@@ -148,3 +148,29 @@ func TestDefaultTemplateBodyMatchesMigration(t *testing.T) {
 			got, contract.DefaultTemplateBody)
 	}
 }
+
+// TestDueDayPhraseReadsWithoutADueDay: `due_day` is optional (SPEC §4), and the
+// default template says "on or before {{due_day}} of each payment period" — so
+// the variable has to carry a phrase, not a bare number, or a contract without
+// a due day reads "on or before  of each payment period".
+func TestDueDayPhraseReadsWithoutADueDay(t *testing.T) {
+	five := 5
+	if got := contract.DueDayPhrase(&five); got != "day 5" {
+		t.Errorf("DueDayPhrase(5) = %q, want \"day 5\"", got)
+	}
+	if got := contract.DueDayPhrase(nil); got != "the first day" {
+		t.Errorf("DueDayPhrase(nil) = %q, want \"the first day\"", got)
+	}
+
+	// The default body has to read in both cases.
+	body := contract.SanitizeHTML(contract.DefaultTemplateBody)
+	for name, phrase := range map[string]string{"none": contract.DueDayPhrase(nil), "fifth": contract.DueDayPhrase(&five)} {
+		out := contract.Render(body, map[string]string{"due_day": phrase})
+		if strings.Contains(out, "before  ") || strings.Contains(out, "before of") {
+			t.Errorf("the default template reads badly with due day %s: %s", name, out)
+		}
+		if !strings.Contains(out, "on or before "+phrase+" of each payment period") {
+			t.Errorf("the default template's rent clause did not resolve with due day %s", name)
+		}
+	}
+}

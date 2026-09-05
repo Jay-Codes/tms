@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"tms/backend/internal/contract"
+	"tms/backend/internal/storage"
 )
 
 // ------------------------------------------------------------- fixtures --
@@ -1007,4 +1008,159 @@ func inclusiveDays(t *testing.T, from, to string) int {
 		t.Fatalf("parse %q: %v", to, err)
 	}
 	return int(end.Sub(start).Hours()/24) + 1
+}
+
+// TestCreatingATemplateAsDefaultDemotesTheIncumbent: an org has at most one
+// default (partial unique index), so creating one straight to default has to
+// demote the seeded template rather than collide with it.
+func TestCreatingATemplateAsDefaultDemotesTheIncumbent(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newOrgWithUnits("TplDef", "tpldef@jjne.test", "0714000252", nil, 0)
+	c := fix.client
+
+	created := c.do(http.MethodPost, "/contract-templates", map[string]any{
+		"name": "House rules", "body_html": "<p>Rent {{rent}}</p>", "is_default": true,
+	}).mustStatus(t, http.StatusCreated, "create as default")
+	id := created.str(t, "template", "id")
+
+	for _, row := range listOf(t, c.do(http.MethodGet, "/contract-templates", nil).
+		mustStatus(t, http.StatusOK, "list")) {
+		want := row["id"] == id
+		if row["is_default"] != want {
+			t.Errorf("template %v is_default = %v, want %v", row["id"], row["is_default"], want)
+		}
+	}
+}
+
+// TestActivateRefusesADocumentThatChanged: the landlord countersigns the same
+// document the renter signed, so activation rechecks the hash the way signing
+// does — a row edited under a signature must not become a live tenancy.
+func TestActivateRefusesADocumentThatChanged(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newContractFixture(t, "ActTamper", "0714000290", "+255714000291")
+	h.signAsRenter(t, fix.renter, fix.contractID, fix.renterPhone)
+
+	if _, err := h.pool.Exec(context.Background(),
+		`UPDATE contracts SET rent_amount = rent_amount + 1 WHERE id = $1`, fix.contractID); err != nil {
+		t.Fatalf("tamper: %v", err)
+	}
+	resp := fix.owner.do(http.MethodPost, "/contracts/"+fix.contractID+"/activate", nil).
+		mustStatus(t, http.StatusConflict, "activate a changed document")
+	if got := resp.str(t, "type"); got != "snapshot_mismatch" {
+		t.Errorf("type = %q, want snapshot_mismatch", got)
+	}
+	var status string
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT status FROM contracts WHERE id = $1`, fix.contractID).Scan(&status); err != nil {
+		t.Fatalf("read status: %v", err)
+	}
+	if status != "pending_signature" {
+		t.Errorf("contract status = %q, want it left pending_signature", status)
+	}
+}
+
+// TestRenterCannotCallOrgWrites: the reads are shared between the two parties,
+// the writes are not (API.md Phase 4 notes). A renter session on an org-only
+// write is refused, never served.
+func TestRenterCannotCallOrgWrites(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newContractFixture(t, "RWrite", "0714000300", "+255714000301")
+
+	writes := []struct {
+		method, path string
+		body         map[string]any
+	}{
+		{http.MethodPost, "/contracts", map[string]any{
+			"unit_id": fix.unitIDs[1], "renter_user_id": fix.renterID,
+			"payment_period_id": fix.periodID, "term_days": 30,
+			"start_date": time.Now().UTC().Format("2006-01-02"),
+		}},
+		{http.MethodPost, "/contracts/" + fix.contractID + "/activate", nil},
+		{http.MethodPost, "/contracts/" + fix.contractID + "/terminate", map[string]any{"reason": "mine now"}},
+		{http.MethodPost, "/contract-templates", map[string]any{"name": "x", "body_html": "<p>x</p>"}},
+		{http.MethodGet, "/contract-templates", nil},
+		{http.MethodPut, "/org/branding", map[string]any{"display_name": "Renter Estates"}},
+	}
+	for _, tc := range writes {
+		resp := fix.renter.do(tc.method, tc.path, tc.body)
+		if resp.Code != http.StatusUnauthorized && resp.Code != http.StatusNotFound {
+			t.Errorf("renter %s %s: status = %d, want 401 or 404 — body: %s",
+				tc.method, tc.path, resp.Code, resp.Raw)
+		}
+	}
+	// And the contract is untouched.
+	if got := fix.owner.do(http.MethodGet, "/contracts/"+fix.contractID, nil).
+		mustStatus(t, http.StatusOK, "owner reads").str(t, "contract", "status"); got != "pending_signature" {
+		t.Errorf("contract status = %q, want pending_signature", got)
+	}
+}
+
+// TestTermsReadWithoutADueDay: most contracts have no due day (the rows fall
+// due on the day their period starts), and the seeded template still has to
+// read as English for them.
+func TestTermsReadWithoutADueDay(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newContractFixture(t, "DueWords", "0714000310", "+255714000311")
+
+	doc := fix.renter.do(http.MethodGet, "/contracts/"+fix.contractID+"/document", nil).
+		mustStatus(t, http.StatusOK, "document")
+	terms := doc.str(t, "terms_html")
+	if !strings.Contains(terms, "on or before the first day of each payment period") {
+		t.Errorf("the rent clause does not read without a due day: %s", terms)
+	}
+	if strings.Contains(terms, "before  of") || strings.Contains(terms, "day  of") {
+		t.Errorf("the rent clause has a hole where the due day would be: %s", terms)
+	}
+}
+
+// TestDrawnSignatureIsCheckedAgainstWhatLanded: the presigned PUT enforces
+// neither content type nor size, so `POST /sign` checks the object itself —
+// otherwise a "signature" could be an HTML page served back to both parties
+// from the same origin as the app.
+func TestDrawnSignatureIsCheckedAgainstWhatLanded(t *testing.T) {
+	h := newHarness(t)
+	if h.store == nil {
+		t.Skip("SKIP: MinIO unreachable")
+	}
+	fix := h.newContractFixture(t, "Drawn", "0714000320", "+255714000321")
+	id := fix.contractID
+
+	ticket := fix.renter.do(http.MethodPost, "/contracts/"+id+"/signature-upload",
+		map[string]any{"content_type": "image/png", "size_bytes": 2048}).
+		mustStatus(t, http.StatusOK, "signature upload ticket")
+	key := ticket.str(t, "object_key")
+
+	// One code, used twice: a refused image must not burn the renter's OTP,
+	// because the resend cooldown would then lock them out of signing.
+	fix.renter.do(http.MethodPost, "/contracts/"+id+"/sign/otp", nil).
+		mustStatus(t, http.StatusAccepted, "sign otp")
+	code := h.sms.LastOTP(fix.renterPhone)
+	sign := func(t *testing.T) response {
+		t.Helper()
+		return fix.renter.do(http.MethodPost, "/contracts/"+id+"/sign",
+			map[string]any{"otp_code": code, "signature_object_key": key})
+	}
+
+	t.Run("an object that is not a PNG is refused and removed", func(t *testing.T) {
+		if err := h.store.PutBytes(context.Background(), storage.BucketSignatures, key,
+			[]byte("<html><script>alert(1)</script></html>"), "text/html"); err != nil {
+			t.Fatalf("seed object: %v", err)
+		}
+		sign(t).mustStatus(t, http.StatusBadRequest, "html signature")
+		if h.store.Exists(context.Background(), storage.BucketSignatures, key) {
+			t.Error("the rejected upload was left in the bucket")
+		}
+	})
+
+	t.Run("a PNG is accepted and recorded as drawn", func(t *testing.T) {
+		if err := h.store.PutBytes(context.Background(), storage.BucketSignatures, key,
+			make([]byte, 1024), "image/png"); err != nil {
+			t.Fatalf("seed object: %v", err)
+		}
+		signed := sign(t).mustStatus(t, http.StatusOK, "drawn signature")
+		sigs := arrayOf(t, response{Body: signed.Body["contract"].(map[string]any), Raw: signed.Raw}, "signatures")
+		if len(sigs) != 1 || sigs[0]["method"] != "drawn" {
+			t.Errorf("signatures = %v, want one drawn row", sigs)
+		}
+	})
 }

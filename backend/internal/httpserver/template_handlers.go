@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"tms/backend/internal/audit"
 	"tms/backend/internal/auth"
@@ -14,6 +15,13 @@ import (
 	"tms/backend/internal/httpx"
 	"tms/backend/internal/validate"
 )
+
+// noTemplateID is the "keep nothing" argument to ClearDefaultTemplate: a valid
+// but all-zero UUID, which no template can carry, so every live default of the
+// org is demoted. A NULL there would match no row at all (`id <> NULL`).
+//
+//nolint:gochecknoglobals // a constant value pgtype cannot express as a const.
+var noTemplateID = pgtype.UUID{Valid: true}
 
 // notFoundTemplate keeps another org's template indistinguishable from one that
 // never existed (API.md: cross-org is 404, never 403).
@@ -100,21 +108,22 @@ func (s *Server) handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 
 	var created sqlc.ContractTemplate
 	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
+		// The partial unique index allows one default per org and is checked
+		// row by row, so the incumbent is demoted *before* the new default is
+		// inserted — the other order collides with the index.
+		if body.IsDefault {
+			if err := q.ClearDefaultTemplate(r.Context(), sqlc.ClearDefaultTemplateParams{
+				OrgID: p.OrgID, KeepID: noTemplateID,
+			}); err != nil {
+				return err
+			}
+		}
 		var err error
 		created, err = q.CreateContractTemplate(r.Context(), sqlc.CreateContractTemplateParams{
 			OrgID: p.OrgID, Name: name, BodyHtml: html, IsDefault: body.IsDefault,
 		})
 		if err != nil {
 			return err
-		}
-		// The partial unique index allows one default per org, so promoting a
-		// template demotes the incumbent first.
-		if body.IsDefault {
-			if err := q.ClearDefaultTemplate(r.Context(), sqlc.ClearDefaultTemplateParams{
-				OrgID: p.OrgID, KeepID: created.ID,
-			}); err != nil {
-				return err
-			}
 		}
 		return audit.Record(r.Context(), q, audit.Entry{
 			OrgID:       p.OrgIDString(),

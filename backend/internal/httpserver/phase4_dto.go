@@ -32,12 +32,12 @@ const (
 
 // Field bounds (API.md).
 const (
-	templateNameMax     = 80
-	templateBodyMax     = 200 << 10 // 200 KiB
+	templateNameMax      = 80
+	templateBodyMax      = 200 << 10 // 200 KiB
 	terminationReasonMax = 200
-	footerTextMax       = 500
-	dueDayMin           = 1
-	dueDayMax           = 31
+	footerTextMax        = 500
+	dueDayMin            = 1
+	dueDayMax            = 31
 )
 
 // ------------------------------------------------------------- responses --

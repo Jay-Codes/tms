@@ -12,7 +12,7 @@ const DefaultTemplateBody = `<h1>Tenancy Agreement</h1>
 <h2>1. Term</h2>
 <p>The tenancy runs for {{term_days}} days, from {{start_date}} to {{end_date}}.</p>
 <h2>2. Rent</h2>
-<p>The Tenant shall pay rent of <strong>{{rent}}</strong> per {{payment_period}}, payable in advance on or before day {{due_day}} of each payment period, to the bank account nominated by the Landlord. Receipts are issued for every payment.</p>
+<p>The Tenant shall pay rent of <strong>{{rent}}</strong> per {{payment_period}}, payable in advance on or before {{due_day}} of each payment period, to the bank account nominated by the Landlord. Receipts are issued for every payment.</p>
 <h2>3. Deposit and utilities</h2>
 <p>Any deposit held is refundable at the end of the tenancy, less the cost of repairing damage beyond fair wear and tear. Electricity, water and refuse charges for the premises are payable by the Tenant unless agreed otherwise in writing.</p>
 <h2>4. Use of the premises</h2>

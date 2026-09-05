@@ -210,7 +210,7 @@ func (s *Server) createContractTx(
 		"payment_period": fmt.Sprintf("%s (%d days)", period.Label, period.Days),
 		"org_name":       displayName,
 		"term_days":      strconv.Itoa(int(in.TermDays)),
-		"due_day":        dueDayString(dueDay),
+		"due_day":        contract.DueDayPhrase(intPtr(dueDay)),
 	})
 
 	hash := contract.Snapshot{
@@ -754,6 +754,50 @@ func (s *Server) handleSignContract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A drawn signature is optional; when one is claimed it must actually be in
+	// the bucket, or the evidence bundle would reference nothing. A presigned
+	// PUT enforces neither type nor size, so both are checked against what
+	// actually landed (SPEC §7) — the same rule the branding and KYC
+	// completions apply, and what stops a "signature" that is really an HTML
+	// page served back to both parties from the same origin.
+	method := methodOTPAccept
+	var storedKey *string
+	if objectKey != "" {
+		if s.deps.Storage == nil {
+			signatureStorageUnavailable(w)
+			return
+		}
+		info, err := s.deps.Storage.Stat(r.Context(), storage.BucketSignatures, objectKey)
+		if err != nil {
+			httpx.WriteProblemFields(w, http.StatusBadRequest, "signature not found",
+				"no signature image was found for that key",
+				map[string]string{"signature_object_key": "no object has been uploaded under this key"})
+			return
+		}
+		if info.Size > signatureMaxBytes ||
+			strings.ToLower(strings.TrimSpace(info.ContentType)) != signatureContentType {
+			if rmErr := s.deps.Storage.Remove(r.Context(), storage.BucketSignatures, objectKey); rmErr != nil {
+				s.logger.Warn("could not remove rejected signature upload",
+					"object_key", objectKey, "error", rmErr)
+			}
+			httpx.WriteProblemFields(w, http.StatusBadRequest, "invalid signature image",
+				"the uploaded signature image was rejected",
+				map[string]string{"signature_object_key": "must be a PNG of at most 512 KiB"})
+			return
+		}
+		method = methodDrawn
+		storedKey = &objectKey
+	}
+
+	// Verification attempts are capped like the login OTP's: a six-digit code
+	// with a five-minute life is only strong while it cannot be guessed at
+	// machine speed (SPEC §8, rate limiting on OTP).
+	if res := s.limiter.Allow(r.Context(), "otp:verify:sign:"+db.UUIDString(row.ID),
+		otpVerifyLimit, otpVerifyWindow); !res.Allowed {
+		tooMany(w, res, "too many signing attempts for this contract")
+		return
+	}
+
 	phone := db.StrVal(row.RenterPhone)
 	switch err := s.store.CheckOTP(r.Context(), signPurpose(db.UUIDString(row.ID)), phone, body.OTPCode); {
 	case errors.Is(err, auth.ErrNotFound):
@@ -767,21 +811,6 @@ func (s *Server) handleSignContract(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		s.serverError(w, r, "contract.sign.check", err)
 		return
-	}
-
-	// A drawn signature is optional; when one is claimed it must actually be in
-	// the bucket, or the evidence bundle would reference nothing.
-	method := methodOTPAccept
-	var storedKey *string
-	if objectKey != "" {
-		if s.deps.Storage == nil || !s.deps.Storage.Exists(r.Context(), storage.BucketSignatures, objectKey) {
-			httpx.WriteProblemFields(w, http.StatusBadRequest, "signature not found",
-				"no signature image was found for that key",
-				map[string]string{"signature_object_key": "no object has been uploaded under this key"})
-			return
-		}
-		method = methodDrawn
-		storedKey = &objectKey
 	}
 
 	info := audit.RequestInfoFrom(r.Context())
@@ -843,6 +872,14 @@ func (s *Server) handleActivateContract(w http.ResponseWriter, r *http.Request) 
 	if row.Status != contractPendingSignature {
 		conflictCode(w, "not_pending_signature", "contract not awaiting signature",
 			"only a contract awaiting signature can be activated")
+		return
+	}
+	// The landlord countersigns the same document the renter read, so the hash
+	// is rechecked here as well as at signing: a row edited underneath a
+	// signature must not be able to become an active tenancy (SPEC §5.5).
+	if computed := hashOf(row); computed != db.StrVal(row.SnapshotHash) {
+		conflictCode(w, "snapshot_mismatch", "document changed",
+			"this document no longer matches the terms that were signed")
 		return
 	}
 

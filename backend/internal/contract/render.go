@@ -3,6 +3,7 @@ package contract
 import (
 	"html"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/microcosm-cc/bluemonday"
@@ -74,6 +75,20 @@ func Render(body string, vars map[string]string) string {
 	})
 }
 
+// DueDayPhrase renders `{{due_day}}` as a phrase rather than a bare number, so
+// a contract without a due day still reads as English.
+//
+// A contract may have no due day at all (SPEC §4: each row then falls due on
+// the day its period starts), and "on or before day  of each payment period"
+// is the sentence that produced. The phrase carries the word "day" with it —
+// "day 5", or "the first day" when there is none — so both cases read.
+func DueDayPhrase(dueDay *int) string {
+	if dueDay == nil {
+		return "the first day"
+	}
+	return "day " + strconv.Itoa(*dueDay)
+}
+
 // SampleVars are the placeholder values POST /contract-templates/{id}/preview
 // substitutes, so a landlord sees the shape of a real document while editing.
 func SampleVars(orgName string) map[string]string {
@@ -87,6 +102,6 @@ func SampleVars(orgName string) map[string]string {
 		"payment_period": "Monthly (30 days)",
 		"org_name":       orgName,
 		"term_days":      "180",
-		"due_day":        "1",
+		"due_day":        "day 1",
 	}
 }

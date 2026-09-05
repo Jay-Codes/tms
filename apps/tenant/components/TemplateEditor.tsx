@@ -45,7 +45,7 @@ const VARIABLE_LABELS: Record<string, string> = {
   payment_period: 'Payment period',
   org_name: 'Business name',
   term_days: 'Term in days',
-  due_day: 'Due day of month',
+  due_day: 'Due day ("day 5")',
 };
 
 const EDITOR_STYLE = `
