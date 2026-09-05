@@ -22,6 +22,7 @@ import (
 	"tms/backend/internal/db"
 	"tms/backend/internal/httpserver"
 	"tms/backend/internal/notify"
+	"tms/backend/internal/platform"
 	"tms/backend/internal/storage"
 )
 
@@ -93,6 +94,10 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 			logger.Error("postgres ping failed at startup; serving degraded", "error", pingErr)
 		}
 		deps.DB = pool
+		deps.Pool = pool
+		if seedErr := platform.SeedAdmin(ctx, pool, cfg, logger); seedErr != nil {
+			logger.Error("platform admin seeding failed", "error", seedErr)
+		}
 	}
 
 	redisClient, err := cache.Open(cfg.RedisURL)
@@ -104,6 +109,7 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 			logger.Warn("redis ping failed; running degraded", "error", pingErr)
 		}
 		deps.Redis = redisClient
+		deps.Cache = redisClient
 	}
 
 	minioClient, err := storage.Open(cfg.MinioEndpoint, cfg.MinioAccessKey, cfg.MinioSecretKey, cfg.MinioUseSSL)
@@ -116,8 +122,9 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 		deps.Minio = minioClient
 	}
 
-	sms := notify.ProviderFor(cfg, logger)
-	logger.Info("sms provider selected", "beem_configured", cfg.BeemAPIKey != "", "provider_type", providerName(sms))
+	deps.SMS = notify.ProviderFor(cfg, logger)
+	deps.Email = notify.NewLogEmailProvider(logger)
+	logger.Info("sms provider selected", "beem_configured", cfg.BeemAPIKey != "", "provider_type", providerName(deps.SMS))
 
 	srv := httpserver.New(cfg, deps, logger)
 	if err := srv.ListenAndServe(ctx); err != nil {

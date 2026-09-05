@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Env names the deployment environment.
@@ -39,6 +40,14 @@ type Config struct {
 
 	SessionTTLHours int
 
+	// NidaEncKey is the pgcrypto symmetric key for renter_profiles.nida_number.
+	NidaEncKey string
+
+	// AdminEmail/AdminPassword seed the first platform admin on startup when
+	// no platform_admin user exists yet. Empty disables seeding.
+	AdminEmail    string
+	AdminPassword string
+
 	BeemAPIKey    string
 	BeemSecretKey string
 	BeemSenderID  string
@@ -63,6 +72,10 @@ func Load() Config {
 
 		SessionTTLHours: getint("SESSION_TTL_HOURS", 720),
 
+		NidaEncKey:    getenv("NIDA_ENC_KEY", "dev-nida-key-change-me"),
+		AdminEmail:    getenv("ADMIN_EMAIL", ""),
+		AdminPassword: getenv("ADMIN_PASSWORD", ""),
+
 		BeemAPIKey:    getenv("BEEM_API_KEY", ""),
 		BeemSecretKey: getenv("BEEM_SECRET_KEY", ""),
 		BeemSenderID:  getenv("BEEM_SENDER_ID", ""),
@@ -78,6 +91,14 @@ func (c Config) IsDev() bool { return c.Env != EnvProd }
 
 // Addr is the listen address for the HTTP server.
 func (c Config) Addr() string { return ":" + c.Port }
+
+// SessionTTL is the opaque-session lifetime.
+func (c Config) SessionTTL() time.Duration {
+	return time.Duration(c.SessionTTLHours) * time.Hour
+}
+
+// CookieSecure reports whether session cookies must carry the Secure flag.
+func (c Config) CookieSecure() bool { return !c.IsDev() }
 
 func getenv(key, def string) string {
 	if v, ok := os.LookupEnv(key); ok && strings.TrimSpace(v) != "" {

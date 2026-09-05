@@ -5,7 +5,7 @@ NGROK_API := http://127.0.0.1:4040/api/tunnels
 
 .PHONY: help preview dev stop url install up down \
         api api-stop api-restart api-log proxy-restart \
-        migrate migrate-down sqlc build test lint
+        migrate migrate-down test-db sqlc build test lint
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  make %-14s %s\n", $$1, $$2}'
@@ -88,6 +88,10 @@ migrate-down: ## Roll back exactly one migration
 	@set -a; [ -f .env ] && . ./.env; set +a; \
 		cd backend && go run ./cmd/api migrate down
 
+test-db: ## Create the tms_test database used by handler tests (idempotent)
+	@docker compose exec -T postgres sh -c 'psql -U $${POSTGRES_USER:-tms} -tc "SELECT 1 FROM pg_database WHERE datname = '"'"'tms_test'"'"'" | grep -q 1 || createdb -U $${POSTGRES_USER:-tms} tms_test'
+	@echo "test database ready: tms_test (host port 5433)"
+
 sqlc: ## Regenerate sqlc query code into backend/internal/db/sqlc
 	@cd backend/internal/db && \
 		if command -v sqlc >/dev/null 2>&1; then sqlc generate; \
@@ -103,7 +107,7 @@ build: ## Build backend, proxy and all Next.js apps (next builds are slow)
 	@npm run build --workspaces --if-present
 
 test: ## Run backend Go tests and workspace tests
-	@cd backend && go test ./...
+	@cd backend && TEST_DATABASE_URL="$${TEST_DATABASE_URL:-postgres://tms:tms_dev@localhost:5433/tms_test?sslmode=disable}" go test ./...
 	@npm test --workspaces --if-present
 
 lint: ## Lint backend (golangci-lint, falls back to go vet) and frontends

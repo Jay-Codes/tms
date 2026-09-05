@@ -3,3 +3,260 @@
 //   sqlc v1.30.0
 
 package sqlc
+
+import (
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+type AuditLog struct {
+	ID          pgtype.UUID        `json:"id"`
+	OrgID       pgtype.UUID        `json:"org_id"`
+	ActorUserID pgtype.UUID        `json:"actor_user_id"`
+	Action      string             `json:"action"`
+	EntityType  string             `json:"entity_type"`
+	EntityID    pgtype.UUID        `json:"entity_id"`
+	Before      []byte             `json:"before"`
+	After       []byte             `json:"after"`
+	Ip          *string            `json:"ip"`
+	UserAgent   *string            `json:"user_agent"`
+	At          pgtype.Timestamptz `json:"at"`
+}
+
+type Contract struct {
+	ID                pgtype.UUID        `json:"id"`
+	OrgID             pgtype.UUID        `json:"org_id"`
+	UnitID            pgtype.UUID        `json:"unit_id"`
+	RenterUserID      pgtype.UUID        `json:"renter_user_id"`
+	TemplateID        pgtype.UUID        `json:"template_id"`
+	TermsSnapshotHtml string             `json:"terms_snapshot_html"`
+	RentAmount        int64              `json:"rent_amount"`
+	RentPeriodDays    int32              `json:"rent_period_days"`
+	PaymentPeriodID   pgtype.UUID        `json:"payment_period_id"`
+	PaymentPeriodDays int32              `json:"payment_period_days"`
+	TermDays          int32              `json:"term_days"`
+	StartDate         pgtype.Date        `json:"start_date"`
+	EndDate           pgtype.Date        `json:"end_date"`
+	DueDay            *int32             `json:"due_day"`
+	Status            string             `json:"status"`
+	SnapshotHash      *string            `json:"snapshot_hash"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type ContractSignature struct {
+	ID                 pgtype.UUID        `json:"id"`
+	OrgID              pgtype.UUID        `json:"org_id"`
+	ContractID         pgtype.UUID        `json:"contract_id"`
+	Party              string             `json:"party"`
+	UserID             pgtype.UUID        `json:"user_id"`
+	Method             string             `json:"method"`
+	OtpRef             *string            `json:"otp_ref"`
+	SignatureObjectKey *string            `json:"signature_object_key"`
+	SnapshotHash       string             `json:"snapshot_hash"`
+	Ip                 *string            `json:"ip"`
+	UserAgent          *string            `json:"user_agent"`
+	SignedAt           pgtype.Timestamptz `json:"signed_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ContractTemplate struct {
+	ID        pgtype.UUID        `json:"id"`
+	OrgID     pgtype.UUID        `json:"org_id"`
+	Name      string             `json:"name"`
+	BodyHtml  string             `json:"body_html"`
+	IsDefault bool               `json:"is_default"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type NotificationLog struct {
+	ID            pgtype.UUID        `json:"id"`
+	OrgID         pgtype.UUID        `json:"org_id"`
+	UserID        pgtype.UUID        `json:"user_id"`
+	Kind          string             `json:"kind"`
+	Channel       string             `json:"channel"`
+	DedupeKey     string             `json:"dedupe_key"`
+	Payload       []byte             `json:"payload"`
+	ProviderMsgID *string            `json:"provider_msg_id"`
+	Status        string             `json:"status"`
+	SentAt        pgtype.Timestamptz `json:"sent_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Org struct {
+	ID        pgtype.UUID        `json:"id"`
+	Name      string             `json:"name"`
+	Slug      string             `json:"slug"`
+	Status    string             `json:"status"`
+	Settings  []byte             `json:"settings"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type OrgBranding struct {
+	ID                  pgtype.UUID        `json:"id"`
+	OrgID               pgtype.UUID        `json:"org_id"`
+	DisplayName         string             `json:"display_name"`
+	LogoObjectKey       *string            `json:"logo_object_key"`
+	LetterheadObjectKey *string            `json:"letterhead_object_key"`
+	Theme               []byte             `json:"theme"`
+	DashboardPrefs      []byte             `json:"dashboard_prefs"`
+	DocumentFooterText  *string            `json:"document_footer_text"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type OrgMember struct {
+	ID        pgtype.UUID        `json:"id"`
+	OrgID     pgtype.UUID        `json:"org_id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Role      string             `json:"role"`
+	Status    string             `json:"status"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type Payment struct {
+	ID               pgtype.UUID        `json:"id"`
+	OrgID            pgtype.UUID        `json:"org_id"`
+	ContractID       pgtype.UUID        `json:"contract_id"`
+	ScheduleID       pgtype.UUID        `json:"schedule_id"`
+	Amount           int64              `json:"amount"`
+	Method           string             `json:"method"`
+	Reference        *string            `json:"reference"`
+	PaidAt           pgtype.Timestamptz `json:"paid_at"`
+	RecordedByUserID pgtype.UUID        `json:"recorded_by_user_id"`
+	Note             *string            `json:"note"`
+	Status           string             `json:"status"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type PaymentPeriod struct {
+	ID            pgtype.UUID        `json:"id"`
+	OrgID         pgtype.UUID        `json:"org_id"`
+	Label         string             `json:"label"`
+	Days          int32              `json:"days"`
+	IsRecommended bool               `json:"is_recommended"`
+	SortOrder     int32              `json:"sort_order"`
+	Active        bool               `json:"active"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt     pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type PaymentSchedule struct {
+	ID          pgtype.UUID        `json:"id"`
+	OrgID       pgtype.UUID        `json:"org_id"`
+	ContractID  pgtype.UUID        `json:"contract_id"`
+	PeriodStart pgtype.Date        `json:"period_start"`
+	PeriodEnd   pgtype.Date        `json:"period_end"`
+	DueDate     pgtype.Date        `json:"due_date"`
+	Amount      int64              `json:"amount"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type PricePlan struct {
+	ID            pgtype.UUID        `json:"id"`
+	OrgID         pgtype.UUID        `json:"org_id"`
+	UnitID        pgtype.UUID        `json:"unit_id"`
+	Amount        int64              `json:"amount"`
+	Currency      string             `json:"currency"`
+	PeriodDays    int32              `json:"period_days"`
+	EffectiveFrom pgtype.Date        `json:"effective_from"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt     pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type Property struct {
+	ID           pgtype.UUID        `json:"id"`
+	OrgID        pgtype.UUID        `json:"org_id"`
+	Name         string             `json:"name"`
+	LocationText string             `json:"location_text"`
+	Lat          *float64           `json:"lat"`
+	Lng          *float64           `json:"lng"`
+	Notes        *string            `json:"notes"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type RenterProfile struct {
+	ID              pgtype.UUID        `json:"id"`
+	UserID          pgtype.UUID        `json:"user_id"`
+	FullName        string             `json:"full_name"`
+	NidaNumberEnc   []byte             `json:"nida_number_enc"`
+	NextOfKinName   *string            `json:"next_of_kin_name"`
+	NextOfKinPhone  *string            `json:"next_of_kin_phone"`
+	KycStatus       string             `json:"kyc_status"`
+	KycDocObjectKey *string            `json:"kyc_doc_object_key"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type Session struct {
+	ID        pgtype.UUID        `json:"id"`
+	TokenHash string             `json:"token_hash"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	OrgID     pgtype.UUID        `json:"org_id"`
+	Audience  string             `json:"audience"`
+	Role      *string            `json:"role"`
+	Ip        *string            `json:"ip"`
+	UserAgent *string            `json:"user_agent"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Unit struct {
+	ID               pgtype.UUID        `json:"id"`
+	OrgID            pgtype.UUID        `json:"org_id"`
+	PropertyID       pgtype.UUID        `json:"property_id"`
+	Name             string             `json:"name"`
+	UnitCode         string             `json:"unit_code"`
+	Status           string             `json:"status"`
+	AllowedPeriodIds []pgtype.UUID      `json:"allowed_period_ids"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type UnitLinkRequest struct {
+	ID           pgtype.UUID        `json:"id"`
+	OrgID        pgtype.UUID        `json:"org_id"`
+	UnitID       pgtype.UUID        `json:"unit_id"`
+	RenterUserID pgtype.UUID        `json:"renter_user_id"`
+	Status       string             `json:"status"`
+	Reason       *string            `json:"reason"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type User struct {
+	ID              pgtype.UUID        `json:"id"`
+	Kind            string             `json:"kind"`
+	Phone           *string            `json:"phone"`
+	Email           *string            `json:"email"`
+	FullName        string             `json:"full_name"`
+	PinHash         *string            `json:"pin_hash"`
+	PasswordHash    *string            `json:"password_hash"`
+	EmailVerifiedAt pgtype.Timestamptz `json:"email_verified_at"`
+	Status          string             `json:"status"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+}
