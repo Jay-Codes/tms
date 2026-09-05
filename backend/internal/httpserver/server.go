@@ -19,6 +19,7 @@ import (
 	"tms/backend/internal/httpx"
 	"tms/backend/internal/notify"
 	"tms/backend/internal/ratelimit"
+	"tms/backend/internal/storage"
 )
 
 // APIPrefix is the mount point for every versioned route.
@@ -45,6 +46,10 @@ type Deps struct {
 	Cache *cache.Client
 	SMS   notify.SMSProvider
 	Email notify.EmailProvider
+
+	// Storage issues the presigned URLs and holds the QR PNGs. A nil client
+	// makes the QR routes answer 503 rather than panicking.
+	Storage *storage.Client
 }
 
 // Server is the TMS HTTP API.
@@ -171,7 +176,39 @@ func (s *Server) routes() chi.Router {
 			r.Get("/org/members", s.handleListMembers)
 			r.Get("/audit-log", s.handleListAuditLog)
 			r.Get("/audit-log/{id}", s.handleGetAuditEntry)
+
+			// --- Phase 2: payment periods ---
+			r.Get("/org/payment-periods", s.handleListPaymentPeriods)
+			r.Post("/org/payment-periods", s.handleCreatePaymentPeriod)
+			r.Post("/org/payment-periods/restore-recommended", s.handleRestoreRecommendedPeriods)
+			r.Patch("/org/payment-periods/{id}", s.handlePatchPaymentPeriod)
+			r.Delete("/org/payment-periods/{id}", s.handleDeletePaymentPeriod)
+
+			// --- Phase 2: properties ---
+			r.Get("/properties", s.handleListProperties)
+			r.Post("/properties", s.handleCreateProperty)
+			r.Get("/properties/{id}", s.handleGetProperty)
+			r.Patch("/properties/{id}", s.handlePatchProperty)
+			r.Delete("/properties/{id}", s.handleDeleteProperty)
+			r.Get("/properties/{id}/units", s.handleListPropertyUnits)
+			r.Post("/properties/{id}/units", s.handleCreateUnit)
+			r.Post("/properties/{id}/units/bulk", s.handleBulkCreateUnits)
+			r.Get("/properties/{id}/qr-sheet", s.handleQRSheet)
+
+			// --- Phase 2: units, prices ---
+			r.Get("/units", s.handleListUnits)
+			r.Post("/units/bulk-price", s.handleBulkPrice)
+			r.Get("/units/{id}", s.handleGetUnit)
+			r.Patch("/units/{id}", s.handlePatchUnit)
+			r.Delete("/units/{id}", s.handleDeleteUnit)
+			r.Post("/units/{id}/qr", s.handleUnitQR)
+			r.Get("/units/{id}/prices", s.handleListPrices)
+			r.Post("/units/{id}/prices", s.handleCreatePrice)
 		})
+
+		// --- Phase 2: public (no session; rate limited per IP) ---
+		r.Get("/public/orgs/{slug}/branding", s.publicRateLimited(s.handlePublicBranding))
+		r.Get("/public/units/{unit_code}", s.publicRateLimited(s.handlePublicUnit))
 		r.Group(func(r chi.Router) {
 			r.Use(s.sessions.RequireOrg(auth.RoleOwner))
 			r.Post("/org/members", s.handleCreateMember)

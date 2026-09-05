@@ -11,6 +11,7 @@ import (
 	"tms/backend/internal/config"
 	"tms/backend/internal/db"
 	"tms/backend/internal/httpserver"
+	"tms/backend/internal/storage"
 	"tms/backend/internal/testutil"
 )
 
@@ -22,6 +23,8 @@ type harness struct {
 	sms   *testutil.SMSCapture
 	email *testutil.EmailCapture
 	pool  *db.Pool
+	// store is nil when MinIO is unreachable; the QR tests skip in that case.
+	store *storage.Client
 }
 
 // newHarness builds a server against the real test Postgres and an in-process
@@ -40,11 +43,12 @@ func newHarness(t *testing.T) *harness {
 		SessionTTLHours: 24,
 		NidaEncKey:      "test-key",
 	}
+	store := testutil.Storage(t)
 	srv := httpserver.New(cfg, httpserver.Deps{
-		DB: pool, Redis: redis, Pool: pool, Cache: redis, SMS: sms, Email: email,
+		DB: pool, Redis: redis, Pool: pool, Cache: redis, SMS: sms, Email: email, Storage: store,
 	}, testutil.Logger())
 
-	return &harness{t: t, srv: srv, sms: sms, email: email, pool: pool}
+	return &harness{t: t, srv: srv, sms: sms, email: email, pool: pool, store: store}
 }
 
 // client is one browser: it keeps the cookies the server sets.

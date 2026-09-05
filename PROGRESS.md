@@ -26,3 +26,12 @@
 - Verified in preview: org signup → wizard → settings; renter register with OTP from log → home; curl isolation (org B → org A member/audit = 404).
 
 **Deferred:** wizard step bodies (later phases); email verification not enforced for login (banner only). Sec review findings all fixed (H1, M1–M4, L1–L6).
+
+## 2026-09-05 — Phase 2: Properties, units, QR, pricing, vacancy ✅
+
+**Shipped**
+- Backend: migration `000003_phase2`; payment periods CRUD + restore-recommended; properties CRUD (unit_counts, cascade soft-delete, 409 on live contracts); units CRUD/bulk, status override rules, vacancy board filters + cursor; price plans (history, current by effective_from, atomic bulk percent/set, bounds); QR PNG → MinIO `qrcodes` (presigned via public host through proxy bucket routes); public branding + unit endpoints (prorated periods, rate-limited). 16-route cross-org isolation table.
+- Tenant app: properties list/detail, add/bulk-add units, QR print sheet (A4 print CSS), unit page (rename, override, allowed periods, QR, price history/new price), vacancy board (tabs, property filter, search, days vacant, bulk price), payment periods manager (settings + wizard), wizard steps First property / Payment periods / Units.
+- Verified live: property + units created, QR sheet with real PNGs served through :8080, price change + bulk +10%, period add/reorder, public unit resolves branding + prorated amounts.
+
+**Deferred:** bulk unit create non-atomic (spec silent); `unit_ids` cap 200. Presigned URLs use `MINIO_PUBLIC_URL` (=localhost:8080 until ngrok is restarted).

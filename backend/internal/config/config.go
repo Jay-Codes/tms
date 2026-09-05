@@ -35,6 +35,10 @@ type Config struct {
 	MinioAccessKey string
 	MinioSecretKey string
 	MinioUseSSL    bool
+	// MinioPublicURL is the origin presigned URLs are signed against, so the
+	// links work from outside the host network (phones via ngrok). Requests
+	// reach MinIO through the dev proxy, which preserves the Host header.
+	MinioPublicURL string
 
 	// AppBaseURL is the public origin the apps are served from (ngrok in dev).
 	AppBaseURL string
@@ -74,6 +78,7 @@ func Load() Config {
 		MinioAccessKey: getenv("MINIO_ROOT_USER", "tms"),
 		MinioSecretKey: getenv("MINIO_ROOT_PASSWORD", "tms_dev_secret"),
 		MinioUseSSL:    getbool("MINIO_USE_SSL", false),
+		MinioPublicURL: DeriveMinioPublicURL(getenv("MINIO_PUBLIC_URL", ""), getenv("APP_BASE_URL", "")),
 
 		AppBaseURL:    getenv("APP_BASE_URL", "http://localhost:8080"),
 		PublicBaseURL: getenv("PUBLIC_BASE_URL", ""),
@@ -94,6 +99,23 @@ func Load() Config {
 		c.PublicBaseURL = c.AppBaseURL
 	}
 	return c
+}
+
+// DefaultMinioPublicURL is used when neither MINIO_PUBLIC_URL nor APP_BASE_URL
+// is set: MinIO's own published port on the host.
+const DefaultMinioPublicURL = "http://localhost:9000"
+
+// DeriveMinioPublicURL resolves the origin presigned URLs are signed against.
+// MINIO_PUBLIC_URL wins; otherwise APP_BASE_URL (the proxy/ngrok origin, which
+// forwards the bucket prefixes to MinIO); otherwise MinIO direct.
+func DeriveMinioPublicURL(minioPublicURL, appBaseURL string) string {
+	if v := strings.TrimRight(strings.TrimSpace(minioPublicURL), "/"); v != "" {
+		return v
+	}
+	if v := strings.TrimRight(strings.TrimSpace(appBaseURL), "/"); v != "" {
+		return v
+	}
+	return DefaultMinioPublicURL
 }
 
 // IsDev reports whether the API is running in the dev environment.

@@ -44,3 +44,35 @@ func TestEnvProd(t *testing.T) {
 		t.Error("IsDev() = true for ENV=prod")
 	}
 }
+
+func TestDeriveMinioPublicURL(t *testing.T) {
+	tests := []struct {
+		name, minio, app, want string
+	}{
+		{"explicit wins", "http://localhost:8080", "https://app.example", "http://localhost:8080"},
+		{"falls back to app base url", "", "https://x.ngrok-free.app", "https://x.ngrok-free.app"},
+		{"both empty falls back to minio", "", "", config.DefaultMinioPublicURL},
+		{"whitespace counts as empty", "   ", "  ", config.DefaultMinioPublicURL},
+		{"trailing slash trimmed", "http://localhost:8080/", "", "http://localhost:8080"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := config.DeriveMinioPublicURL(tt.minio, tt.app); got != tt.want {
+				t.Errorf("DeriveMinioPublicURL(%q, %q) = %q, want %q", tt.minio, tt.app, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadMinioPublicURLFromEnv(t *testing.T) {
+	t.Setenv("MINIO_PUBLIC_URL", "")
+	t.Setenv("APP_BASE_URL", "https://y.ngrok-free.app")
+	if got := config.Load().MinioPublicURL; got != "https://y.ngrok-free.app" {
+		t.Errorf("MinioPublicURL = %q, want the APP_BASE_URL fallback", got)
+	}
+
+	t.Setenv("MINIO_PUBLIC_URL", "http://localhost:8080")
+	if got := config.Load().MinioPublicURL; got != "http://localhost:8080" {
+		t.Errorf("MinioPublicURL = %q", got)
+	}
+}

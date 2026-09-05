@@ -19,6 +19,8 @@ The proxy maps:
 | `/enduser`  | http://localhost:3001 |
 | `/tenant`   | http://localhost:3002 |
 | `/admin`    | http://localhost:3003 |
+| `/api`      | http://localhost:8081 (Go API) |
+| `/branding`, `/qrcodes`, `/kyc`, `/signatures` | http://localhost:9000 (MinIO buckets) |
 | `/`         | landing page with links |
 
 Each app sets `basePath` in `next.config.js` so assets/HMR resolve behind the proxy; `allowedDevOrigins` allows ngrok hosts.
@@ -58,5 +60,6 @@ make help
 
 - Free ngrok URL changes on every restart — `make url` after each `make preview`.
 - ngrok free shows a browser interstitial on first visit — click through, or send header `ngrok-skip-browser-warning: 1`.
+- Presigned MinIO URLs are signed against `MINIO_PUBLIC_URL` (defaults to `APP_BASE_URL`), so QR PNGs open from a phone through the tunnel. Set it to the current ngrok URL after `make preview`; leave it at `http://localhost:8080` when there is no tunnel. The bucket paths above are forwarded to MinIO with Host and path unchanged so the V4 signature validates. Presigned GETs are method-bound: `curl -I` (HEAD) returns 403, a GET returns 200.
 - Hot reload works through the tunnel; edit `apps/*/app/page.tsx` and the browser updates.
 - First install: `make install` (npm workspaces).

@@ -242,3 +242,209 @@ export const orgApi = {
 export function unwrapOrg(res: { org: Org } | Org): Org {
   return 'org' in res && res.org ? res.org : (res as Org);
 }
+
+/* ------------------------------------------------------------------ */
+/* Shapes — mirror API.md Phase 2 exactly.                             */
+/* ------------------------------------------------------------------ */
+
+export type UnitStatus = 'vacant' | 'occupied' | 'unlisted' | 'maintenance';
+/** Statuses a landlord may set by hand; `occupied` is derived from contracts. */
+export type UnitStatusOverride = Exclude<UnitStatus, 'occupied'>;
+
+export interface PaymentPeriod {
+  id: string;
+  label: string;
+  days: number;
+  is_recommended: boolean;
+  sort_order: number;
+  active: boolean;
+  created_at: string;
+}
+
+export interface UnitCounts {
+  total: number;
+  vacant: number;
+  occupied: number;
+  maintenance: number;
+  unlisted: number;
+}
+
+export interface Property {
+  id: string;
+  name: string;
+  location_text: string | null;
+  lat: number | null;
+  lng: number | null;
+  notes: string | null;
+  unit_counts: UnitCounts;
+  created_at: string;
+}
+
+export interface Price {
+  id: string;
+  amount: number;
+  currency: string;
+  period_days: number;
+  effective_from: string;
+  created_at?: string;
+  created_by_name?: string | null;
+}
+
+export interface Unit {
+  id: string;
+  org_id: string;
+  property_id: string;
+  property_name: string;
+  name: string;
+  unit_code: string;
+  status: UnitStatus;
+  status_override: boolean;
+  allowed_period_ids: string[] | null;
+  current_price: Price | null;
+  scan_url: string;
+  vacant_since: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface QrSheetItem {
+  unit_id: string;
+  unit_name: string;
+  unit_code: string;
+  scan_url: string;
+  png_url: string;
+}
+
+export interface UnitQr {
+  unit_code: string;
+  scan_url: string;
+  png_url: string;
+}
+
+export interface PublicBranding {
+  org: { id: string; name: string; slug: string };
+  display_name: string;
+  logo_url: string | null;
+  theme: { primary_color: string; font_id: string };
+}
+
+export interface PriceInput {
+  amount: number;
+  period_days: number;
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 2 endpoint helpers                                             */
+/* ------------------------------------------------------------------ */
+
+export const periodsApi = {
+  list: (includeInactive = false, signal?: AbortSignal) =>
+    api.get<{ items: PaymentPeriod[] }>('/org/payment-periods', {
+      query: includeInactive ? { include_inactive: 'true' } : undefined,
+      signal,
+    }),
+  create: (body: { label: string; days: number }) =>
+    api.post<{ period: PaymentPeriod } | PaymentPeriod>('/org/payment-periods', body),
+  update: (
+    id: string,
+    body: { label?: string; days?: number; sort_order?: number; active?: boolean },
+  ) => api.patch<{ period: PaymentPeriod } | PaymentPeriod>(`/org/payment-periods/${id}`, body),
+  deactivate: (id: string) => api.del<void>(`/org/payment-periods/${id}`),
+  restoreRecommended: () =>
+    api.post<{ items: PaymentPeriod[] }>('/org/payment-periods/restore-recommended'),
+};
+
+export const propertiesApi = {
+  list: (query: { cursor?: string; limit?: number } = {}, signal?: AbortSignal) =>
+    api.get<{ items: Property[]; next_cursor: string | null }>('/properties', { query, signal }),
+  get: (id: string, signal?: AbortSignal) =>
+    api.get<{ property: Property } | Property>(`/properties/${id}`, { signal }),
+  create: (body: {
+    name: string;
+    location_text?: string;
+    lat?: number;
+    lng?: number;
+    notes?: string;
+  }) => api.post<{ property: Property } | Property>('/properties', body),
+  update: (
+    id: string,
+    body: {
+      name?: string;
+      location_text?: string;
+      lat?: number | null;
+      lng?: number | null;
+      notes?: string | null;
+    },
+  ) => api.patch<{ property: Property } | Property>(`/properties/${id}`, body),
+  remove: (id: string) => api.del<void>(`/properties/${id}`),
+  units: (id: string, signal?: AbortSignal) =>
+    api.get<{ items: Unit[] }>(`/properties/${id}/units`, { signal }),
+  addUnit: (
+    id: string,
+    body: { name: string; price?: PriceInput; allowed_period_ids?: string[] | null },
+  ) => api.post<{ unit: Unit } | Unit>(`/properties/${id}/units`, body),
+  addUnitsBulk: (
+    id: string,
+    body: { names: string[]; price?: PriceInput; allowed_period_ids?: string[] | null },
+  ) =>
+    api.post<{ items: Unit[] }>(`/properties/${id}/units/bulk`, body),
+  qrSheet: (id: string, signal?: AbortSignal) =>
+    api.get<{ items: QrSheetItem[] }>(`/properties/${id}/qr-sheet`, { signal }),
+};
+
+export const unitsApi = {
+  list: (
+    query: { status?: string; property_id?: string; q?: string; cursor?: string; limit?: number } = {},
+    signal?: AbortSignal,
+  ) => api.get<{ items: Unit[]; next_cursor: string | null }>('/units', { query, signal }),
+  get: (id: string, signal?: AbortSignal) => api.get<{ unit: Unit } | Unit>(`/units/${id}`, { signal }),
+  update: (
+    id: string,
+    body: { name?: string; status?: UnitStatusOverride; allowed_period_ids?: string[] | null },
+  ) => api.patch<{ unit: Unit } | Unit>(`/units/${id}`, body),
+  remove: (id: string) => api.del<void>(`/units/${id}`),
+  qr: (id: string) => api.post<UnitQr>(`/units/${id}/qr`),
+  prices: (id: string, signal?: AbortSignal) =>
+    api.get<{ items: Price[] }>(`/units/${id}/prices`, { signal }),
+  addPrice: (id: string, body: { amount: number; period_days: number; effective_from?: string }) =>
+    api.post<{ price: Price } | Price>(`/units/${id}/prices`, body),
+  bulkPrice: (body: {
+    unit_ids: string[];
+    mode: 'percent' | 'set';
+    value: number;
+    period_days?: number;
+    effective_from?: string;
+  }) => api.post<{ items: Price[] }>('/units/bulk-price', body),
+};
+
+export const publicApi = {
+  // slug and unit_code are typed by a human (or read off a sticker), so they
+  // are escaped: an unencoded '/' or '?' would rewrite the request path.
+  branding: (slug: string, signal?: AbortSignal) =>
+    api.get<PublicBranding>(`/public/orgs/${encodeURIComponent(slug)}/branding`, { signal }),
+  unit: (unitCode: string, signal?: AbortSignal) =>
+    api.get<unknown>(`/public/units/${encodeURIComponent(unitCode)}`, { signal }),
+};
+
+/* ------------------------------------------------------------------ */
+/* Envelope helpers — the API answers `{thing}`; tolerate a bare body.  */
+/* ------------------------------------------------------------------ */
+
+function unwrap<T>(res: unknown, key: string): T {
+  if (res && typeof res === 'object' && key in (res as Record<string, unknown>)) {
+    return (res as Record<string, unknown>)[key] as T;
+  }
+  return res as T;
+}
+
+export const unwrapProperty = (res: { property: Property } | Property) =>
+  unwrap<Property>(res, 'property');
+export const unwrapUnit = (res: { unit: Unit } | Unit) => unwrap<Unit>(res, 'unit');
+export const unwrapPrice = (res: { price: Price } | Price) => unwrap<Price>(res, 'price');
+export const unwrapPeriod = (res: { period: PaymentPeriod } | PaymentPeriod) =>
+  unwrap<PaymentPeriod>(res, 'period');
+
+/** Normalise any thrown value into an ApiError so screens can render it. */
+export function toApiError(e: unknown): ApiError {
+  return e instanceof ApiError ? e : new ApiError(0, { detail: String(e) });
+}

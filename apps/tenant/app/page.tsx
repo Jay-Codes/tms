@@ -2,8 +2,9 @@
 
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { PageHead, Shell } from '../components/Shell';
+import { propertiesApi, type Property } from '../lib/api';
 import { useMe } from '../lib/auth';
 
 /**
@@ -34,6 +35,19 @@ function EmptyCard({
 
 function DashboardBody() {
   const { user, org } = useMe();
+  const [firstProperty, setFirstProperty] = useState<Property | null>(null);
+
+  // The QR empty-state card jumps straight to a printable sheet once there is
+  // something to print; until then it points at the properties screen.
+  useEffect(() => {
+    const ac = new AbortController();
+    propertiesApi
+      .list({ limit: 1 }, ac.signal)
+      .then((r) => setFirstProperty((r.items ?? [])[0] ?? null))
+      .catch(() => setFirstProperty(null));
+    return () => ac.abort();
+  }, []);
+
   const today = new Date().toLocaleDateString(undefined, {
     weekday: 'long',
     day: 'numeric',
@@ -73,8 +87,11 @@ function DashboardBody() {
           title="Print QR codes"
           body="Each unit gets a permanent sticker. A renter scans it and starts their own registration."
           action={
-            <Link href="/properties" className="btn btn-secondary">
-              Set up units
+            <Link
+              href={firstProperty ? `/properties/${firstProperty.id}/qr` : '/properties'}
+              className="btn btn-secondary"
+            >
+              {firstProperty ? 'Print QR sheet' : 'Set up units'}
             </Link>
           }
         />

@@ -21,6 +21,7 @@ import (
 
 	"tms/backend/internal/cache"
 	"tms/backend/internal/db"
+	"tms/backend/internal/storage"
 )
 
 // DefaultTestDatabaseURL is the dev-compose test database (host port 5433).
@@ -111,4 +112,33 @@ func Logger() *slog.Logger {
 		level = slog.LevelDebug
 	}
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+}
+
+// Storage returns a MinIO client when the dev object storage is reachable, and
+// nil otherwise. QR tests use it to decide between a real upload and a skip:
+// `make test` must stay green without the compose stack.
+func Storage(t *testing.T) *storage.Client {
+	t.Helper()
+	endpoint := os.Getenv("MINIO_ENDPOINT")
+	if endpoint == "" {
+		endpoint = "localhost:9000"
+	}
+	access := os.Getenv("MINIO_ROOT_USER")
+	if access == "" {
+		access = "tms"
+	}
+	secret := os.Getenv("MINIO_ROOT_PASSWORD")
+	if secret == "" {
+		secret = "tms_dev_secret"
+	}
+	client, err := storage.Open(endpoint, access, secret, false, "")
+	if err != nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx); err != nil {
+		return nil
+	}
+	return client
 }
