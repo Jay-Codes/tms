@@ -33,9 +33,9 @@ import {
   errorMessage,
   formatDate,
   money,
-  priceLine,
 } from '../../../../lib/format';
 import { Protected } from '../../../../components/Protected';
+import { RentValue } from '../../../../components/RentValue';
 import { Notice, Screen, ScreenHeader } from '../../../../components/Screen';
 import { SignaturePad, type SignaturePadHandle } from '../../../../components/SignaturePad';
 
@@ -275,7 +275,7 @@ function SignContent() {
             to {user ? displayPhone(user.phone) : 'your phone'}.
           </p>
           {contract && (
-            <table className="ledger">
+            <table className="ledger ledger-kv">
               <tbody>
                 <tr>
                   <td>Unit</td>
@@ -286,7 +286,7 @@ function SignContent() {
                 <tr>
                   <td>Rent</td>
                   <td className="num">
-                    {priceLine(contract.rent_amount, contract.rent_period_days)}
+                    <RentValue contract={contract} />
                   </td>
                 </tr>
                 <tr>

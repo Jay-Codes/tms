@@ -18,6 +18,7 @@ import {
   type PaymentPeriod,
 } from '../lib/api';
 import { Field, Note, ProblemNote } from './FormBits';
+import { TableScroll } from '@tms/ui';
 
 function Recommended() {
   return (
@@ -164,6 +165,17 @@ function Row({
       <td className="num" style={{ whiteSpace: 'nowrap' }}>
         {period.active ? (
           <>
+            {period.is_recommended ? null : (
+              <button
+                type="button"
+                className="btn btn-quiet"
+                onClick={() => void run(() => periodsApi.recommend(period.id))}
+                disabled={busy}
+                style={{ minHeight: 32 }}
+              >
+                Set as recommended
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-quiet"
@@ -272,6 +284,7 @@ export function PeriodsManager({ heading }: { heading?: string }) {
       <ProblemNote error={actionError} />
       {note ? <Note>{note}</Note> : null}
 
+      <TableScroll label="Payment periods">
       <table className="ledger">
         <thead>
           <tr>
@@ -308,6 +321,11 @@ export function PeriodsManager({ heading }: { heading?: string }) {
           )}
         </tbody>
       </table>
+      </TableScroll>
+
+      <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+        Recommended is shown first to renters and pre-selected when they connect.
+      </p>
 
       <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
         Changes affect future contracts only. Active contracts keep the cadence they were signed with.

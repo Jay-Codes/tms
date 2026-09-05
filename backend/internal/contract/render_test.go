@@ -124,12 +124,14 @@ func TestDefaultTemplateUsesEveryVariable(t *testing.T) {
 	}
 }
 
-// TestDefaultTemplateBodyMatchesMigration: migration 000005 seeds this body for
-// orgs that already existed when Phase 4 landed, 000006 re-words the ones that
-// still carry the pre-DueDayPhrase text, and org creation seeds the constant.
-// If any of them drift, old and new orgs issue different terms.
+// TestDefaultTemplateBodyMatchesMigration: org creation seeds this constant, and
+// every migration that re-words the default carries a copy for the orgs that
+// already exist (000005 seeded it, 000006 fixed the `{{due_day}}` phrase, 000012
+// added `{{rent_basis}}`). The *newest* of those copies is the one that has to
+// match the constant — the earlier ones are history, and each was superseded by
+// the next. If the newest drifts, old and new orgs issue different terms.
 func TestDefaultTemplateBodyMatchesMigration(t *testing.T) {
-	for _, name := range []string{"000005_contracts.up.sql", "000006_signatures_append_only.up.sql"} {
+	for _, name := range []string{"000012_part2_foundations.up.sql"} {
 		t.Run(name, func(t *testing.T) {
 			raw, err := os.ReadFile("../../migrations/" + name)
 			if err != nil {

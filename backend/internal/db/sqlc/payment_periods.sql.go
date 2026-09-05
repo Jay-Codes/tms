@@ -11,6 +11,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearRecommendedPaymentPeriod = `-- name: ClearRecommendedPaymentPeriod :exec
+UPDATE payment_periods
+SET is_recommended = false
+WHERE org_id = $1 AND is_recommended AND deleted_at IS NULL
+  AND id <> $2
+`
+
+type ClearRecommendedPaymentPeriodParams struct {
+	OrgID  pgtype.UUID `json:"org_id"`
+	KeepID pgtype.UUID `json:"keep_id"`
+}
+
+// Drops the badge from every live period of the org except the one about to
+// take it. Excluding the target keeps the partial unique index quiet within the
+// transaction and makes the pair idempotent when the badge is already there.
+func (q *Queries) ClearRecommendedPaymentPeriod(ctx context.Context, arg ClearRecommendedPaymentPeriodParams) error {
+	_, err := q.db.Exec(ctx, clearRecommendedPaymentPeriod, arg.OrgID, arg.KeepID)
+	return err
+}
+
 const countActivePaymentPeriods = `-- name: CountActivePaymentPeriods :one
 SELECT count(*) FROM payment_periods
 WHERE org_id = $1 AND deleted_at IS NULL AND active
@@ -95,6 +115,30 @@ func (q *Queries) GetPaymentPeriod(ctx context.Context, arg GetPaymentPeriodPara
 	return i, err
 }
 
+const getRecommendedPaymentPeriod = `-- name: GetRecommendedPaymentPeriod :one
+SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at FROM payment_periods
+WHERE org_id = $1 AND is_recommended AND deleted_at IS NULL
+LIMIT 1
+`
+
+func (q *Queries) GetRecommendedPaymentPeriod(ctx context.Context, orgID pgtype.UUID) (PaymentPeriod, error) {
+	row := q.db.QueryRow(ctx, getRecommendedPaymentPeriod, orgID)
+	var i PaymentPeriod
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Label,
+		&i.Days,
+		&i.IsRecommended,
+		&i.SortOrder,
+		&i.Active,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const getRecommendedPaymentPeriodByDays = `-- name: GetRecommendedPaymentPeriodByDays :one
 SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at FROM payment_periods
 WHERE org_id = $1 AND days = $2
@@ -128,7 +172,7 @@ func (q *Queries) GetRecommendedPaymentPeriodByDays(ctx context.Context, arg Get
 const listActivePaymentPeriods = `-- name: ListActivePaymentPeriods :many
 SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at FROM payment_periods
 WHERE org_id = $1 AND deleted_at IS NULL AND active
-ORDER BY sort_order ASC, days ASC
+ORDER BY is_recommended DESC, sort_order ASC, days ASC
 `
 
 func (q *Queries) ListActivePaymentPeriods(ctx context.Context, orgID pgtype.UUID) ([]PaymentPeriod, error) {
@@ -166,7 +210,7 @@ const listPaymentPeriods = `-- name: ListPaymentPeriods :many
 SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at FROM payment_periods
 WHERE org_id = $1 AND deleted_at IS NULL
   AND ($2::boolean OR active)
-ORDER BY sort_order ASC, days ASC
+ORDER BY is_recommended DESC, sort_order ASC, days ASC
 `
 
 type ListPaymentPeriodsParams struct {
@@ -174,6 +218,9 @@ type ListPaymentPeriodsParams struct {
 	IncludeInactive bool        `json:"include_inactive"`
 }
 
+// Recommended first: exactly one period per org carries the badge (migration
+// 000012), and it is the one the landlord wants a renter to see at the top of
+// the list. sort_order then days breaks the rest, as before.
 func (q *Queries) ListPaymentPeriods(ctx context.Context, arg ListPaymentPeriodsParams) ([]PaymentPeriod, error) {
 	rows, err := q.db.Query(ctx, listPaymentPeriods, arg.OrgID, arg.IncludeInactive)
 	if err != nil {
@@ -279,6 +326,36 @@ func (q *Queries) ReactivatePaymentPeriod(ctx context.Context, arg ReactivatePay
 		arg.OrgID,
 		arg.ID,
 	)
+	var i PaymentPeriod
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Label,
+		&i.Days,
+		&i.IsRecommended,
+		&i.SortOrder,
+		&i.Active,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const setRecommendedPaymentPeriod = `-- name: SetRecommendedPaymentPeriod :one
+UPDATE payment_periods
+SET is_recommended = true
+WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
+RETURNING id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at
+`
+
+type SetRecommendedPaymentPeriodParams struct {
+	OrgID pgtype.UUID `json:"org_id"`
+	ID    pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) SetRecommendedPaymentPeriod(ctx context.Context, arg SetRecommendedPaymentPeriodParams) (PaymentPeriod, error) {
+	row := q.db.QueryRow(ctx, setRecommendedPaymentPeriod, arg.OrgID, arg.ID)
 	var i PaymentPeriod
 	err := row.Scan(
 		&i.ID,

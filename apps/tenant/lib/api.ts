@@ -363,6 +363,13 @@ export const periodsApi = {
     body: { label?: string; days?: number; sort_order?: number; active?: boolean },
   ) => api.patch<{ period: PaymentPeriod } | PaymentPeriod>(`/org/payment-periods/${id}`, body),
   deactivate: (id: string) => api.del<void>(`/org/payment-periods/${id}`),
+  /**
+   * Move the "Recommended" badge to this period. Exactly one period per org
+   * carries it (PLAN2 #8), so the server clears the others; the response is
+   * the changed period, like PATCH.
+   */
+  recommend: (id: string) =>
+    api.post<{ period: PaymentPeriod } | PaymentPeriod>(`/org/payment-periods/${id}/recommend`),
   restoreRecommended: () =>
     api.post<{ items: PaymentPeriod[] }>('/org/payment-periods/restore-recommended'),
 };

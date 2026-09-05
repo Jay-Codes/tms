@@ -203,11 +203,19 @@ func (s *Server) createContractTx(
 
 	// Sanitizing again on render keeps a body stored before a policy change
 	// from escaping the current allowlist.
+	// `rent` is what falls due once per payment period — the unit price scaled
+	// from its own basis, with Generate's rounding, so it equals a full
+	// schedule row exactly. `rent_basis` keeps the unit price visible
+	// ("TZS 100,000 / 30 days"). Before Part 2 `rent` was the unit price
+	// itself, which read as the wrong figure whenever the two bases differed
+	// (PLAN2 Phase 9).
+	rentPerPeriod := contract.RentPerPeriod(unit.PriceAmount, int(unit.PricePeriodDays), int(period.Days))
 	terms := contract.Render(contract.SanitizeHTML(tpl.BodyHtml), map[string]string{
 		"renter_name":    renter.FullName,
 		"unit":           unit.Name,
 		"property":       unit.PropertyName,
-		"rent":           formatTZS(unit.PriceAmount),
+		"rent":           formatTZS(rentPerPeriod),
+		"rent_basis":     contract.RentBasisPhrase(formatTZS(unit.PriceAmount), int(unit.PricePeriodDays)),
 		"start_date":     start.Format(dateLayout),
 		"end_date":       end.Format(dateLayout),
 		"payment_period": fmt.Sprintf("%s (%d days)", period.Label, period.Days),

@@ -4,15 +4,17 @@ package contract
 // ("Standard tenancy agreement"): short, plain Tanzanian residential tenancy
 // terms using every variable the editor offers.
 //
-// Migration 000005 carries a byte-identical copy for orgs that already existed
-// when Phase 4 landed; TestDefaultTemplateBodyMatchesMigration keeps the two in
-// step, so a wording change cannot leave old and new orgs with different terms.
+// Each migration that re-words the default carries a byte-identical copy for
+// orgs that already existed (000005 seeded it, 000006 fixed the `{{due_day}}`
+// phrase, 000012 added `{{rent_basis}}`); TestDefaultTemplateBodyMatchesMigration
+// checks the newest of them against this constant, so a wording change cannot
+// leave old and new orgs with different terms.
 const DefaultTemplateBody = `<h1>Tenancy Agreement</h1>
 <p>This agreement is made between <strong>{{org_name}}</strong> ("the Landlord") and <strong>{{renter_name}}</strong> ("the Tenant") for the premises known as <strong>{{unit}}</strong> at <strong>{{property}}</strong>.</p>
 <h2>1. Term</h2>
 <p>The tenancy runs for {{term_days}} days, from {{start_date}} to {{end_date}}.</p>
 <h2>2. Rent</h2>
-<p>The Tenant shall pay rent of <strong>{{rent}}</strong> per {{payment_period}}, payable in advance on or before {{due_day}} of each payment period, to the bank account nominated by the Landlord. Receipts are issued for every payment.</p>
+<p>The Tenant shall pay rent of <strong>{{rent}}</strong> per {{payment_period}} ({{rent_basis}}), payable in advance on or before {{due_day}} of each payment period, to the bank account nominated by the Landlord. Receipts are issued for every payment.</p>
 <h2>3. Deposit and utilities</h2>
 <p>Any deposit held is refundable at the end of the tenancy, less the cost of repairing damage beyond fair wear and tear. Electricity, water and refuse charges for the premises are payable by the Tenant unless agreed otherwise in writing.</p>
 <h2>4. Use of the premises</h2>

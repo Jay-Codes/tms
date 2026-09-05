@@ -123,6 +123,11 @@ func (s *Server) handlePatchPaymentPeriod(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// `is_recommended` is deliberately absent: the badge is exclusive and moves
+	// through POST /org/payment-periods/{id}/recommend, which also clears it
+	// from the period that had it. The decoder disallows unknown fields, so a
+	// client that sends it here is told so with a 400 rather than silently
+	// having it ignored.
 	var body struct {
 		Label     *string `json:"label"`
 		Days      *int32  `json:"days"`
@@ -227,6 +232,95 @@ func (s *Server) handleDeletePaymentPeriod(w http.ResponseWriter, r *http.Reques
 	NoContent(w)
 }
 
+// ----------------------------- POST /org/payment-periods/{id}/recommend --
+
+// handleRecommendPaymentPeriod moves the org's single "Recommended" badge onto
+// one period.
+//
+// The badge is exclusive (PLAN2 #8, confirmed with the client): it is the
+// landlord saying "this is the one I suggest", which is only information while
+// exactly one period carries it. Migration 000012 backs that with a partial
+// unique index, so the clear and the set have to happen in one transaction —
+// two requests racing for the badge leave one of them with a unique violation
+// rather than an org with two recommendations.
+//
+// It is a separate endpoint rather than a PATCH field because it writes to a
+// row the caller did not name (the period losing the badge). PATCH refuses an
+// `is_recommended` key outright: the decoder disallows unknown fields, so a
+// client sending it gets a 400 pointing at this route.
+func (s *Server) handleRecommendPaymentPeriod(w http.ResponseWriter, r *http.Request) {
+	if s.dbUnavailable(w) {
+		return
+	}
+	p := auth.MustFromContext(r.Context())
+	current, ok := s.orgPeriod(w, r, p)
+	if !ok {
+		return
+	}
+
+	// The badge points renters at a period they can actually choose.
+	if !current.Active {
+		httpx.WriteProblemCode(w, http.StatusConflict, "period_inactive", "inactive payment period",
+			"a period that is not offered cannot be the recommended one")
+		return
+	}
+
+	// Recorded before the write, so the audit entry names the period that lost
+	// the badge as well as the one that gained it.
+	previous, err := s.q.GetRecommendedPaymentPeriod(r.Context(), p.OrgID)
+	hadPrevious := err == nil
+	if err != nil && !isNoRows(err) {
+		s.serverError(w, r, "periods.recommend.previous", err)
+		return
+	}
+
+	var updated sqlc.PaymentPeriod
+	err = s.inTx(r.Context(), func(q *sqlc.Queries) error {
+		if err := q.ClearRecommendedPaymentPeriod(r.Context(), sqlc.ClearRecommendedPaymentPeriodParams{
+			OrgID: p.OrgID, KeepID: current.ID,
+		}); err != nil {
+			return err
+		}
+		var err error
+		updated, err = q.SetRecommendedPaymentPeriod(r.Context(), sqlc.SetRecommendedPaymentPeriodParams{
+			OrgID: p.OrgID, ID: current.ID,
+		})
+		if err != nil {
+			return err
+		}
+		before := map[string]any{"recommended_period_id": nil}
+		if hadPrevious {
+			before = map[string]any{
+				"recommended_period_id": db.UUIDString(previous.ID),
+				"period":                toPeriod(previous),
+			}
+		}
+		return audit.Record(r.Context(), q, audit.Entry{
+			OrgID:       p.OrgIDString(),
+			ActorUserID: p.UserIDString(),
+			Action:      audit.ActionPeriodRecommend,
+			EntityType:  audit.EntityPaymentPeriod,
+			EntityID:    db.UUIDString(current.ID),
+			Before:      before,
+			After: map[string]any{
+				"recommended_period_id": db.UUIDString(updated.ID),
+				"period":                toPeriod(updated),
+			},
+		})
+	})
+	if isUnique(err) {
+		// The partial unique index; another request took the badge mid-flight.
+		httpx.WriteProblem(w, http.StatusConflict, "recommendation in flight",
+			"another change to the recommended period is in progress — try again")
+		return
+	}
+	if err != nil {
+		s.serverError(w, r, "periods.recommend.tx", err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"period": toPeriod(updated)})
+}
+
 // ------------------------- POST /org/payment-periods/restore-recommended --
 
 func (s *Server) handleRestoreRecommendedPeriods(w http.ResponseWriter, r *http.Request) {
@@ -246,6 +340,19 @@ func (s *Server) handleRestoreRecommendedPeriods(w http.ResponseWriter, r *http.
 	if err != nil {
 		s.serverError(w, r, "periods.restore.sort", err)
 		return
+	}
+
+	// The badge is exclusive (PLAN2 #8), so restoring presets must not mint a
+	// second recommended period: a preset is created badged only when it is the
+	// designated one (Monthly) *and* the org has nothing badged already.
+	// Reactivating a preset never touches the flag — restoring an old row is
+	// not a decision about which period the landlord recommends.
+	hasRecommended := false
+	for _, row := range existing {
+		if row.IsRecommended {
+			hasRecommended = true
+			break
+		}
 	}
 
 	// Idempotent: a preset already offered is left exactly as it is, one that
@@ -284,12 +391,16 @@ func (s *Server) handleRestoreRecommendedPeriods(w http.ResponseWriter, r *http.
 				if labelTaken {
 					label = preset.label + " (recommended)"
 				}
+				recommend := preset.recommended && !hasRecommended
 				row, err := q.CreatePaymentPeriod(r.Context(), sqlc.CreatePaymentPeriodParams{
 					OrgID: p.OrgID, Label: label, Days: preset.days,
-					IsRecommended: true, SortOrder: sortOrder + int32(i) + 1,
+					IsRecommended: recommend, SortOrder: sortOrder + int32(i) + 1,
 				})
 				if err != nil {
 					return err
+				}
+				if recommend {
+					hasRecommended = true
 				}
 				restored = append(restored, map[string]any{"id": db.UUIDString(row.ID), "days": row.Days, "action": "created"})
 			}

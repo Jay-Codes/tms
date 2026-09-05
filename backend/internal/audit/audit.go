@@ -44,6 +44,10 @@ const (
 	ActionPeriodUpdate    = "payment_period.update"
 	ActionPeriodDelete    = "payment_period.delete"
 	ActionPeriodRestore   = "payment_period.restore_recommended"
+	// Part 2: moving the single "Recommended" badge from one period to another
+	// (PLAN2 #8). It is its own action rather than a `payment_period.update`
+	// because it changes what every renter of the org is shown first.
+	ActionPeriodRecommend = "payment_period.recommend"
 
 	// Phase 3 — renter KYC and unit link requests. `kyc.view` records every
 	// read of an identity document (SPEC §8: access to KYC is audited); the

@@ -34,7 +34,7 @@ VALUES (
     $6,
     $7
 )
-RETURNING id, kind, phone, email, full_name, pin_hash, password_hash, email_verified_at, status, created_at, updated_at, deleted_at
+RETURNING id, kind, phone, email, full_name, pin_hash, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, locale
 `
 
 type CreateUserParams struct {
@@ -73,12 +73,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Locale,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, kind, phone, email, full_name, pin_hash, password_hash, email_verified_at, status, created_at, updated_at, deleted_at FROM users WHERE lower(email) = lower($1) AND deleted_at IS NULL
+SELECT id, kind, phone, email, full_name, pin_hash, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, locale FROM users WHERE lower(email) = lower($1) AND deleted_at IS NULL
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -97,12 +98,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Locale,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, kind, phone, email, full_name, pin_hash, password_hash, email_verified_at, status, created_at, updated_at, deleted_at FROM users WHERE id = $1 AND deleted_at IS NULL
+SELECT id, kind, phone, email, full_name, pin_hash, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, locale FROM users WHERE id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error) {
@@ -121,12 +123,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Locale,
 	)
 	return i, err
 }
 
 const getUserByPhone = `-- name: GetUserByPhone :one
-SELECT id, kind, phone, email, full_name, pin_hash, password_hash, email_verified_at, status, created_at, updated_at, deleted_at FROM users WHERE phone = $1 AND deleted_at IS NULL
+SELECT id, kind, phone, email, full_name, pin_hash, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, locale FROM users WHERE phone = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) GetUserByPhone(ctx context.Context, phone *string) (User, error) {
@@ -145,6 +148,7 @@ func (q *Queries) GetUserByPhone(ctx context.Context, phone *string) (User, erro
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Locale,
 	)
 	return i, err
 }
@@ -152,7 +156,7 @@ func (q *Queries) GetUserByPhone(ctx context.Context, phone *string) (User, erro
 const markEmailVerified = `-- name: MarkEmailVerified :one
 UPDATE users SET email_verified_at = COALESCE(email_verified_at, now())
 WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, kind, phone, email, full_name, pin_hash, password_hash, email_verified_at, status, created_at, updated_at, deleted_at
+RETURNING id, kind, phone, email, full_name, pin_hash, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, locale
 `
 
 func (q *Queries) MarkEmailVerified(ctx context.Context, id pgtype.UUID) (User, error) {
@@ -171,6 +175,7 @@ func (q *Queries) MarkEmailVerified(ctx context.Context, id pgtype.UUID) (User, 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Locale,
 	)
 	return i, err
 }
@@ -178,7 +183,7 @@ func (q *Queries) MarkEmailVerified(ctx context.Context, id pgtype.UUID) (User, 
 const setUserEmail = `-- name: SetUserEmail :one
 UPDATE users SET email = $1
 WHERE id = $2 AND deleted_at IS NULL
-RETURNING id, kind, phone, email, full_name, pin_hash, password_hash, email_verified_at, status, created_at, updated_at, deleted_at
+RETURNING id, kind, phone, email, full_name, pin_hash, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, locale
 `
 
 type SetUserEmailParams struct {
@@ -204,6 +209,7 @@ func (q *Queries) SetUserEmail(ctx context.Context, arg SetUserEmailParams) (Use
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Locale,
 	)
 	return i, err
 }
@@ -211,7 +217,7 @@ func (q *Queries) SetUserEmail(ctx context.Context, arg SetUserEmailParams) (Use
 const setUserFullName = `-- name: SetUserFullName :one
 UPDATE users SET full_name = $1
 WHERE id = $2 AND deleted_at IS NULL
-RETURNING id, kind, phone, email, full_name, pin_hash, password_hash, email_verified_at, status, created_at, updated_at, deleted_at
+RETURNING id, kind, phone, email, full_name, pin_hash, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, locale
 `
 
 type SetUserFullNameParams struct {
@@ -239,6 +245,7 @@ func (q *Queries) SetUserFullName(ctx context.Context, arg SetUserFullNameParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Locale,
 	)
 	return i, err
 }

@@ -1,7 +1,11 @@
 'use client';
 
 /**
- * Console chrome: platform header, left tab rail, sign out.
+ * Console chrome: platform header, left tab rail (desktop), drawer + bottom
+ * bar (mobile), sign out.
+ *
+ * Mounted ONCE by `app/(portal)/layout.tsx`; pages must never render it (see
+ * the no-restricted-imports rule in .eslintrc.json — PLAN2 #7).
  *
  * The admin app is deliberately NOT org-themed (SPEC §2.0): it never calls
  * applyOrgTheme, so the platform default palette and font are what an admin
@@ -11,7 +15,7 @@
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { RequireAuth, useMe } from '../lib/auth';
 
 export interface NavItem {
@@ -27,59 +31,52 @@ export const NAV: NavItem[] = [
   { href: '/jobs', label: 'Jobs', icon: 'solar:refresh-circle-linear' },
 ];
 
-function Rail() {
-  const pathname = usePathname();
+function isCurrent(pathname: string, href: string): boolean {
+  return pathname === href || (href !== '/' && pathname.startsWith(href));
+}
 
+function Mark() {
   return (
-    <aside
-      style={{
-        background: 'var(--paper)',
-        borderRight: '1px solid var(--rule)',
-        padding: 'var(--sp-5) 0',
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--sp-3)',
-          padding: '0 var(--sp-4)',
-          marginBottom: 'var(--sp-6)',
-        }}
-      >
-        <span
-          aria-hidden
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: 'var(--radius-sm)',
-            background: 'var(--ink)',
-            flexShrink: 0,
-          }}
-        />
-        <div style={{ lineHeight: 1.15, minWidth: 0 }}>
-          <div style={{ fontWeight: 600 }}>TMS</div>
-          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>Platform admin</div>
-        </div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', minWidth: 0 }}>
+      <span
+        aria-hidden
+        style={{ width: 28, height: 28, borderRadius: 'var(--radius-sm)', background: 'var(--ink)', flexShrink: 0 }}
+      />
+      <div style={{ lineHeight: 1.15, minWidth: 0 }}>
+        <div style={{ fontWeight: 600 }}>TMS</div>
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>Platform admin</div>
       </div>
+    </div>
+  );
+}
 
-      <nav className="tabs" aria-label="Sections">
-        {NAV.map((item) => {
-          const current =
-            pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="tab"
-              aria-current={current ? 'page' : undefined}
-            >
-              <Icon icon={item.icon} width={20} />
-              <span style={{ flex: 1 }}>{item.label}</span>
-            </Link>
-          );
-        })}
-      </nav>
+function NavList({ onNavigate }: { onNavigate?: () => void }) {
+  const pathname = usePathname();
+  return (
+    <nav className="tabs" aria-label="Sections">
+      {NAV.map((item) => (
+        <Link
+          key={item.href}
+          href={item.href}
+          className="tab"
+          aria-current={isCurrent(pathname, item.href) ? 'page' : undefined}
+          onClick={onNavigate}
+        >
+          <Icon icon={item.icon} width={20} />
+          <span style={{ flex: 1 }}>{item.label}</span>
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+function Rail() {
+  return (
+    <aside className="shell-rail">
+      <div style={{ padding: '0 var(--sp-4)', marginBottom: 'var(--sp-6)' }}>
+        <Mark />
+      </div>
+      <NavList />
     </aside>
   );
 }
@@ -87,73 +84,138 @@ function Rail() {
 function TopBar() {
   const { user, logout } = useMe();
   return (
-    <header
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 'var(--sp-4)',
-        padding: 'var(--sp-3) var(--sp-6)',
-        borderBottom: '1px solid var(--rule)',
-      }}
-    >
+    <header className="shell-topbar">
       <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>
         {user?.full_name}
         {user?.email ? ` · ${user.email}` : ''}
       </span>
-      <button
-        type="button"
-        className="btn btn-quiet"
-        onClick={() => void logout()}
-        style={{ minHeight: 36 }}
-      >
+      <button type="button" className="btn btn-quiet" onClick={() => void logout()} style={{ minHeight: 36 }}>
         <Icon icon="solar:logout-2-linear" width={18} /> Sign out
       </button>
     </header>
   );
 }
 
+function MobileBar({ onOpen }: { onOpen: () => void }) {
+  return (
+    <header className="shell-mobilebar">
+      <Mark />
+      <button
+        type="button"
+        className="btn btn-quiet"
+        aria-label="Open menu"
+        aria-haspopup="dialog"
+        onClick={onOpen}
+        style={{ minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)', justifyContent: 'center' }}
+      >
+        <Icon icon="solar:hamburger-menu-linear" width={24} />
+      </button>
+    </header>
+  );
+}
+
+function Drawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { user, logout } = useMe();
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="shell-drawer-backdrop"
+      role="presentation"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="shell-drawer" role="dialog" aria-modal="true" aria-label="Menu">
+        <div className="shell-drawer-head">
+          <Mark />
+          <button
+            type="button"
+            className="btn btn-quiet"
+            aria-label="Close menu"
+            onClick={onClose}
+            style={{ minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)', justifyContent: 'center' }}
+          >
+            <Icon icon="solar:close-circle-linear" width={24} />
+          </button>
+        </div>
+        <div className="shell-drawer-body">
+          <NavList onNavigate={onClose} />
+        </div>
+        <div className="shell-drawer-foot">
+          <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>{user?.full_name}</span>
+          <button type="button" className="btn btn-quiet" onClick={() => void logout()} style={{ minHeight: 40 }}>
+            <Icon icon="solar:logout-2-linear" width={18} /> Sign out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BottomBar({ onMore }: { onMore: () => void }) {
+  const pathname = usePathname();
+  return (
+    <nav className="bottom-bar shell-bottom" aria-label="Main sections">
+      {NAV.map((item) => (
+        <Link
+          key={item.href}
+          href={item.href}
+          className="tab"
+          aria-current={isCurrent(pathname, item.href) ? 'page' : undefined}
+        >
+          <Icon icon={item.icon} width={22} />
+          {item.label === 'Organizations' ? 'Orgs' : item.label}
+        </Link>
+      ))}
+      <button
+        type="button"
+        className="tab"
+        onClick={onMore}
+        aria-haspopup="dialog"
+        style={{ background: 'transparent', border: 0, borderTop: '3px solid transparent', font: 'inherit', fontSize: 'var(--text-xs)' }}
+      >
+        <Icon icon="solar:menu-dots-linear" width={22} />
+        More
+      </button>
+    </nav>
+  );
+}
+
 export function Shell({ children }: { children: ReactNode }) {
+  const [drawer, setDrawer] = useState(false);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      // eslint-disable-next-line no-console
+      console.debug('shell mount');
+    }
+  }, []);
+
   return (
     <RequireAuth>
-      <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', minHeight: '100vh' }}>
+      <div className="shell-grid">
         <Rail />
-        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <div className="shell-main">
+          <MobileBar onOpen={() => setDrawer(true)} />
           <TopBar />
-          <div style={{ padding: 'var(--sp-6)', flex: 1 }}>{children}</div>
+          <div className="shell-body">{children}</div>
         </div>
+        <BottomBar onMore={() => setDrawer(true)} />
+        <Drawer open={drawer} onClose={() => setDrawer(false)} />
       </div>
     </RequireAuth>
   );
 }
 
-/** Page header used inside <Shell>. */
-export function PageHead({
-  title,
-  lead,
-  actions,
-}: {
-  title: string;
-  lead?: string;
-  actions?: ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'flex-end',
-        justifyContent: 'space-between',
-        gap: 'var(--sp-4)',
-        marginBottom: 'var(--sp-5)',
-      }}
-    >
-      <div>
-        <h1 style={{ fontSize: 'var(--text-2xl)' }}>{title}</h1>
-        {lead ? <p style={{ marginTop: 'var(--sp-2)', color: 'var(--ink-soft)' }}>{lead}</p> : null}
-      </div>
-      {actions ? (
-        <div style={{ display: 'flex', gap: 'var(--sp-2)', flexShrink: 0 }}>{actions}</div>
-      ) : null}
-    </div>
-  );
-}
+export { PageHead } from './PageHead';

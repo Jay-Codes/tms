@@ -496,7 +496,7 @@ function ConnectContent() {
 function RequestLedger({ request }: { request: LinkRequest }) {
   const p = request.schedule_preview;
   return (
-    <table className="ledger">
+    <table className="ledger ledger-kv">
       <tbody>
         <tr>
           <td style={{ color: 'var(--ink-soft)' }}>Unit</td>
@@ -517,7 +517,8 @@ function RequestLedger({ request }: { request: LinkRequest }) {
         <tr>
           <td style={{ color: 'var(--ink-soft)' }}>Dates</td>
           <td className="num">
-            {formatDate(request.start_date)} – {formatDate(request.end_date)}
+            <span className="nowrap">{formatDate(request.start_date)}</span> –{' '}
+            <span className="nowrap">{formatDate(request.end_date)}</span>
           </td>
         </tr>
         {p && (

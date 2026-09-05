@@ -407,3 +407,254 @@ button, input, select, textarea {
   border-top-color: var(--primary);
   background: transparent;
 }
+
+/* ---------------- Portal shell (added Phase 9) ---------------- */
+/* The landlord and admin chrome. Desktop is exactly what it was when these
+   rules lived as inline styles on <Shell>; everything below 768px is new. */
+
+.shell-grid {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+}
+
+.shell-rail {
+  background: var(--paper);
+  border-right: 1px solid var(--rule);
+  padding: var(--sp-5) 0;
+}
+
+.shell-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.shell-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-6);
+  border-bottom: 1px solid var(--rule);
+}
+
+.shell-body {
+  padding: var(--sp-6);
+  flex: 1;
+  min-width: 0;
+}
+
+/* Mobile-only pieces: off by default so the desktop tree is untouched. */
+.shell-mobilebar {
+  display: none;
+}
+
+.shell-bottom {
+  display: none;
+}
+
+/* A dot instead of a number where the bottom bar has no room for one. */
+.shell-dot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--primary);
+}
+
+/* ---------------- Drawer (mobile nav) ---------------- */
+
+.shell-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  background: rgb(28 43 90 / 0.35);
+}
+
+.shell-drawer {
+  display: flex;
+  flex-direction: column;
+  width: min(320px, 86vw);
+  height: 100%;
+  background: var(--paper);
+  border-right: 1px solid var(--rule);
+}
+
+.shell-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--rule);
+}
+
+.shell-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-3) 0;
+}
+
+.shell-drawer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  padding-bottom: calc(var(--sp-3) + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--rule);
+}
+
+@media (max-width: 767px) {
+  .shell-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .shell-rail,
+  .shell-topbar {
+    display: none;
+  }
+
+  .shell-mobilebar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-4);
+    background: var(--paper);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .shell-body {
+    padding: var(--sp-4);
+    /* Nothing hides behind the fixed bar. */
+    padding-bottom: calc(56px + var(--sp-6) + env(safe-area-inset-bottom));
+  }
+
+  .shell-bottom {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    display: flex;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .shell-banner {
+    padding-inline: var(--sp-4);
+  }
+
+  /* A page header's actions wrap under the title rather than squeezing it. */
+  .page-head {
+    flex-wrap: wrap;
+  }
+}
+
+/* ---------------- Table scroll ---------------- */
+/* A wide ledger scrolls inside its own box instead of pushing the page
+   sideways. The gradients are the classic scroll-shadow trick: the white
+   covers travel with the content ("local"), the shadows stay pinned, so the
+   fade only shows on the side that still has content off-screen. */
+
+.table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+  background:
+    linear-gradient(to right, var(--paper) 40%, rgb(255 255 255 / 0)) left center / 28px 100% no-repeat local,
+    linear-gradient(to left, var(--paper) 40%, rgb(255 255 255 / 0)) right center / 28px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, rgb(28 43 90 / 0.14), rgb(255 255 255 / 0)) left center / 12px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, rgb(28 43 90 / 0.14), rgb(255 255 255 / 0)) right center / 12px 100% no-repeat scroll;
+}
+
+.table-scroll > table {
+  min-width: 100%;
+}
+
+/* ---------------- Sheets on small screens ---------------- */
+/* A dialog is the whole screen below 768px; the inline sizing on the element
+   is deliberate there, hence !important. */
+
+@media (max-width: 767px) {
+  .sheet-backdrop {
+    padding: 0 !important;
+    align-items: stretch !important;
+  }
+
+  .sheet-dialog {
+    width: 100% !important;
+    max-width: none !important;
+    min-height: 100dvh;
+    margin-top: 0 !important;
+    border: 0;
+    border-radius: 0;
+    padding-bottom: calc(var(--sp-5) + env(safe-area-inset-bottom)) !important;
+  }
+}
+
+/* ---------------- Period picker ---------------- */
+
+.period-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.period-cadence {
+  display: inline-flex;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.period-cadence button {
+  min-height: var(--touch-min);
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-left: 1px solid var(--rule);
+  background: transparent;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.period-cadence button:first-child {
+  border-left: 0;
+}
+
+.period-cadence button[aria-pressed='true'] {
+  background: var(--primary-soft);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+@media (max-width: 399px) {
+  /* Two rows rather than a horizontal squeeze. */
+  .period-cadence {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    width: 100%;
+  }
+
+  .period-cadence button {
+    border-left: 1px solid var(--rule);
+    border-top: 1px solid var(--rule);
+  }
+
+  .period-cadence button:nth-child(-n + 3) {
+    border-top: 0;
+  }
+
+  .period-cadence button:nth-child(3n + 1) {
+    border-left: 0;
+  }
+}

@@ -15,6 +15,7 @@ import {
   type ScheduleRow,
 } from '../lib/api';
 import { Amount, fmtDate } from '../lib/format';
+import { TableScroll } from '@tms/ui';
 
 export function ContractStatusStamp({ status }: { status: ContractStatus | string | null | undefined }) {
   if (status === 'active') return <span className="stamp stamp-paid">Active</span>;
@@ -100,6 +101,7 @@ export function ContractsTable({
 }) {
   const cols = showRenter ? 6 : 5;
   return (
+    <TableScroll label="Contracts">
     <table className="ledger">
       <thead>
         <tr>
@@ -165,6 +167,7 @@ export function ContractsTable({
         )}
       </tbody>
     </table>
+    </TableScroll>
   );
 }
 

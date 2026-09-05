@@ -79,7 +79,7 @@ function ProfileContent() {
         </>
       )}
 
-      <table className="ledger">
+      <table className="ledger ledger-kv">
         <tbody>
           <tr>
             <td style={{ color: 'var(--ink-soft)' }}>Name</td>

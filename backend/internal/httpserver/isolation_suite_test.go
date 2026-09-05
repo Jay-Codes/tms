@@ -136,6 +136,10 @@ var isoRoutes = []isoCase{
 		method: "DELETE", pattern: "/org/payment-periods/{id}", aud: isoOrg,
 		path: "/org/payment-periods/{periodA}",
 	},
+	{
+		method: "POST", pattern: "/org/payment-periods/{id}/recommend", aud: isoOrg,
+		path: "/org/payment-periods/{periodA}/recommend",
+	},
 
 	// -------------------------------------------------------- properties --
 	{method: "GET", pattern: "/properties", aud: isoOrg, want: []int{200}},

@@ -67,6 +67,20 @@ func EndDate(start time.Time, termDays int) time.Time {
 	return dateOnly(start).AddDate(0, 0, termDays)
 }
 
+// RentPerPeriod is the rent for one whole payment period, scaled from the
+// unit's own pricing basis: a unit priced at 100,000 per 30 days, rented on a
+// 90-day payment period, costs 300,000 each time it falls due.
+//
+// It is Prorate under a name that says what the number is for, and it is the
+// figure the contract document must state. Before Part 2 the document printed
+// the unit price beside the payment-period label ("TZS 100,000 per Quarterly
+// (90 days)"), which was the wrong amount whenever the two bases differed
+// (PLAN2 Phase 9). Because it shares Prorate's rounding, a full-length schedule
+// row from Generate always equals this value exactly.
+func RentPerPeriod(rentAmount int64, rentPeriodDays, paymentPeriodDays int) int64 {
+	return Prorate(rentAmount, paymentPeriodDays, rentPeriodDays)
+}
+
 // Prorate scales an amount from one period basis to a number of days, rounding
 // half away from zero to whole shillings (SPEC §4). A non-positive basis
 // yields 0 rather than dividing by zero.

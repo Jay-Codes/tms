@@ -27,9 +27,10 @@ import {
   type DocumentSignature,
   type VerifyResponse,
 } from '../../../lib/api';
-import { errorMessage, formatDate, money, phoneLast4, priceLine } from '../../../lib/format';
+import { errorMessage, formatDate, money, phoneLast4 } from '../../../lib/format';
 import { Protected } from '../../../components/Protected';
 import { ContractStamp } from '../../../components/ContractStatus';
+import { RentValue } from '../../../components/RentValue';
 import { Notice, Screen } from '../../../components/Screen';
 import './document.css';
 
@@ -231,7 +232,7 @@ function DocumentContent() {
         {/* ---- parties ---- */}
         <section className="doc-block">
           <h2>Parties</h2>
-          <table className="ledger">
+          <table className="ledger ledger-kv">
             <tbody>
               <tr>
                 <td>Landlord</td>
@@ -242,12 +243,7 @@ function DocumentContent() {
                 <td className="num">
                   {doc.parties.renter.name}
                   {doc.parties.renter.phone_masked && (
-                    <>
-                      <br />
-                      <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-                        {doc.parties.renter.phone_masked}
-                      </span>
-                    </>
+                    <span className="sub">{doc.parties.renter.phone_masked}</span>
                   )}
                 </td>
               </tr>
@@ -262,13 +258,16 @@ function DocumentContent() {
                   <tr>
                     <td>Rent</td>
                     <td className="num">
-                      {priceLine(contract.rent_amount, contract.rent_period_days)}
+                      <RentValue contract={contract} />
                     </td>
                   </tr>
                   <tr>
                     <td>Term</td>
+                    {/* Each date holds together; the range breaks at the
+                        en dash when the pair will not fit. */}
                     <td className="num">
-                      {formatDate(contract.start_date)} – {formatDate(contract.end_date)}
+                      <span className="nowrap">{formatDate(contract.start_date)}</span> –{' '}
+                      <span className="nowrap">{formatDate(contract.end_date)}</span>
                     </td>
                   </tr>
                 </>
