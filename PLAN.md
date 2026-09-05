@@ -34,7 +34,7 @@ Execution plan for [SPEC.md](SPEC.md) / [FLOWS.md](FLOWS.md). Target: **testing-
 - [x] Landlord/admin auth: email+password, verification link. RBAC middleware (`org_owner`, `org_manager`, `renter`, `platform_admin`).
 - [x] `POST /orgs` (owner signup), `GET/PATCH /org`, org member CRUD (§5.2).
 - [x] Audit middleware: every mutation → audit_log row.
-- [ ] Frontend: tenant-app signup/login + wizard shell (Flow 1); enduser login/register/OTP screens.
+- [x] Frontend: tenant-app signup/login + wizard shell (Flow 1); enduser login/register/OTP screens.
 
 **Exit:** org can be created, owner logs in, staff invited; renter registers with OTP (dev-logged); cross-org access returns 404 (first isolation tests green).
 

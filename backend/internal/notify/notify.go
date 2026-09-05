@@ -15,3 +15,29 @@ type SMSProvider interface {
 
 // ErrBeemNotConfigured is returned when Beem credentials are missing.
 var ErrBeemNotConfigured = errors.New("beem: not configured")
+
+// ErrDevProviderInProd is returned by the provider selectors when ENV=prod
+// would fall back to a dev LogProvider. The dev providers write the message
+// body — OTP codes, verification and invite links — to the API log, so they
+// must never run in production.
+var ErrDevProviderInProd = errors.New("dev log provider refused in ENV=prod")
+
+// ErrProviderDisabled is returned by the disabled providers.
+var ErrProviderDisabled = errors.New("notify: provider not configured")
+
+// DisabledSMSProvider fails every send. It stands in when no usable provider
+// could be selected, so messages error loudly instead of leaking to the log.
+type DisabledSMSProvider struct{}
+
+// Send always fails.
+func (DisabledSMSProvider) Send(context.Context, string, string) (string, error) {
+	return "", ErrProviderDisabled
+}
+
+// DisabledEmailProvider fails every send (see DisabledSMSProvider).
+type DisabledEmailProvider struct{}
+
+// Send always fails.
+func (DisabledEmailProvider) Send(context.Context, string, string, string, string) (string, error) {
+	return "", ErrProviderDisabled
+}

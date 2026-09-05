@@ -146,12 +146,16 @@ func (f Fields) OneOf(field, in string, allowed ...string) string {
 	return in
 }
 
+// allDigits reports whether s is non-empty and made only of ASCII 0-9. The
+// check is deliberately ASCII-only: unicode.IsDigit also accepts Arabic-Indic
+// and other digit forms, which are not valid PIN/OTP input and would not
+// round-trip through the numeric comparisons downstream.
 func allDigits(s string) bool {
 	if s == "" {
 		return false
 	}
-	for _, r := range s {
-		if !unicode.IsDigit(r) {
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
 			return false
 		}
 	}

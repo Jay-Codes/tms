@@ -19,6 +19,10 @@ const (
 	EnvProd Env = "prod"
 )
 
+// DefaultTrustedProxyCIDRs is the TRUSTED_PROXY_CIDRS default: loopback only,
+// i.e. the dev Go proxy is the only hop allowed to set forwarded-for headers.
+const DefaultTrustedProxyCIDRs = "127.0.0.0/8,::1/128"
+
 // Config holds all runtime configuration for the API binary.
 type Config struct {
 	Env  Env
@@ -51,6 +55,10 @@ type Config struct {
 	BeemAPIKey    string
 	BeemSecretKey string
 	BeemSenderID  string
+
+	// TrustedProxyCIDRs is the comma-separated set of networks whose requests
+	// may carry X-Forwarded-For / X-Real-IP on a caller's behalf.
+	TrustedProxyCIDRs string
 }
 
 // Load reads configuration from the process environment.
@@ -79,6 +87,8 @@ func Load() Config {
 		BeemAPIKey:    getenv("BEEM_API_KEY", ""),
 		BeemSecretKey: getenv("BEEM_SECRET_KEY", ""),
 		BeemSenderID:  getenv("BEEM_SENDER_ID", ""),
+
+		TrustedProxyCIDRs: getenv("TRUSTED_PROXY_CIDRS", DefaultTrustedProxyCIDRs),
 	}
 	if c.PublicBaseURL == "" {
 		c.PublicBaseURL = c.AppBaseURL

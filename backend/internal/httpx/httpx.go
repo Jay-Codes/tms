@@ -7,6 +7,7 @@ package httpx
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -69,6 +70,12 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	dec.DisallowUnknownFields()
 
 	if err := dec.Decode(dst); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			WriteProblem(w, http.StatusRequestEntityTooLarge, "request body too large",
+				fmt.Sprintf("the request body must not exceed %d bytes", MaxBodyBytes))
+			return false
+		}
 		WriteProblem(w, http.StatusBadRequest, "invalid request body", err.Error())
 		return false
 	}
@@ -79,9 +86,58 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	return true
 }
 
-// ClientIP extracts the caller's IP, honouring X-Forwarded-For (the dev proxy
-// and ngrok both set it) and falling back to RemoteAddr.
-func ClientIP(r *http.Request) string {
+// ProxyTrust decides whether the direct peer of a request is allowed to set
+// X-Forwarded-For / X-Real-IP on the caller's behalf. Anything outside the
+// trusted set has its forwarded headers ignored, so audit IPs and rate-limit
+// buckets cannot be spoofed by an arbitrary client.
+type ProxyTrust struct {
+	nets []*net.IPNet
+}
+
+// NewProxyTrust parses a comma-separated CIDR list. An empty list means "trust
+// nothing": forwarded headers are then always ignored.
+func NewProxyTrust(cidrs string) (ProxyTrust, error) {
+	var t ProxyTrust
+	for _, raw := range strings.Split(cidrs, ",") {
+		s := strings.TrimSpace(raw)
+		if s == "" {
+			continue
+		}
+		_, n, err := net.ParseCIDR(s)
+		if err != nil {
+			return ProxyTrust{}, fmt.Errorf("httpx: invalid proxy CIDR %q: %w", s, err)
+		}
+		t.nets = append(t.nets, n)
+	}
+	return t, nil
+}
+
+// Trusts reports whether ip (the direct peer) may set forwarded headers.
+func (t ProxyTrust) Trusts(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	for _, n := range t.nets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// ClientIP extracts the caller's IP. X-Forwarded-For / X-Real-IP are honoured
+// only when the direct peer (RemoteAddr) is inside the trusted proxy set;
+// otherwise the peer address itself is returned.
+func (t ProxyTrust) ClientIP(r *http.Request) string {
+	peer := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(peer); err == nil {
+		peer = host
+	}
+	peer = strings.Trim(peer, "[]")
+
+	if !t.Trusts(net.ParseIP(peer)) {
+		return peer
+	}
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		if first := strings.TrimSpace(strings.Split(xff, ",")[0]); first != "" {
 			return first
@@ -90,9 +146,5 @@ func ClientIP(r *http.Request) string {
 	if xrip := strings.TrimSpace(r.Header.Get("X-Real-IP")); xrip != "" {
 		return xrip
 	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
+	return peer
 }

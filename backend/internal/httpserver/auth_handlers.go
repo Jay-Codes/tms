@@ -161,6 +161,25 @@ func (s *Server) handleOTPVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The code was valid: record the verification (no org context — the phone
+	// is not necessarily attached to an account yet).
+	actorID := ""
+	if u, uErr := s.q.GetUserByPhone(r.Context(), &phone); uErr == nil {
+		actorID = db.UUIDString(u.ID)
+	}
+	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
+		return audit.Record(r.Context(), q, audit.Entry{
+			ActorUserID: actorID,
+			Action:      audit.ActionOTPVerify,
+			EntityType:  audit.EntityUser,
+			EntityID:    actorID,
+			After:       map[string]any{"phone": phone, "purpose": purpose},
+		})
+	}); err != nil {
+		s.serverError(w, r, "otp.verify.audit", err)
+		return
+	}
+
 	switch purpose {
 	case "register":
 		token, err := s.store.PutOTPToken(r.Context(), phone)
@@ -173,7 +192,11 @@ func (s *Server) handleOTPVerify(w http.ResponseWriter, r *http.Request) {
 	case "login":
 		user, err := s.q.GetUserByPhone(r.Context(), &phone)
 		if isNoRows(err) {
-			httpx.WriteProblem(w, http.StatusNotFound, "not found", "no account exists for this phone number")
+			// Do not disclose whether the number has an account: answer
+			// exactly as a wrong code does. The attempt was already counted
+			// by the rate limiter above and the code has been consumed.
+			httpx.WriteProblemFields(w, http.StatusBadRequest, "invalid code",
+				"the code is incorrect or has expired", map[string]string{"code": "invalid or expired"})
 			return
 		}
 		if err != nil {
@@ -463,8 +486,16 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	token := auth.TokenFrom(r, audience)
 	if token != "" {
+		hash := auth.HashToken(token)
+		revoked := false
 		if p, ok := s.sessions.Resolve(r, audience); ok && s.q != nil {
+			// The revocation and its audit row share one transaction: a
+			// rolled-back revoke must leave no "logged out" trail, and a
+			// committed one must always have it.
 			if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
+				if err := q.RevokeSession(r.Context(), hash); err != nil {
+					return err
+				}
 				return audit.Record(r.Context(), q, audit.Entry{
 					OrgID:       p.OrgIDString(),
 					ActorUserID: p.UserIDString(),
@@ -474,9 +505,16 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 				})
 			}); err != nil {
 				s.logger.Error("failed to record logout", "error", err)
+			} else {
+				revoked = true
+				// Postgres is committed; drop the cached copy so Lookup
+				// stops answering from Redis.
+				s.sessions.EvictCached(r.Context(), []string{hash})
 			}
 		}
-		s.sessions.Revoke(r.Context(), token)
+		if !revoked {
+			s.sessions.Revoke(r.Context(), token)
+		}
 	}
 	s.sessions.ClearCookie(w, audience)
 	NoContent(w)

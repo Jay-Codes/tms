@@ -11,3 +11,5 @@
 | 2026-09-05 | Email delivery behind `EmailProvider` interface; dev implementation logs verification/invite links to the API log. Login is allowed before email verification (`email_verified` flag surfaced in UI banner). | No mail provider in scope; keeps dev loop unblocked. |
 | 2026-09-05 | `users.full_name` column added (spec lists it only on renter_profiles). | Org users/admins need a display name for audit + signatures. |
 | 2026-09-05 | `make build` for Next apps uses `NEXT_DIST_DIR=.next-build` (`distDir` in next.config) so builds don't clobber the running dev servers' `.next`. | Preview must keep running during orchestration. |
+| 2026-09-05 | Client IP: trust `X-Forwarded-For`/`X-Real-IP` only when the direct peer is loopback or in `TRUSTED_PROXY_CIDRS` (default `127.0.0.0/8,::1/128`). | Rate limits + audit IPs must not be spoofable; the Go proxy is the only trusted hop. |
+| 2026-09-05 | In `ENV=prod` the API refuses to start with the dev `LogProvider` for SMS/email (missing Beem creds). | OTP codes must never reach production logs. |

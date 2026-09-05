@@ -53,7 +53,7 @@ func (q *Queries) CreateOrgMember(ctx context.Context, arg CreateOrgMemberParams
 
 const getMembershipForUser = `-- name: GetMembershipForUser :one
 SELECT id, org_id, user_id, role, status, created_at, updated_at, deleted_at FROM org_members
-WHERE user_id = $1 AND deleted_at IS NULL
+WHERE user_id = $1 AND status = 'active' AND deleted_at IS NULL
 ORDER BY created_at ASC
 LIMIT 1
 `

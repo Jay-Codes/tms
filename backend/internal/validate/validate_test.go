@@ -103,3 +103,24 @@ func TestPINAndPassword(t *testing.T) {
 		t.Fatalf("expected no field errors, got %v", ok)
 	}
 }
+
+// TestIsDigitsASCIIOnly is the L5 guard: non-ASCII digit forms (Arabic-Indic,
+// fullwidth) must not pass as OTP/PIN input.
+func TestIsDigitsASCIIOnly(t *testing.T) {
+	for _, s := range []string{"0", "123456", "0000"} {
+		if !validate.IsDigits(s) {
+			t.Errorf("IsDigits(%q) = false, want true", s)
+		}
+	}
+	for _, s := range []string{"", "12a456", "١٢٣٤٥٦", "１２３４５６", "12 34", "+123456"} {
+		if validate.IsDigits(s) {
+			t.Errorf("IsDigits(%q) = true, want false", s)
+		}
+	}
+
+	f := validate.Fields{}
+	f.PIN("pin", "١٢٣٤")
+	if f.Empty() {
+		t.Error("PIN() accepted Arabic-Indic digits")
+	}
+}

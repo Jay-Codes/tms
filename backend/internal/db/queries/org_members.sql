@@ -27,7 +27,7 @@ WHERE org_id = sqlc.arg(org_id) AND user_id = sqlc.arg(user_id) AND deleted_at I
 -- input. Returns at most one row (a user joins one org in MVP).
 -- name: GetMembershipForUser :one
 SELECT * FROM org_members
-WHERE user_id = sqlc.arg(user_id) AND deleted_at IS NULL
+WHERE user_id = sqlc.arg(user_id) AND status = 'active' AND deleted_at IS NULL
 ORDER BY created_at ASC
 LIMIT 1;
 

@@ -46,14 +46,65 @@ func TestBeemProviderUnconfiguredErrors(t *testing.T) {
 	}
 }
 
-func TestProviderForSelection(t *testing.T) {
+func TestSMSProviderForSelection(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 
-	if _, ok := notify.ProviderFor(config.Config{}, logger).(*notify.LogProvider); !ok {
-		t.Error("empty BEEM_API_KEY should select LogProvider")
+	p, err := notify.SMSProviderFor(config.Config{}, logger)
+	if err != nil {
+		t.Fatalf("dev selection error = %v", err)
 	}
+	if _, ok := p.(*notify.LogProvider); !ok {
+		t.Errorf("empty BEEM_API_KEY in dev should select LogProvider, got %T", p)
+	}
+
 	cfg := config.Config{BeemAPIKey: "key", BeemSecretKey: "secret"}
-	if _, ok := notify.ProviderFor(cfg, logger).(*notify.BeemProvider); !ok {
-		t.Error("set BEEM_API_KEY should select BeemProvider")
+	p, err = notify.SMSProviderFor(cfg, logger)
+	if err != nil {
+		t.Fatalf("beem selection error = %v", err)
+	}
+	if _, ok := p.(*notify.BeemProvider); !ok {
+		t.Errorf("set BEEM_API_KEY should select BeemProvider, got %T", p)
+	}
+
+	// prod + Beem configured is fine.
+	prodBeem := config.Config{Env: config.EnvProd, BeemAPIKey: "key", BeemSecretKey: "secret"}
+	if _, err := notify.SMSProviderFor(prodBeem, logger); err != nil {
+		t.Fatalf("prod with Beem configured error = %v", err)
+	}
+}
+
+// TestProvidersRefusedInProd is the M4 guard: ENV=prod must never fall back to
+// the dev log providers, which write OTP codes and invite links to the log.
+func TestProvidersRefusedInProd(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	prod := config.Config{Env: config.EnvProd}
+
+	p, err := notify.SMSProviderFor(prod, logger)
+	if !errors.Is(err, notify.ErrDevProviderInProd) {
+		t.Errorf("SMSProviderFor(prod) error = %v, want ErrDevProviderInProd", err)
+	}
+	if p != nil {
+		t.Errorf("SMSProviderFor(prod) provider = %T, want nil", p)
+	}
+
+	ep, err := notify.EmailProviderFor(prod, logger)
+	if !errors.Is(err, notify.ErrDevProviderInProd) {
+		t.Errorf("EmailProviderFor(prod) error = %v, want ErrDevProviderInProd", err)
+	}
+	if ep != nil {
+		t.Errorf("EmailProviderFor(prod) provider = %T, want nil", ep)
+	}
+
+	if _, err := notify.EmailProviderFor(config.Config{}, logger); err != nil {
+		t.Errorf("EmailProviderFor(dev) error = %v", err)
+	}
+}
+
+func TestDisabledProvidersError(t *testing.T) {
+	if _, err := (notify.DisabledSMSProvider{}).Send(context.Background(), "+255700000001", "hi"); !errors.Is(err, notify.ErrProviderDisabled) {
+		t.Errorf("DisabledSMSProvider.Send error = %v", err)
+	}
+	if _, err := (notify.DisabledEmailProvider{}).Send(context.Background(), "a@b.test", "s", "l", "b"); !errors.Is(err, notify.ErrProviderDisabled) {
+		t.Errorf("DisabledEmailProvider.Send error = %v", err)
 	}
 }

@@ -43,12 +43,16 @@ func SlogLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 }
 
 // RequestContext stores the caller's IP and user agent in the request context
-// so audit rows written deeper in the stack carry them (SPEC §8).
-func RequestContext(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := audit.WithRequestInfo(r.Context(), httpx.ClientIP(r), r.UserAgent())
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+// so audit rows written deeper in the stack carry them (SPEC §8). Forwarded-for
+// headers are honoured only for peers inside trust (chi's RealIP middleware is
+// deliberately not used: it rewrites RemoteAddr from unauthenticated headers).
+func RequestContext(trust httpx.ProxyTrust) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := audit.WithRequestInfo(r.Context(), trust.ClientIP(r), r.UserAgent())
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }
 
 // redisOf unwraps the cache client, tolerating a nil (Redis-down) client.

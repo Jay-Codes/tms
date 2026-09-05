@@ -16,6 +16,7 @@ import (
 	"tms/backend/internal/config"
 	"tms/backend/internal/db"
 	"tms/backend/internal/db/sqlc"
+	"tms/backend/internal/httpx"
 	"tms/backend/internal/notify"
 	"tms/backend/internal/ratelimit"
 )
@@ -57,6 +58,8 @@ type Server struct {
 	sessions *auth.Manager
 	store    *auth.Store
 	limiter  *ratelimit.Limiter
+
+	proxyTrust httpx.ProxyTrust
 }
 
 // New builds a Server with the full middleware stack and routes mounted.
@@ -65,6 +68,13 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) *Server {
 		logger = slog.Default()
 	}
 	s := &Server{cfg: cfg, deps: deps, logger: logger}
+
+	trust, err := httpx.NewProxyTrust(cfg.TrustedProxyCIDRs)
+	if err != nil {
+		logger.Error("invalid TRUSTED_PROXY_CIDRS; trusting no proxy", "error", err)
+		trust = httpx.ProxyTrust{}
+	}
+	s.proxyTrust = trust
 
 	if deps.Pool != nil {
 		s.q = sqlc.New(deps.Pool)
@@ -79,11 +89,24 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) *Server {
 	}
 	s.store = &auth.Store{Redis: redisClient}
 	s.limiter = ratelimit.New(redisClient, logger)
+	// Defaults for tests and the dev loop. In ENV=prod the dev log providers
+	// are refused (they would print OTP codes and invite links to the log);
+	// cmd/api fails startup on the same condition before reaching here.
 	if s.deps.SMS == nil {
-		s.deps.SMS = notify.NewLogProvider(logger)
+		p, err := notify.SMSProviderFor(cfg, logger)
+		if err != nil {
+			logger.Error("sms provider unavailable", "error", err)
+			p = notify.DisabledSMSProvider{}
+		}
+		s.deps.SMS = p
 	}
 	if s.deps.Email == nil {
-		s.deps.Email = notify.NewLogEmailProvider(logger)
+		p, err := notify.EmailProviderFor(cfg, logger)
+		if err != nil {
+			logger.Error("email provider unavailable", "error", err)
+			p = notify.DisabledEmailProvider{}
+		}
+		s.deps.Email = p
 	}
 
 	s.router = s.routes()
@@ -107,10 +130,12 @@ func (s *Server) routes() chi.Router {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	// No middleware.RealIP: it rewrites RemoteAddr from client-supplied
+	// headers. RequestContext resolves the client IP against the trusted
+	// proxy set instead.
 	r.Use(SlogLogger(s.logger))
 	r.Use(middleware.Recoverer)
-	r.Use(RequestContext)
+	r.Use(RequestContext(s.proxyTrust))
 
 	r.NotFound(NotFound)
 	r.MethodNotAllowed(MethodNotAllowed)
