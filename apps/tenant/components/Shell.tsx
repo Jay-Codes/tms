@@ -43,6 +43,7 @@ export const NAV: NavItem[] = [
     sub: [{ href: '/contracts/templates', label: 'Templates' }],
   },
   { href: '/payments', label: 'Payments', icon: 'solar:wallet-money-linear' },
+  { href: '/expenses', label: 'Expenses', icon: 'solar:bill-list-linear' },
   { href: '/notifications', label: 'Messages', icon: 'solar:chat-round-line-linear' },
   { href: '/reports', label: 'Reports', icon: 'solar:chart-square-linear' },
   {
@@ -53,6 +54,7 @@ export const NAV: NavItem[] = [
       { href: '/settings/branding', label: 'Branding' },
       { href: '/settings/bank-account', label: 'Bank account' },
       { href: '/settings/notifications', label: 'Notifications' },
+      { href: '/settings/expense-categories', label: 'Expense categories' },
     ],
   },
   { href: '/audit', label: 'Audit', icon: 'solar:history-linear' },

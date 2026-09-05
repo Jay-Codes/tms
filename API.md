@@ -284,7 +284,7 @@ Notes fixed in Phase 7 (implementation detail, same for all three reports):
 - `status=` on payment-status filters the *derived* status; an unknown value is a 400.
 
 ### Dashboard prefs
-`PUT /org/branding {dashboard_prefs:{cards:["assets","renters","payment_status","collections","link_requests","overdue"], layout:"grid"|"list"}}` — free JSON validated to known card ids; frontend orders cards by it.
+`PUT /org/branding {dashboard_prefs:{cards:["assets","renters","payment_status","collections","link_requests","overdue","expenses"], layout:"grid"|"list"}}` — free JSON validated to known card ids; frontend orders cards by it.
 
 Validation (400 with `errors.dashboard_prefs.*`): `cards` must be an array of ids drawn from that exact list, with no repeats; `layout` must be `grid` (default) or `list`; any other key in the object is refused rather than silently dropped. The stored blob is the canonical `{cards, layout}` shape, and `cards` keeps the order it was sent in — that order is the dashboard's.
 

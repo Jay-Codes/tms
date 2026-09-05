@@ -1365,9 +1365,25 @@ export const DASHBOARD_CARDS = [
   'collections',
   'link_requests',
   'overdue',
+  'expenses',
 ] as const;
 
 export type DashboardCard = (typeof DASHBOARD_CARDS)[number];
+
+/**
+ * What an org that has never opened the customise sheet sees. It is a subset of
+ * `DASHBOARD_CARDS` on purpose: a card shipped after an org started using the
+ * product (Phase 10's "Expenses this month") is offered in the sheet but is not
+ * pushed onto anyone's dashboard uninvited.
+ */
+export const DEFAULT_DASHBOARD_CARDS: readonly DashboardCard[] = [
+  'assets',
+  'renters',
+  'payment_status',
+  'collections',
+  'link_requests',
+  'overdue',
+];
 
 export interface DashboardPrefs {
   cards: DashboardCard[];
@@ -1388,7 +1404,7 @@ export function readDashboardPrefs(prefs: Record<string, unknown> | undefined | 
   const listed = Array.isArray(raw.cards) ? raw.cards.filter(isCard) : [];
   const cards = [...new Set(listed)];
   return {
-    cards: cards.length ? cards : [...DASHBOARD_CARDS],
+    cards: cards.length ? cards : [...DEFAULT_DASHBOARD_CARDS],
     layout: raw.layout === 'list' ? 'list' : 'grid',
   };
 }
@@ -1427,3 +1443,290 @@ export const reportsApi = {
     return `${API_BASE}/reports/payment-status?${qs.toString()}`;
   },
 };
+
+/* ------------------------------------------------------------------ */
+/* Shapes — mirror API.md Phase 10 exactly (expenses + categories).    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A spending category. Seeded per org (Repairs & maintenance, Utilities,
+ * Security, Cleaning, Taxes & levies, Insurance, Management fees, Other) —
+ * `is_default` marks those, which is why the manager offers "deactivate"
+ * rather than "delete" for a category that has already been used.
+ */
+export interface ExpenseCategory {
+  id: string;
+  name: string;
+  is_default: boolean;
+  sort_order: number;
+  active: boolean;
+  created_at: string;
+}
+
+export type ExpenseStatus = 'recorded' | 'voided';
+
+/** What the ledger knows about a receipt without fetching it. */
+export interface ExpenseReceipt {
+  present: boolean;
+  content_type: string | null;
+  size: number | null;
+}
+
+export interface ExpenseRef {
+  id: string;
+  name: string;
+}
+
+export interface Expense {
+  id: string;
+  property: ExpenseRef;
+  unit: ExpenseRef | null;
+  category: ExpenseRef | null;
+  amount: number;
+  /** Calendar date the money was spent, `YYYY-MM-DD`. */
+  incurred_on: string;
+  vendor: string | null;
+  reference: string | null;
+  note: string | null;
+  receipt: ExpenseReceipt;
+  recorded_by: { id: string; name: string } | null;
+  status: ExpenseStatus | string;
+  voided_at: string | null;
+  void_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExpenseInput {
+  property_id: string;
+  unit_id?: string | null;
+  category_id?: string | null;
+  amount: number;
+  incurred_on: string;
+  vendor?: string;
+  reference?: string;
+  note?: string;
+}
+
+/** `GET /expenses` — a page of the ledger plus the totals for the whole filter. */
+export interface ExpenseListResult {
+  items: Expense[];
+  next_cursor: string | null;
+  totals: { count: number; amount: number };
+}
+
+export interface ExpenseListQuery {
+  /** Passed straight to the query-string builder, which drops empty entries. */
+  [key: string]: string | number | null | undefined;
+  property_id?: string;
+  unit_id?: string;
+  category_id?: string;
+  /** `all` includes voided rows; the default the backend applies is `recorded`. */
+  status?: ExpenseStatus | 'all' | '';
+  from?: string;
+  to?: string;
+  cadence?: string;
+  anchor?: string;
+  q?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export type ExpenseGroupBy = 'property' | 'category';
+
+export interface ExpenseSummaryGroup {
+  id: string;
+  name: string;
+  amount: number;
+  count: number;
+}
+
+/**
+ * `GET /expenses/summary`. `change_pct` is null when the previous window held
+ * nothing — a percentage against zero is not a fact, so the UI prints "—".
+ */
+export interface ExpenseSummary {
+  window: { from: string; to: string; cadence: string };
+  previous: { from: string; to: string };
+  groups: ExpenseSummaryGroup[];
+  total: { amount: number; count: number };
+  previous_total: { amount: number; count: number };
+  change_pct: number | null;
+}
+
+/** `POST /expenses/{id}/receipt` — a presigned PUT for the receipt file. */
+export interface ReceiptTicket {
+  upload_url: string;
+  object_key: string;
+  expires_in: number;
+  /** Optional; when absent the caller sets `Content-Type` itself. */
+  headers?: Record<string, string>;
+}
+
+/** `GET /expenses/{id}/receipt` — a short-lived read URL. */
+export interface ReceiptView {
+  url: string;
+  expires_in: number;
+}
+
+/** What a receipt may be (SPEC §7, bucket `receipts`). */
+export const RECEIPT_TYPES = ['image/jpeg', 'image/png', 'application/pdf'] as const;
+export const RECEIPT_MAX_BYTES = 5 * 1024 * 1024;
+export const RECEIPT_ACCEPT = 'image/jpeg,image/png,application/pdf';
+
+/** null when the file is acceptable; otherwise the sentence to show. */
+export function receiptFileProblem(file: File): string | null {
+  if (!(RECEIPT_TYPES as readonly string[]).includes(file.type)) {
+    return 'A receipt must be a JPEG, PNG or PDF.';
+  }
+  if (file.size > RECEIPT_MAX_BYTES) return 'That file is larger than 5 MB. Choose a smaller one.';
+  return null;
+}
+
+/**
+ * PUT the receipt straight at MinIO. Deliberately cookie-free (a signed URL
+ * must stay so) and the Content-Type must match the one the ticket was signed
+ * for, or the object store rejects the signature.
+ */
+export async function uploadReceipt(ticket: ReceiptTicket, file: File): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(ticket.upload_url, {
+      method: 'PUT',
+      headers: ticket.headers ?? { 'Content-Type': file.type },
+      body: file,
+    });
+  } catch (cause) {
+    throw offlineError(cause);
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, {
+      title: 'Upload failed',
+      detail: 'The receipt could not be uploaded. The expense was saved — try the receipt again.',
+    });
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 10 endpoint helpers (audience org)                             */
+/* ------------------------------------------------------------------ */
+
+export const expenseCategoriesApi = {
+  list: (signal?: AbortSignal) =>
+    api.get<{ items: ExpenseCategory[] }>('/org/expense-categories', { signal }),
+  create: (body: { name: string; sort_order?: number }) =>
+    api.post<{ category: ExpenseCategory } | ExpenseCategory>('/org/expense-categories', body),
+  update: (id: string, body: { name?: string; sort_order?: number; active?: boolean }) =>
+    api.patch<{ category: ExpenseCategory } | ExpenseCategory>(
+      `/org/expense-categories/${id}`,
+      body,
+    ),
+  remove: (id: string) => api.del<void>(`/org/expense-categories/${id}`),
+};
+
+export const expensesApi = {
+  list: (query: ExpenseListQuery = {}, signal?: AbortSignal) =>
+    api.get<ExpenseListResult>('/expenses', { query, signal }),
+  get: (id: string, signal?: AbortSignal) =>
+    api.get<{ expense: Expense } | Expense>(`/expenses/${id}`, { signal }),
+  create: (body: ExpenseInput) => api.post<{ expense: Expense } | Expense>('/expenses', body),
+  update: (id: string, body: Partial<ExpenseInput>) =>
+    api.patch<{ expense: Expense } | Expense>(`/expenses/${id}`, body),
+  /** Append-style correction: the row stays and is stamped, like reversing a payment. */
+  void: (id: string, reason: string) =>
+    api.post<{ expense: Expense } | Expense>(`/expenses/${id}/void`, { reason }),
+  summary: (
+    query: {
+      cadence?: string;
+      anchor?: string;
+      from?: string;
+      to?: string;
+      group_by?: ExpenseGroupBy;
+      property_id?: string;
+    } = {},
+    signal?: AbortSignal,
+  ) => api.get<ExpenseSummary>('/expenses/summary', { query, signal }),
+
+  /* ------------------------------- receipts ------------------------------ */
+  receiptTicket: (id: string, contentType: string, size: number) =>
+    api.post<ReceiptTicket>(`/expenses/${id}/receipt`, { content_type: contentType, size }),
+  /**
+   * Confirm the upload landed. The backend wants the key it just signed back
+   * (the same shape KYC's complete step uses), so the ticket's `object_key` is
+   * echoed rather than the endpoint being called bare.
+   */
+  receiptComplete: (id: string, objectKey: string) =>
+    api.post<{ expense: Expense } | Expense>(`/expenses/${id}/receipt/complete`, {
+      object_key: objectKey,
+    }),
+  receiptUrl: (id: string, signal?: AbortSignal) =>
+    api.get<ReceiptView>(`/expenses/${id}/receipt`, { signal }),
+  receiptRemove: (id: string) => api.del<{ expense: Expense } | Expense>(`/expenses/${id}/receipt`),
+
+  /**
+   * The CSV export. Fetched rather than linked because the filename comes back
+   * in `Content-Disposition` and the blob has to be handed to the browser
+   * ourselves; `credentials: 'include'` carries the httpOnly `tms_o` cookie.
+   */
+  csv: async (query: ExpenseListQuery = {}, signal?: AbortSignal): Promise<{ blob: Blob; filename: string }> => {
+    const url = buildUrl('/expenses', { ...query, cursor: undefined, limit: undefined, format: 'csv' });
+    let res: Response;
+    try {
+      res = await fetch(url, { credentials: 'include', headers: { Accept: 'text/csv' }, signal });
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
+      throw offlineError(cause);
+    }
+    if (!res.ok) {
+      const text = await res.text();
+      let problem: Problem = { title: res.statusText, detail: text.slice(0, 300) || res.statusText };
+      try {
+        problem = JSON.parse(text) as Problem;
+      } catch {
+        /* not problem+json — keep the text */
+      }
+      throw new ApiError(res.status, { ...problem, status: res.status });
+    }
+    return {
+      blob: await res.blob(),
+      filename: filenameFromDisposition(res.headers.get('Content-Disposition')),
+    };
+  },
+};
+
+/** `attachment; filename="expenses-2026-09-01.csv"` → the filename, or ''. */
+function filenameFromDisposition(header: string | null): string {
+  if (!header) return '';
+  const star = /filename\*=(?:UTF-8'')?([^;]+)/i.exec(header);
+  if (star?.[1]) {
+    try {
+      return decodeURIComponent(star[1].trim().replace(/^"|"$/g, ''));
+    } catch {
+      /* fall through to the plain form */
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(header);
+  return plain?.[1]?.trim() ?? '';
+}
+
+/** Save a fetched blob to disk under `filename`. */
+export function downloadBlob(blob: Blob, filename: string): void {
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoked on the next tick so the click has already been handled.
+  setTimeout(() => URL.revokeObjectURL(href), 0);
+}
+
+export const unwrapExpense = (res: { expense: Expense } | Expense) => unwrap<Expense>(res, 'expense');
+export const unwrapCategory = (res: { category: ExpenseCategory } | ExpenseCategory) =>
+  unwrap<ExpenseCategory>(res, 'category');
+
+/** A voided expense is read-only — no edit, no second void (FLOWS flow 12). */
+export function isVoided(e: Pick<Expense, 'status'>): boolean {
+  return e.status === 'voided';
+}

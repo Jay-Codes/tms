@@ -14,17 +14,20 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useReadyToCountersign } from '../../components/ContractBits';
 import { CARD_LABELS, DashboardCustomize } from '../../components/DashboardCustomize';
+import { ChangeMark } from '../../components/ExpenseBits';
 import { StatTile, TileRow } from '../../components/ReportBits';
 import { PageHead } from '../../components/PageHead';
 import { pendingLabel, usePendingLinkRequests } from '../../components/NavBadges';
 import {
   brandingApi,
+  expensesApi,
   propertiesApi,
   readDashboardPrefs,
   reportsApi,
   unwrapBranding,
   type DashboardCard,
   type DashboardPrefs,
+  type ExpenseSummary,
   type PaymentStatusRow,
   type Property,
   type ReportSummary,
@@ -128,6 +131,7 @@ function Figure({ value, sub, tone }: { value: ReactNode; sub?: ReactNode; tone?
 function useDashboardData() {
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [statuses, setStatuses] = useState<PaymentStatusRow[] | null>(null);
+  const [expenses, setExpenses] = useState<ExpenseSummary | null>(null);
 
   useEffect(() => {
     const ac = new AbortController();
@@ -139,10 +143,16 @@ function useDashboardData() {
       .paymentStatus({}, ac.signal)
       .then((r) => setStatuses(r.items ?? []))
       .catch(() => setStatuses(null));
+    // This month's spending, with the previous month for the change figure —
+    // the same endpoint the expense ledger's summary strip reads.
+    expensesApi
+      .summary({ cadence: 'month' }, ac.signal)
+      .then(setExpenses)
+      .catch(() => setExpenses(null));
     return () => ac.abort();
   }, []);
 
-  return { summary, statuses };
+  return { summary, statuses, expenses };
 }
 
 function DashboardBody() {
@@ -152,7 +162,7 @@ function DashboardBody() {
   const [customizing, setCustomizing] = useState(false);
   const pending = usePendingLinkRequests();
   const countersign = useReadyToCountersign();
-  const { summary, statuses } = useDashboardData();
+  const { summary, statuses, expenses } = useDashboardData();
 
   useEffect(() => {
     const ac = new AbortController();
@@ -268,11 +278,32 @@ function DashboardBody() {
               />
             </DashCard>
           );
+        case 'expenses':
+          return (
+            <DashCard key={card} icon="solar:bill-list-linear" label={CARD_LABELS.expenses} href="/expenses" cta="Open expenses">
+              <Figure
+                value={expenses ? fmtTZS(expenses.total.amount) : '—'}
+                sub={
+                  expenses ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                      <ChangeMark pct={expenses.change_pct} />
+                      <span>
+                        vs {fmtTZS(expenses.previous_total?.amount ?? 0)} last month ·{' '}
+                        {expenses.total.count} expense{expenses.total.count === 1 ? '' : 's'}
+                      </span>
+                    </span>
+                  ) : (
+                    'Waiting for figures.'
+                  )
+                }
+              />
+            </DashCard>
+          );
         default:
           return null;
       }
     },
-    [summary, statuses, pending],
+    [summary, statuses, pending, expenses],
   );
 
   return (

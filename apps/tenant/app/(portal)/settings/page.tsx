@@ -427,6 +427,30 @@ function SettingsBody() {
 
       <section style={{ paddingTop: 'var(--sp-7)' }}>
         <hr className="rule rule-strong" />
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-end',
+            justifyContent: 'space-between',
+            gap: 'var(--sp-4)',
+            margin: 'var(--sp-4) 0',
+          }}
+        >
+          <div>
+            <h2 style={{ fontSize: 'var(--text-lg)' }}>Expense categories</h2>
+            <p style={{ marginTop: 'var(--sp-2)', color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+              What your spending is filed under: repairs, utilities, security and any category of your
+              own.
+            </p>
+          </div>
+          <Link href="/settings/expense-categories" className="btn btn-secondary">
+            Manage categories
+          </Link>
+        </div>
+      </section>
+
+      <section style={{ paddingTop: 'var(--sp-7)' }}>
+        <hr className="rule rule-strong" />
         <h2 style={{ fontSize: 'var(--text-lg)', margin: 'var(--sp-4) 0' }}>Staff</h2>
         <Members canManage={orgRef?.role === 'org_owner'} />
       </section>

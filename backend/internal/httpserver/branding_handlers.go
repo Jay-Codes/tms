@@ -42,7 +42,7 @@ var brandingFonts = []string{"bricolage", "archivo", "instrument", "hanken"}
 //
 //nolint:gochecknoglobals // fixed vocabulary, read-only.
 var dashboardCards = []string{
-	"assets", "renters", "payment_status", "collections", "link_requests", "overdue",
+	"assets", "renters", "payment_status", "collections", "link_requests", "overdue", "expenses",
 }
 
 // dashboardLayouts is the layout enum.
