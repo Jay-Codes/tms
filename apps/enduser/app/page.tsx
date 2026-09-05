@@ -5,14 +5,26 @@
  *
  * Phase 3 fills the top of it with `GET /me/link-requests`: the units the
  * renter has asked to connect to, pencilled while a landlord is still
- * thinking and stamped once they decide. Payments land in Phase 5, so "Next
- * payment" keeps its empty state.
+ * thinking and stamped once they decide.
+ *
+ * Phase 4 adds the two things that matter more than any of that: a contract
+ * waiting for a signature (`GET /me/contracts`) and the next payment due
+ * (`GET /me/schedules`). Both are best-effort — a rent book that cannot reach
+ * one endpoint still shows the rest.
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Icon } from '@iconify/react';
-import { ApiError, renterApi, type LinkRequest } from '../lib/api';
+import {
+  ApiError,
+  contractApi,
+  needsRenterSignature,
+  renterApi,
+  type Contract,
+  type LinkRequest,
+  type MySchedule,
+} from '../lib/api';
 import { useMe } from '../lib/auth';
 import { errorMessage, formatDate, money } from '../lib/format';
 import { forgetScannedUnit, readScannedUnit } from '../lib/scan';
@@ -87,16 +99,45 @@ function RequestRow({
   );
 }
 
+/** The pencil/stamp for a schedule row (Phase 5 fills in paid/partial). */
+function scheduleMark(schedule: MySchedule) {
+  switch (schedule.status) {
+    case 'paid':
+      return <span className="stamp stamp-paid">Paid</span>;
+    case 'overdue':
+      return <span className="stamp stamp-overdue">Overdue</span>;
+    case 'partial':
+      return <span className="pencil">Part paid</span>;
+    case 'waived':
+      return <span className="pencil">Waived</span>;
+    default:
+      return <span className="pencil">Due</span>;
+  }
+}
+
 function HomeContent() {
   const { user } = useMe();
 
   const [requests, setRequests] = useState<LinkRequest[]>([]);
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [nextDue, setNextDue] = useState<MySchedule | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [scanned, setScanned] = useState<string | null>(null);
 
   const load = useCallback(async (signal?: AbortSignal) => {
+    // Contracts and schedules are additions to the rent book, not the book
+    // itself: if either endpoint is unhappy the screen still renders.
+    void contractApi
+      .mine(signal)
+      .then((res) => setContracts(res.items ?? []))
+      .catch(() => setContracts([]));
+    void contractApi
+      .mySchedules(signal)
+      .then((res) => setNextDue(res.next_due ?? null))
+      .catch(() => setNextDue(null));
+
     try {
       const res = await renterApi.linkRequests(signal);
       setRequests(res.items ?? []);
@@ -133,6 +174,10 @@ function HomeContent() {
   }
 
   const open = requests.filter((r) => r.status !== 'cancelled');
+  const toSign = contracts.filter(needsRenterSignature);
+  const signedWaiting = contracts.some(
+    (c) => c.status === 'pending_signature' && !needsRenterSignature(c),
+  );
 
   return (
     <Screen bottomBar>
@@ -142,6 +187,48 @@ function HomeContent() {
       />
 
       {error && <Notice tone="error">{error}</Notice>}
+
+      {toSign.length > 0 && (
+        <section style={{ display: 'grid', gap: 'var(--sp-3)' }}>
+          <table className="ledger">
+            <tbody>
+              {toSign.map((c) => (
+                <tr key={c.id}>
+                  <td colSpan={2}>
+                    <Link
+                      href={`/contract/${encodeURIComponent(c.id)}`}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 'var(--sp-3)',
+                        color: 'var(--primary)',
+                        fontWeight: 600,
+                        textDecoration: 'none',
+                      }}
+                    >
+                      <span>
+                        Contract ready to sign
+                        <br />
+                        <span
+                          style={{
+                            color: 'var(--ink-soft)',
+                            fontSize: 'var(--text-sm)',
+                            fontWeight: 400,
+                          }}
+                        >
+                          {c.unit.name} · {c.unit.property_name}
+                        </span>
+                      </span>
+                      <Icon icon="solar:alt-arrow-right-linear" width={22} aria-hidden />
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
 
       {(loading || open.length > 0) && (
         <section style={{ display: 'grid', gap: 'var(--sp-3)' }}>
@@ -191,22 +278,43 @@ function HomeContent() {
 
         <table className="ledger" style={{ marginTop: 'var(--sp-4)' }}>
           <tbody>
-            <tr>
-              <td colSpan={2} style={{ color: 'var(--ink-soft)' }}>
-                Nothing to pay yet
-              </td>
-              <td className="num">
-                <span className="pencil">—</span>
-              </td>
-            </tr>
+            {nextDue ? (
+              <tr>
+                <td>
+                  {formatDate(nextDue.due_date)}
+                  <br />
+                  <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+                    {nextDue.contract?.unit_name ?? 'Your unit'}
+                  </span>
+                </td>
+                <td className="num">
+                  <span className="amount">{money(nextDue.amount)}</span>
+                  <br />
+                  {scheduleMark(nextDue)}
+                </td>
+              </tr>
+            ) : (
+              <tr>
+                <td style={{ color: 'var(--ink-soft)' }}>Nothing to pay yet</td>
+                <td className="num">
+                  <span className="pencil">—</span>
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
 
         <div style={{ display: 'grid', gap: 'var(--sp-3)', paddingTop: 'var(--sp-4)' }}>
           <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-            {open.some((r) => r.status === 'approved')
-              ? 'Payments start once your contract is signed and activated.'
-              : 'No tenancy yet — scan your unit’s QR code.'}
+            {nextDue
+              ? 'Pay your landlord directly, then they record it here.'
+              : toSign.length > 0
+                ? 'Sign your contract and payments will appear here.'
+                : signedWaiting
+                  ? 'You have signed — payments start once your landlord countersigns.'
+                  : open.some((r) => r.status === 'approved')
+                    ? 'Payments start once your contract is signed and activated.'
+                    : 'No tenancy yet — scan your unit’s QR code.'}
           </p>
           <p
             style={{

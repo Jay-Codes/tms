@@ -306,12 +306,15 @@ export interface ProfileInput {
   email?: string;
 }
 
-/** Presigned PUT ticket for the optional ID photo. */
-export interface KycUploadTicket {
+/** Presigned PUT ticket (KYC photo, drawn signature — same shape everywhere). */
+export interface UploadTicket {
   upload_url: string;
   object_key: string;
   headers: Record<string, string>;
 }
+
+/** @deprecated name kept for the KYC call sites. */
+export type KycUploadTicket = UploadTicket;
 
 export type LinkRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
@@ -381,20 +384,205 @@ export const renterApi = {
  * deliberate absence of `credentials` (a signed URL must stay cookie-free).
  */
 export async function uploadToPresignedUrl(
-  ticket: KycUploadTicket,
-  file: File,
+  ticket: UploadTicket,
+  body: Blob,
 ): Promise<void> {
   let res: Response;
   try {
     res = await fetch(ticket.upload_url, {
       method: 'PUT',
       headers: ticket.headers ?? {},
-      body: file,
+      body,
     });
   } catch {
     throw new ApiError(0);
   }
   if (!res.ok) {
-    throw new ApiError(res.status, { title: 'Upload failed', detail: 'The photo could not be uploaded. Please try again.' });
+    throw new ApiError(res.status, {
+      title: 'Upload failed',
+      detail: 'That file could not be uploaded. Please try again.',
+    });
   }
+}
+
+/* ---------------------------------------------------------------- */
+/* Shapes from API.md — Phase 4 (contracts, signing, schedules)       */
+/* ---------------------------------------------------------------- */
+
+export type ContractStatus =
+  | 'draft'
+  | 'pending_signature'
+  | 'active'
+  | 'expiring'
+  | 'ended'
+  | 'terminated';
+
+export type SignatureParty = 'renter' | 'landlord';
+
+/** `otp_accept` = tapped Accept & sign; `drawn` = also drew a signature. */
+export type SignatureMethod = 'otp_accept' | 'drawn';
+
+export interface ContractSignature {
+  party: SignatureParty;
+  name: string;
+  signed_at: string;
+  method: SignatureMethod | string;
+  /** Server-masked; the raw number never reaches the document. */
+  phone_masked?: string | null;
+  has_image?: boolean;
+}
+
+export interface SchedulesSummary {
+  count: number;
+  total: number;
+  next_due_date: string | null;
+  next_due_amount: number | null;
+  paid_count: number;
+  overdue_count: number;
+}
+
+export interface Contract {
+  id: string;
+  unit: { id: string; name: string; property_name: string };
+  renter: { user_id: string; full_name: string; phone: string };
+  template_id?: string | null;
+  status: ContractStatus;
+  rent_amount: number;
+  rent_period_days: number;
+  payment_period: { id: string; label: string; days: number };
+  term_days: number;
+  start_date: string;
+  end_date: string;
+  due_day?: number | null;
+  /** sha256 over the snapshotted terms + commercial facts (SPEC §5.5). */
+  snapshot_hash: string;
+  signatures: ContractSignature[];
+  link_request_id?: string | null;
+  created_at: string;
+  activated_at?: string | null;
+  terminated_at?: string | null;
+  termination_reason?: string | null;
+  schedules_summary?: SchedulesSummary | null;
+}
+
+/** One line of the payment schedule shown inside the document. */
+export interface DocumentScheduleRow {
+  period_start: string;
+  period_end: string;
+  due_date: string;
+  amount: number;
+}
+
+export interface DocumentSignature extends ContractSignature {
+  /** Presigned GET for the drawn PNG, when one was uploaded. */
+  signature_image_url?: string | null;
+}
+
+/**
+ * `GET /contracts/{id}/document` — everything needed to paint (and print) the
+ * agreement. `terms_html` is the server-sanitized snapshot; it is rendered
+ * verbatim, never re-derived here.
+ */
+export interface ContractDocument {
+  contract_id: string;
+  status: ContractStatus;
+  org: {
+    display_name: string;
+    logo_url?: string | null;
+    letterhead_url?: string | null;
+    footer_text?: string | null;
+  };
+  parties: {
+    landlord: { name: string };
+    renter: { name: string; phone_masked?: string | null };
+  };
+  terms_html: string;
+  schedule: DocumentScheduleRow[];
+  signatures: DocumentSignature[];
+  snapshot_hash: string;
+  generated_at: string;
+}
+
+export interface VerifyResponse {
+  valid: boolean;
+  computed_hash: string;
+  stored_hash: string;
+  signatures: ContractSignature[];
+}
+
+export type ScheduleStatus = 'pending' | 'paid' | 'partial' | 'overdue' | 'waived';
+
+export interface PaymentSchedule {
+  id: string;
+  period_start: string;
+  period_end: string;
+  due_date: string;
+  amount: number;
+  status: ScheduleStatus;
+  paid_amount: number;
+}
+
+/** `GET /me/schedules` rows carry the contract they belong to. */
+export interface MySchedule extends PaymentSchedule {
+  contract: { id: string; unit_name: string };
+}
+
+export interface MySchedulesResponse {
+  items: MySchedule[];
+  next_due: MySchedule | null;
+}
+
+export interface SignInput {
+  otp_code: string;
+  /** Key returned by `/signature-upload`, once the PNG is in the bucket. */
+  signature_object_key?: string;
+}
+
+export const contractApi = {
+  mine: (signal?: AbortSignal) =>
+    api.get<{ items: Contract[]; next_cursor?: string | null }>('/me/contracts', { signal }),
+
+  get: (id: string, signal?: AbortSignal) =>
+    api.get<{ contract: Contract }>(`/contracts/${encodeURIComponent(id)}`, { signal }),
+
+  document: (id: string, signal?: AbortSignal) =>
+    api.get<ContractDocument>(`/contracts/${encodeURIComponent(id)}/document`, { signal }),
+
+  verify: (id: string, signal?: AbortSignal) =>
+    api.get<VerifyResponse>(`/contracts/${encodeURIComponent(id)}/verify`, { signal }),
+
+  schedules: (id: string, signal?: AbortSignal) =>
+    api.get<{ items: PaymentSchedule[] }>(`/contracts/${encodeURIComponent(id)}/schedules`, {
+      signal,
+    }),
+
+  sendSignOtp: (id: string) =>
+    api.post<{ resend_after_seconds: number }>(`/contracts/${encodeURIComponent(id)}/sign/otp`),
+
+  signatureUploadTicket: (id: string, sizeBytes: number) =>
+    api.post<UploadTicket>(`/contracts/${encodeURIComponent(id)}/signature-upload`, {
+      content_type: 'image/png',
+      size_bytes: sizeBytes,
+    }),
+
+  sign: (id: string, input: SignInput) =>
+    api.post<{ contract: Contract }>(`/contracts/${encodeURIComponent(id)}/sign`, input),
+
+  mySchedules: (signal?: AbortSignal) =>
+    api.get<MySchedulesResponse>('/me/schedules', { signal }),
+};
+
+/** True once the renter's own signature row exists on this contract. */
+export function hasRenterSignature(c: Pick<Contract, 'signatures'>): boolean {
+  return (c.signatures ?? []).some((s) => s.party === 'renter');
+}
+
+/** True once the landlord has countersigned (i.e. activated). */
+export function hasLandlordSignature(c: Pick<Contract, 'signatures'>): boolean {
+  return (c.signatures ?? []).some((s) => s.party === 'landlord');
+}
+
+/** Contracts the renter still has to sign — the home screen's nudge. */
+export function needsRenterSignature(c: Contract): boolean {
+  return c.status === 'pending_signature' && !hasRenterSignature(c);
 }

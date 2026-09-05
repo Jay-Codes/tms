@@ -140,3 +140,17 @@ export function formatDate(iso: string | null | undefined): string {
     timeZone: 'UTC',
   }).format(d);
 }
+
+/* ------------------------------------------------------------------ */
+/* Signatures                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Last four digits of a server-masked phone, for the signature block's
+ * "via phone •••1234". Returns null when the mask hides everything.
+ */
+export function phoneLast4(masked: string | null | undefined): string | null {
+  if (!masked) return null;
+  const digits = masked.replace(/\D/g, '');
+  return digits.length >= 4 ? digits.slice(-4) : null;
+}
