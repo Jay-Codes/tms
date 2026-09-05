@@ -9,7 +9,7 @@ Companion to [SPEC.md](SPEC.md). Actors: **Renter** (`apps/enduser`), **Landlord
 1. Landlord opens signup link → registers org: business name, owner name, email, phone, password.
 2. Email verification link → verified.
 3. Guided setup wizard:
-   1. **Branding** — display name (e.g. "JJnE Rentals"), logo upload, theme color.
+   1. **Branding** — display name (e.g. "JJnE Rentals"), logo upload, optional letterhead upload + document footer text (used on contract documents), theme color.
    2. **First property** — name (custom, e.g. "Mbezi Beach Block A"), location.
    3. **Payment periods** — list pre-seeded with recommended presets (Monthly 30d, Quarterly 90d, Half-year 180d, Yearly 365d, badged "Recommended"). Landlord keeps/removes any, and adds custom periods as a label + number of days (e.g. "Weekly" 7d, "3 weeks" 21d, "45 days") — no limit on count or value.
    4. **Units** — add units with custom names ("Room 1", "House B"), set price (amount per N days, default 30) and optionally restrict which payment periods this unit offers.
@@ -30,8 +30,10 @@ Companion to [SPEC.md](SPEC.md). Actors: **Renter** (`apps/enduser`), **Landlord
 4. KYC form: full name, **NIDA number**, next of kin (name + phone), contact number (prefilled), email. Optional ID photo upload.
 5. Choose **payment period** from the landlord's offered list for this unit (recommended presets first, then custom ones like "21 days"), each showing the prorated amount. Choose **tenancy length** (term) and **start date** — end date auto-derived, shown, with the resulting schedule preview (N payments of X).
 6. Review terms (from landlord's template) → accept → **link request** submitted.
+   (Signing happens after approval — step 7b — so the renter signs the final document with the landlord-confirmed dates.)
 7. Status screen: "Waiting for landlord approval" (skipped if org auto-approve on).
-8. On approval, SMS: "Welcome to {org}. Your tenancy at {unit} starts {date}." → renter dashboard live.
+7b. On approval, SMS: "Your contract for {unit} is ready to sign." → renter opens the contract document (letterhead, full terms, schedule) → **Accept & sign**: OTP sent to registered phone → enter code → optional draw signature → signed. Status: "Waiting for landlord to countersign."
+8. Landlord activates (countersigns) → SMS: "Welcome to {org}. Your tenancy at {unit} starts {date}." → renter dashboard live; signed contract available to print anytime.
 
 **Alternate entries:** landlord manually adds renter (sends SMS invite link with the same flow, unit pre-linked); renter with existing account scans a new QR → jumps straight to step 5.
 
@@ -43,9 +45,12 @@ Companion to [SPEC.md](SPEC.md). Actors: **Renter** (`apps/enduser`), **Landlord
 
 1. Dashboard badge: pending link requests.
 2. Open request → renter KYC details, chosen duration, start date.
-3. Approve → contract created from template (terms + price **snapshotted**), payment schedules generated for the whole span.
+3. Approve → contract created from template (terms + price **snapshotted**, hash computed), status `pending_signature`, renter SMS'd to sign.
 4. Reject (with reason) → renter notified by SMS.
-5. Contract visible to both parties; PDF of terms downloadable.
+5. Renter signs (OTP + optional drawn signature) → landlord sees "Ready to countersign" → **Activate** records the landlord signature, generates payment schedules for the whole span, unit → occupied.
+6. Contract visible to both parties as an in-app document (org letterhead + logo, resolved terms, parties, schedule summary, signature block with names/timestamps/phone last-4/drawn signatures, verification hash). "Print / Save as PDF" uses the browser. Landlord can also **manually add a renter** and sign on their behalf only if the renter has no phone — flagged as `landlord_recorded` in the audit log (no renter signature row); avoid where possible.
+
+**Edge cases:** renter doesn't sign within N days (org setting, default 7) → reminder SMS, then landlord can cancel; renter disputes → landlord terminates and issues a new contract (old one kept, never edited).
 
 ---
 
@@ -71,7 +76,7 @@ Companion to [SPEC.md](SPEC.md). Actors: **Renter** (`apps/enduser`), **Landlord
 
 ## 6. Contracts & terms management (landlord)
 
-1. Templates page: create/edit named templates (markdown), set default.
+1. Templates page: create/edit named templates in an in-app rich-text editor (headings, lists, bold, variables like `{{renter_name}}`, `{{rent}}`), set default. Live preview shows the document with the org's uploaded letterhead/logo.
 2. Editing a template never changes active contracts (snapshot rule) — banner states this.
 3. Contract lifecycle: `draft → pending_signature → active → expiring → ended | terminated`.
 4. ~30 days before end date contract flags **expiring**; landlord prompted to renew (new contract, current price, renter confirms via SMS link) or let lapse.

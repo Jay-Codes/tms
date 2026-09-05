@@ -5,10 +5,11 @@
     "dev": "next dev -p 3002"
   },
   "dependencies": {
+    "@iconify/react": "^6.0.2",
+    "@tms/ui": "*",
     "next": "^15.5.2",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "@tms/ui": "*"
+    "react-dom": "^19.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

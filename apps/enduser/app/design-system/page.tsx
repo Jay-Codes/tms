@@ -1,411 +1,259 @@
 'use client';
 
 import { Icon } from '@iconify/react';
-import { applyOrgTheme, DEFAULT_THEME, FONT_IDS, FONT_LABELS, type OrgTheme } from '@tms/ui';
-import { useState, type CSSProperties, type ReactNode } from 'react';
+import { ThemeSwitcher } from '@tms/ui';
+import type { ReactNode } from 'react';
 
 /* ------------------------------------------------------------------ */
-/* Design-system preview. Read-only reference for the tokens in        */
-/* globals.css — every component here uses tokens only, no ad-hoc      */
-/* values, so this page doubles as the compliance check.               */
+/* Design-system preview, renter side (mobile).                        */
+/* Every element uses @tms/ui classes and tokens only; this page is    */
+/* the compliance check as well as the reference.                      */
 /* ------------------------------------------------------------------ */
 
-const styles: Record<string, CSSProperties> = {
-  page: {
-    maxWidth: 480,
-    margin: '0 auto',
-    padding: 'var(--sp-4) var(--sp-4) var(--sp-7)',
-  },
-  section: { marginTop: 'var(--sp-6)' },
-  sectionTitle: {
-    fontSize: 'var(--text-lg)',
-    marginBottom: 'var(--sp-1)',
-  },
-  sectionNote: {
-    fontSize: 'var(--text-sm)',
-    color: 'var(--text-muted)',
-    margin: '0 0 var(--sp-4)',
-  },
-  card: {
-    background: 'var(--surface)',
-    border: '1px solid var(--border)',
-    borderRadius: 'var(--radius-lg)',
-    boxShadow: 'var(--shadow-card)',
-    padding: 'var(--sp-4)',
-  },
-  input: {
-    display: 'block',
-    width: '100%',
-    minHeight: 'var(--touch-min)',
-    padding: '0 var(--sp-3)',
-    fontSize: 'var(--text-md)',
-    fontFamily: 'var(--font-sans)',
-    color: 'var(--text)',
-    background: 'var(--surface-sunken)',
-    border: '1px solid var(--border)',
-    borderRadius: 'var(--radius-sm)',
-  },
-  label: {
-    display: 'block',
-    fontSize: 'var(--text-sm)',
-    fontWeight: 600,
-    marginBottom: 'var(--sp-1)',
-  },
-};
-
-function Section({ title, note, children }: { title: string; note: string; children: ReactNode }) {
+function Section({ title, lead, children }: { title: string; lead: string; children: ReactNode }) {
   return (
-    <section style={styles.section}>
-      <h2 style={styles.sectionTitle}>{title}</h2>
-      <p style={styles.sectionNote}>{note}</p>
+    <section style={{ paddingTop: 'var(--sp-6)' }}>
+      <hr className="rule rule-strong" />
+      <h2 style={{ fontSize: 'var(--text-lg)', marginTop: 'var(--sp-3)' }}>{title}</h2>
+      <p style={{ color: 'var(--ink-soft)', margin: 'var(--sp-1) 0 var(--sp-4)' }}>{lead}</p>
       {children}
     </section>
   );
 }
 
-function Swatch({ name, token, dark }: { name: string; token: string; dark?: boolean }) {
+function Money({ value, currency }: { value: string; currency?: boolean }) {
   return (
-    <div style={{ flex: '1 1 96px', minWidth: 96 }}>
-      <div
-        style={{
-          height: 56,
-          borderRadius: 'var(--radius-sm)',
-          border: '1px solid var(--border)',
-          background: `var(${token})`,
-        }}
-      />
-      <div style={{ fontSize: 'var(--text-xs)', marginTop: 'var(--sp-1)', fontWeight: 600 }}>{name}</div>
-      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{token}</div>
-    </div>
-  );
-}
-
-function Row(props: { children: ReactNode }) {
-  return <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-3)' }}>{props.children}</div>;
-}
-
-function Button({
-  variant = 'primary',
-  children,
-}: {
-  variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
-  children: ReactNode;
-}) {
-  const base: CSSProperties = {
-    minHeight: 'var(--touch-min)',
-    padding: '0 var(--sp-4)',
-    borderRadius: 'var(--radius-md)',
-    fontSize: 'var(--text-md)',
-    fontWeight: 700,
-    fontFamily: 'var(--font-sans)',
-    border: '1px solid transparent',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 'var(--sp-2)',
-    cursor: 'pointer',
-  };
-  const variants: Record<string, CSSProperties> = {
-    primary: { background: 'var(--primary)', color: 'var(--on-primary)' },
-    secondary: { background: 'var(--surface)', color: 'var(--primary)', borderColor: 'var(--border)' },
-    danger: { background: 'var(--status-overdue)', color: 'var(--on-primary)' },
-    ghost: { background: 'transparent', color: 'var(--primary)' },
-  };
-  return <button style={{ ...base, ...variants[variant] }}>{children}</button>;
-}
-
-function StatusChip({ status }: { status: 'paid' | 'pending' | 'overdue' }) {
-  const map = {
-    paid: { label: 'Paid', icon: 'solar:check-circle-bold', fg: 'var(--status-paid)', bg: 'var(--status-paid-bg)' },
-    pending: { label: 'Pending', icon: 'solar:clock-circle-bold', fg: 'var(--status-pending)', bg: 'var(--status-pending-bg)' },
-    overdue: { label: 'Overdue', icon: 'solar:danger-triangle-bold', fg: 'var(--status-overdue)', bg: 'var(--status-overdue-bg)' },
-  } as const;
-  const s = map[status];
-  return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 'var(--sp-1)',
-        padding: 'var(--sp-1) var(--sp-3)',
-        borderRadius: 'var(--radius-full)',
-        fontSize: 'var(--text-xs)',
-        fontWeight: 700,
-        color: s.fg,
-        background: s.bg,
-      }}
-    >
-      <Icon icon={s.icon} width={16} />
-      {s.label}
+    <span className="amount">
+      {currency && <span className="currency">TZS</span>}
+      {value}
     </span>
   );
 }
 
-const PRESET_COLORS: Array<[string, string]> = [
-  ['Teal (default)', '#0f766e'],
-  ['Indigo', '#4338ca'],
-  ['Maroon', '#9f1239'],
-  ['Forest', '#166534'],
-  ['Amber', '#b45309'],
-];
-
-function ThemeSwitcher() {
-  const [theme, setTheme] = useState<OrgTheme>(DEFAULT_THEME);
-
-  const update = (next: OrgTheme) => {
-    setTheme(next);
-    applyOrgTheme(next);
-  };
-
-  return (
-    <div style={{ ...styles.card, display: 'grid', gap: 'var(--sp-4)' }}>
-      <div>
-        <div style={styles.label}>Primary color</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
-          {PRESET_COLORS.map(([label, hex]) => (
-            <button
-              key={hex}
-              onClick={() => update({ ...theme, primaryColor: hex })}
-              title={label}
-              aria-label={label}
-              style={{
-                width: 'var(--touch-min)',
-                height: 'var(--touch-min)',
-                borderRadius: 'var(--radius-full)',
-                background: hex,
-                cursor: 'pointer',
-                border:
-                  theme.primaryColor === hex ? '3px solid var(--text)' : '1px solid var(--border)',
-              }}
-            />
-          ))}
-        </div>
-      </div>
-      <div>
-        <div style={styles.label}>Font</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
-          {FONT_IDS.map((id) => (
-            <button
-              key={id}
-              onClick={() => update({ ...theme, font: id })}
-              style={{
-                minHeight: 'var(--touch-min)',
-                padding: '0 var(--sp-3)',
-                borderRadius: 'var(--radius-md)',
-                fontSize: 'var(--text-sm)',
-                fontWeight: 600,
-                fontFamily: `var(--font-${id}), system-ui, sans-serif`,
-                cursor: 'pointer',
-                background: theme.font === id ? 'var(--primary-soft)' : 'var(--surface)',
-                color: theme.font === id ? 'var(--primary-strong)' : 'var(--text)',
-                border: theme.font === id ? '2px solid var(--primary)' : '1px solid var(--border)',
-              }}
-            >
-              {FONT_LABELS[id]}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+function Status({ s }: { s: 'paid' | 'overdue' | { due: string } }) {
+  if (s === 'paid') return <span className="stamp stamp-paid">Paid</span>;
+  if (s === 'overdue') return <span className="stamp stamp-overdue">Overdue</span>;
+  return <span className="pencil">due {s.due}</span>;
 }
+
+const PERIODS: Array<[string, 'paid' | 'overdue' | { due: string }, string]> = [
+  ['July', 'paid', '450,000'],
+  ['August', 'paid', '450,000'],
+  ['September', 'overdue', '450,000'],
+  ['October', { due: '5 Oct' }, '450,000'],
+];
 
 const ICONS: Array<[string, string]> = [
   ['Home', 'solar:home-2-linear'],
-  ['Payments', 'solar:wallet-money-linear'],
-  ['Scan QR', 'solar:qr-code-linear'],
-  ['Contract', 'solar:document-text-linear'],
+  ['Rent', 'solar:wallet-money-linear'],
+  ['Scan', 'solar:qr-code-linear'],
+  ['Agreement', 'solar:document-text-linear'],
   ['Calendar', 'solar:calendar-linear'],
-  ['Notifications', 'solar:bell-linear'],
+  ['Messages', 'solar:chat-round-dots-linear'],
   ['Profile', 'solar:user-circle-linear'],
   ['Property', 'solar:buildings-2-linear'],
-  ['Unit', 'solar:key-linear'],
+  ['Key', 'solar:key-linear'],
   ['Settings', 'solar:settings-linear'],
   ['History', 'solar:history-linear'],
-  ['Support', 'solar:chat-round-dots-linear'],
+  ['Receipt', 'solar:bill-check-linear'],
 ];
 
 export default function DesignSystem() {
   return (
-    <main style={styles.page}>
-      <header style={{ paddingTop: 'var(--sp-5)' }}>
-        <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--text-muted)', fontWeight: 600 }}>
-          TMS · Design System v1
-        </p>
-        <h1 style={{ fontSize: 'var(--text-xl)', marginTop: 'var(--sp-1)' }}>
-          Legible. Simple. Mobile-first.
+    <main style={{ maxWidth: 440, margin: '0 auto', padding: 'var(--sp-6) var(--sp-4) var(--sp-8)' }}>
+      <header>
+        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>TMS design system, renter app</p>
+        <h1 style={{ fontSize: 'var(--text-2xl)', marginTop: 'var(--sp-2)' }}>
+          A rent ledger you can read on a phone.
         </h1>
-        <p style={{ color: 'var(--text-muted)', margin: 'var(--sp-2) 0 0' }}>
-          Plus Jakarta Sans · Solar icons · 4px grid · 44px touch targets. Org theming overrides the
-          primary color at runtime; everything else stays fixed.
+        <p style={{ marginTop: 'var(--sp-3)' }}>
+          Paper, ink, ruled rows. Money sits on the right in tabular figures. When rent is paid or
+          overdue, it gets stamped. Until then it is only pencilled in.
         </p>
       </header>
 
       <Section
-        title="Org theme"
-        note="What a landlord can configure: one primary color + one whitelisted font. Strong/soft/on-primary variants derive automatically. Everything else is fixed core. Try it — the whole page updates."
+        title="A renter's ledger"
+        lead="The home screen. One unit, this year's periods, the next thing to do."
+      >
+        <div className="sheet" style={{ padding: 'var(--sp-4) var(--sp-4) 0', overflow: 'hidden' }}>
+          <p style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>Mbezi Beach, Block A</p>
+          <h3 style={{ fontSize: 'var(--text-xl)' }}>Room 4</h3>
+
+          <table className="ledger" style={{ marginTop: 'var(--sp-4)' }}>
+            <tbody>
+              {PERIODS.map(([month, s, amt]) => (
+                <tr key={month}>
+                  <td style={{ fontWeight: 500 }}>{month}</td>
+                  <td>
+                    <Status s={s} />
+                  </td>
+                  <td className="num">{amt}</td>
+                </tr>
+              ))}
+              <tr className="total">
+                <td colSpan={2}>Owed now</td>
+                <td className="num">
+                  <Money value="450,000" currency />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div style={{ display: 'grid', gap: 'var(--sp-2)', padding: 'var(--sp-4) 0' }}>
+            <button className="btn btn-primary">
+              <Icon icon="solar:wallet-money-linear" width={20} /> How to pay 450,000
+            </button>
+            <button className="btn btn-quiet">See the full agreement</button>
+          </div>
+
+          <nav className="bottom-bar" style={{ margin: '0 calc(-1 * var(--sp-4))' }} aria-label="Preview">
+            {[
+              ['Home', 'solar:home-2-bold', true],
+              ['Rent', 'solar:wallet-money-linear', false],
+              ['Agreement', 'solar:document-text-linear', false],
+              ['Profile', 'solar:user-circle-linear', false],
+            ].map(([label, icon, current]) => (
+              <a key={label as string} className="tab" aria-current={current ? 'page' : undefined}>
+                <Icon icon={icon as string} width={22} />
+                {label as string}
+              </a>
+            ))}
+          </nav>
+        </div>
+      </Section>
+
+      <Section
+        title="What a landlord can change"
+        lead="Two things: their colour and their typeface. Everything else is the same for every landlord, so a bad colour can't break a screen."
       >
         <ThemeSwitcher />
       </Section>
 
-      <Section title="Color" note="Warm neutrals, one brand color, three semantic statuses. Status colors are never used decoratively.">
-        <Row>
-          <Swatch name="Primary" token="--primary" />
-          <Swatch name="Primary strong" token="--primary-strong" />
-          <Swatch name="Primary soft" token="--primary-soft" />
-        </Row>
-        <div style={{ height: 'var(--sp-3)' }} />
-        <Row>
-          <Swatch name="Background" token="--bg" />
-          <Swatch name="Surface" token="--surface" />
-          <Swatch name="Sunken" token="--surface-sunken" />
-          <Swatch name="Border" token="--border" />
-        </Row>
-        <div style={{ height: 'var(--sp-3)' }} />
-        <Row>
-          <Swatch name="Paid" token="--status-paid" />
-          <Swatch name="Pending" token="--status-pending" />
-          <Swatch name="Overdue" token="--status-overdue" />
-        </Row>
+      <Section
+        title="Stamps"
+        lead="The loudest thing in the system, so it is used for exactly one job: recording what has happened."
+      >
+        <table className="ledger">
+          <tbody>
+            <tr>
+              <td>Money received and recorded</td>
+              <td className="num">
+                <span className="stamp stamp-paid">Paid</span>
+              </td>
+            </tr>
+            <tr>
+              <td>Due date passed, nothing recorded</td>
+              <td className="num">
+                <span className="stamp stamp-overdue">Overdue</span>
+              </td>
+            </tr>
+            <tr>
+              <td>Inside the payment window</td>
+              <td className="num">
+                <span className="pencil">due 5 Oct</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </Section>
 
-      <Section title="Typography" note="Plus Jakarta Sans, 1.25 scale, 16px body minimum (prevents iOS input zoom). Amounts use tabular figures.">
-        <div style={styles.card}>
-          <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 700 }} className="amount">TZS 450,000</div>
-          <div style={{ fontSize: 'var(--text-xl)', fontWeight: 700, marginTop: 'var(--sp-3)' }}>Page title · 25</div>
-          <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginTop: 'var(--sp-2)' }}>Section title · 20</div>
-          <div style={{ fontSize: 'var(--text-md)', marginTop: 'var(--sp-2)' }}>Body text · 16 — Rent for Mbezi Beach Block A, Room 4 is due on 5 October.</div>
-          <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginTop: 'var(--sp-2)' }}>Secondary · 14 — Recorded by Asha (manager)</div>
-          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 'var(--sp-2)' }}>CAPTION · 13 — LAST UPDATED TODAY 09:00</div>
+      <Section title="Money" lead="Tabular figures, thousands separators, currency set small. Totals get the accountant's double rule.">
+        <div style={{ fontSize: 'var(--text-display)', lineHeight: 1 }}>
+          <Money value="1,350,000" currency />
         </div>
+        <table className="ledger" style={{ marginTop: 'var(--sp-4)' }}>
+          <tbody>
+            <tr>
+              <td>Expected</td>
+              <td className="num">4,500,000</td>
+            </tr>
+            <tr>
+              <td>Collected</td>
+              <td className="num">3,150,000</td>
+            </tr>
+            <tr className="total">
+              <td>Outstanding</td>
+              <td className="num">1,350,000</td>
+            </tr>
+          </tbody>
+        </table>
       </Section>
 
-      <Section title="Icons — Solar" note="Iconify solar set. Linear weight by default; bold weight only for active/selected states.">
-        <div
-          style={{
-            ...styles.card,
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))',
-            gap: 'var(--sp-4)',
-          }}
-        >
-          {ICONS.map(([label, icon]) => (
-            <div key={icon} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--sp-1)' }}>
-              <Icon icon={icon} width={28} color="var(--text)" />
-              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{label}</span>
+      <Section title="Paper and ink" lead="Text is ballpoint blue-black, not black. Rules are ledger blue. The brand colour appears only on the primary action and the active tab.">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--sp-3)' }}>
+          {[
+            ['Paper', '--paper'],
+            ['Sheet', '--sheet'],
+            ['Rule', '--rule'],
+            ['Ink', '--ink'],
+            ['Ink, soft', '--ink-soft'],
+            ['Brand', '--primary'],
+            ['Paid', '--stamp-paid'],
+            ['Overdue', '--stamp-overdue'],
+            ['Pencil', '--pencil'],
+          ].map(([name, token]) => (
+            <div key={token}>
+              <div
+                style={{
+                  height: 48,
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--rule)',
+                  background: `var(${token})`,
+                }}
+              />
+              <div style={{ fontSize: 'var(--text-sm)', marginTop: 'var(--sp-1)' }}>{name}</div>
+              <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>{token}</div>
             </div>
           ))}
         </div>
       </Section>
 
-      <Section title="Buttons" note="One primary action per screen. All targets ≥ 44px tall.">
-        <Row>
-          <Button variant="primary">
+      <Section title="Type" lead="One family. Sixteen pixels is the floor so phones never zoom into a field. Headlines are set tight and balanced.">
+        <div style={{ display: 'grid', gap: 'var(--sp-3)' }}>
+          <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 600, lineHeight: 1.15 }}>Rent for Room 4 is overdue</div>
+          <div style={{ fontSize: 'var(--text-xl)', fontWeight: 600, lineHeight: 1.15 }}>September, 450,000</div>
+          <div style={{ fontSize: 'var(--text-lg)', fontWeight: 600 }}>Payment history</div>
+          <p>Pay at any CRDB branch or by M-Pesa to the account below, then send the reference to your landlord.</p>
+          <p style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>Recorded by Asha, 3 Sep 2026 at 14:20</p>
+        </div>
+      </Section>
+
+      <Section title="Buttons" lead="One filled button per screen. Secondary actions are outlined in ink, quiet ones are underlined text.">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
+          <button className="btn btn-primary">
             <Icon icon="solar:qr-code-linear" width={20} /> Scan to connect
-          </Button>
-          <Button variant="secondary">View contract</Button>
-          <Button variant="danger">Terminate</Button>
-          <Button variant="ghost">Cancel</Button>
-        </Row>
+          </button>
+          <button className="btn btn-secondary">View agreement</button>
+          <button className="btn btn-danger">End tenancy</button>
+          <button className="btn btn-quiet">Not now</button>
+          <button className="btn btn-primary" disabled>
+            Saving
+          </button>
+        </div>
       </Section>
 
-      <Section title="Status chips" note="The three payment states from the spec. Icon + word, never color alone.">
-        <Row>
-          <StatusChip status="paid" />
-          <StatusChip status="pending" />
-          <StatusChip status="overdue" />
-        </Row>
-      </Section>
-
-      <Section title="Inputs" note="Sunken fill, 16px text, labels always visible — no placeholder-only fields.">
-        <div style={{ ...styles.card, display: 'grid', gap: 'var(--sp-4)' }}>
-          <div>
-            <label style={styles.label}>Phone number</label>
-            <input style={styles.input} placeholder="0712 345 678" inputMode="tel" />
+      <Section title="Fields" lead="Labels above, hints below, errors say what to do. Never placeholder-only.">
+        <div style={{ display: 'grid', gap: 'var(--sp-4)' }}>
+          <div className="field">
+            <label htmlFor="phone">Phone number</label>
+            <input id="phone" className="input" placeholder="0712 345 678" inputMode="tel" />
+            <span className="hint">We'll text you a code.</span>
           </div>
-          <div>
-            <label style={styles.label}>NIDA number</label>
-            <input style={styles.input} placeholder="XXXXXXXX-XXXXX-XXXXX-XX" />
+          <div className="field invalid">
+            <label htmlFor="nida">NIDA number</label>
+            <input id="nida" className="input" defaultValue="19900101-12345" />
+            <span className="error">A NIDA number has 20 digits. Check the last group.</span>
           </div>
         </div>
       </Section>
 
-      <Section title="Cards" note="The core pattern: next-payment card as a renter sees it on the dashboard.">
-        <div style={styles.card}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', fontWeight: 600 }}>Next payment due</div>
-              <div className="amount" style={{ fontSize: 'var(--text-2xl)', marginTop: 'var(--sp-1)' }}>TZS 450,000</div>
-              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginTop: 'var(--sp-1)' }}>
-                Due 5 Oct 2026 · Room 4, Block A
-              </div>
-            </div>
-            <StatusChip status="pending" />
-          </div>
-          <div style={{ marginTop: 'var(--sp-4)' }}>
-            <Button variant="primary">
-              <Icon icon="solar:wallet-money-linear" width={20} /> How to pay
-            </Button>
-          </div>
-        </div>
-      </Section>
-
-      <Section title="List rows" note="Payment history rows: 44px minimum, amount right-aligned with tabular figures.">
-        <div style={{ ...styles.card, padding: 0 }}>
-          {[
-            ['Jul 2026', 'paid', '450,000'],
-            ['Aug 2026', 'paid', '450,000'],
-            ['Sep 2026', 'overdue', '450,000'],
-          ].map(([month, status, amt], i) => (
-            <div
-              key={month}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 'var(--sp-3)',
-                minHeight: 'var(--touch-min)',
-                padding: 'var(--sp-3) var(--sp-4)',
-                borderTop: i ? '1px solid var(--border)' : 'none',
-              }}
-            >
-              <Icon icon="solar:history-linear" width={22} color="var(--text-muted)" />
-              <div style={{ flex: 1, fontWeight: 600 }}>{month}</div>
-              <StatusChip status={status as 'paid' | 'overdue'} />
-              <div className="amount" style={{ minWidth: 90, textAlign: 'right' }}>{amt}</div>
-            </div>
-          ))}
-        </div>
-      </Section>
-
-      <Section title="Bottom navigation" note="Renter app: four destinations max. Bold icon weight marks the active tab.">
-        <div
-          style={{
-            ...styles.card,
-            display: 'flex',
-            justifyContent: 'space-around',
-            padding: 'var(--sp-2) 0',
-          }}
-        >
-          {[
-            ['Home', 'solar:home-2-bold', true],
-            ['Payments', 'solar:wallet-money-linear', false],
-            ['Contract', 'solar:document-text-linear', false],
-            ['Profile', 'solar:user-circle-linear', false],
-          ].map(([label, icon, active]) => (
-            <div
-              key={label as string}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 2,
-                minWidth: 'var(--touch-min)',
-                minHeight: 'var(--touch-min)',
-                justifyContent: 'center',
-                color: active ? 'var(--primary)' : 'var(--text-muted)',
-              }}
-            >
-              <Icon icon={icon as string} width={24} />
-              <span style={{ fontSize: 'var(--text-xs)', fontWeight: active ? 700 : 500 }}>{label as string}</span>
+      <Section title="Icons" lead="Solar, linear weight. Bold weight only marks the current tab.">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 'var(--sp-4)' }}>
+          {ICONS.map(([label, icon]) => (
+            <div key={icon} style={{ display: 'grid', justifyItems: 'center', gap: 'var(--sp-1)' }}>
+              <Icon icon={icon} width={26} />
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>{label}</span>
             </div>
           ))}
         </div>

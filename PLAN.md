@@ -18,7 +18,7 @@ Execution plan for [SPEC.md](SPEC.md) / [FLOWS.md](FLOWS.md). Target: **testing-
 
 ## Phase 0 — Foundations & infrastructure (Sep 5, 0.5 day)
 
-- [ ] `docker-compose.yml`: postgres:17, redis:7, minio + bucket-init job (`branding`, `qr`, `contracts`, `kyc`). Volumes, healthchecks. `make up` / `make down`.
+- [ ] `docker-compose.yml`: postgres:17, redis:7, minio + bucket-init job (`branding`, `qr`, `kyc`, `signatures`). Volumes, healthchecks. `make up` / `make down`.
 - [ ] Backend skeleton `backend/`: `cmd/api`, `internal/{org,renter,contract,payment,notify,audit,report,platform}`, chi router, slog, config from env, `/healthz`.
 - [ ] golang-migrate wiring + `make migrate`; sqlc config; `make build`, `make test`, `make lint` (golangci-lint, next lint).
 - [ ] Proxy routes `/api/*` → backend :8081 (frontends keep 3001-3003).
@@ -66,10 +66,13 @@ Execution plan for [SPEC.md](SPEC.md) / [FLOWS.md](FLOWS.md). Target: **testing-
 - [ ] Contracts: create (from approval or manual), activate = snapshot terms + price basis + period days, generate all payment_schedules across `term_days` at `payment_period_days` cadence, last row truncated, amounts prorated from price basis, optional `due_day` snapping (§4 rules). Table-driven tests: 180d/45d, 100d/30d, 7d cadence, due_day snapping.
 - [ ] Renter onboarding + public unit endpoint show offered periods with prorated amounts and schedule preview.
 - [ ] Lifecycle: draft → pending_signature → active → expiring (30d job) → ended | terminated. Terminate cancels/waives remaining schedules, unit → vacant.
-- [ ] `GET /contracts/{id}/pdf`: render snapshot → MinIO `contracts`, presigned URL.
-- [ ] Screens: templates editor (with snapshot-rule banner), contract detail (both apps), renter terms-accept step.
+- [ ] `GET /contracts/{id}/document`: app-native document payload (letterhead/logo URLs, resolved `terms_snapshot_html`, parties, schedule summary, footer). Frontend document view + print stylesheet (browser "Save as PDF"). No server PDF.
+- [ ] Rich-text template editor in tenant app (sanitized HTML, variable insertion, live letterhead preview); letterhead upload + footer text in branding settings.
+- [ ] Digital signing: `snapshot_hash` at pending_signature; `contract_signatures` table; `POST /contracts/{id}/sign/otp` + `/sign` (OTP verify, IP/UA capture); optional drawn signature (canvas → presigned PUT to `signatures` bucket); activate requires renter signature and records landlord row; `GET /contracts/{id}/verify`.
+- [ ] Screens: templates editor (with snapshot-rule banner), contract detail (both apps), renter "Accept & sign" flow (document → OTP → optional draw → confirmation), landlord "Ready to countersign" → Activate, signature block + hash in document view.
+- [ ] Unsigned-contract reminder (org setting, default 7 days) wired into Phase 6 scheduler.
 
-**Exit:** approval creates active contract with correct schedule rows; PDF downloads; termination flips unit vacant.
+**Exit:** approval → renter OTP-signs → landlord activates → correct schedule rows; document renders with letterhead + signature block, prints cleanly, `/verify` returns valid; termination flips unit vacant.
 
 ## Phase 5 — Payments (offline) & statuses (Sep 10, 1 day)
 

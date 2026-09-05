@@ -44,8 +44,8 @@ The schema is designed so gateway payments and complaints bolt on without migrat
            |            |               |        \
        PostgreSQL     Redis          MinIO      Beem SMS
        (truth)      (sessions,     (logos,      (HTTP API)
-                     cache, rate    contract
-                     limits, jobs)  PDFs, KYC docs)
+                     cache, rate    letterheads,
+                     limits, jobs)  QR PNGs, KYC docs)
 ```
 
 - Single Go service (`cmd/api`), internal packages per domain (`internal/org`, `internal/renter`, `internal/contract`, `internal/payment`, `internal/notify`, `internal/audit`, `internal/report`).
@@ -55,10 +55,10 @@ The schema is designed so gateway payments and complaints bolt on without migrat
 
 ### 2.0 Design system
 
-Base design system lives in `packages/ui` (`@tms/ui`), used by all three apps; preview at `/enduser/design-system`. Two layers:
+Base design system lives in `packages/ui` (`@tms/ui`), used by all three apps. Previews: `/enduser/design-system` (mobile, renter) and `/tenant/design-system` (desktop, landlord). Concept: **"the stamped ledger"** — a landlord's rent book. Paper background, blue-black ballpoint ink for text, ledger-blue rules, money right-aligned in tabular figures with accountant's double rule under totals, and a rubber **stamp** for what has happened (Paid / Overdue); pending is only pencilled. No card grids or drop shadows except genuinely separate sheets (dialogs). Two layers:
 
-- **Core (fixed platform-wide):** warm-gray neutrals, semantic payment-status colors, 1.25 type scale on 16px base, 4px spacing grid, radii, 44px touch targets, Solar icon set (Iconify).
-- **Org theme (landlord-configurable, enduser + tenant apps only):** one primary color (strong/soft/on-primary variants derived automatically with contrast guaranteed) and one font from a whitelist (Plus Jakarta Sans default, Inter, Manrope, Figtree — self-hosted via next/font). Applied at runtime by `applyOrgTheme()` from org branding settings; the admin app always uses platform defaults.
+- **Core (fixed platform-wide):** paper/ink/rule palette, stamp colors (never themed), 16px-base type scale with one display size, 4px spacing grid, small stationery radii (3–6px), 52px ledger rows / 44px touch minimum, Solar icon set (Iconify), ink-colored focus ring, reduced-motion respected. Shared classes: `.ledger`, `.stamp`, `.pencil`, `.amount`, `.num`, `.btn-*`, `.field`/`.input`, `.sheet`, `.tabs`/`.tab`, `.bottom-bar`.
+- **Org theme (landlord-configurable, enduser + tenant apps only):** one primary color (pressed/tint/on-primary variants derived automatically, contrast guaranteed) and one font from a whitelist (Bricolage Grotesque default, Archivo, Instrument Sans, Hanken Grotesk — self-hosted via next/font). Applied at runtime by `applyOrgTheme()` from org branding settings; the admin app always uses platform defaults. Identity lives in structure, so a color/font swap cannot break a screen.
 
 ### 2.1 Multi-tenancy model
 
@@ -98,8 +98,10 @@ orgs                 name, slug, status, settings JSONB (auto_approve_links, due
 payment_periods      org_id, label ("Monthly", "3 weeks"), days INT >0, is_recommended, sort_order, active
                      -- landlord-managed list; seeded with recommended presets 30/90/180/365 days,
                      -- landlord adds any custom value (7, 21, 45 days...) — no upper/lower cap beyond >0
-org_branding         org_id, display_name, logo_object_key, theme JSONB {primary_color, font_id}, dashboard_prefs JSONB
-                     -- font_id from whitelist (jakarta|inter|manrope|figtree); see packages/ui
+org_branding         org_id, display_name, logo_object_key, letterhead_object_key NULLABLE,
+                     theme JSONB {primary_color, font_id}, dashboard_prefs JSONB,
+                     document_footer_text NULLABLE       -- address/phone/signature line under contracts
+                     -- font_id from whitelist (bricolage|archivo|instrument|hanken); see packages/ui
 users                phone, email, password_hash, kind (renter|org_user|platform_admin), status
 org_members          org_id, user_id, role (org_owner|org_manager)
 renter_profiles      user_id, full_name, nida_number, next_of_kin_name, next_of_kin_phone, kyc_status, kyc_doc_object_key
@@ -108,12 +110,17 @@ units                org_id, property_id, name, unit_code UNIQUE, status (vacant
                      allowed_period_ids UUID[] NULLABLE   -- NULL = all org periods offered for this unit
 price_plans          org_id, unit_id, amount, currency (TZS), period_days (default 30), effective_from
                      -- price history preserved; amount is per `period_days`, other periods prorated
-contract_templates   org_id, name, body_md, is_default                                        -- landlord-editable terms
-contracts            org_id, unit_id, renter_user_id, template_id, terms_snapshot_md,
+contract_templates   org_id, name, body_html, is_default   -- edited in-app (rich text editor); sanitized HTML
+contracts            org_id, unit_id, renter_user_id, template_id, terms_snapshot_html,
+                     -- app-native document: rendered in-app from snapshot + org letterhead; no external file
                      rent_amount, rent_period_days,           -- snapshot of price basis
                      payment_period_id, payment_period_days,  -- chosen cadence (days snapshotted)
                      term_days, start_date, end_date,         -- span; end_date = start + term_days
-                     due_day NULLABLE, status (draft|pending_signature|active|expiring|ended|terminated)
+                     due_day NULLABLE, status (draft|pending_signature|active|expiring|ended|terminated),
+                     snapshot_hash                            -- sha256 over terms_snapshot_html + key fields
+contract_signatures  org_id, contract_id, party (renter|landlord), user_id, method (otp_accept|drawn),
+                     otp_ref NULLABLE, signature_object_key NULLABLE, snapshot_hash, ip, user_agent, signed_at
+                     -- append-only; one row per party; renter row required before activate
 unit_link_requests   org_id, unit_id, renter_user_id, status (pending|approved|rejected)
 payment_schedules    org_id, contract_id, period_start, period_end, due_date, amount,
                      status (pending|paid|partial|overdue|waived)
@@ -160,6 +167,7 @@ POST /orgs                        register org (owner signup)
 GET/PATCH /org                    current org profile & settings
 GET/PUT   /org/branding           display name, theme, dashboard prefs
 POST      /org/branding/logo      → presigned MinIO upload URL
+POST      /org/branding/letterhead → presigned upload (PNG/JPG banner shown atop contract documents)
 POST/GET/DELETE /org/members      staff management
 ```
 
@@ -187,14 +195,37 @@ GET  /renters                     landlord's renter directory + KYC view
 
 ### 5.5 Contract templates & contracts
 ```
-CRUD /contract-templates          terms management (markdown body)
+CRUD /contract-templates          terms management (rich-text body, sanitized HTML; variables
+                                  {{renter_name}}, {{unit}}, {{property}}, {{rent}}, {{start_date}},
+                                  {{end_date}}, {{payment_period}}, {{org_name}})
 POST /contracts                   from link approval or manual: unit + renter + template +
                                   term_days + payment_period_id + start_date (end_date derived) + due_day?
-POST /contracts/{id}/activate     snapshots terms & price, generates schedules
+POST /contracts/{id}/sign/otp     renter: send OTP to registered phone for signing (rate-limited)
+POST /contracts/{id}/sign         renter: {otp_code, signature_upload_key?} → verifies OTP, records
+                                  contract_signatures row (party=renter), status → pending landlord
+POST /contracts/{id}/signature-upload   presigned PUT for optional drawn signature PNG (bucket `signatures`)
+POST /contracts/{id}/activate     landlord: records landlord signature row (party=landlord, method
+                                  otp_accept via session), requires renter signature present; snapshots
+                                  price, generates schedules, status → active
 POST /contracts/{id}/terminate
 GET  /contracts, /contracts/{id}  (renter sees only own)
-GET  /contracts/{id}/pdf          rendered terms snapshot → MinIO presigned URL
+GET  /contracts/{id}/document     app-native document: {letterhead_url, logo_url, org display name,
+                                  terms_snapshot_html, parties, schedule summary, footer_text,
+                                  signatures[] {party, name, signed_at, method, phone_masked,
+                                  signature_image_url?}, snapshot_hash}. Rendered in-app with a
+                                  signature block; "Print / Save as PDF" is browser print with a
+                                  print stylesheet. No server-side PDF in MVP.
+GET  /contracts/{id}/verify       recompute hash; returns valid/tampered + signature summary
 ```
+
+**Digital signing (MVP):**
+- Terms are snapshotted (variables resolved) and `snapshot_hash` computed when the contract enters `pending_signature`. Nothing about the document can change after that — edits require a new contract.
+- **Renter signs** in-app: reads the document → taps "Accept & sign" → OTP to the phone they registered with → optional drawn signature on a canvas → signature row stored with OTP reference, IP, user agent, timestamp, hash.
+- **Landlord countersigns** by activating (authenticated org user; row recorded the same way). Both rows are append-only and audited.
+- Document renders a signature block: "Signed by {name} on {date} via phone •••{last4}" (+ drawn image if given), and the hash for verification. Either party can re-open and print anytime.
+- Evidence bundle (snapshot + hash + OTP proof + IP/UA + timestamps) is the MVP e-signature; no third-party e-sign provider. Certificate-based / provider-backed signing is a §9 seam.
+
+Contract documents are **app-native**: the source of truth is `terms_snapshot_html` in Postgres, rendered by the frontends with the org's letterhead/logo. No generated files are stored. A server-rendered PDF (§9) can be added later without schema change.
 
 ### 5.6 Payments (MVP: offline recording)
 ```
@@ -257,7 +288,7 @@ Mechanics: scheduler derives due sends from Postgres → `dedupe_key` (`{kind}:{
 
 ## 7. Object storage (MinIO)
 
-Buckets: `branding` (logos), `qr` (unit QR PNGs), `contracts` (rendered PDFs), `kyc` (ID document images — private, short-TTL presigned reads only). All access via backend-issued presigned URLs; uploads via presigned PUT with content-type and size limits enforced on completion callback.
+Buckets: `branding` (logos, letterheads), `qr` (unit QR PNGs), `kyc` (ID document images — private, short-TTL presigned reads only), `signatures` (drawn signature PNGs — private, presigned reads only for contract parties). No `contracts` bucket in MVP — contract documents are app-native (§5.5). All access via backend-issued presigned URLs; uploads via presigned PUT with content-type and size limits enforced on completion callback.
 
 ---
 
@@ -277,6 +308,8 @@ Buckets: `branding` (logos), `qr` (unit QR PNGs), `contracts` (rendered PDFs), `
 - **Complaints:** future `complaints` table (org_id, unit_id, renter_user_id, category, status, thread). No current schema impact.
 - **Lavatory pay-per-use + commission split (30/70):** out of scope; would arrive as a separate module with its own service-usage ledger. Explicitly excluded from MVP.
 - **Payment gateway:** §5.7.
+- **Server-rendered contract PDFs:** would add a `contracts` bucket + `GET /contracts/{id}/pdf`; `terms_snapshot_html` + `contract_signatures` already hold everything needed to render.
+- **Provider-backed / certificate e-signature:** `contract_signatures.method` gains a new value; existing evidence rows stay valid.
 
 ---
 

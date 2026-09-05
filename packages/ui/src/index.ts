@@ -6,3 +6,4 @@ export {
   applyOrgTheme,
 } from './theme';
 export type { FontId, OrgTheme } from './theme';
+export { ThemeSwitcher } from './ThemeSwitcher';

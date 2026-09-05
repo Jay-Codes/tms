@@ -14,26 +14,26 @@
  * applyOrgTheme and keeps the defaults.
  */
 
-export const FONT_IDS = ['jakarta', 'inter', 'manrope', 'figtree'] as const;
+export const FONT_IDS = ['bricolage', 'archivo', 'instrument', 'hanken'] as const;
 export type FontId = (typeof FONT_IDS)[number];
 
 /** Font CSS variables are registered by each app's next/font setup. */
 export const FONT_LABELS: Record<FontId, string> = {
-  jakarta: 'Plus Jakarta Sans',
-  inter: 'Inter',
-  manrope: 'Manrope',
-  figtree: 'Figtree',
+  bricolage: 'Bricolage Grotesque',
+  archivo: 'Archivo',
+  instrument: 'Instrument Sans',
+  hanken: 'Hanken Grotesk',
 };
 
 export interface OrgTheme {
-  /** Hex color, e.g. "#0f766e". Comes from org branding settings. */
+  /** Hex color, e.g. "#2b4fd0". Comes from org branding settings. */
   primaryColor: string;
   font: FontId;
 }
 
 export const DEFAULT_THEME: OrgTheme = {
-  primaryColor: '#0f766e',
-  font: 'jakarta',
+  primaryColor: '#2b4fd0',
+  font: 'bricolage',
 };
 
 /* ----- color math (no deps) ----- */
