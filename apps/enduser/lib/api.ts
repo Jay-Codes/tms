@@ -463,8 +463,15 @@ export interface Contract {
   renter: { user_id: string; full_name: string; phone: string };
   template_id?: string | null;
   status: ContractStatus;
+  /** The unit price basis: `rent_amount` per `rent_period_days`. */
   rent_amount: number;
   rent_period_days: number;
+  /**
+   * The same rent scaled to one payment period — what the renter actually
+   * hands over each time (SPEC §6, "rent per payment period"). Optional:
+   * an older API omits it, and then the unit price is all we can show.
+   */
+  rent_per_period?: number;
   payment_period: { id: string; label: string; days: number };
   term_days: number;
   start_date: string;

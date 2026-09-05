@@ -1,5 +1,6 @@
 import { Bricolage_Grotesque, Archivo, Instrument_Sans, Hanken_Grotesk } from 'next/font/google';
 import '@tms/ui/tokens.css';
+import './enduser.css';
 import { AuthProvider } from '../lib/auth';
 import { ServiceWorker } from '../components/ServiceWorker';
 

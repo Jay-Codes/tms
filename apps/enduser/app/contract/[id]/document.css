@@ -12,6 +12,10 @@
   padding: var(--sp-4);
   display: grid;
   gap: var(--sp-5);
+  /* A grid item will not shrink below its content unless told to; without
+     this the sheet grew wider than the phone and the values inside it ran
+     off the right border (Phase 9, fix #9). */
+  min-width: 0;
 }
 
 .doc-letterhead {
@@ -24,6 +28,7 @@
 .doc-block {
   display: grid;
   gap: var(--sp-2);
+  min-width: 0;
 }
 
 .doc-block > h2 {
@@ -32,6 +37,15 @@
   color: var(--ink-soft);
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+/* Every value inside the sheet wraps rather than escaping it; the
+   label/value table itself is `.ledger-kv` (apps/enduser/app/enduser.css). */
+.doc .ledger td.num {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  height: auto;
+  padding-block: var(--sp-3);
 }
 
 /* ---- the snapshotted terms (sanitized server-side) ---- */

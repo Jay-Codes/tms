@@ -1,0 +1,74 @@
+/* ============================================================
+   Renter app — phone-first corrections layered on @tms/ui tokens.
+
+   Imported once by the root layout, so everything here is scoped to
+   `apps/enduser`: the shared design system keeps its own defaults for
+   the landlord and admin apps.
+   ============================================================ */
+
+/* A renter's ledger carries names, addresses and date ranges in its
+   right-hand column at least as often as it carries money, and `.num`
+   in the design system is `white-space: nowrap`. On a 320–414px phone
+   that pushed "Growsoft Technologies", "Studio Apartment · Kisanga B
+   Kwa mama vivi" and the like straight past the card's right border,
+   where they were clipped (Phase 9, fix #9).
+
+   Let those values wrap — still right-aligned, still tabular figures —
+   and break inside a single unbroken token rather than overflow. A
+   `height` on a table cell is a *minimum*, so a wrapped row simply grows
+   past `--row-h` instead of clipping; the extra block padding keeps a
+   two-line value off the rules.
+
+   The same holds for a `.num` used outside a table: a bank account
+   number beside its copy button, a price beside a period radio. */
+.ledger-kv .num,
+.doc .num {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ledger td.num {
+  padding-block: var(--sp-2);
+}
+
+/* Opt back in for the fragments that must never be split: one date of a
+   range, a formatted amount, a short chip. */
+.nowrap {
+  white-space: nowrap;
+}
+
+/* A label/value ledger — parties, profile, request summary. Auto table
+   layout hands the label column as much room as its longest word wants and
+   lets the value column overflow; fixed layout pins the labels to a third
+   of the card and gives the rest to the value, which now wraps. */
+.ledger-kv {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.ledger-kv td:first-child {
+  width: 30%;
+  color: var(--ink-soft);
+}
+
+.ledger-kv td.num {
+  /* A wrapped value is a block of lines, not one centred line. */
+  vertical-align: top;
+  height: auto;
+}
+
+/* A quiet second line under a ledger value: the masked phone under the
+   renter's name, the unit price under the rent actually paid. */
+.sub {
+  display: block;
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  font-weight: 400;
+}
+
+/* Flex and grid children default to `min-width: auto` and refuse to
+   shrink below their content. The phone-width column of paper always
+   wins; wide content scrolls inside its own wrapper instead. */
+main > * {
+  min-width: 0;
+}
