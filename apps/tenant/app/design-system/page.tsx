@@ -1,7 +1,23 @@
 'use client';
 
 import { Icon } from '@iconify/react';
-import { PeriodPicker, resolvePeriod, TableScroll, ThemeSwitcher, type PeriodValue } from '@tms/ui';
+import {
+  BarChart,
+  CHART_ROLES,
+  CHART_SLOTS,
+  LineAreaChart,
+  PeriodPicker,
+  RowBar,
+  Sparkline,
+  StatTile,
+  TableScroll,
+  ThemeSwitcher,
+  compactNumber,
+  fullTZS,
+  pctLabel,
+  resolvePeriod,
+  type PeriodValue,
+} from '@tms/ui';
 import { useState, type ReactNode } from 'react';
 
 /* ------------------------------------------------------------------ */
@@ -156,6 +172,158 @@ function Dashboard() {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Charts (phase 11). Sample data, so the pieces can be judged on      */
+/* their own before the real figures are behind them.                  */
+/* ------------------------------------------------------------------ */
+
+const MONTHS_2026 = ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'];
+const COLLECTED = [3_150_000, 3_600_000, 3_450_000, 4_050_000, 3_900_000, 4_350_000];
+const EXPECTED = [3_600_000, 3_600_000, 3_600_000, 4_050_000, 4_050_000, 4_500_000];
+const EXPENSES = [420_000, 1_180_000, 360_000, 505_000, 990_000, 610_000];
+const NET = COLLECTED.map((c, i) => c - EXPENSES[i]);
+const OCCUPANCY = [0.75, 0.83, 0.83, 0.91, 0.91, 1];
+
+const money = (v: number) => `TZS ${compactNumber(v)}`;
+
+function ChartsDemo() {
+  const netByProperty: Array<[string, number, number]> = [
+    ['Mbezi Beach Block A', 2_640_000, 0.97],
+    ['Kariakoo Shops', 1_180_000, 0.84],
+    ['Mikocheni House B', 320_000, 0.61],
+    ['Tegeta Annex', -140_000, 0.22],
+  ];
+  const max = Math.max(...netByProperty.map(([, v]) => Math.abs(v)));
+
+  return (
+    <div style={{ display: 'grid', gap: 'var(--sp-6)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 'var(--sp-5)' }}>
+        <StatTile
+          label="Collected"
+          value={fullTZS(COLLECTED[COLLECTED.length - 1])}
+          change={11.5}
+          changeLabelText="vs previous month"
+          goodDirection="up"
+          tone="paid"
+          trend={<Sparkline values={COLLECTED} color={CHART_ROLES.collected} ariaLabel="Collected over six months" />}
+        />
+        <StatTile
+          label="Expenses"
+          value={fullTZS(EXPENSES[EXPENSES.length - 1])}
+          change={-38.4}
+          changeLabelText="vs previous month"
+          goodDirection="down"
+        />
+        <StatTile
+          label="Net"
+          value={fullTZS(NET[NET.length - 1])}
+          change={22.1}
+          changeLabelText="vs previous month"
+          goodDirection="up"
+        />
+        <StatTile label="Collection rate" value={pctLabel(0.9667)} change={null} changeLabelText="vs previous month" />
+      </div>
+
+      <LineAreaChart
+        title="Collected against expected, by month. Expected is the reference line."
+        ariaLabel="Collected, expected and net over six months"
+        labels={MONTHS_2026}
+        headings={MONTHS_2026.map((m) => `${m} 2026`)}
+        formatValue={fullTZS}
+        formatTick={money}
+        series={[
+          { id: 'collected', label: 'Collected', color: CHART_ROLES.collected, values: COLLECTED, area: true },
+          { id: 'expected', label: 'Expected', color: CHART_ROLES.expected, values: EXPECTED, dashed: true },
+          { id: 'net', label: 'Net', color: CHART_ROLES.net, values: NET },
+        ]}
+      />
+
+      <BarChart
+        title="Expected against collected, side by side."
+        ariaLabel="Expected against collected over six months"
+        labels={MONTHS_2026}
+        headings={MONTHS_2026.map((m) => `${m} 2026`)}
+        formatValue={fullTZS}
+        formatTick={money}
+        series={[
+          { id: 'expected', label: 'Expected', color: CHART_ROLES.expected, values: EXPECTED },
+          { id: 'collected', label: 'Collected', color: CHART_ROLES.collected, values: COLLECTED },
+        ]}
+      />
+
+      <BarChart
+        title="Spending by category, stacked — the eight categorical slots in their fixed order."
+        ariaLabel="Spending by category over six months"
+        labels={MONTHS_2026}
+        stacked
+        formatValue={fullTZS}
+        formatTick={money}
+        series={['Repairs', 'Utilities', 'Security', 'Cleaning'].map((name, i) => ({
+          id: name,
+          label: name,
+          color: CHART_SLOTS[i],
+          values: EXPENSES.map((e, k) => Math.round((e * [0.42, 0.28, 0.18, 0.12][i]) / (k % 2 === 0 ? 1 : 1.2))),
+        }))}
+      />
+
+      <BarChart
+        title="Net by month — a loss draws below the baseline, not clipped to zero."
+        ariaLabel="Net by month, including a loss-making month"
+        labels={MONTHS_2026}
+        height={220}
+        formatValue={fullTZS}
+        formatTick={money}
+        series={[{ id: 'net', label: 'Net', color: CHART_ROLES.net, values: [...NET.slice(0, 4), -640_000, NET[5]] }]}
+      />
+
+      <LineAreaChart
+        title="Occupancy, by month. One series, so no legend: the title says what is plotted."
+        ariaLabel="Occupancy over six months"
+        labels={MONTHS_2026}
+        height={240}
+        formatValue={(v) => pctLabel(v, 1)}
+        formatTick={(v) => pctLabel(v)}
+        series={[{ id: 'occ', label: 'Occupancy', color: CHART_ROLES.occupancy, values: OCCUPANCY, area: true }]}
+      />
+
+      <TableScroll label="Net by property">
+        <table className="ledger">
+          <thead>
+            <tr>
+              <th>Property</th>
+              <th className="num">Net</th>
+              <th>Net share</th>
+              <th className="num">Collected</th>
+            </tr>
+          </thead>
+          <tbody>
+            {netByProperty.map(([name, net, rate]) => (
+              <tr key={name}>
+                <td style={{ fontWeight: 500 }}>{name}</td>
+                <td className="num" style={{ color: net < 0 ? 'var(--stamp-overdue)' : undefined }}>
+                  {fullTZS(net)}
+                </td>
+                <td>
+                  <RowBar value={net} max={max} color={CHART_ROLES.net} ariaLabel={`${name}: net ${fullTZS(net)}`} />
+                </td>
+                <td className="num">{pctLabel(rate)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableScroll>
+
+      <BarChart
+        title="Nothing recorded — the empty state, not an axis with no bars."
+        ariaLabel="An empty chart"
+        labels={MONTHS_2026}
+        height={200}
+        series={[{ id: 'z', label: 'Collected', color: CHART_ROLES.collected, values: MONTHS_2026.map(() => 0) }]}
+      />
+    </div>
+  );
+}
+
 function Section({ title, lead, children }: { title: string; lead: string; children: ReactNode }) {
   return (
     <section style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 'var(--sp-6)', paddingTop: 'var(--sp-6)' }}>
@@ -188,6 +356,13 @@ export default function DesignSystem() {
         lead="Brand colour and typeface. Both are applied at runtime from the org's settings; nothing else is exposed."
       >
         <ThemeSwitcher />
+      </Section>
+
+      <Section
+        title="Charts"
+        lead="Inline SVG, no chart library. One validated palette (--chart-1…8), a legend whenever two series are drawn, a tooltip on hover, tap and arrow keys, and the table beside the chart so no figure is only reachable by pointing at it."
+      >
+        <ChartsDemo />
       </Section>
 
       <Section
