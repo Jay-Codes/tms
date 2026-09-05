@@ -35,3 +35,12 @@
 - Verified live: property + units created, QR sheet with real PNGs served through :8080, price change + bulk +10%, period add/reorder, public unit resolves branding + prorated amounts.
 
 **Deferred:** bulk unit create non-atomic (spec silent); `unit_ids` cap 200. Presigned URLs use `MINIO_PUBLIC_URL` (=localhost:8080 until ngrok is restarted).
+
+## 2026-09-05 — Phase 3: Renter onboarding, KYC, linking ✅
+
+**Shipped**
+- Backend: migration `000004_link_requests`; `internal/contract/schedule.go` generator (table-tested: 180/45, 100/30, 7d, due_day clamps); renter profile + NIDA (encrypted, masked, never audited), KYC presigned upload/complete/view; link requests (create rules, cancel, inbox, approve/reject, auto-approve); renter directory; `notification_log` queue + Redis worker + SW/EN templates (`link_approved`, `link_rejected`).
+- Enduser: `/u/{code}` branded landing (applyOrgTheme), KYC form + ID upload, connect flow (period, term, start date, preview), request ledger on home. Tenant: link-request inbox + detail (KYC panel, approve/reject), renter directory + detail, nav badge, dashboard card.
+- Verified live: renter connect via UI → landlord inbox → approve → Swahili SMS in `.dev/api.log`, notification_log `sent`; auto-approve path via curl (100d/30d → 4 rows, last 83,333).
+
+**Deferred to later phases:** worker atomic claim for multi-worker pool (Phase 6); orphaned KYC objects on re-upload; `GET /renters` N+1 (Phase 8 load pass); enduser `KycStatus` type lacks `rejected`.

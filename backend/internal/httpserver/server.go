@@ -204,6 +204,28 @@ func (s *Server) routes() chi.Router {
 			r.Post("/units/{id}/qr", s.handleUnitQR)
 			r.Get("/units/{id}/prices", s.handleListPrices)
 			r.Post("/units/{id}/prices", s.handleCreatePrice)
+
+			// --- Phase 3: link-request inbox, renter directory ---
+			r.Get("/link-requests", s.handleListLinkRequests)
+			r.Get("/link-requests/{id}", s.handleGetLinkRequest)
+			r.Post("/link-requests/{id}/approve", s.handleApproveLinkRequest)
+			r.Post("/link-requests/{id}/reject", s.handleRejectLinkRequest)
+			r.Get("/renters", s.handleListRenters)
+			r.Get("/renters/{user_id}", s.handleGetRenter)
+			r.Get("/renters/{user_id}/kyc-doc", s.handleRenterKYCDoc)
+		})
+
+		// --- Phase 3: renter scope (tms_r) ---
+		r.Group(func(r chi.Router) {
+			r.Use(s.sessions.RequireRenter())
+			r.Get("/me/profile", s.handleGetMyProfile)
+			r.Put("/me/profile", s.handlePutMyProfile)
+			r.Post("/me/profile/kyc-upload", s.handleKYCUpload)
+			r.Post("/me/profile/kyc-upload/complete", s.handleKYCUploadComplete)
+			r.Get("/me/profile/kyc-doc", s.handleMyKYCDoc)
+			r.Get("/me/link-requests", s.handleListMyLinkRequests)
+			r.Delete("/me/link-requests/{id}", s.handleCancelMyLinkRequest)
+			r.Post("/units/{unit_code}/link", s.handleCreateLinkRequest)
 		})
 
 		// --- Phase 2: public (no session; rate limited per IP) ---

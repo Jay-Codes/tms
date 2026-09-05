@@ -44,6 +44,18 @@ const (
 	ActionPeriodUpdate    = "payment_period.update"
 	ActionPeriodDelete    = "payment_period.delete"
 	ActionPeriodRestore   = "payment_period.restore_recommended"
+
+	// Phase 3 — renter KYC and unit link requests. `kyc.view` records every
+	// read of an identity document (SPEC §8: access to KYC is audited); the
+	// NIDA number itself never appears in an audit payload, only
+	// `nida_changed`.
+	ActionProfileUpdate     = "renter_profile.update"
+	ActionKYCUpload         = "kyc.upload"
+	ActionKYCView           = "kyc.view"
+	ActionLinkRequestCreate = "link_request.create"
+	ActionLinkRequestCancel = "link_request.cancel"
+	ActionLinkApprove       = "link_request.approve"
+	ActionLinkReject        = "link_request.reject"
 )
 
 // Entity types.
@@ -57,6 +69,9 @@ const (
 	EntityUnit          = "unit"
 	EntityPricePlan     = "price_plan"
 	EntityPaymentPeriod = "payment_period"
+
+	EntityRenterProfile = "renter_profile"
+	EntityLinkRequest   = "link_request"
 )
 
 type ctxKey int

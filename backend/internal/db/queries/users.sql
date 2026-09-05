@@ -36,3 +36,19 @@ RETURNING *;
 
 -- name: CountPlatformAdmins :one
 SELECT count(*) FROM users WHERE kind = 'platform_admin' AND deleted_at IS NULL;
+
+-- SetUserEmail backs the optional `email` field of PUT /me/profile. A renter
+-- registers by phone, so the address is added later or not at all.
+-- name: SetUserEmail :one
+UPDATE users SET email = sqlc.narg(email)
+WHERE id = sqlc.arg(id) AND deleted_at IS NULL
+RETURNING *;
+
+-- SetUserFullName keeps the account's display name in step with the renter
+-- profile: PUT /me/profile writes the name a renter types, and the landlord
+-- directory reads `users.full_name` in places the profile row is not joined,
+-- so leaving the two apart shows the same person under two names.
+-- name: SetUserFullName :one
+UPDATE users SET full_name = sqlc.arg(full_name)
+WHERE id = sqlc.arg(id) AND deleted_at IS NULL
+RETURNING *;

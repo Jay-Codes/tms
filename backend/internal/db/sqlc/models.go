@@ -85,6 +85,10 @@ type NotificationLog struct {
 	SentAt        pgtype.Timestamptz `json:"sent_at"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ToPhone       string             `json:"to_phone"`
+	Body          string             `json:"body"`
+	Error         *string            `json:"error"`
+	Attempts      int32              `json:"attempts"`
 }
 
 type Org struct {
@@ -237,15 +241,22 @@ type Unit struct {
 }
 
 type UnitLinkRequest struct {
-	ID           pgtype.UUID        `json:"id"`
-	OrgID        pgtype.UUID        `json:"org_id"`
-	UnitID       pgtype.UUID        `json:"unit_id"`
-	RenterUserID pgtype.UUID        `json:"renter_user_id"`
-	Status       string             `json:"status"`
-	Reason       *string            `json:"reason"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
+	ID              pgtype.UUID        `json:"id"`
+	OrgID           pgtype.UUID        `json:"org_id"`
+	UnitID          pgtype.UUID        `json:"unit_id"`
+	RenterUserID    pgtype.UUID        `json:"renter_user_id"`
+	Status          string             `json:"status"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	PaymentPeriodID pgtype.UUID        `json:"payment_period_id"`
+	TermDays        *int32             `json:"term_days"`
+	StartDate       pgtype.Date        `json:"start_date"`
+	EndDate         pgtype.Date        `json:"end_date"`
+	RejectionReason *string            `json:"rejection_reason"`
+	DecidedAt       pgtype.Timestamptz `json:"decided_at"`
+	DecidedByUserID pgtype.UUID        `json:"decided_by_user_id"`
+	AcceptedTermsAt pgtype.Timestamptz `json:"accepted_terms_at"`
 }
 
 type User struct {

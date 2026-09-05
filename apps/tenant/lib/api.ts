@@ -448,3 +448,153 @@ export const unwrapPeriod = (res: { period: PaymentPeriod } | PaymentPeriod) =>
 export function toApiError(e: unknown): ApiError {
   return e instanceof ApiError ? e : new ApiError(0, { detail: String(e) });
 }
+
+/* ------------------------------------------------------------------ */
+/* Shapes — mirror API.md Phase 3 (landlord side) exactly.             */
+/* ------------------------------------------------------------------ */
+
+export type KycStatus = 'none' | 'submitted' | 'verified';
+export type LinkRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+
+export interface LinkRequestUnit {
+  id: string;
+  name: string;
+  property_name: string;
+  /** Present on some payloads; used only to deep-link the unit screen. */
+  property_id?: string | null;
+}
+
+export interface LinkRequestRenter {
+  user_id: string;
+  full_name: string;
+  phone: string | null;
+  kyc_status: KycStatus;
+}
+
+export interface LinkRequestPeriod {
+  id?: string;
+  label: string;
+  days: number;
+  /** Prorated amount for this period, integer TZS. */
+  amount: number | null;
+}
+
+export interface SchedulePreview {
+  count: number;
+  first_due: string;
+  amount_first: number;
+  amount_last: number;
+  total: number;
+}
+
+export interface LinkRequest {
+  id: string;
+  unit: LinkRequestUnit;
+  renter: LinkRequestRenter;
+  payment_period: LinkRequestPeriod;
+  term_days: number;
+  start_date: string;
+  end_date: string;
+  status: LinkRequestStatus;
+  created_at: string;
+  decided_at: string | null;
+  rejection_reason: string | null;
+  schedule_preview?: SchedulePreview | null;
+}
+
+/** Renter KYC as the landlord may see it — NIDA is masked server-side. */
+export interface RenterProfile {
+  full_name: string;
+  nida_masked: string | null;
+  next_of_kin_name: string | null;
+  next_of_kin_phone: string | null;
+  email: string | null;
+  kyc_status: KycStatus;
+  kyc_doc_uploaded?: boolean;
+  /** Some payloads name the flag differently; both are tolerated in the UI. */
+  kyc_doc_available?: boolean;
+  updated_at?: string | null;
+}
+
+export interface LinkRequestDetail {
+  request: LinkRequest;
+  renter_profile: RenterProfile | null;
+}
+
+export interface RenterUnitLink {
+  unit_id: string;
+  unit_name: string;
+  property_name: string;
+  link_status: string;
+}
+
+export interface RenterSummary {
+  user_id: string;
+  full_name: string;
+  phone: string | null;
+  email: string | null;
+  kyc_status: KycStatus;
+  units: RenterUnitLink[];
+  created_at: string;
+}
+
+export interface RenterDetail {
+  renter: RenterSummary;
+  profile: RenterProfile | null;
+  link_requests: LinkRequest[];
+  /** Phase 4 fills this in; Phase 3 always answers an empty list. */
+  contracts: unknown[];
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 3 endpoint helpers (landlord; audience org)                    */
+/* ------------------------------------------------------------------ */
+
+export const linkRequestsApi = {
+  list: (
+    query: { status?: LinkRequestStatus | ''; cursor?: string; limit?: number } = {},
+    signal?: AbortSignal,
+  ) =>
+    api.get<{ items: LinkRequest[]; next_cursor?: string | null; total?: number }>(
+      '/link-requests',
+      { query, signal },
+    ),
+  get: (id: string, signal?: AbortSignal) =>
+    api.get<LinkRequestDetail | LinkRequest>(`/link-requests/${id}`, { signal }),
+  approve: (id: string) => api.post<{ request: LinkRequest } | LinkRequest>(`/link-requests/${id}/approve`),
+  reject: (id: string, reason: string) =>
+    api.post<{ request: LinkRequest } | LinkRequest>(`/link-requests/${id}/reject`, { reason }),
+};
+
+export const rentersApi = {
+  list: (
+    query: { q?: string; kyc_status?: KycStatus | ''; cursor?: string; limit?: number } = {},
+    signal?: AbortSignal,
+  ) => api.get<{ items: RenterSummary[]; next_cursor?: string | null }>('/renters', { query, signal }),
+  get: (userId: string, signal?: AbortSignal) =>
+    api.get<RenterDetail>(`/renters/${userId}`, { signal }),
+  kycDoc: (userId: string) => api.get<{ url: string }>(`/renters/${userId}/kyc-doc`),
+};
+
+export const unwrapRequest = (res: { request: LinkRequest } | LinkRequest) =>
+  unwrap<LinkRequest>(res, 'request');
+
+/**
+ * `GET /link-requests/{id}` may answer `{request, renter_profile}` or a flat
+ * request carrying `renter_profile`; normalise both into the pair.
+ */
+export function unwrapRequestDetail(res: LinkRequestDetail | LinkRequest): LinkRequestDetail {
+  const o = res as unknown as Record<string, unknown>;
+  const request = (o.request ?? res) as LinkRequest;
+  const profile =
+    (o.renter_profile as RenterProfile | undefined) ??
+    ((request as unknown as Record<string, unknown>)?.renter_profile as RenterProfile | undefined) ??
+    null;
+  return { request, renter_profile: profile };
+}
+
+/** True when the renter uploaded an ID document (payload names it either way). */
+export function hasKycDoc(profile: RenterProfile | null | undefined): boolean {
+  if (!profile) return false;
+  return Boolean(profile.kyc_doc_uploaded ?? profile.kyc_doc_available);
+}

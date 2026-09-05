@@ -47,6 +47,18 @@ func WriteProblemFields(w http.ResponseWriter, status int, title, detail string,
 	}
 }
 
+// WriteProblemCode writes an RFC 7807 error carrying a machine-readable code
+// in `type`, for the errors API.md names by code (`unit_occupied`,
+// `kyc_required`, …). Clients branch on the code; humans read the title.
+func WriteProblemCode(w http.ResponseWriter, status int, code, title, detail string) {
+	p := Problem{Type: code, Title: title, Status: status, Detail: detail}
+	w.Header().Set("Content-Type", ProblemContentType)
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(p); err != nil {
+		slog.Error("write problem response", "error", err)
+	}
+}
+
 // WriteJSON writes v as a JSON response with the given status code.
 func WriteJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

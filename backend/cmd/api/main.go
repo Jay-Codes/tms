@@ -20,6 +20,7 @@ import (
 	"tms/backend/internal/cache"
 	"tms/backend/internal/config"
 	"tms/backend/internal/db"
+	"tms/backend/internal/db/sqlc"
 	"tms/backend/internal/httpserver"
 	"tms/backend/internal/notify"
 	"tms/backend/internal/platform"
@@ -138,6 +139,21 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 		}
 		deps.Minio = minioClient
 		deps.Storage = minioClient
+	}
+
+	// The notification worker drains the Redis SMS queue and records each
+	// send in notification_log. It needs Postgres, Redis and a provider; with
+	// any of them missing it declines to start and messages simply stay
+	// `queued` until a healthy run picks them up (SPEC §2.2).
+	if deps.Pool != nil && redisClient != nil {
+		go notify.RunWorker(ctx, notify.Worker{
+			Q:      sqlc.New(deps.Pool),
+			Redis:  redisClient.Client,
+			SMS:    deps.SMS,
+			Logger: logger,
+		})
+	} else {
+		logger.Warn("notification worker not started: postgres or redis unavailable")
 	}
 
 	srv := httpserver.New(cfg, deps, logger)
