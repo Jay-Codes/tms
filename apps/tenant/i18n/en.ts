@@ -1408,6 +1408,12 @@ const messages: Messages = {
   'expenses.form.reference_hint': 'Invoice or receipt number.',
   'expenses.form.reference_placeholder': 'e.g. INV-2291',
   'expenses.form.note_hint': '{count}/500 — for your own records.',
+  'period.cadence.month': 'Month',
+  'period.cadence.quarter': 'Quarter',
+  'period.cadence.half_year': '6 months',
+  'period.cadence.year': 'Year',
+  'period.cadence.custom': 'Custom',
+  'common.no_comparison': 'no comparison',
 };
 
 export default messages;

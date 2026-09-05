@@ -33,6 +33,8 @@ export interface PeriodPickerProps {
   maxDate?: string;
   /** Accessible name for the whole control. */
   label?: string;
+  /** Localised cadence names; falls back to the English CADENCE_LABELS. */
+  cadenceLabels?: Partial<Record<Cadence, string>>;
 }
 
 function Arrow({ dir }: { dir: 'prev' | 'next' }) {
@@ -50,7 +52,7 @@ function Arrow({ dir }: { dir: 'prev' | 'next' }) {
   );
 }
 
-export function PeriodPicker({ value, onChange, minDate, maxDate, label = 'Period' }: PeriodPickerProps) {
+export function PeriodPicker({ value, onChange, minDate, maxDate, label = 'Period', cadenceLabels }: PeriodPickerProps) {
   const id = useId();
   const prev = shiftPeriod(value, -1);
   const next = shiftPeriod(value, 1);
@@ -86,7 +88,7 @@ export function PeriodPicker({ value, onChange, minDate, maxDate, label = 'Perio
             aria-pressed={c === value.cadence}
             onClick={() => pick(c)}
           >
-            {CADENCE_LABELS[c]}
+            {cadenceLabels?.[c] ?? CADENCE_LABELS[c]}
           </button>
         ))}
       </div>

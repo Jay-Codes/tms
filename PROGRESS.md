@@ -142,3 +142,15 @@
 - Enduser: `lib/theme.ts` adapter (v2 + legacy), full theme applied pre-auth (QR landing/connect) and signed-in, cache migrated to v2 shape, `theme-color` meta from paper, dark-aware document/signature/letterhead, print pinned to light paper.
 
 **Verified**: `make build/test/lint` green; curl: 8 presets, preset save → public endpoints, low-contrast 400 with failures, legacy PUT; browser with JJnE on Night ledger: tenant reports dark (paper #14161c, stamp-paid #4ec07f, charts re-stepped), renter rent book dark with theme-color #14161c. JJnE restored to `ledger`.
+
+## Phase 13 — Language: Swahili/English per user (6 Sep 2026) — branch `phase-13-language`
+
+**Shipped**
+- Shared runtime `packages/ui/src/i18n` (I18nProvider, useT, plural, Intl date/number helpers) + `packages/ui/scripts/i18n-check.mjs` wired into `make lint`.
+- Backend: `locale` on register/signup/invite/OTP send, on every `{user}` payload, `PATCH /me` + `PATCH /org/members/me` (audited); `notify.LanguageFor` (user locale → org default → sw) on every renter-directed send incl. OTP (now a template kind); `notification_log.language`; bulk `POST /notifications/custom {body_sw, body_en}` with per-recipient fan-out and `by_language`; `GET /notifications/custom/recipients-preview`; contract templates `body_html_sw` + Kiswahili default body seeded (migration 000015), `POST /contracts {language}` defaulting to the renter's locale, `contracts.language` on DTOs. Fixed an evening-UTC flake in scheduler tests.
+- Enduser: 305 keys, `LocaleProvider` (user → localStorage → `?lang` → org default → device), SW/EN toggle on login/register/QR landing/profile, Kiswahili app identity + manifest, title survives client navigation.
+- Tenant: 1346 keys across all screens, Settings → Preferences, toggles on auth pages + drawer, bilingual bulk compose with per-language counts and segment counters, template editor EN/SW tabs + per-language preview, "Document language" on new contracts, contract detail shows language. `PeriodPicker`/`StatTile` gained localisable labels; uncategorised expense group mapped client-side.
+
+**Verified**: `make build/test/lint` (incl. i18n-check) green; curl: locale round-trip, invalid → 400, bulk `by_language {sw:3,en:1}` with per-recipient bodies confirmed in Postgres, SW/EN template preview; browser: landlord app fully Swahili (nav, reports cadence "Mwezi/Robo mwaka/Miezi 6/Mwaka/Maalum", tiles), renter app Swahili with Swahili month names, 375 px bottom bars fit. Owner and renter restored to their previous locales.
+
+**Open for the user**: `.env` now carries real Beem credentials and every send fails upstream with `API_INVALID_PARAMETER: Invalid Sender ID` — the sender name must be one Beem has approved for the account. Dev OTP reading via `grep sms_body .dev/api.log` no longer works while the real provider is configured.

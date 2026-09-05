@@ -133,7 +133,7 @@ export function PropertyExpenses({
         </div>
       </div>
 
-      <PeriodPicker value={period} onChange={setPeriod} label={t('properties.expenses.period_label')} />
+      <PeriodPicker value={period} onChange={setPeriod} label={t('properties.expenses.period_label')} cadenceLabels={{ month: t('period.cadence.month'), quarter: t('period.cadence.quarter'), half_year: t('period.cadence.half_year'), year: t('period.cadence.year'), custom: t('period.cadence.custom') }} />
 
       <p
         style={{

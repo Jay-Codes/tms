@@ -1406,6 +1406,12 @@ const messages: Messages = {
   'expenses.form.reference_hint': 'Namba ya ankara au risiti.',
   'expenses.form.reference_placeholder': 'mfano INV-2291',
   'expenses.form.note_hint': '{count}/500 — kwa kumbukumbu zako mwenyewe.',
+  'period.cadence.month': 'Mwezi',
+  'period.cadence.quarter': 'Robo mwaka',
+  'period.cadence.half_year': 'Miezi 6',
+  'period.cadence.year': 'Mwaka',
+  'period.cadence.custom': 'Maalum',
+  'common.no_comparison': 'hakuna ulinganisho',
 };
 
 export default messages;

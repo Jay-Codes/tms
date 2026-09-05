@@ -35,6 +35,8 @@ export interface StatTileProps {
   /** Drawn to the right of the figure. */
   trend?: ReactNode;
   tone?: 'paid' | 'overdue';
+  /** Localised text shown when there is no previous-period comparison. */
+  noComparisonLabel?: string;
 }
 
 function Arrow({ dir }: { dir: 'up' | 'down' | 'flat' }) {
@@ -50,15 +52,17 @@ export function ChangeMark({
   change,
   goodDirection = 'up',
   suffix,
+  noComparisonLabel,
 }: {
   change: number | null | undefined;
   goodDirection?: GoodDirection;
   suffix?: string;
+  noComparisonLabel?: string;
 }) {
   if (change === null || change === undefined || !Number.isFinite(change)) {
     return (
-      <span className="pencil" title="There was nothing in the previous period to compare against.">
-        no comparison
+      <span className="pencil" title={noComparisonLabel ?? "There was nothing in the previous period to compare against."}>
+        {noComparisonLabel ?? 'no comparison'}
       </span>
     );
   }
@@ -94,6 +98,7 @@ export function StatTile({
   sub,
   trend,
   tone,
+  noComparisonLabel,
 }: StatTileProps) {
   const color = tone === 'overdue' ? 'var(--stamp-overdue)' : tone === 'paid' ? 'var(--stamp-paid)' : 'var(--ink)';
   return (
@@ -113,7 +118,7 @@ export function StatTile({
       </div>
       {change !== undefined ? (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-          <ChangeMark change={change} goodDirection={goodDirection} />
+          <ChangeMark change={change} goodDirection={goodDirection} noComparisonLabel={noComparisonLabel} />
           {changeLabelText ? (
             <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>{changeLabelText}</span>
           ) : null}

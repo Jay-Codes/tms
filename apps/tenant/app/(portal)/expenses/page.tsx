@@ -195,7 +195,7 @@ function ExpensesBody() {
       />
 
       <div style={{ marginBottom: 'var(--sp-4)' }}>
-        <PeriodPicker value={period} onChange={setPeriod} label={t('expenses.period_label')} />
+        <PeriodPicker value={period} onChange={setPeriod} label={t('expenses.period_label')} cadenceLabels={{ month: t('period.cadence.month'), quarter: t('period.cadence.quarter'), half_year: t('period.cadence.half_year'), year: t('period.cadence.year'), custom: t('period.cadence.custom') }} />
       </div>
 
       <div

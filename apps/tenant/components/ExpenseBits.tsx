@@ -290,7 +290,7 @@ export function ExpenseSummaryStrip({
                 <li key={g.id || g.name} style={{ display: 'grid', gap: 2 }}>
                   <span style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--sp-3)' }}>
                     <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {g.name}
+                      {g.id ? g.name : t('expenses.uncategorised')}
                     </span>
                     <span className="num" style={{ fontVariantNumeric: 'tabular-nums lining-nums' }}>
                       {fmtTZS(g.amount)}

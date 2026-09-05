@@ -200,7 +200,7 @@ function OverviewTab({ period, propertyId, previousLabel }: Scope) {
         <section style={{ display: 'grid', gap: 'var(--sp-4)' }}>
           <SectionHead icon="solar:wallet-money-linear" title={t9('reports.overview.this_period')} />
           <TileRow min={220}>
-            <StatTile
+            <StatTile noComparisonLabel={t9('common.no_comparison')}
               label={t9('reports.tile.collected')}
               value={fmtTZS(t?.collected ?? null)}
               change={change.collected ?? null}
@@ -220,7 +220,7 @@ function OverviewTab({ period, propertyId, previousLabel }: Scope) {
                 ) : undefined
               }
             />
-            <StatTile
+            <StatTile noComparisonLabel={t9('common.no_comparison')}
               label={t9('reports.tile.expected')}
               value={fmtTZS(t?.expected ?? null)}
               change={change.expected ?? null}
@@ -228,14 +228,14 @@ function OverviewTab({ period, propertyId, previousLabel }: Scope) {
               goodDirection="none"
               sub={t9('reports.tile.expected_sub')}
             />
-            <StatTile
+            <StatTile noComparisonLabel={t9('common.no_comparison')}
               label={t9('reports.tile.expenses')}
               value={fmtTZS(t?.expenses ?? null)}
               change={change.expenses ?? null}
               changeLabelText={previousLabel}
               goodDirection="down"
             />
-            <StatTile
+            <StatTile noComparisonLabel={t9('common.no_comparison')}
               label={t9('reports.tile.net')}
               value={fmtTZS(t?.net ?? null)}
               change={change.net ?? null}
@@ -244,7 +244,7 @@ function OverviewTab({ period, propertyId, previousLabel }: Scope) {
               tone={t && t.net < 0 ? 'overdue' : undefined}
               sub={t9('reports.tile.net_sub')}
             />
-            <StatTile
+            <StatTile noComparisonLabel={t9('common.no_comparison')}
               label={t9('reports.tile.collection_rate')}
               value={pctLabel(r?.collection_rate ?? null)}
               sub={
@@ -256,7 +256,7 @@ function OverviewTab({ period, propertyId, previousLabel }: Scope) {
                   : undefined
               }
             />
-            <StatTile
+            <StatTile noComparisonLabel={t9('common.no_comparison')}
               label={t9('reports.tile.occupancy')}
               value={pctLabel(occupancy.data ? frac(occupancy.data.current.occupancy_pct) : (a?.occupancy_rate ?? null))}
               sub={
@@ -278,18 +278,18 @@ function OverviewTab({ period, propertyId, previousLabel }: Scope) {
             <section style={{ display: 'grid', gap: 'var(--sp-4)' }}>
               <SectionHead icon="solar:buildings-2-linear" title={t9('reports.overview.assets')} />
               <TileRow>
-                <StatTile label={t9('reports.tile.properties')} value={a.properties} />
-                <StatTile
+                <StatTile noComparisonLabel={t9('common.no_comparison')} label={t9('reports.tile.properties')} value={a.properties} />
+                <StatTile noComparisonLabel={t9('common.no_comparison')}
                   label={t9('reports.tile.units')}
                   value={a.units}
                   sub={t9('reports.tile.units_sub', { vacant: a.vacant, maintenance: a.maintenance })}
                 />
-                <StatTile
+                <StatTile noComparisonLabel={t9('common.no_comparison')}
                   label={t9('reports.tile.active_renters')}
                   value={summary.data.renters.active}
                   sub={t9('reports.tile.active_renters_sub')}
                 />
-                <StatTile
+                <StatTile noComparisonLabel={t9('common.no_comparison')}
                   label={t9('reports.tile.contracts')}
                   value={summary.data.contracts.active}
                   sub={t9('reports.tile.contracts_sub', {
@@ -381,22 +381,22 @@ function RevenueTab({ period, propertyId, previousLabel }: Scope) {
         <ProblemNote error={revenue.error} />
 
         <TileRow min={200}>
-          <StatTile
+          <StatTile noComparisonLabel={t9('common.no_comparison')}
             label={t9('reports.tile.collected')}
             value={fmtTZS(t?.collected ?? null)}
             change={change.collected ?? null}
             changeLabelText={previousLabel}
             tone="paid"
           />
-          <StatTile label={t9('reports.tile.expected')} value={fmtTZS(t?.expected ?? null)} goodDirection="none" />
-          <StatTile
+          <StatTile noComparisonLabel={t9('common.no_comparison')} label={t9('reports.tile.expected')} value={fmtTZS(t?.expected ?? null)} goodDirection="none" />
+          <StatTile noComparisonLabel={t9('common.no_comparison')}
             label={t9('reports.tile.expenses')}
             value={fmtTZS(t?.expenses ?? null)}
             change={change.expenses ?? null}
             changeLabelText={previousLabel}
             goodDirection="down"
           />
-          <StatTile
+          <StatTile noComparisonLabel={t9('common.no_comparison')}
             label={t9('reports.tile.net')}
             value={fmtTZS(t?.net ?? null)}
             change={change.net ?? null}
@@ -611,7 +611,7 @@ function ExpensesTab({ period, propertyId, previousLabel }: Scope) {
         <ProblemNote error={summary.error} />
 
         <TileRow min={220}>
-          <StatTile
+          <StatTile noComparisonLabel={t('common.no_comparison')}
             label={t('reports.expenses.spent_this_period')}
             value={fmtTZS(total)}
             change={summary.data?.change_pct ?? null}
@@ -626,7 +626,7 @@ function ExpensesTab({ period, propertyId, previousLabel }: Scope) {
                 : undefined
             }
           />
-          <StatTile
+          <StatTile noComparisonLabel={t('common.no_comparison')}
             label={t('reports.expenses.largest_category')}
             value={groups[0]?.name ?? '—'}
             sub={groups[0] ? fmtTZS(groups[0].amount) : t('reports.expenses.nothing_recorded')}
@@ -662,7 +662,7 @@ function ExpensesTab({ period, propertyId, previousLabel }: Scope) {
         <BarChart
           title={t('reports.expenses.chart_categories_title')}
           ariaLabel={t('reports.expenses.chart_categories_aria')}
-          labels={groups.slice(0, 8).map((g) => g.name)}
+          labels={groups.slice(0, 8).map((g) => (g.id ? g.name : t('expenses.uncategorised')))}
           height={220}
           formatValue={fmtTZS}
           formatTick={money}
@@ -697,7 +697,7 @@ function ExpensesTab({ period, propertyId, previousLabel }: Scope) {
               ) : (
                 groups.map((g) => (
                   <tr key={g.id}>
-                    <td style={{ fontWeight: 500 }}>{g.name}</td>
+                    <td style={{ fontWeight: 500 }}>{g.id ? g.name : t('expenses.uncategorised')}</td>
                     <td className="num">{g.count}</td>
                     <td className="num">{fmtTZS(g.amount)}</td>
                     <td>
@@ -753,8 +753,8 @@ function OccupancyTab({ period, propertyId }: Scope) {
         <ProblemNote error={occ.error} />
 
         <TileRow min={220}>
-          <StatTile label={t('reports.occupancy.now')} value={pctLabel(frac(current?.occupancy_pct))} />
-          <StatTile
+          <StatTile noComparisonLabel={t('common.no_comparison')} label={t('reports.occupancy.now')} value={pctLabel(frac(current?.occupancy_pct))} />
+          <StatTile noComparisonLabel={t('common.no_comparison')}
             label={t('reports.occupancy.units_occupied')}
             value={
               current
@@ -1009,19 +1009,19 @@ function CollectionsTab({ period, propertyId }: Scope) {
         <ProblemNote error={read.error} />
 
         <TileRow>
-          <StatTile
+          <StatTile noComparisonLabel={t('common.no_comparison')}
             label={t('reports.tile.expected')}
             value={fmtTZS(data?.totals.expected ?? null)}
             goodDirection="none"
           />
-          <StatTile
+          <StatTile noComparisonLabel={t('common.no_comparison')}
             label={t('reports.tile.collected')}
             value={fmtTZS(data?.totals.collected ?? null)}
             tone="paid"
             change={data?.change_pct?.collected ?? undefined}
             changeLabelText={data?.change_pct ? t('reports.vs.period') : undefined}
           />
-          <StatTile
+          <StatTile noComparisonLabel={t('common.no_comparison')}
             label={t('reports.collections.shortfall')}
             value={fmtTZS(data ? Math.max(0, data.totals.expected - data.totals.collected) : null)}
             tone={data && data.totals.collected < data.totals.expected ? 'overdue' : undefined}
@@ -1148,7 +1148,7 @@ function ReportsBody() {
           paddingBottom: 'var(--sp-4)',
         }}
       >
-        <PeriodPicker value={period} onChange={onPeriod} label={t('reports.period_label')} />
+        <PeriodPicker value={period} onChange={onPeriod} label={t('reports.period_label')} cadenceLabels={{ month: t('period.cadence.month'), quarter: t('period.cadence.quarter'), half_year: t('period.cadence.half_year'), year: t('period.cadence.year'), custom: t('period.cadence.custom') }} />
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
           <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>{t('common.property')}</span>
           <select

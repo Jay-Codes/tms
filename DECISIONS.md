@@ -56,3 +56,6 @@
 | 2026-09-05 | Stamp inks are not org-themable but get a fixed dark step (`#4ec07f` paid / `#ff8a80` overdue) under `data-theme="dark"`, same as the chart palette | Fixed stamps measured 2.8–3.4:1 on dark paper |
 | 2026-09-05 | Theme presets: backend `presets.json` is the source of truth; `packages/ui` keeps a generated offline copy guarded by `TestPresetsMatchUICopy` | Frontends need a fallback before the API answers; drift must fail the build |
 | 2026-09-05 | `night_ledger` primary is `#96b4ff` (not `#7c9cff`) so `on_primary/primary` passes 4.5:1; colours canonicalised lower-case; `source:"legacy"` only when `primary_color` differs from the schema default | Every preset must pass the validator |
+| 2026-09-06 | Invalid `locale` → 400 (codebase-wide validation convention), not 422; bulk send keeps scalar `queued` and adds `by_language:{sw,en}` | Keep Phase 6 shapes stable |
+| 2026-09-06 | i18n: apps own flat `en.ts`/`sw.ts` dictionaries; `make lint` runs `i18n-check` (key parity + placeholder parity); server-provided data (period labels, unit names, template HTML) is never translated client-side | Data vs chrome |
+| 2026-09-06 | OTP became a platform template kind `otp` (`{{code}}`) rendered in the recipient's locale; excluded from landlord-editable kinds | Locale-aware security text |
