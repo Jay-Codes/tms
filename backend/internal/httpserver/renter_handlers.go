@@ -218,6 +218,13 @@ func (s *Server) handleKYCUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := auth.MustFromContext(r.Context())
+	// Counted before object storage is consulted: the limit is on how often a
+	// session may ask, and it must hold whether or not MinIO is reachable.
+	if res := s.limiter.Allow(r.Context(), "kyc:upload:"+p.UserIDString(),
+		kycUploadLimit, kycUploadWindow); !res.Allowed {
+		tooMany(w, res, "too many upload requests; try again shortly")
+		return
+	}
 	if s.deps.Storage == nil {
 		kycStorageUnavailable(w)
 		return

@@ -5,7 +5,8 @@ NGROK_API := http://127.0.0.1:4040/api/tunnels
 
 .PHONY: help preview dev stop url install up down \
         api api-stop api-restart api-log proxy-restart \
-        migrate migrate-down test-db sqlc build test lint
+        migrate migrate-down test-db sqlc build test test-isolation test-race lint \
+        seed seed-demo loadtest
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  make %-14s %s\n", $$1, $$2}'
@@ -99,6 +100,25 @@ sqlc: ## Regenerate sqlc query code into backend/internal/db/sqlc
 		     go run github.com/sqlc-dev/sqlc/cmd/sqlc@latest generate; fi
 	@echo "sqlc: generated."
 
+# --- seeding / load pass (Phase 8) ---
+
+# SEED_ARGS passes flags through, e.g. `make seed SEED_ARGS=-reset`.
+SEED_ARGS ?=
+# LOADTEST_ARGS likewise, e.g. `make loadtest LOADTEST_ARGS="-duration 60s"`.
+LOADTEST_ARGS ?=
+
+seed: ## Seed the load-test org (5 properties, 50 units, 40 renters); idempotent
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+		cd backend && go run ./cmd/seed $(SEED_ARGS)
+
+seed-demo: ## Top up the JJnE Rentals demo org so every FLOWS screen has data
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+		cd backend && go run ./cmd/seed -demo $(SEED_ARGS)
+
+loadtest: ## Hammer the hot endpoints for 20s (needs `make seed` and a running API)
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+		cd backend && go run ./cmd/loadtest $(LOADTEST_ARGS)
+
 # --- build / test / lint ---
 
 build: ## Build backend, proxy and all Next.js apps (next builds are slow)
@@ -109,9 +129,25 @@ build: ## Build backend, proxy and all Next.js apps (next builds are slow)
 # -p 1 runs one package at a time: every DB-backed package truncates the SAME
 # tms_test database between tests, so packages running in parallel wipe each
 # other's rows and fail at random.
-test: ## Run backend Go tests and workspace tests
+test: ## Run backend Go tests and workspace tests (includes the isolation suite)
 	@cd backend && TEST_DATABASE_URL="$${TEST_DATABASE_URL:-postgres://tms:tms_dev@localhost:5433/tms_test?sslmode=disable}" go test -p 1 ./...
 	@npm test --workspaces --if-present
+
+# The SPEC §8 suite on its own, for the tight loop while adding a route. The
+# route-census test needs no database, so it still fails usefully (with the list
+# of uncovered routes) on a machine with no compose stack running.
+test-isolation: ## Run only the org/renter/admin isolation suite (SPEC §8)
+	@cd backend && TEST_DATABASE_URL="$${TEST_DATABASE_URL:-postgres://tms:tms_dev@localhost:5433/tms_test?sslmode=disable}" \
+		go test -v -count=1 ./internal/httpserver/ \
+		-run 'TestIsolationSuiteCoversEveryRoute|TestCrossOrgIsolationSuite|TestCrossRenterIsolationSuite|TestAdminRoutesRefuseTenantSessions'
+
+# The three packages that run goroutines of their own: the HTTP handlers, the
+# notification scheduler/worker pool, and the payment allocator. -race makes
+# each test far slower, so this is a separate target rather than part of
+# `make test`: the run takes ~2m15s (httpserver ~2m of it), against ~10s plain.
+test-race: ## Run the concurrent packages under the race detector
+	@cd backend && TEST_DATABASE_URL="$${TEST_DATABASE_URL:-postgres://tms:tms_dev@localhost:5433/tms_test?sslmode=disable}" \
+		go test -race -p 1 -count=1 ./internal/httpserver/... ./internal/notify/... ./internal/payment/...
 
 lint: ## Lint backend (golangci-lint, falls back to go vet) and frontends
 	@cd backend && \

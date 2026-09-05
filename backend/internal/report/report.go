@@ -4,24 +4,19 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"tms/backend/internal/tz"
 )
 
 // LocalZone is the wall clock a report's calendar boundaries are read against.
 // A landlord asking for "this month" means the month on the wall in Dar es
 // Salaam, not the one in UTC — which at 22:00 on the last day of a month is a
 // different month (SPEC §6 uses the same zone for send hours).
-const LocalZone = "Africa/Dar_es_Salaam"
-
-const eatOffsetHours = 3
+const LocalZone = tz.LocalZone
 
 // Zone resolves the org wall clock, falling back to a fixed UTC+3 when the host
 // image ships without tzdata.
-func Zone() *time.Location {
-	if loc, err := time.LoadLocation(LocalZone); err == nil {
-		return loc
-	}
-	return time.FixedZone("EAT", eatOffsetHours*60*60)
-}
+func Zone() *time.Location { return tz.Zone() }
 
 // Period is a closed range of calendar days, inclusive at both ends. `From` and
 // `To` are the dates the SQL `due_date BETWEEN` uses; FromTime/ToTime are the
@@ -38,10 +33,7 @@ func (p Period) FromTime() time.Time { return startOfDay(p.From) }
 // half-open so a payment recorded at 23:59:59.9 on the last day still counts.
 func (p Period) ToTime() time.Time { return startOfDay(p.To).AddDate(0, 0, 1) }
 
-func startOfDay(d time.Time) time.Time {
-	loc := Zone()
-	return time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, loc)
-}
+func startOfDay(d time.Time) time.Time { return tz.StartOfDay(d) }
 
 // ParsePeriod resolves the `period` query parameter of GET /reports/summary.
 // Empty or "month" means the calendar month `now` falls in; otherwise the value

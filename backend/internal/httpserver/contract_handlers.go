@@ -667,6 +667,13 @@ func (s *Server) handleSignatureUpload(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Counted before object storage is consulted: the limit is on how often a
+	// session may ask, and it must hold whether or not MinIO is reachable.
+	if res := s.limiter.Allow(r.Context(), "signature:upload:"+auth.MustFromContext(r.Context()).UserIDString(),
+		signatureUploadLimit, signatureUploadWindow); !res.Allowed {
+		tooMany(w, res, "too many signature upload requests; try again shortly")
+		return
+	}
 	if s.deps.Storage == nil {
 		signatureStorageUnavailable(w)
 		return

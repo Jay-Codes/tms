@@ -124,7 +124,7 @@ func (s *Server) handleListUnits(w http.ResponseWriter, r *http.Request) {
 	if v := strings.TrimSpace(qs.Get("q")); v != "" {
 		// The value goes into an ILIKE pattern; escape the wildcards so a
 		// search for "100%" cannot match everything.
-		escaped := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(v)
+		escaped := escapeLike(v)
 		params.Q = &escaped
 	}
 	if !f.Empty() {
