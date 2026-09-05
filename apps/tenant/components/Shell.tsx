@@ -22,7 +22,8 @@ export interface NavItem {
 
 export const NAV: NavItem[] = [
   { href: '/', label: 'Dashboard', icon: 'solar:home-2-linear' },
-  { href: '/properties', label: 'Properties', icon: 'solar:buildings-2-linear', phase: 2 },
+  { href: '/properties', label: 'Properties', icon: 'solar:buildings-2-linear' },
+  { href: '/units', label: 'Units', icon: 'solar:widget-4-linear' },
   { href: '/renters', label: 'Renters', icon: 'solar:users-group-rounded-linear', phase: 3 },
   { href: '/contracts', label: 'Contracts', icon: 'solar:document-text-linear', phase: 4 },
   { href: '/payments', label: 'Payments', icon: 'solar:wallet-money-linear', phase: 5 },
@@ -52,6 +53,7 @@ function VerifyBanner() {
 
   return (
     <div
+      className="shell-banner"
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -85,6 +87,7 @@ function Rail() {
 
   return (
     <aside
+      className="shell-rail"
       style={{
         background: 'var(--paper)',
         borderRight: '1px solid var(--rule)',
@@ -136,6 +139,7 @@ function TopBar() {
   const { user, logout } = useMe();
   return (
     <header
+      className="shell-topbar"
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -159,12 +163,12 @@ function TopBar() {
 export function Shell({ children }: { children: ReactNode }) {
   return (
     <RequireAuth>
-      <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', minHeight: '100vh' }}>
+      <div className="shell-grid" style={{ display: 'grid', gridTemplateColumns: '220px 1fr', minHeight: '100vh' }}>
         <Rail />
         <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           <TopBar />
           <VerifyBanner />
-          <div style={{ padding: 'var(--sp-6)', flex: 1 }}>{children}</div>
+          <div className="shell-body" style={{ padding: 'var(--sp-6)', flex: 1 }}>{children}</div>
         </div>
       </div>
     </RequireAuth>

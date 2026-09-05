@@ -1,17 +1,17 @@
 'use client';
 
-import { StepShell } from './StepShell';
+/** Wizard step 3 (FLOWS flow 1 step 3.3) — the same editor as Settings. */
 
-/** Not built in Phase 1 — the periods API arrives with properties and units. */
+import { PeriodsManager } from '../../../components/PeriodsManager';
+
 export function PaymentPeriodsStep() {
   return (
-    <StepShell
-      lead="Your org is seeded with Monthly (30d), Quarterly (90d), Half-year (180d) and Yearly (365d). Keep, remove or add your own."
-      collects={[
-        'Which recommended presets to keep',
-        'Custom periods as a label plus a number of days, e.g. "Weekly" 7d, "45 days"',
-        'Ordering of the list renters see',
-      ]}
-    />
+    <div style={{ display: 'grid', gap: 'var(--sp-4)' }}>
+      <p style={{ maxWidth: 'var(--measure)' }}>
+        Your business starts with Monthly (30d), Quarterly (90d), Half-year (180d) and Yearly (365d).
+        Keep them, deactivate the ones you never use, and add your own — any number of days.
+      </p>
+      <PeriodsManager />
+    </div>
   );
 }

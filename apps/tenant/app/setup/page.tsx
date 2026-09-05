@@ -109,9 +109,11 @@ function SetupBody() {
         <div style={{ marginTop: 'var(--sp-3)' }}>
           <step.Body />
         </div>
-        <p style={{ marginTop: 'var(--sp-4)', fontSize: 'var(--text-sm)', color: 'var(--ink-faint)' }}>
-          This step is filled in during Phase {step.phase}.
-        </p>
+        {step.built ? null : (
+          <p style={{ marginTop: 'var(--sp-4)', fontSize: 'var(--text-sm)', color: 'var(--ink-faint)' }}>
+            This step is filled in during Phase {step.phase}.
+          </p>
+        )}
       </section>
 
       <div style={{ display: 'flex', gap: 'var(--sp-2)', marginTop: 'var(--sp-6)' }}>

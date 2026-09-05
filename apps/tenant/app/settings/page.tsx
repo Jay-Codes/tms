@@ -1,6 +1,7 @@
 'use client';
 
 import { Icon } from '@iconify/react';
+import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { Field, Note, ProblemNote } from '../../components/FormBits';
 import { PageHead, Shell } from '../../components/Shell';
@@ -329,6 +330,29 @@ function SettingsBody() {
         ) : error ? null : (
           <p style={{ color: 'var(--ink-soft)' }}>Loading…</p>
         )}
+      </section>
+
+      <section style={{ paddingTop: 'var(--sp-7)' }}>
+        <hr className="rule rule-strong" />
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-end',
+            justifyContent: 'space-between',
+            gap: 'var(--sp-4)',
+            margin: 'var(--sp-4) 0',
+          }}
+        >
+          <div>
+            <h2 style={{ fontSize: 'var(--text-lg)' }}>Payment periods</h2>
+            <p style={{ marginTop: 'var(--sp-2)', color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+              Monthly, quarterly or any number of days you like. Changes affect future contracts only.
+            </p>
+          </div>
+          <Link href="/settings/periods" className="btn btn-secondary">
+            Manage periods
+          </Link>
+        </div>
       </section>
 
       <section style={{ paddingTop: 'var(--sp-7)' }}>
