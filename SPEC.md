@@ -288,7 +288,7 @@ Mechanics: scheduler derives due sends from Postgres → `dedupe_key` (`{kind}:{
 
 ## 7. Object storage (MinIO)
 
-Buckets: `branding` (logos, letterheads), `qr` (unit QR PNGs), `kyc` (ID document images — private, short-TTL presigned reads only), `signatures` (drawn signature PNGs — private, presigned reads only for contract parties). No `contracts` bucket in MVP — contract documents are app-native (§5.5). All access via backend-issued presigned URLs; uploads via presigned PUT with content-type and size limits enforced on completion callback.
+Buckets: `branding` (logos, letterheads), `qrcodes` (unit QR PNGs; S3 requires ≥3-char names), `kyc` (ID document images — private, short-TTL presigned reads only), `signatures` (drawn signature PNGs — private, presigned reads only for contract parties). No `contracts` bucket in MVP — contract documents are app-native (§5.5). All access via backend-issued presigned URLs; uploads via presigned PUT with content-type and size limits enforced on completion callback.
 
 ---
 

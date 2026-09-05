@@ -18,10 +18,10 @@ Execution plan for [SPEC.md](SPEC.md) / [FLOWS.md](FLOWS.md). Target: **testing-
 
 ## Phase 0 — Foundations & infrastructure (Sep 5, 0.5 day)
 
-- [ ] `docker-compose.yml`: postgres:17, redis:7, minio + bucket-init job (`branding`, `qr`, `kyc`, `signatures`). Volumes, healthchecks. `make up` / `make down`.
-- [ ] Backend skeleton `backend/`: `cmd/api`, `internal/{org,renter,contract,payment,notify,audit,report,platform}`, chi router, slog, config from env, `/healthz`.
-- [ ] golang-migrate wiring + `make migrate`; sqlc config; `make build`, `make test`, `make lint` (golangci-lint, next lint).
-- [ ] Proxy routes `/api/*` → backend :8081 (frontends keep 3001-3003).
+- [x] `docker-compose.yml`: postgres:17, redis:7, minio + bucket-init job (`branding`, `qrcodes`, `kyc`, `signatures`). Volumes, healthchecks. `make up` / `make down`.
+- [x] Backend skeleton `backend/`: `cmd/api`, `internal/{org,renter,contract,payment,notify,audit,report,platform}`, chi router, slog, config from env, `/healthz`.
+- [x] golang-migrate wiring + `make migrate`; sqlc config; `make build`, `make test`, `make lint` (golangci-lint, next lint).
+- [x] Proxy routes `/api/*` → backend :8081 (frontends keep 3001-3003).
 
 **Exit:** `make up && make migrate && make preview` gives working `/api/v1/healthz` through ngrok.
 

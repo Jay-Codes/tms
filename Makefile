@@ -3,10 +3,12 @@
 DEVDIR := .dev
 NGROK_API := http://127.0.0.1:4040/api/tunnels
 
-.PHONY: help preview dev stop url install up down
+.PHONY: help preview dev stop url install up down \
+        api api-stop api-restart api-log proxy-restart \
+        migrate migrate-down sqlc build test lint
 
 help: ## List available targets
-	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  make %-10s %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  make %-14s %s\n", $$1, $$2}'
 
 install: ## Install all dependencies (npm workspaces)
 	npm install
@@ -50,3 +52,64 @@ stop: ## Stop dev servers, proxy, and ngrok
 		lsof -ti tcp:$$port | xargs kill 2>/dev/null; true; \
 	done; true
 	@echo "stopped."
+
+# --- backend (Go API, :8081) ---
+
+api: api-stop ## Build and run the Go API (:8081) in the background
+	@mkdir -p $(DEVDIR)
+	@cd backend && go build -o ../$(DEVDIR)/api-bin ./cmd/api
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+		nohup $(DEVDIR)/api-bin > $(DEVDIR)/api.log 2>&1 & echo $$! > $(DEVDIR)/api.pid
+	@echo "api on :8081 — health: curl localhost:8081/api/v1/healthz — logs: make api-log"
+
+api-stop: ## Stop the Go API only (leaves apps, proxy and ngrok running)
+	@[ -f $(DEVDIR)/api.pid ] && kill "$$(cat $(DEVDIR)/api.pid)" 2>/dev/null; rm -f $(DEVDIR)/api.pid; true
+	@lsof -ti tcp:8081 | xargs kill 2>/dev/null; true
+
+api-restart: api ## Rebuild and restart the Go API
+
+api-log: ## Tail the last 100 lines of the API log
+	@tail -n 100 $(DEVDIR)/api.log
+
+proxy-restart: ## Rebuild and restart only the dev proxy (:8080)
+	@mkdir -p $(DEVDIR)
+	@[ -f $(DEVDIR)/proxy.pid ] && kill "$$(cat $(DEVDIR)/proxy.pid)" 2>/dev/null; rm -f $(DEVDIR)/proxy.pid; true
+	@cd proxy && go build -o ../$(DEVDIR)/proxy-bin .
+	@nohup $(DEVDIR)/proxy-bin > $(DEVDIR)/proxy.log 2>&1 & echo $$! > $(DEVDIR)/proxy.pid
+	@echo "proxy restarted on :8080"
+
+# --- database ---
+
+migrate: ## Apply pending database migrations
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+		cd backend && go run ./cmd/api migrate up
+
+migrate-down: ## Roll back exactly one migration
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+		cd backend && go run ./cmd/api migrate down
+
+sqlc: ## Regenerate sqlc query code into backend/internal/db/sqlc
+	@cd backend/internal/db && \
+		if command -v sqlc >/dev/null 2>&1; then sqlc generate; \
+		else echo "note: sqlc binary not found — running via 'go run' (needs network)"; \
+		     go run github.com/sqlc-dev/sqlc/cmd/sqlc@latest generate; fi
+	@echo "sqlc: generated."
+
+# --- build / test / lint ---
+
+build: ## Build backend, proxy and all Next.js apps (next builds are slow)
+	@cd backend && go build ./...
+	@mkdir -p $(DEVDIR) && cd proxy && go build -o ../$(DEVDIR)/proxy-bin .
+	@npm run build --workspaces --if-present
+
+test: ## Run backend Go tests and workspace tests
+	@cd backend && go test ./...
+	@npm test --workspaces --if-present
+
+lint: ## Lint backend (golangci-lint, falls back to go vet) and frontends
+	@cd backend && \
+		if command -v golangci-lint >/dev/null 2>&1; then golangci-lint run ./...; \
+		else echo "note: golangci-lint not installed — falling back to 'go vet ./...'"; \
+		     echo "      install: brew install golangci-lint"; \
+		     go vet ./...; fi
+	@npm run lint --workspaces --if-present
