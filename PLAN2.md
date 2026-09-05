@@ -30,7 +30,7 @@ Confirmed with the client (5 Sep 2026, second round):
 - **Rent in the document:** `{{rent}}` becomes the amount **per payment period** (unit price × payment_period_days ÷ rent_period_days, same rounding as the schedule); new `{{rent_basis}}` variable keeps the unit price ("TZS 100,000 / 30 days") for landlords who want both. Header "Rent" row shows the per-payment-period figure with the basis underneath. **Confirmed: rent scales by payment period.**
 - **Language:** stored on the user (`users.locale`, `sw|en`), chosen at registration/signup and changeable in Profile/Settings. Renter locale drives every SMS to that renter (including bulk); landlord locale drives the landlord screens. Org `sms_language` remains only as the fallback for renters with no preference (pre-existing users). Public QR landing / connect pages before login default to the org language and show a **SW/EN toggle** (confirmed); the choice carries into registration as the initial `locale`.
 - **SMS balance:** prepaid credit per org set by the platform admin (top-ups, **no expiry, no monthly reset — confirmed**). Every outbound SMS except OTP/security messages debits 1 credit per 160-char segment. At 0 the queue holds messages as `held_no_credit`; landlord sees the balance and a low-credit warning in Notifications.
-- **Templates:** platform defaults move from Go constants to a DB table the admin edits (EN + SW per kind, variables validated). Resolution order: org override → admin platform template → built-in code fallback.
+- **Templates:** platform defaults move from Go constants to a DB table the admin edits (EN + SW per kind, variables validated). Resolution order: org override → admin platform template → built-in code fallback. **Lock (confirmed):** per-kind `locked` flag set by the admin; `otp` locked out of the box; locked kind → landlord sees read-only wording, `PUT /org/notification-settings` override returns 409 `template_locked`.
 
 ---
 
@@ -110,7 +110,7 @@ platform_template_versions  kind, version, sw, en, admin_user_id, created_at    
 ```
 - [ ] **Credits (#11)**: admin `GET /admin/orgs/{id}/sms` → `{balance, low_watermark, used_30d, held_count, ledger:[…]}`; `POST /admin/orgs/{id}/sms/topup {credits, note}`, `POST …/adjust {delta, note}`, `PATCH …/sms {low_watermark}` — all audited (platform audit + org audit visible to the landlord as "credits added by platform"). Worker debits atomically **at send time** (`UPDATE … SET balance = balance - n WHERE balance >= n`), one credit per 160-char GSM segment (70 for UCS-2); OTP/security kinds exempt (configurable list, default `otp`). Insufficient balance → row status `held_no_credit` (not `failed`); a top-up releases held rows in order. Bulk send pre-checks (`409 insufficient_sms_credits {needed, balance}`) so the landlord is told before queuing.
 - [ ] Landlord visibility: `GET /org/sms-credits` → `{balance, low_watermark, held_count}`; Notifications page header shows balance + "N messages held" with a "contact platform" note; low-balance in-app banner under the watermark; optional email to the owner (log provider in dev).
-- [ ] **Platform templates (#12)**: `GET /admin/templates` (all kinds, both languages, variables, version, last editor), `PUT /admin/templates/{kind} {sw, en}` (validates placeholders against the kind's allowed variables, ≤ 3 segments warning, records a version; audited), `POST /admin/templates/{kind}/preview {language, sample?}`, `POST /admin/templates/{kind}/revert {version}`. `notify.Render` resolution: org override → platform_templates row → built-in Go default (seeded into the table by migration so the table is authoritative from day one). Rendered cache in Redis invalidated on save.
+- [ ] **Platform templates (#12)**: `GET /admin/templates` (all kinds, both languages, variables, version, last editor), `PUT /admin/templates/{kind} {sw, en}` (validates placeholders against the kind's allowed variables, ≤ 3 segments warning, records a version; audited), `POST /admin/templates/{kind}/preview {language, sample?}`, `POST /admin/templates/{kind}/revert {version}`, `PATCH /admin/templates/{kind} {locked}`; `platform_templates.locked BOOL NOT NULL DEFAULT false` (otp seeded true). `notify.Render` resolution: org override → platform_templates row → built-in Go default (seeded into the table by migration so the table is authoritative from day one). Rendered cache in Redis invalidated on save.
 - [ ] Admin app: **Orgs → org detail → SMS** tab (balance, top-up form, ledger, held messages); **Templates** nav item (list by kind with SW/EN editors side-by-side, variable chips, live preview with sample values, version history + revert). Admin dashboard metric: credits consumed today / orgs under watermark.
 - [ ] Tests: debit atomicity under concurrency (race test), segment counting (GSM vs UCS-2, Swahili diacritics), held→released ordering after top-up, exemption list, template validation (unknown variable rejected, both languages required), resolution precedence, isolation (org B cannot read org A credits).
 
@@ -130,12 +130,11 @@ platform_template_versions  kind, version, sw, en, admin_user_id, created_at    
 
 ## Open questions (answer whenever; defaults applied if unanswered)
 
-1. **Template lock**: should the platform admin be able to lock a kind so landlords cannot override it? Default: per-kind `locked` checkbox in the admin template editor, `otp` locked out of the box, all other kinds overridable. Locked kind → landlord sees read-only wording, `PUT` override returns 409 `template_locked`.
-2. **Credit unit**: 1 credit per 160-char GSM segment (default; 70 for UCS-2) vs 1 credit per message regardless of length. OTP/security messages exempt (default yes).
-3. Expense **approval**: managers can record expenses; should owners approve/void only? Default: owner + manager record and void; audit shows who.
-4. Revenue **basis toggle**: cash (collected) is the default; add an "accrual (expected)" toggle in Reports? Default: both lines always shown, no toggle.
-5. Theme **per app**: one org theme applies to both landlord and renter apps (default).
-6. Receipts as **PDF** allowed? Default: yes (image/jpeg, image/png, application/pdf, ≤5 MiB).
+1. **Credit unit**: 1 credit per 160-char GSM segment (default; 70 for UCS-2) vs 1 credit per message regardless of length. OTP/security messages exempt (default yes).
+2. Expense **approval**: managers can record expenses; should owners approve/void only? Default: owner + manager record and void; audit shows who.
+3. Revenue **basis toggle**: cash (collected) is the default; add an "accrual (expected)" toggle in Reports? Default: both lines always shown, no toggle.
+4. Theme **per app**: one org theme applies to both landlord and renter apps (default).
+5. Receipts as **PDF** allowed? Default: yes (image/jpeg, image/png, application/pdf, ≤5 MiB).
 
 ## Risks
 
