@@ -9,10 +9,19 @@ import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
+import { ContractsTable } from '../../../components/ContractBits';
 import { ProblemNote } from '../../../components/FormBits';
 import { Facts, KycStamp, LinkStatusStamp, ViewIdDocButton } from '../../../components/RenterBits';
 import { PageHead, Shell } from '../../../components/Shell';
-import { ApiError, hasKycDoc, rentersApi, toApiError, type RenterDetail } from '../../../lib/api';
+import {
+  ApiError,
+  contractsApi,
+  hasKycDoc,
+  rentersApi,
+  toApiError,
+  type Contract,
+  type RenterDetail,
+} from '../../../lib/api';
 import { Amount, fmtDate } from '../../../lib/format';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -27,7 +36,17 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function RenterBody({ userId }: { userId: string }) {
   const [data, setData] = useState<RenterDetail | null>(null);
+  const [contractRows, setContractRows] = useState<Contract[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    contractsApi
+      .list({ renter_user_id: userId, limit: 200 }, ac.signal)
+      .then((r) => setContractRows(r.items ?? []))
+      .catch(() => setContractRows(null));
+    return () => ac.abort();
+  }, [userId]);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -74,7 +93,9 @@ function RenterBody({ userId }: { userId: string }) {
   const renter = data.renter;
   const profile = data.profile;
   const requests = data.link_requests ?? [];
-  const contracts = data.contracts ?? [];
+  // `GET /renters/{id}` carries contracts too, but the list endpoint is the one
+  // that fills in `schedules_summary`, so it wins when it has answered.
+  const contracts = contractRows ?? data.contracts ?? [];
   const docOnFile = hasKycDoc(profile);
 
   return (
@@ -200,14 +221,7 @@ function RenterBody({ userId }: { userId: string }) {
       </Section>
 
       <Section title="Contracts">
-        {contracts.length === 0 ? (
-          <p style={{ color: 'var(--ink-soft)' }}>No contracts yet.</p>
-        ) : (
-          <p style={{ color: 'var(--ink-soft)' }}>
-            {contracts.length} contract{contracts.length === 1 ? '' : 's'} — the contract screen ships in
-            Phase 4.
-          </p>
-        )}
+        <ContractsTable items={contracts} showRenter={false} emptyText="No contracts with this renter yet." />
       </Section>
     </>
   );

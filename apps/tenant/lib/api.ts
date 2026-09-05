@@ -542,8 +542,8 @@ export interface RenterDetail {
   renter: RenterSummary;
   profile: RenterProfile | null;
   link_requests: LinkRequest[];
-  /** Phase 4 fills this in; Phase 3 always answers an empty list. */
-  contracts: unknown[];
+  /** Phase 4 fills this in; Phase 3 always answered an empty list. */
+  contracts: Contract[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -561,7 +561,11 @@ export const linkRequestsApi = {
     ),
   get: (id: string, signal?: AbortSignal) =>
     api.get<LinkRequestDetail | LinkRequest>(`/link-requests/${id}`, { signal }),
-  approve: (id: string) => api.post<{ request: LinkRequest } | LinkRequest>(`/link-requests/${id}/approve`),
+  /** Phase 4: approval also creates the contract, returned alongside the request. */
+  approve: (id: string) =>
+    api.post<{ request: LinkRequest; contract?: Contract } | LinkRequest>(
+      `/link-requests/${id}/approve`,
+    ),
   reject: (id: string, reason: string) =>
     api.post<{ request: LinkRequest } | LinkRequest>(`/link-requests/${id}/reject`, { reason }),
 };
@@ -597,4 +601,288 @@ export function unwrapRequestDetail(res: LinkRequestDetail | LinkRequest): LinkR
 export function hasKycDoc(profile: RenterProfile | null | undefined): boolean {
   if (!profile) return false;
   return Boolean(profile.kyc_doc_uploaded ?? profile.kyc_doc_available);
+}
+
+/* ------------------------------------------------------------------ */
+/* Shapes — mirror API.md Phase 4 + Branding exactly.                  */
+/* ------------------------------------------------------------------ */
+
+/** The variables a template body may carry; resolved server-side at creation. */
+export const TEMPLATE_VARIABLES = [
+  'renter_name',
+  'unit',
+  'property',
+  'rent',
+  'start_date',
+  'end_date',
+  'payment_period',
+  'org_name',
+  'term_days',
+  'due_day',
+] as const;
+
+export type TemplateVariable = (typeof TEMPLATE_VARIABLES)[number];
+
+export interface ContractTemplateSummary {
+  id: string;
+  name: string;
+  is_default: boolean;
+  updated_at: string;
+  created_at: string;
+}
+
+export interface ContractTemplate extends ContractTemplateSummary {
+  body_html: string;
+  variables?: string[];
+}
+
+/**
+ * `POST /contract-templates/{id}/preview`. The letterhead fields may arrive
+ * flat or nested under `org`; `unwrapTemplatePreview` normalises both.
+ */
+export interface TemplatePreview {
+  html: string;
+  letterhead_url?: string | null;
+  logo_url?: string | null;
+  display_name?: string | null;
+  footer_text?: string | null;
+}
+
+export type ContractStatus =
+  | 'draft'
+  | 'pending_signature'
+  | 'active'
+  | 'expiring'
+  | 'ended'
+  | 'terminated';
+
+export type SignatureParty = 'renter' | 'landlord';
+
+export interface ContractSignature {
+  party: SignatureParty;
+  name: string;
+  signed_at: string;
+  method: string;
+  phone_masked?: string | null;
+  has_image?: boolean;
+  signature_image_url?: string | null;
+}
+
+export interface SchedulesSummary {
+  count: number;
+  total: number;
+  next_due_date: string | null;
+  next_due_amount: number | null;
+  paid_count: number;
+  overdue_count: number;
+}
+
+export interface Contract {
+  id: string;
+  unit: { id: string; name: string; property_name: string };
+  renter: { user_id: string; full_name: string; phone: string | null };
+  template_id: string | null;
+  status: ContractStatus;
+  rent_amount: number;
+  rent_period_days: number;
+  payment_period: { id: string; label: string; days: number } | null;
+  term_days: number;
+  start_date: string;
+  end_date: string;
+  due_day: number | null;
+  snapshot_hash: string;
+  signatures: ContractSignature[];
+  link_request_id: string | null;
+  created_at: string;
+  activated_at: string | null;
+  terminated_at: string | null;
+  termination_reason: string | null;
+  schedules_summary: SchedulesSummary | null;
+}
+
+export interface ContractDocument {
+  contract_id: string;
+  status: ContractStatus;
+  org: {
+    display_name: string;
+    logo_url: string | null;
+    letterhead_url: string | null;
+    footer_text: string | null;
+  };
+  parties: {
+    landlord: { name: string };
+    renter: { name: string; phone_masked: string | null };
+  };
+  terms_html: string;
+  schedule: { period_start: string; period_end: string; due_date: string; amount: number }[];
+  signatures: ContractSignature[];
+  snapshot_hash: string;
+  generated_at: string;
+}
+
+export type ScheduleStatus = 'pending' | 'paid' | 'partial' | 'overdue' | 'waived';
+
+export interface ScheduleRow {
+  id: string;
+  period_start: string;
+  period_end: string;
+  due_date: string;
+  amount: number;
+  status: ScheduleStatus | string;
+  paid_amount: number;
+}
+
+export interface ContractVerification {
+  valid: boolean;
+  computed_hash: string;
+  stored_hash: string;
+  signatures: ContractSignature[];
+}
+
+export interface ContractInput {
+  unit_id: string;
+  renter_user_id: string;
+  template_id?: string;
+  payment_period_id: string;
+  term_days: number;
+  start_date: string;
+  due_day?: number | null;
+  link_request_id?: string;
+}
+
+/* --------------------------------- branding -------------------------------- */
+
+export interface OrgBranding {
+  display_name: string;
+  logo_url: string | null;
+  letterhead_url: string | null;
+  theme: { primary_color: string; font_id: string };
+  dashboard_prefs?: Record<string, unknown>;
+  document_footer_text: string | null;
+}
+
+export interface BrandingInput {
+  display_name?: string;
+  theme?: { primary_color: string; font_id: string };
+  dashboard_prefs?: Record<string, unknown>;
+  document_footer_text?: string | null;
+}
+
+/** Presigned PUT ticket (logo, letterhead) — the same shape KYC uses. */
+export interface UploadTicket {
+  upload_url: string;
+  object_key: string;
+  headers: Record<string, string>;
+}
+
+export type BrandingAsset = 'logo' | 'letterhead';
+
+/* ------------------------------------------------------------------ */
+/* Phase 4 endpoint helpers (audience org)                              */
+/* ------------------------------------------------------------------ */
+
+export const templatesApi = {
+  list: (signal?: AbortSignal) =>
+    api.get<{ items: ContractTemplateSummary[] }>('/contract-templates', { signal }),
+  get: (id: string, signal?: AbortSignal) =>
+    api.get<{ template: ContractTemplate } | ContractTemplate>(`/contract-templates/${id}`, {
+      signal,
+    }),
+  create: (body: { name: string; body_html: string; is_default?: boolean }) =>
+    api.post<{ template: ContractTemplate } | ContractTemplate>('/contract-templates', body),
+  update: (id: string, body: { name?: string; body_html?: string; is_default?: boolean }) =>
+    api.patch<{ template: ContractTemplate } | ContractTemplate>(`/contract-templates/${id}`, body),
+  remove: (id: string) => api.del<void>(`/contract-templates/${id}`),
+  preview: (id: string, sample = true) =>
+    api.post<TemplatePreview>(`/contract-templates/${id}/preview`, { sample }),
+};
+
+export const contractsApi = {
+  list: (
+    query: {
+      status?: ContractStatus | '';
+      unit_id?: string;
+      renter_user_id?: string;
+      cursor?: string;
+      limit?: number;
+    } = {},
+    signal?: AbortSignal,
+  ) =>
+    api.get<{ items: Contract[]; next_cursor?: string | null }>('/contracts', { query, signal }),
+  get: (id: string, signal?: AbortSignal) =>
+    api.get<{ contract: Contract } | Contract>(`/contracts/${id}`, { signal }),
+  create: (body: ContractInput) => api.post<{ contract: Contract } | Contract>('/contracts', body),
+  document: (id: string, signal?: AbortSignal) =>
+    api.get<ContractDocument>(`/contracts/${id}/document`, { signal }),
+  schedules: (id: string, signal?: AbortSignal) =>
+    api.get<{ items: ScheduleRow[] }>(`/contracts/${id}/schedules`, { signal }),
+  verify: (id: string) => api.get<ContractVerification>(`/contracts/${id}/verify`),
+  /** No body = normal countersign; `landlord_recorded` is the FLOWS 3.6 escape hatch. */
+  activate: (id: string, body?: { landlord_recorded: true; reason: string }) =>
+    api.post<{ contract: Contract } | Contract>(`/contracts/${id}/activate`, body),
+  terminate: (id: string, body: { reason: string; effective_date?: string }) =>
+    api.post<{ contract: Contract } | Contract>(`/contracts/${id}/terminate`, body),
+};
+
+export const brandingApi = {
+  get: (signal?: AbortSignal) =>
+    api.get<{ branding: OrgBranding } | OrgBranding>('/org/branding', { signal }),
+  save: (body: BrandingInput) =>
+    api.put<{ branding: OrgBranding } | OrgBranding>('/org/branding', body),
+  uploadTicket: (asset: BrandingAsset, contentType: string, sizeBytes: number) =>
+    api.post<UploadTicket>(`/org/branding/${asset}`, {
+      content_type: contentType,
+      size_bytes: sizeBytes,
+    }),
+  uploadComplete: (asset: BrandingAsset, objectKey: string) =>
+    api.post<{ branding: OrgBranding } | OrgBranding>(`/org/branding/${asset}/complete`, {
+      object_key: objectKey,
+    }),
+  remove: (asset: BrandingAsset) =>
+    api.del<{ branding: OrgBranding } | OrgBranding>(`/org/branding/${asset}`),
+};
+
+export const unwrapTemplate = (res: { template: ContractTemplate } | ContractTemplate) =>
+  unwrap<ContractTemplate>(res, 'template');
+export const unwrapContract = (res: { contract: Contract } | Contract) =>
+  unwrap<Contract>(res, 'contract');
+export const unwrapBranding = (res: { branding: OrgBranding } | OrgBranding) =>
+  unwrap<OrgBranding>(res, 'branding');
+
+/** Preview letterhead fields may be flat or nested under `org`; take either. */
+export function unwrapTemplatePreview(res: TemplatePreview): TemplatePreview {
+  const o = res as unknown as Record<string, unknown>;
+  const org = (o.org as Record<string, unknown> | undefined) ?? {};
+  const pick = (k: string) => (o[k] ?? org[k] ?? null) as string | null;
+  return {
+    html: String(o.html ?? ''),
+    letterhead_url: pick('letterhead_url'),
+    logo_url: pick('logo_url'),
+    display_name: pick('display_name'),
+    footer_text: pick('footer_text') ?? pick('document_footer_text'),
+  };
+}
+
+/**
+ * Push a file straight at MinIO with the presigned URL the backend issued.
+ * Not an API call — hence the raw fetch and the deliberate absence of
+ * `credentials` (a signed URL must stay cookie-free).
+ */
+export async function uploadToPresignedUrl(ticket: UploadTicket, file: File): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(ticket.upload_url, {
+      method: 'PUT',
+      headers: ticket.headers ?? {},
+      body: file,
+    });
+  } catch (cause) {
+    throw offlineError(cause);
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, {
+      title: 'Upload failed',
+      detail: 'The file could not be uploaded. Please try again.',
+    });
+  }
 }

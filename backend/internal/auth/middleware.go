@@ -128,6 +128,29 @@ func (m *Manager) RequireOrg(roles ...string) func(http.Handler) http.Handler {
 	return m.require(AudienceOrg, KindOrgUser, roles...)
 }
 
+// RequireContractParty admits either party to a contract: an org user holding
+// `tms_o` or a renter holding `tms_r`.
+//
+// A contract document has two readers and one route (SPEC §5.5), and the
+// handler scopes its query by whichever principal arrives — org id for the
+// landlord, user id for the renter — so the other party's contract is a 404
+// either way. The org cookie is tried first because a tester may hold both.
+func (m *Manager) RequireContractParty() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if p, ok := m.Resolve(r, AudienceOrg); ok && p.Kind == KindOrgUser {
+				next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), p)))
+				return
+			}
+			if p, ok := m.Resolve(r, AudienceRenter); ok && p.Kind == KindRenter {
+				next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), p)))
+				return
+			}
+			httpx.WriteProblem(w, http.StatusUnauthorized, "unauthenticated", "a valid session is required")
+		})
+	}
+}
+
 // RequireAdmin admits platform admins holding a valid `tms_a` session.
 func (m *Manager) RequireAdmin() func(http.Handler) http.Handler {
 	return m.require(AudienceAdmin, KindPlatformAdmin)

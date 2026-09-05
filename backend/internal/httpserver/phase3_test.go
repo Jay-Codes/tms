@@ -95,6 +95,19 @@ func (h *harness) notifications(t *testing.T) []notificationRow {
 	return out
 }
 
+// ofKind filters notification rows by kind. From Phase 4 an approval emits two
+// messages — the decision itself and the contract that approval created — so
+// assertions about one of them name it rather than counting the whole table.
+func ofKind(rows []notificationRow, kind string) []notificationRow {
+	var out []notificationRow
+	for _, row := range rows {
+		if row.Kind == kind {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
 // auditPayloads returns the before/after JSON of every audit row for an action.
 func (h *harness) auditPayloads(t *testing.T, action string) []string {
 	t.Helper()
@@ -661,19 +674,21 @@ func TestLinkRequestAutoApprove(t *testing.T) {
 		t.Fatalf("status = %q, want approved", got)
 	}
 
-	notes := h.notifications(t)
+	all := h.notifications(t)
+	notes := ofKind(all, "link_approved")
 	if len(notes) != 1 {
-		t.Fatalf("notification_log holds %d rows, want 1: %+v", len(notes), notes)
-	}
-	if notes[0].Kind != "link_approved" {
-		t.Errorf("kind = %q, want link_approved", notes[0].Kind)
+		t.Fatalf("notification_log holds %d link_approved rows, want 1: %+v", len(notes), all)
 	}
 	if notes[0].ToPhone != "+255712003201" {
 		t.Errorf("to_phone = %q, want the renter's number", notes[0].ToPhone)
 	}
+	// Auto-approval creates the contract too, and tells the renter to sign it.
+	if got := len(ofKind(all, "contract_ready")); got != 1 {
+		t.Errorf("notification_log holds %d contract_ready rows, want 1: %+v", got, all)
+	}
 
-	// Approval is a decision, not an activation: the unit stays vacant until a
-	// contract activates in Phase 4.
+	// Approval is a decision, not an activation: the unit stays vacant until
+	// the contract is activated.
 	unit := fix.owner.do(http.MethodGet, "/units/"+fix.unitID, nil).
 		mustStatus(t, http.StatusOK, "unit after auto-approval")
 	if got := unit.str(t, "unit", "status"); got != "vacant" {
@@ -700,8 +715,8 @@ func TestLinkDecisionStateMachine(t *testing.T) {
 			t.Error("decided_at is null after approval")
 		}
 
-		notes := h.notifications(t)
-		if len(notes) != 1 || notes[0].Kind != "link_approved" {
+		notes := ofKind(h.notifications(t), "link_approved")
+		if len(notes) != 1 {
 			t.Fatalf("notifications = %+v, want one link_approved", notes)
 		}
 		if want := "link_approved:" + id; notes[0].DedupeKey != want {
@@ -725,8 +740,8 @@ func TestLinkDecisionStateMachine(t *testing.T) {
 			mustStatus(t, http.StatusConflict, "cancel after approve")
 
 		// Deciding twice must not produce a second SMS.
-		if got := len(h.notifications(t)); got != 1 {
-			t.Errorf("notification_log holds %d rows after repeated decisions, want 1", got)
+		if got := len(ofKind(h.notifications(t), "link_approved")); got != 1 {
+			t.Errorf("notification_log holds %d link_approved rows after repeated decisions, want 1", got)
 		}
 	})
 
@@ -814,7 +829,7 @@ func TestLinkNotificationLanguage(t *testing.T) {
 	fix.owner.do(http.MethodPost, "/link-requests/"+created.str(t, "request", "id")+"/approve", nil).
 		mustStatus(t, http.StatusOK, "approve")
 
-	notes := h.notifications(t)
+	notes := ofKind(h.notifications(t), "link_approved")
 	if len(notes) != 1 {
 		t.Fatalf("notifications = %+v", notes)
 	}

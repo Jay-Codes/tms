@@ -3,6 +3,7 @@
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useEffect, useState, type ReactNode } from 'react';
+import { useReadyToCountersign } from '../components/ContractBits';
 import { PageHead, Shell, pendingLabel, usePendingLinkRequests } from '../components/Shell';
 import { propertiesApi, type Property } from '../lib/api';
 import { useMe } from '../lib/auth';
@@ -37,6 +38,7 @@ function DashboardBody() {
   const { user, org } = useMe();
   const [firstProperty, setFirstProperty] = useState<Property | null>(null);
   const pending = usePendingLinkRequests();
+  const countersign = useReadyToCountersign();
 
   // The QR empty-state card jumps straight to a printable sheet once there is
   // something to print; until then it points at the properties screen.
@@ -97,6 +99,21 @@ function DashboardBody() {
           action={
             <Link href="/link-requests" className={pending ? 'btn btn-primary' : 'btn btn-secondary'}>
               {pending ? 'Review requests' : 'Open the inbox'}
+            </Link>
+          }
+        />
+        {/* FLOWS flow 3 step 5 — the landlord's turn, once the renter has signed. */}
+        <EmptyCard
+          icon="solar:document-text-linear"
+          title={countersign ? `Ready to countersign: ${countersign}` : 'Contracts'}
+          body={
+            countersign
+              ? 'A renter has signed. Activating countersigns the contract, writes the payment schedule and marks the unit occupied.'
+              : 'Contracts you have issued, what each is waiting for, and the terms they are written from.'
+          }
+          action={
+            <Link href="/contracts" className={countersign ? 'btn btn-primary' : 'btn btn-secondary'}>
+              {countersign ? 'Countersign now' : 'Open contracts'}
             </Link>
           }
         />

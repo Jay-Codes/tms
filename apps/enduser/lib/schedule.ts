@@ -31,7 +31,7 @@ export interface Preview {
   rows: PreviewRow[];
   count: number;
   total: number;
-  /** Inclusive last day of the tenancy. */
+  /** Exclusive end of the tenancy: `start_date + term_days` (SPEC §4). */
   endDate: string;
 }
 
@@ -42,12 +42,13 @@ export function prorate(price: UnitPrice, coveredDays: number): number {
 }
 
 /**
- * End date derived from a start date and a term length, inclusive — a 30-day
- * term starting 8 Sep runs through 7 Oct, and the next payment would fall due
- * 8 Oct. The server's `end_date` wins once the request is created.
+ * End date derived from a start date and a term length. SPEC §4 makes it
+ * exclusive — `end_date = start_date + term_days` — so a 30-day term starting
+ * 8 Sep ends 8 Oct, the day the next payment period would begin. This matches
+ * the server's `end_date`, which wins once the request is created.
  */
 export function deriveEndDate(startDate: string, termDays: number): string {
-  return addDays(startDate, Math.max(1, termDays) - 1);
+  return addDays(startDate, Math.max(0, termDays));
 }
 
 /**

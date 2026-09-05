@@ -23,25 +23,30 @@ type AuditLog struct {
 }
 
 type Contract struct {
-	ID                pgtype.UUID        `json:"id"`
-	OrgID             pgtype.UUID        `json:"org_id"`
-	UnitID            pgtype.UUID        `json:"unit_id"`
-	RenterUserID      pgtype.UUID        `json:"renter_user_id"`
-	TemplateID        pgtype.UUID        `json:"template_id"`
-	TermsSnapshotHtml string             `json:"terms_snapshot_html"`
-	RentAmount        int64              `json:"rent_amount"`
-	RentPeriodDays    int32              `json:"rent_period_days"`
-	PaymentPeriodID   pgtype.UUID        `json:"payment_period_id"`
-	PaymentPeriodDays int32              `json:"payment_period_days"`
-	TermDays          int32              `json:"term_days"`
-	StartDate         pgtype.Date        `json:"start_date"`
-	EndDate           pgtype.Date        `json:"end_date"`
-	DueDay            *int32             `json:"due_day"`
-	Status            string             `json:"status"`
-	SnapshotHash      *string            `json:"snapshot_hash"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
+	ID                       pgtype.UUID        `json:"id"`
+	OrgID                    pgtype.UUID        `json:"org_id"`
+	UnitID                   pgtype.UUID        `json:"unit_id"`
+	RenterUserID             pgtype.UUID        `json:"renter_user_id"`
+	TemplateID               pgtype.UUID        `json:"template_id"`
+	TermsSnapshotHtml        string             `json:"terms_snapshot_html"`
+	RentAmount               int64              `json:"rent_amount"`
+	RentPeriodDays           int32              `json:"rent_period_days"`
+	PaymentPeriodID          pgtype.UUID        `json:"payment_period_id"`
+	PaymentPeriodDays        int32              `json:"payment_period_days"`
+	TermDays                 int32              `json:"term_days"`
+	StartDate                pgtype.Date        `json:"start_date"`
+	EndDate                  pgtype.Date        `json:"end_date"`
+	DueDay                   *int32             `json:"due_day"`
+	Status                   string             `json:"status"`
+	SnapshotHash             *string            `json:"snapshot_hash"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt                pgtype.Timestamptz `json:"deleted_at"`
+	ActivatedAt              pgtype.Timestamptz `json:"activated_at"`
+	TerminatedAt             pgtype.Timestamptz `json:"terminated_at"`
+	TerminationReason        *string            `json:"termination_reason"`
+	TerminationEffectiveDate pgtype.Date        `json:"termination_effective_date"`
+	LinkRequestID            pgtype.UUID        `json:"link_request_id"`
 }
 
 type ContractSignature struct {
@@ -168,6 +173,7 @@ type PaymentSchedule struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
+	PaidAmount  int64              `json:"paid_amount"`
 }
 
 type PricePlan struct {

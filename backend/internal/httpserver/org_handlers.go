@@ -11,6 +11,7 @@ import (
 
 	"tms/backend/internal/audit"
 	"tms/backend/internal/auth"
+	"tms/backend/internal/contract"
 	"tms/backend/internal/db"
 	"tms/backend/internal/db/sqlc"
 	"tms/backend/internal/httpx"
@@ -118,6 +119,15 @@ func (s *Server) handleCreateOrg(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, err := q.CreateOrgBranding(r.Context(), sqlc.CreateOrgBrandingParams{
 			OrgID: org.ID, DisplayName: orgName,
+		}); err != nil {
+			return err
+		}
+		// Every org starts with terms it can actually issue a contract from.
+		// Migration 000005 seeds the byte-identical body for orgs that already
+		// existed, so old and new orgs agree on what "standard" means.
+		if _, err := q.CreateContractTemplate(r.Context(), sqlc.CreateContractTemplateParams{
+			OrgID: org.ID, Name: contract.DefaultTemplateName,
+			BodyHtml: contract.DefaultTemplateBody, IsDefault: true,
 		}); err != nil {
 			return err
 		}

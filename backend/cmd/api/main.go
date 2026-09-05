@@ -19,6 +19,7 @@ import (
 
 	"tms/backend/internal/cache"
 	"tms/backend/internal/config"
+	"tms/backend/internal/contract"
 	"tms/backend/internal/db"
 	"tms/backend/internal/db/sqlc"
 	"tms/backend/internal/httpserver"
@@ -155,6 +156,12 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 	} else {
 		logger.Warn("notification worker not started: postgres or redis unavailable")
 	}
+
+	// The contract lifecycle sweep flags contracts approaching their end date
+	// and closes the ones past it. It runs once at startup and hourly after
+	// that; it needs only Postgres, and its statements are idempotent
+	// (internal/contract.RunLifecycle).
+	go contract.RunLifecycleTicker(ctx, deps.Pool, logger)
 
 	srv := httpserver.New(cfg, deps, logger)
 	if err := srv.ListenAndServe(ctx); err != nil {

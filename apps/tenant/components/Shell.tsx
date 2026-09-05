@@ -11,6 +11,8 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
 import { ApiError, authApi, linkRequestsApi } from '../lib/api';
 import { RequireAuth, useMe } from '../lib/auth';
+import { loadAndApplyOrgTheme } from '../lib/branding';
+import { useReadyToCountersign } from './ContractBits';
 
 /** How many pending requests the badge will count before it gives up and says "50+". */
 const PENDING_BADGE_CAP = 50;
@@ -46,6 +48,8 @@ export interface NavItem {
   icon: string;
   /** Phase in which the screen ships; undefined = functional now. */
   phase?: number;
+  /** Indented links shown under this one when the section is open. */
+  sub?: { href: string; label: string }[];
 }
 
 export const NAV: NavItem[] = [
@@ -54,10 +58,20 @@ export const NAV: NavItem[] = [
   { href: '/units', label: 'Units', icon: 'solar:widget-4-linear' },
   { href: '/link-requests', label: 'Link requests', icon: 'solar:inbox-in-linear' },
   { href: '/renters', label: 'Renters', icon: 'solar:users-group-rounded-linear' },
-  { href: '/contracts', label: 'Contracts', icon: 'solar:document-text-linear', phase: 4 },
+  {
+    href: '/contracts',
+    label: 'Contracts',
+    icon: 'solar:document-text-linear',
+    sub: [{ href: '/contracts/templates', label: 'Templates' }],
+  },
   { href: '/payments', label: 'Payments', icon: 'solar:wallet-money-linear', phase: 5 },
   { href: '/reports', label: 'Reports', icon: 'solar:chart-square-linear', phase: 7 },
-  { href: '/settings', label: 'Settings', icon: 'solar:settings-linear' },
+  {
+    href: '/settings',
+    label: 'Settings',
+    icon: 'solar:settings-linear',
+    sub: [{ href: '/settings/branding', label: 'Branding' }],
+  },
   { href: '/audit', label: 'Audit', icon: 'solar:history-linear' },
 ];
 
@@ -114,6 +128,7 @@ function Rail() {
   const pathname = usePathname();
   const { org } = useMe();
   const pending = usePendingLinkRequests();
+  const countersign = useReadyToCountersign();
 
   return (
     <aside
@@ -150,32 +165,68 @@ function Rail() {
       <nav className="tabs" aria-label="Sections">
         {NAV.map((item) => {
           const current = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
+          // A sub-link owns `aria-current` when the reader is on it, so the
+          // section and its child never both claim to be the current page.
+          const onSub = (item.sub ?? []).some((s) => pathname.startsWith(s.href));
           return (
-            <Link key={item.href} href={item.href} className="tab" aria-current={current ? 'page' : undefined}>
-              <Icon icon={item.icon} width={20} />
-              <span style={{ flex: 1 }}>{item.label}</span>
-              {item.href === '/link-requests' && pending ? (
-                <span
-                  aria-label={`${pendingLabel(pending)} pending`}
-                  style={{
-                    minWidth: 20,
-                    padding: '0 6px',
-                    borderRadius: 999,
-                    background: 'var(--primary)',
-                    color: 'var(--on-primary)',
-                    fontSize: 'var(--text-xs)',
-                    fontWeight: 600,
-                    textAlign: 'center',
-                    lineHeight: '18px',
-                  }}
-                >
-                  {pendingLabel(pending)}
-                </span>
-              ) : null}
-              {item.phase ? (
-                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-faint)' }}>P{item.phase}</span>
-              ) : null}
-            </Link>
+            <div key={item.href} style={{ display: 'contents' }}>
+              <Link href={item.href} className="tab" aria-current={current && !onSub ? 'page' : undefined}>
+                <Icon icon={item.icon} width={20} />
+                <span style={{ flex: 1 }}>{item.label}</span>
+                {item.href === '/contracts' && countersign ? (
+                  <span
+                    aria-label={`${countersign} ready to countersign`}
+                    style={{
+                      minWidth: 20,
+                      padding: '0 6px',
+                      borderRadius: 999,
+                      background: 'var(--primary)',
+                      color: 'var(--on-primary)',
+                      fontSize: 'var(--text-xs)',
+                      fontWeight: 600,
+                      textAlign: 'center',
+                      lineHeight: '18px',
+                    }}
+                  >
+                    {countersign}
+                  </span>
+                ) : null}
+                {item.href === '/link-requests' && pending ? (
+                  <span
+                    aria-label={`${pendingLabel(pending)} pending`}
+                    style={{
+                      minWidth: 20,
+                      padding: '0 6px',
+                      borderRadius: 999,
+                      background: 'var(--primary)',
+                      color: 'var(--on-primary)',
+                      fontSize: 'var(--text-xs)',
+                      fontWeight: 600,
+                      textAlign: 'center',
+                      lineHeight: '18px',
+                    }}
+                  >
+                    {pendingLabel(pending)}
+                  </span>
+                ) : null}
+                {item.phase ? (
+                  <span style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-faint)' }}>P{item.phase}</span>
+                ) : null}
+              </Link>
+              {current && item.sub
+                ? item.sub.map((s) => (
+                    <Link
+                      key={s.href}
+                      href={s.href}
+                      className="tab"
+                      aria-current={pathname.startsWith(s.href) ? 'page' : undefined}
+                      style={{ paddingLeft: 'calc(var(--sp-4) + 28px)', fontSize: 'var(--text-sm)', fontWeight: 400 }}
+                    >
+                      {s.label}
+                    </Link>
+                  ))
+                : null}
+            </div>
           );
         })}
       </nav>
@@ -209,6 +260,15 @@ function TopBar() {
 }
 
 export function Shell({ children }: { children: ReactNode }) {
+  // The org's colour and typeface are applied as soon as the chrome mounts, so
+  // a landlord's own branding is on screen before the page body loads. Failure
+  // is silent — the platform default is a working theme.
+  useEffect(() => {
+    const ac = new AbortController();
+    void loadAndApplyOrgTheme(ac.signal);
+    return () => ac.abort();
+  }, []);
+
   return (
     <RequireAuth>
       <div className="shell-grid" style={{ display: 'grid', gridTemplateColumns: '220px 1fr', minHeight: '100vh' }}>

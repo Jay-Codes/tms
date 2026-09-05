@@ -1,0 +1,211 @@
+/* ============================================================
+   Contract document — screen styling for the server-sanitized
+   `terms_snapshot_html`, plus the print stylesheet that turns the
+   app into a plain sheet of paper (SPEC §5.5: "Print / Save as
+   PDF" is browser print; no server-side PDF in the MVP).
+   ============================================================ */
+
+.doc {
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-4);
+  display: grid;
+  gap: var(--sp-5);
+}
+
+.doc-letterhead {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+}
+
+.doc-block {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.doc-block > h2 {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--ink-soft);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ---- the snapshotted terms (sanitized server-side) ---- */
+
+.doc-terms {
+  max-width: var(--measure);
+}
+
+.doc-terms h1,
+.doc-terms h2,
+.doc-terms h3 {
+  margin: var(--sp-5) 0 var(--sp-2);
+  line-height: var(--leading-tight);
+}
+
+.doc-terms h1 { font-size: var(--text-lg); }
+.doc-terms h2 { font-size: var(--text-md); }
+.doc-terms h3 { font-size: var(--text-md); color: var(--ink-soft); }
+
+.doc-terms p,
+.doc-terms ul,
+.doc-terms ol,
+.doc-terms blockquote {
+  margin: 0 0 var(--sp-3);
+}
+
+.doc-terms ul,
+.doc-terms ol {
+  padding-left: var(--sp-5);
+}
+
+.doc-terms li {
+  margin-bottom: var(--sp-1);
+}
+
+.doc-terms blockquote {
+  padding-left: var(--sp-3);
+  border-left: 3px solid var(--rule);
+  color: var(--ink-soft);
+}
+
+/* Landlord tables can be wider than a phone — scroll them, never the page. */
+.doc-terms table {
+  width: 100%;
+  border-collapse: collapse;
+  border-top: 1px solid var(--rule-strong);
+  margin-bottom: var(--sp-4);
+}
+
+.doc-terms th,
+.doc-terms td {
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: top;
+}
+
+.doc-terms th {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+
+.doc-scroll-x {
+  overflow-x: auto;
+}
+
+/* ---- signature block ---- */
+
+.doc-sig {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.doc-sig:last-child {
+  border-bottom: 0;
+}
+
+.doc-sig-image {
+  max-width: 220px;
+  max-height: 90px;
+  object-fit: contain;
+}
+
+.doc-sig-slot {
+  height: 64px;
+  border-bottom: 1px dashed var(--ink-faint);
+}
+
+.doc-hash {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--text-xs);
+  color: var(--ink-soft);
+  word-break: break-all;
+}
+
+/* ---- sticky "Accept & sign" ---- */
+
+.doc-cta {
+  position: fixed;
+  inset-inline: 0;
+  /* Clear of the tab bar (56px) plus whatever the phone's chin takes. */
+  bottom: calc(56px + env(safe-area-inset-bottom));
+  z-index: 9;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--paper);
+  border-top: 1px solid var(--rule-strong);
+}
+
+.doc-cta > * {
+  max-width: 440px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* ============================ PRINT ======================== */
+
+@media print {
+  .no-print,
+  .bottom-bar,
+  .doc-cta,
+  nav[aria-label='Main'] {
+    display: none !important;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  main {
+    max-width: none !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    gap: 0 !important;
+  }
+
+  .doc {
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    background: #fff;
+    gap: 12pt;
+  }
+
+  .doc-scroll-x {
+    overflow: visible !important;
+  }
+
+  /* Never split a ledger line, a signature or a labelled block. */
+  .ledger tr,
+  .doc-sig,
+  .doc-block,
+  .doc-terms li,
+  .doc-terms table {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .doc-terms h1,
+  .doc-terms h2,
+  .doc-terms h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  a[href]::after {
+    content: '';
+  }
+
+  @page {
+    margin: 14mm;
+  }
+}

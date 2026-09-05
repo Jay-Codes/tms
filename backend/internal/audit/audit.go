@@ -56,6 +56,26 @@ const (
 	ActionLinkRequestCancel = "link_request.cancel"
 	ActionLinkApprove       = "link_request.approve"
 	ActionLinkReject        = "link_request.reject"
+
+	// Phase 4 — contract templates, contracts, signing, branding.
+	//
+	// `contract.activate_landlord_recorded` is deliberately its own action
+	// rather than a flag on `contract.activate`: it is the one path that
+	// binds a renter without their signature (FLOWS 3.6), so it must be
+	// findable by filtering the trail on the action alone.
+	ActionTemplateCreate   = "contract_template.create"
+	ActionTemplateUpdate   = "contract_template.update"
+	ActionTemplateDelete   = "contract_template.delete"
+	ActionContractCreate   = "contract.create"
+	ActionContractSign     = "contract.sign"
+	ActionContractActivate = "contract.activate"
+	// ActionContractActivateLandlordRecorded is activation without a renter
+	// signature, on the landlord's own record.
+	ActionContractActivateLandlordRecorded = "contract.activate_landlord_recorded"
+	ActionContractTerminate                = "contract.terminate"
+	ActionBrandingUpdate                   = "org.branding_update"
+	ActionBrandingAsset                    = "org.branding_asset"
+	ActionContractLifecycleRun             = "contract.lifecycle_run"
 )
 
 // Entity types.
@@ -72,6 +92,10 @@ const (
 
 	EntityRenterProfile = "renter_profile"
 	EntityLinkRequest   = "link_request"
+
+	EntityContractTemplate = "contract_template"
+	EntityContract         = "contract"
+	EntityOrgBranding      = "org_branding"
 )
 
 type ctxKey int

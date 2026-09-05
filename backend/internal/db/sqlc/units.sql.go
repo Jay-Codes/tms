@@ -346,6 +346,43 @@ func (q *Queries) ListUnits(ctx context.Context, arg ListUnitsParams) ([]ListUni
 	return items, nil
 }
 
+const setUnitStatusDerived = `-- name: SetUnitStatusDerived :one
+UPDATE units
+SET status = $1, status_override = false
+WHERE org_id = $2 AND id = $3 AND deleted_at IS NULL
+RETURNING id, org_id, property_id, name, unit_code, status, allowed_period_ids, created_at, updated_at, deleted_at, status_override
+`
+
+type SetUnitStatusDerivedParams struct {
+	Status string      `json:"status"`
+	OrgID  pgtype.UUID `json:"org_id"`
+	ID     pgtype.UUID `json:"id"`
+}
+
+// SetUnitStatusDerived is the contract lifecycle writing a unit's status:
+// activation makes it occupied, an ending or termination makes it vacant. Both
+// clear the landlord's override — a derived status is the newer fact, and a
+// unit left `maintenance` after a tenancy ended never reaches the vacancy board
+// (API.md, Phase 4 notes).
+func (q *Queries) SetUnitStatusDerived(ctx context.Context, arg SetUnitStatusDerivedParams) (Unit, error) {
+	row := q.db.QueryRow(ctx, setUnitStatusDerived, arg.Status, arg.OrgID, arg.ID)
+	var i Unit
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.PropertyID,
+		&i.Name,
+		&i.UnitCode,
+		&i.Status,
+		&i.AllowedPeriodIds,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.StatusOverride,
+	)
+	return i, err
+}
+
 const softDeleteUnit = `-- name: SoftDeleteUnit :one
 UPDATE units SET deleted_at = now()
 WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL

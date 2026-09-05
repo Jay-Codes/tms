@@ -44,3 +44,12 @@
 - Verified live: renter connect via UI → landlord inbox → approve → Swahili SMS in `.dev/api.log`, notification_log `sent`; auto-approve path via curl (100d/30d → 4 rows, last 83,333).
 
 **Deferred to later phases:** worker atomic claim for multi-worker pool (Phase 6); orphaned KYC objects on re-upload; `GET /renters` N+1 (Phase 8 load pass); enduser `KycStatus` type lacks `rejected`.
+
+## 2026-09-05 — Phase 4: Contracts & schedules ✅
+
+**Shipped**
+- Backend: migrations `000005_contracts`, `000006_signatures_append_only`; templates CRUD + bluemonday sanitizer + preview + default seed; contracts (create, link-approval hook + backfill, list/get/document, OTP sign + drawn signature, activate w/ schedules + landlord_recorded path, terminate, verify, schedules), lifecycle job (hourly + `/admin/jobs/contract-lifecycle`), branding endpoints (logo/letterhead/footer/theme). Sign OTP verify capped, hash rechecked at activate, signature object stat-checked.
+- Tenant: contracts list/detail (document, Activate/on-behalf/Terminate, schedules), TipTap template editor w/ variables + snapshot banner + letterhead preview, branding settings, wizard Branding + Contract template steps. Enduser: contract list, document view + print CSS, OTP + canvas signature flow, home next-payment + sign prompts.
+- Verified live: Room 3 contract backfilled → renter signed in UI (OTP from log + drawn PNG) → landlord activated in UI → 4 schedules (250k×3 + 83,333), unit occupied, welcome SMS, `/verify` valid; letterhead + footer render in document; template edit/preview; new contract + terminate frees unit.
+
+**Note:** Opus session limit hit mid-phase (resets 3pm); lanes relaunched and resumed from partial work.
