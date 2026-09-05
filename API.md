@@ -199,3 +199,23 @@ Public branding endpoint (`/public/orgs/{slug}/branding`, `/public/units/{code}`
 - **Seeding:** every org gets one default template, "Standard tenancy agreement". New orgs get it at `POST /orgs`; orgs that already existed get a byte-identical copy from migration 000005 (idempotent — it inserts only where an org has no live template). `internal/contract.DefaultTemplateBody` and the migration are kept in step by a test.
 
 Phase 4 audit actions: `contract_template.create`, `contract_template.update`, `contract_template.delete`, `contract.create`, `contract.sign`, `contract.activate`, `contract.activate_landlord_recorded`, `contract.terminate`, `contract.lifecycle_run`, `org.branding_update`, `org.branding_asset`. Requesting a signing code reuses `auth.otp_send` with entity type `contract`.
+
+## Phase 5 — offline payments & statuses
+
+`schedule` shape: `{id,contract_id,period_start,period_end,due_date,amount,paid_amount,status:"pending"|"paid"|"partial"|"overdue"|"waived",days_overdue,contract:{id,unit_name,property_name,renter_name,renter_user_id}}`
+`payment` shape: `{id,contract_id,schedule_id,amount,method:"cash"|"bank_transfer"|"mobile_money_manual",reference,paid_at,note,status:"recorded"|"reversed",recorded_by:{user_id,name},reversed_at,reversal_reason,applied:[{schedule_id,amount}],created_at}`
+
+### Landlord (audience org)
+| `GET /schedules?status=&contract_id=&renter_user_id=&due_from=&due_to=&cursor=&limit=` | → `{items:[schedule],next_cursor}` (`status=overdue` = overdue view) |
+| `POST /payments` | `{contract_id, schedule_id?, amount(int>0), method, reference?(≤80), paid_at(datetime, default now, not future >1d), note?(≤500), allow_overpay_rollover?:bool}` → `201 {payment, schedules:[affected schedule]}`. Allocation: target = `schedule_id` or the earliest unpaid (`pending|partial|overdue`) schedule of the contract. Apply `amount` to target: remaining = amount − (target.amount − target.paid_amount). If remaining > 0: when `allow_overpay_rollover` true → apply to following unpaid schedules in order (recorded in `applied[]`); when false → **409 `overpay_confirm_required`** with `{detail, excess, next_schedule:{...}}` so the UI can prompt (FLOWS 7 "overpayment → applied to next schedule (confirm prompt)"). Any leftover after all schedules are paid → 409 `exceeds_contract_balance`. Status flip: paid_amount ≥ amount → `paid`; 0 < paid < amount → `partial`; contract must be `active`/`expiring` → else 409. Audited `payment.record`. Queues SMS `thank_you` (amount received + next due date/amount or "all paid"). |
+| `POST /payments/{id}/reverse` | `{reason(1–200)}` → `200 {payment, schedules}`; status `reversed`, un-applies every `applied[]` amount, recomputes schedule statuses (pending/partial and overdue if due_date < today); audited `payment.reverse`; 409 if already reversed. |
+| `GET /payments?contract_id=&renter_user_id=&method=&from=&to=&cursor=` | → `{items:[payment],next_cursor}` |
+| `GET /payments/{id}` | → `{payment}` |
+| `POST /admin/jobs/overdue` (platform admin) + internal ticker (hourly) | flips `pending|partial` with `due_date + grace_days < today` → `overdue` (grace from org settings); `overdue` that become paid handled by record. Returns `{flipped:n}`. Renter/landlord reads also apply an on-demand check (derive `overdue` at read time if due passed — simplest: the read endpoints call the flip for that org first). |
+| `GET /org/bank-account` / `PUT /org/bank-account` | `{bank_name, account_name, account_number, instructions(≤300)}` stored in `orgs.settings.bank_account` — shown to renters on the payment screen (FLOWS 7). |
+
+### Renter (audience renter)
+| `GET /me/schedules` (extend) | `{items:[schedule], next_due:schedule|null, overdue_total, bank_account:{...}|null}` |
+| `GET /me/payments` | → `{items:[payment]}` (own contracts only; `recorded_by` name only) |
+
+Schedules for a renter show `status` chip: paid (stamp), pending (pencil), overdue (stamp red), partial (pencil + "TZS x of y").
