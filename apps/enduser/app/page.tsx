@@ -21,6 +21,7 @@ import {
   contractApi,
   needsRenterSignature,
   renterApi,
+  scheduleOutstanding,
   type Contract,
   type LinkRequest,
   type MySchedule,
@@ -29,6 +30,7 @@ import { useMe } from '../lib/auth';
 import { errorMessage, formatDate, money } from '../lib/format';
 import { forgetScannedUnit, readScannedUnit } from '../lib/scan';
 import { Protected } from '../components/Protected';
+import { NextDueChip } from '../components/PaymentStatus';
 import { Notice, Screen, ScreenHeader } from '../components/Screen';
 
 function firstName(fullName: string): string {
@@ -99,28 +101,13 @@ function RequestRow({
   );
 }
 
-/** The pencil/stamp for a schedule row (Phase 5 fills in paid/partial). */
-function scheduleMark(schedule: MySchedule) {
-  switch (schedule.status) {
-    case 'paid':
-      return <span className="stamp stamp-paid">Paid</span>;
-    case 'overdue':
-      return <span className="stamp stamp-overdue">Overdue</span>;
-    case 'partial':
-      return <span className="pencil">Part paid</span>;
-    case 'waived':
-      return <span className="pencil">Waived</span>;
-    default:
-      return <span className="pencil">Due</span>;
-  }
-}
-
 function HomeContent() {
   const { user } = useMe();
 
   const [requests, setRequests] = useState<LinkRequest[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [nextDue, setNextDue] = useState<MySchedule | null>(null);
+  const [overdueTotal, setOverdueTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<string | null>(null);
@@ -133,10 +120,16 @@ function HomeContent() {
       .mine(signal)
       .then((res) => setContracts(res.items ?? []))
       .catch(() => setContracts([]));
-    void contractApi
-      .mySchedules(signal)
-      .then((res) => setNextDue(res.next_due ?? null))
-      .catch(() => setNextDue(null));
+    void renterApi
+      .schedules(signal)
+      .then((res) => {
+        setNextDue(res.next_due ?? null);
+        setOverdueTotal(res.overdue_total ?? 0);
+      })
+      .catch(() => {
+        setNextDue(null);
+        setOverdueTotal(0);
+      });
 
     try {
       const res = await renterApi.linkRequests(signal);
@@ -274,7 +267,36 @@ function HomeContent() {
       )}
 
       <section className="sheet" style={{ padding: 'var(--sp-4)' }}>
-        <h2 style={{ fontSize: 'var(--text-lg)' }}>Next payment</h2>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'baseline',
+            justifyContent: 'space-between',
+            gap: 'var(--sp-3)',
+          }}
+        >
+          <h2 style={{ fontSize: 'var(--text-lg)' }}>Next payment</h2>
+          <Link
+            href="/payments"
+            style={{ color: 'var(--primary)', fontSize: 'var(--text-sm)', fontWeight: 600 }}
+          >
+            How to pay →
+          </Link>
+        </div>
+
+        {overdueTotal > 0 && (
+          <p
+            role="alert"
+            style={{
+              margin: 'var(--sp-3) 0 0',
+              color: 'var(--stamp-overdue)',
+              fontSize: 'var(--text-sm)',
+              fontWeight: 600,
+            }}
+          >
+            {money(overdueTotal)} overdue.
+          </p>
+        )}
 
         <table className="ledger" style={{ marginTop: 'var(--sp-4)' }}>
           <tbody>
@@ -288,9 +310,9 @@ function HomeContent() {
                   </span>
                 </td>
                 <td className="num">
-                  <span className="amount">{money(nextDue.amount)}</span>
+                  <span className="amount">{money(scheduleOutstanding(nextDue))}</span>
                   <br />
-                  {scheduleMark(nextDue)}
+                  <NextDueChip schedule={nextDue} />
                 </td>
               </tr>
             ) : (
