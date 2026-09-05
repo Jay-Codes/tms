@@ -228,6 +228,15 @@ func (s *Server) routes() chi.Router {
 			r.Post("/contracts/{id}/activate", s.handleActivateContract)
 			r.Post("/contracts/{id}/terminate", s.handleTerminateContract)
 
+			// --- Phase 5: offline payments, schedules, bank account ---
+			r.Get("/schedules", s.handleListSchedules)
+			r.Post("/payments", s.handleRecordPayment)
+			r.Get("/payments", s.handleListPayments)
+			r.Get("/payments/{id}", s.handleGetPayment)
+			r.Post("/payments/{id}/reverse", s.handleReversePayment)
+			r.Get("/org/bank-account", s.handleGetBankAccount)
+			r.Put("/org/bank-account", s.handlePutBankAccount)
+
 			// --- Phase 4: branding ---
 			r.Get("/org/branding", s.handleGetBranding)
 			r.Put("/org/branding", s.handlePutBranding)
@@ -257,6 +266,9 @@ func (s *Server) routes() chi.Router {
 			r.Post("/contracts/{id}/sign/otp", s.handleContractSignOTP)
 			r.Post("/contracts/{id}/signature-upload", s.handleSignatureUpload)
 			r.Post("/contracts/{id}/sign", s.handleSignContract)
+
+			// --- Phase 5: the renter's own payment history ---
+			r.Get("/me/payments", s.handleListMyPayments)
 		})
 
 		// --- Phase 4: contract reads, open to either party (tms_o or tms_r) ---
@@ -274,6 +286,7 @@ func (s *Server) routes() chi.Router {
 		r.Group(func(r chi.Router) {
 			r.Use(s.sessions.RequireAdmin())
 			r.Post("/admin/jobs/contract-lifecycle", s.handleContractLifecycleJob)
+			r.Post("/admin/jobs/overdue", s.handleOverdueJob)
 		})
 
 		// --- Phase 2: public (no session; rate limited per IP) ---

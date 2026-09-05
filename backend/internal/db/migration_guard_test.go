@@ -9,11 +9,16 @@ import (
 	"testing"
 )
 
-// migrationPath is the Phase 1 schema migration the guards are derived from.
-const (
-	migrationUp   = "../../migrations/000002_schema.up.sql"
-	migrationDown = "../../migrations/000002_schema.down.sql"
-)
+// schemaMigrations are the migrations the guards are derived from: the Phase 1
+// schema plus every later migration that creates a table. A migration that adds
+// an org-scoped table must be listed here, or its table silently escapes the
+// isolation guard.
+//
+//nolint:gochecknoglobals // fixed list of migration files, read-only.
+var schemaMigrations = []struct{ up, down string }{
+	{"../../migrations/000002_schema.up.sql", "../../migrations/000002_schema.down.sql"},
+	{"../../migrations/000007_payments.up.sql", "../../migrations/000007_payments.down.sql"},
+}
 
 // guardExemptTables carry an org_id column but are deliberately absent from
 // orgScopedTables in orgscope_guard_test.go:
@@ -69,8 +74,11 @@ func tablesWithOrgID(t *testing.T, sql string) []string {
 // as a deliberate exemption here. Without this, adding a table silently opts it
 // out of the isolation guard.
 func TestOrgScopedTableListMatchesMigration(t *testing.T) {
-	sql := readMigration(t, migrationUp)
-	found := tablesWithOrgID(t, sql)
+	var found []string
+	for _, m := range schemaMigrations {
+		found = append(found, tablesWithOrgID(t, readMigration(t, m.up))...)
+	}
+	sort.Strings(found)
 	if len(found) < 10 {
 		t.Fatalf("only %d org_id tables parsed out of the migration — the parser is broken: %v", len(found), found)
 	}
@@ -90,8 +98,8 @@ func TestOrgScopedTableListMatchesMigration(t *testing.T) {
 			}
 			continue
 		}
-		t.Errorf("table %q carries org_id in 000002 but is missing from orgScopedTables — "+
-			"add it there, or document an exemption in guardExemptTables", tbl)
+		t.Errorf("table %q carries org_id in the schema migrations but is missing from "+
+			"orgScopedTables — add it there, or document an exemption in guardExemptTables", tbl)
 	}
 
 	// The reverse direction: no stale entries naming tables that no longer exist.
@@ -101,7 +109,7 @@ func TestOrgScopedTableListMatchesMigration(t *testing.T) {
 	}
 	for _, tbl := range orgScopedTables {
 		if !inMigration[tbl] {
-			t.Errorf("orgScopedTables lists %q, which has no org_id column in 000002", tbl)
+			t.Errorf("orgScopedTables lists %q, which no schema migration creates with an org_id column", tbl)
 		}
 	}
 }
@@ -109,28 +117,26 @@ func TestOrgScopedTableListMatchesMigration(t *testing.T) {
 // TestDownMigrationReversesUp checks that every table and function created by
 // 000002 is dropped by its down migration, so a rollback leaves no orphans.
 func TestDownMigrationReversesUp(t *testing.T) {
-	up := readMigration(t, migrationUp)
-	down := readMigration(t, migrationDown)
-	lowerDown := strings.ToLower(down)
+	total := 0
+	for _, mig := range schemaMigrations {
+		up := readMigration(t, mig.up)
+		lowerDown := strings.ToLower(readMigration(t, mig.down))
 
-	tables := createTableRe.FindAllStringSubmatch(up, -1)
-	if len(tables) == 0 {
-		t.Fatal("no CREATE TABLE statements parsed from the up migration")
-	}
-	for _, m := range tables {
-		if !strings.Contains(lowerDown, "drop table if exists "+strings.ToLower(m[1])) {
-			t.Errorf("down migration does not drop table %q", m[1])
+		tables := createTableRe.FindAllStringSubmatch(up, -1)
+		total += len(tables)
+		for _, m := range tables {
+			if !strings.Contains(lowerDown, "drop table if exists "+strings.ToLower(m[1])) {
+				t.Errorf("%s does not drop table %q", mig.down, m[1])
+			}
+		}
+		for _, m := range createFuncRe.FindAllStringSubmatch(up, -1) {
+			if !strings.Contains(lowerDown, "drop function if exists "+strings.ToLower(m[1])) {
+				t.Errorf("%s does not drop function %q", mig.down, m[1])
+			}
 		}
 	}
-
-	funcs := createFuncRe.FindAllStringSubmatch(up, -1)
-	if len(funcs) == 0 {
-		t.Fatal("no CREATE FUNCTION statements parsed from the up migration")
-	}
-	for _, m := range funcs {
-		if !strings.Contains(lowerDown, "drop function if exists "+strings.ToLower(m[1])) {
-			t.Errorf("down migration does not drop function %q", m[1])
-		}
+	if total == 0 {
+		t.Fatal("no CREATE TABLE statements parsed from the up migrations")
 	}
 }
 
@@ -138,7 +144,12 @@ func TestDownMigrationReversesUp(t *testing.T) {
 // table has an index whose leading column is org_id, because every query
 // against it filters on org_id.
 func TestOrgScopedTablesAreIndexedOnOrgID(t *testing.T) {
-	sql := strings.ToLower(readMigration(t, migrationUp))
+	var b strings.Builder
+	for _, m := range schemaMigrations {
+		b.WriteString(readMigration(t, m.up))
+		b.WriteString("\n")
+	}
+	sql := strings.ToLower(b.String())
 	for _, tbl := range orgScopedTables {
 		idx := regexp.MustCompile(`create (?:unique )?index [a-z0-9_]+ on ` + tbl + ` \(org_id`)
 		if !idx.MatchString(sql) {

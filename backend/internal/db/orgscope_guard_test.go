@@ -30,6 +30,7 @@ var orgScopedTables = []string{
 	"unit_link_requests",
 	"payment_schedules",
 	"payments",
+	"payment_allocations",
 	"notification_log",
 	"audit_log",
 }

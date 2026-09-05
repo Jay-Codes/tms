@@ -11,6 +11,47 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const applyPaymentToSchedule = `-- name: ApplyPaymentToSchedule :one
+UPDATE payment_schedules
+SET paid_amount = $1,
+    status = CASE
+        WHEN status = 'waived' THEN 'waived'
+        WHEN $1::bigint >= amount THEN 'paid'
+        ELSE 'partial'
+    END
+WHERE org_id = $2 AND id = $3 AND deleted_at IS NULL
+RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount
+`
+
+type ApplyPaymentToScheduleParams struct {
+	PaidAmount int64       `json:"paid_amount"`
+	OrgID      pgtype.UUID `json:"org_id"`
+	ID         pgtype.UUID `json:"id"`
+}
+
+// ApplyPaymentToSchedule credits one schedule and flips its status the way
+// API.md describes for a recording: fully covered → `paid`, partly → `partial`.
+// A row that has been waived is never revived by a payment.
+func (q *Queries) ApplyPaymentToSchedule(ctx context.Context, arg ApplyPaymentToScheduleParams) (PaymentSchedule, error) {
+	row := q.db.QueryRow(ctx, applyPaymentToSchedule, arg.PaidAmount, arg.OrgID, arg.ID)
+	var i PaymentSchedule
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.ContractID,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.DueDate,
+		&i.Amount,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.PaidAmount,
+	)
+	return i, err
+}
+
 const createPaymentSchedule = `-- name: CreatePaymentSchedule :one
 
 INSERT INTO payment_schedules (org_id, contract_id, period_start, period_end, due_date, amount)
@@ -58,6 +99,143 @@ func (q *Queries) CreatePaymentSchedule(ctx context.Context, arg CreatePaymentSc
 		&i.PaidAmount,
 	)
 	return i, err
+}
+
+const getSchedule = `-- name: GetSchedule :one
+SELECT id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount FROM payment_schedules
+WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
+`
+
+type GetScheduleParams struct {
+	OrgID pgtype.UUID `json:"org_id"`
+	ID    pgtype.UUID `json:"id"`
+}
+
+// GetSchedule resolves one schedule inside its org, used to validate an
+// explicit `schedule_id` on POST /payments.
+func (q *Queries) GetSchedule(ctx context.Context, arg GetScheduleParams) (PaymentSchedule, error) {
+	row := q.db.QueryRow(ctx, getSchedule, arg.OrgID, arg.ID)
+	var i PaymentSchedule
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.ContractID,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.DueDate,
+		&i.Amount,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.PaidAmount,
+	)
+	return i, err
+}
+
+const listSchedules = `-- name: ListSchedules :many
+SELECT s.id, s.org_id, s.contract_id, s.period_start, s.period_end, s.due_date, s.amount, s.status, s.created_at, s.updated_at, s.deleted_at, s.paid_amount,
+       c.renter_user_id, c.status AS contract_status,
+       u.name AS unit_name, p.name AS property_name,
+       ru.full_name AS renter_name
+FROM payment_schedules s
+JOIN contracts c  ON c.id = s.contract_id AND c.org_id = s.org_id
+JOIN units u      ON u.id = c.unit_id AND u.org_id = c.org_id
+JOIN properties p ON p.id = u.property_id AND p.org_id = c.org_id
+JOIN users ru     ON ru.id = c.renter_user_id
+WHERE s.org_id = $1 AND s.deleted_at IS NULL AND c.deleted_at IS NULL
+  AND ($2::text IS NULL OR s.status = $2::text)
+  AND ($3::uuid IS NULL OR s.contract_id = $3::uuid)
+  AND ($4::uuid IS NULL OR c.renter_user_id = $4::uuid)
+  AND ($5::date IS NULL OR s.due_date >= $5::date)
+  AND ($6::date IS NULL OR s.due_date <= $6::date)
+  AND ($7::date IS NULL
+       OR (s.due_date, s.id) > ($7::date, $8::uuid))
+ORDER BY s.due_date, s.id
+LIMIT $9
+`
+
+type ListSchedulesParams struct {
+	OrgID        pgtype.UUID `json:"org_id"`
+	Status       *string     `json:"status"`
+	ContractID   pgtype.UUID `json:"contract_id"`
+	RenterUserID pgtype.UUID `json:"renter_user_id"`
+	DueFrom      pgtype.Date `json:"due_from"`
+	DueTo        pgtype.Date `json:"due_to"`
+	CursorDue    pgtype.Date `json:"cursor_due"`
+	CursorID     pgtype.UUID `json:"cursor_id"`
+	RowLimit     int32       `json:"row_limit"`
+}
+
+type ListSchedulesRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	OrgID          pgtype.UUID        `json:"org_id"`
+	ContractID     pgtype.UUID        `json:"contract_id"`
+	PeriodStart    pgtype.Date        `json:"period_start"`
+	PeriodEnd      pgtype.Date        `json:"period_end"`
+	DueDate        pgtype.Date        `json:"due_date"`
+	Amount         int64              `json:"amount"`
+	Status         string             `json:"status"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
+	PaidAmount     int64              `json:"paid_amount"`
+	RenterUserID   pgtype.UUID        `json:"renter_user_id"`
+	ContractStatus string             `json:"contract_status"`
+	UnitName       string             `json:"unit_name"`
+	PropertyName   string             `json:"property_name"`
+	RenterName     string             `json:"renter_name"`
+}
+
+// ListSchedules is the landlord's schedule board: every row of the org with the
+// contract, unit, property and renter resolved, filtered and cursor-paged by
+// due date (API.md Phase 5).
+func (q *Queries) ListSchedules(ctx context.Context, arg ListSchedulesParams) ([]ListSchedulesRow, error) {
+	rows, err := q.db.Query(ctx, listSchedules,
+		arg.OrgID,
+		arg.Status,
+		arg.ContractID,
+		arg.RenterUserID,
+		arg.DueFrom,
+		arg.DueTo,
+		arg.CursorDue,
+		arg.CursorID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSchedulesRow{}
+	for rows.Next() {
+		var i ListSchedulesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ContractID,
+			&i.PeriodStart,
+			&i.PeriodEnd,
+			&i.DueDate,
+			&i.Amount,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.PaidAmount,
+			&i.RenterUserID,
+			&i.ContractStatus,
+			&i.UnitName,
+			&i.PropertyName,
+			&i.RenterName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listSchedulesForContract = `-- name: ListSchedulesForContract :many
@@ -172,6 +350,105 @@ func (q *Queries) ListSchedulesForRenter(ctx context.Context, renterUserID pgtyp
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockSchedulesForContract = `-- name: LockSchedulesForContract :many
+
+SELECT id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount FROM payment_schedules
+WHERE org_id = $1 AND contract_id = $2 AND deleted_at IS NULL
+ORDER BY due_date, period_start, id
+FOR UPDATE
+`
+
+type LockSchedulesForContractParams struct {
+	OrgID      pgtype.UUID `json:"org_id"`
+	ContractID pgtype.UUID `json:"contract_id"`
+}
+
+// ------------------------------------------------------ Phase 5: payments --
+// LockSchedulesForContract reads every schedule of a contract inside the
+// recording transaction and locks the rows, so two landlords recording at the
+// same moment cannot both allocate against the same outstanding balance.
+func (q *Queries) LockSchedulesForContract(ctx context.Context, arg LockSchedulesForContractParams) ([]PaymentSchedule, error) {
+	rows, err := q.db.Query(ctx, lockSchedulesForContract, arg.OrgID, arg.ContractID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PaymentSchedule{}
+	for rows.Next() {
+		var i PaymentSchedule
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ContractID,
+			&i.PeriodStart,
+			&i.PeriodEnd,
+			&i.DueDate,
+			&i.Amount,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.PaidAmount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const unapplyPaymentFromSchedule = `-- name: UnapplyPaymentFromSchedule :one
+UPDATE payment_schedules
+SET paid_amount = GREATEST(paid_amount - $1::bigint, 0),
+    status = CASE
+        WHEN status = 'waived' THEN 'waived'
+        WHEN GREATEST(paid_amount - $1::bigint, 0) >= amount THEN 'paid'
+        WHEN due_date + $2::int < CURRENT_DATE THEN 'overdue'
+        WHEN GREATEST(paid_amount - $1::bigint, 0) > 0 THEN 'partial'
+        ELSE 'pending'
+    END
+WHERE org_id = $3 AND id = $4 AND deleted_at IS NULL
+RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount
+`
+
+type UnapplyPaymentFromScheduleParams struct {
+	Delta     int64       `json:"delta"`
+	GraceDays int32       `json:"grace_days"`
+	OrgID     pgtype.UUID `json:"org_id"`
+	ID        pgtype.UUID `json:"id"`
+}
+
+// UnapplyPaymentFromSchedule is the reversal half: it debits the schedule and
+// recomputes the status from scratch, including the overdue check, because
+// taking money back can push a row past its due date again (API.md Phase 5).
+func (q *Queries) UnapplyPaymentFromSchedule(ctx context.Context, arg UnapplyPaymentFromScheduleParams) (PaymentSchedule, error) {
+	row := q.db.QueryRow(ctx, unapplyPaymentFromSchedule,
+		arg.Delta,
+		arg.GraceDays,
+		arg.OrgID,
+		arg.ID,
+	)
+	var i PaymentSchedule
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.ContractID,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.DueDate,
+		&i.Amount,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.PaidAmount,
+	)
+	return i, err
 }
 
 const waiveSchedulesAfter = `-- name: WaiveSchedulesAfter :many
