@@ -15,7 +15,7 @@ If a change requires deviating from the stack, update TECHSTACK.md first, then i
 
 ## Spec & plan
 
-Product spec: [SPEC.md](SPEC.md) (architecture, data model, API surface) with user flows in [FLOWS.md](FLOWS.md). Implementation plan and phase status: [PLAN.md](PLAN.md) — consult it before starting work; update checkboxes as phases complete.
+Product spec: [SPEC.md](SPEC.md) (architecture, data model, API surface) with user flows in [FLOWS.md](FLOWS.md). Implementation plan and phase status: [PLAN.md](PLAN.md) (Part 1, done) and [PLAN2.md](PLAN2.md) (Part 2) — consult it before starting work; update checkboxes as phases complete.
 
 ## Tooling
 

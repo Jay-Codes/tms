@@ -132,3 +132,7 @@ Compose is the deployment stack (dev infra now, full stack at Phase 8):
 | Beem account/sender-ID approval delays | Provider behind interface; dev mode logs SMS; only Phase 6 needs live creds |
 | Payment edge cases (partial/overpay/reverse) | Table-driven unit tests written with Phase 5, not after |
 | Org isolation regressions | Isolation tests run in `make test` from Phase 1 onward |
+
+---
+
+**Part 2** (revenue trends, expenses, cadence reports, mobile landlord, theming v2, nav fix): see [PLAN2.md](PLAN2.md).
