@@ -253,6 +253,31 @@ func (s *Server) routes() chi.Router {
 			r.Get("/reports/payment-status", s.handleReportPaymentStatus)
 			r.Get("/reports/collections", s.handleReportCollections)
 
+			// --- Phase 10: the expense ledger ---
+			//
+			// Owner and manager, the org's two roles: whoever may record a
+			// payment may record an expense (PLAN2 Phase 10). The roles are
+			// named rather than left implicit so a later, narrower role does
+			// not inherit the ledger by default.
+			r.Group(func(r chi.Router) {
+				r.Use(s.sessions.RequireOrg(auth.RoleOwner, auth.RoleManager))
+				r.Get("/org/expense-categories", s.handleListExpenseCategories)
+				r.Post("/org/expense-categories", s.handleCreateExpenseCategory)
+				r.Patch("/org/expense-categories/{id}", s.handlePatchExpenseCategory)
+				r.Delete("/org/expense-categories/{id}", s.handleDeleteExpenseCategory)
+
+				r.Get("/expenses", s.handleListExpenses)
+				r.Post("/expenses", s.handleCreateExpense)
+				r.Get("/expenses/summary", s.handleExpenseSummary)
+				r.Get("/expenses/{id}", s.handleGetExpense)
+				r.Patch("/expenses/{id}", s.handlePatchExpense)
+				r.Post("/expenses/{id}/void", s.handleVoidExpense)
+				r.Post("/expenses/{id}/receipt", s.handleExpenseReceiptUpload)
+				r.Post("/expenses/{id}/receipt/complete", s.handleExpenseReceiptComplete)
+				r.Get("/expenses/{id}/receipt", s.handleExpenseReceiptView)
+				r.Delete("/expenses/{id}/receipt", s.handleExpenseReceiptDelete)
+			})
+
 			// --- Phase 4: branding ---
 			r.Get("/org/branding", s.handleGetBranding)
 			r.Put("/org/branding", s.handlePutBranding)

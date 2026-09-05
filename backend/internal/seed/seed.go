@@ -36,6 +36,7 @@ import (
 	"tms/backend/internal/contract"
 	"tms/backend/internal/db"
 	"tms/backend/internal/db/sqlc"
+	"tms/backend/internal/expense"
 	"tms/backend/internal/notify"
 	"tms/backend/internal/validate"
 )
@@ -256,6 +257,9 @@ func (s *Seeder) ensureOrg(ctx context.Context, name, slug, ownerName, ownerEmai
 				}); err != nil {
 					return err
 				}
+			}
+			if err := expense.SeedCategories(ctx, q, org.ID); err != nil {
+				return err
 			}
 			out.org = org
 			return audit.Record(ctx, q, audit.Entry{

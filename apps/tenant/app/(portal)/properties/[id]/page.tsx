@@ -10,6 +10,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { ProblemNote } from '../../../../components/FormBits';
+import { PropertyExpenses } from '../../../../components/PropertyExpenses';
 import { PropertyForm } from '../../../../components/PropertyForm';
 import { PageHead } from '../../../../components/PageHead';
 import { Sheet } from '../../../../components/Sheet';
@@ -26,6 +27,7 @@ import {
   type Unit,
 } from '../../../../lib/api';
 import { Amount } from '../../../../lib/format';
+import { TableScroll } from '@tms/ui';
 
 function PropertyBody({ id }: { id: string }) {
   const router = useRouter();
@@ -150,6 +152,7 @@ function PropertyBody({ id }: { id: string }) {
           </div>
         </div>
 
+        <TableScroll label="Units">
         <table className="ledger">
           <thead>
             <tr>
@@ -194,7 +197,15 @@ function PropertyBody({ id }: { id: string }) {
             )}
           </tbody>
         </table>
+        </TableScroll>
       </div>
+
+      <section style={{ paddingTop: 'var(--sp-7)' }}>
+        <hr className="rule rule-strong" />
+        <div style={{ paddingTop: 'var(--sp-5)' }}>
+          <PropertyExpenses propertyId={id} propertyName={property?.name} />
+        </div>
+      </section>
 
       <Sheet open={sheet === 'edit'} title="Edit property" onClose={() => setSheet('none')}>
         {property ? (

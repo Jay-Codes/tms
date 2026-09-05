@@ -14,6 +14,7 @@ import (
 	"tms/backend/internal/contract"
 	"tms/backend/internal/db"
 	"tms/backend/internal/db/sqlc"
+	"tms/backend/internal/expense"
 	"tms/backend/internal/httpx"
 	"tms/backend/internal/validate"
 )
@@ -148,6 +149,12 @@ func (s *Server) handleCreateOrg(w http.ResponseWriter, r *http.Request) {
 			}); err != nil {
 				return err
 			}
+		}
+		// The expense ledger's vocabulary, seeded like the payment periods
+		// above so the Record-expense sheet has a category picker from the
+		// org's first minute (PLAN2 Phase 10).
+		if err := expense.SeedCategories(r.Context(), q, org.ID); err != nil {
+			return err
 		}
 		if err := audit.Record(r.Context(), q, audit.Entry{
 			OrgID:       db.UUIDString(org.ID),

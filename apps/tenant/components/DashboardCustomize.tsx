@@ -17,6 +17,7 @@ import { Sheet } from './Sheet';
 import {
   ApiError,
   DASHBOARD_CARDS,
+  DEFAULT_DASHBOARD_CARDS,
   brandingApi,
   hiddenDashboardCards,
   type DashboardCard,
@@ -30,6 +31,7 @@ export const CARD_LABELS: Record<DashboardCard, string> = {
   collections: 'Collections this month',
   link_requests: 'Link requests',
   overdue: 'Overdue',
+  expenses: 'Expenses this month',
 };
 
 export function DashboardCustomize({
@@ -152,7 +154,7 @@ export function DashboardCustomize({
             disabled={busy}
             onClick={() => {
               setOrder([...DASHBOARD_CARDS]);
-              setShown(new Set(DASHBOARD_CARDS));
+              setShown(new Set(DEFAULT_DASHBOARD_CARDS));
             }}
           >
             Reset to default

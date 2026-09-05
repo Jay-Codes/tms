@@ -284,7 +284,7 @@ Notes fixed in Phase 7 (implementation detail, same for all three reports):
 - `status=` on payment-status filters the *derived* status; an unknown value is a 400.
 
 ### Dashboard prefs
-`PUT /org/branding {dashboard_prefs:{cards:["assets","renters","payment_status","collections","link_requests","overdue"], layout:"grid"|"list"}}` — free JSON validated to known card ids; frontend orders cards by it.
+`PUT /org/branding {dashboard_prefs:{cards:["assets","renters","payment_status","collections","link_requests","overdue","expenses"], layout:"grid"|"list"}}` — free JSON validated to known card ids; frontend orders cards by it.
 
 Validation (400 with `errors.dashboard_prefs.*`): `cards` must be an array of ids drawn from that exact list, with no repeats; `layout` must be `grid` (default) or `list`; any other key in the object is refused rather than silently dropped. The stored blob is the canonical `{cards, layout}` shape, and `cards` keeps the order it was sent in — that order is the dashboard's.
 
@@ -380,3 +380,96 @@ Credit rules: 1 credit per 160-character GSM segment (70 for UCS-2), debited **a
 ### Phase 15 — hardening (planned)
 
 No new endpoints. Reports v2 routes enter `make loadtest` (p95 < 300 ms on the seed org), the isolation census covers every Part 2 route, and receipt uploads and admin template edits gain rate limits.
+
+## Part 2 — Phase 10 (shipped)
+
+The expense ledger (SPEC §5.11, FLOWS 12). Every route below is audience **org**
+(`tms_o`), owner + manager — the org's two roles: whoever may record a payment
+may record an expense. Errors are the same RFC-7807 documents as Phase 5, with
+the machine-readable code in `type`: `category_exists`, `category_in_use`,
+`expense_voided`. Another org's id is a 404 everywhere.
+
+`category` shape: `{id, name, is_default, sort_order, active, created_at}`
+`expense` shape: `{id, property:{id,name}, unit:{id,name}|null, category:{id,name}|null, amount(int TZS), incurred_on:"YYYY-MM-DD", vendor, reference, note, receipt:{present:bool, content_type|null, size|null}, recorded_by:{user_id,name}|null, status:"recorded"|"voided", voided_at|null, void_reason|null, created_at, updated_at}`
+
+### Categories
+
+| `GET /org/expense-categories` | → `{items:[category]}`, ordered by `sort_order` then `name`. Includes inactive rows (`active:false`) so the settings screen can switch one back on; excludes soft-deleted ones. **Seeds lazily:** an org with no categories gets the eight defaults on this read, so orgs created before Phase 10 are not left with an empty picker. |
+| `POST /org/expense-categories` | `{name(1–60), sort_order?(0–10000)}` → `201 {category}`; `is_default:false`. Omitting `sort_order` appends to the end. A duplicate name (case-insensitive, ignoring soft-deleted rows) → **409 `category_exists`**. Audited `expense_category.create`. |
+| `PATCH /org/expense-categories/{id}` | `{name?, sort_order?, active?}` → `200 {category}`; duplicate name → 409 `category_exists`. Audited `expense_category.update` (before/after). |
+| `DELETE /org/expense-categories/{id}` | → **204**, soft delete. If any non-deleted expense is filed under it → **409 `category_in_use`** ("deactivate it instead"). Audited `expense_category.delete`. |
+
+The eight seeded defaults, `is_default:true`, `sort_order` 1…8 in this order:
+Repairs & maintenance, Utilities, Security, Cleaning, Taxes & levies, Insurance,
+Management fees, Other. They are written by `POST /orgs`, by `internal/seed`, and
+lazily by the list endpoint — one list, `internal/expense.DefaultCategories`.
+
+### Expenses
+
+| `POST /expenses` | `{property_id, unit_id?, category_id?, amount(int 1…1,000,000,000), incurred_on(date), vendor?(≤120), reference?(≤120), note?(≤1000)}` → `201 {expense}`. `incurred_on` is `YYYY-MM-DD`, no earlier than `2000-01-01` and no later than **tomorrow** on the platform wall clock (Africa/Dar_es_Salaam). A property that is not the caller's → 404. A `unit_id` that is not a unit of that property, or a `category_id` that is not an **active** category of the org → **422** with the field named in `errors`. Audited `expense.create`. |
+| `PATCH /expenses/{id}` | partial, same fields → `200 {expense}`. `unit_id`/`category_id` accept an explicit `null` to clear them (an absent member leaves them alone). References are validated against the merged post-patch row, so moving an expense to another property with its old unit attached is refused. A voided expense → **409 `expense_voided`**. Audited `expense.update` (before/after). |
+| `POST /expenses/{id}/void` | `{reason(1–300)}` → `200 {expense}` with `status:"voided"`, `voided_at`, `void_reason`. Append-style correction, like `payment.reverse`: nothing is deleted, nothing is restored, and the row drops out of every total. Already voided → 409 `expense_voided`. Audited `expense.void`. |
+| `GET /expenses?property_id=&unit_id=&category_id=&status=&from=&to=&cadence=&anchor=&q=&cursor=&limit=` | → `{items:[expense], next_cursor, totals:{count, amount}}`. `status` is `recorded` (default), `voided` or `all`. `totals` covers the **whole filtered set**, not the page. Sorted `incurred_on DESC, created_at DESC, id DESC`; `limit` 1–200, default 50. |
+| `GET /expenses?format=csv` | the same filters, no pagination, capped at 10 000 rows. Columns: `date, property, unit, category, vendor, reference, amount, status, note, recorded_by`. Free-text cells are formula-neutralised exactly as the payment-status export is (a leading `=+-@` gets a `'`). Filename `expenses-{from}-{to}.csv` — `from` is `all` when the window is unbounded below, `to` is today's date when unbounded above. |
+| `GET /expenses/{id}` | → `{expense}`; another org's id → 404. |
+| `GET /expenses/summary?cadence=&anchor=&from=&to=&group_by=property\|category&property_id=` | → `{window:{from,to,cadence}, previous:{from,to,cadence}, group_by, groups:[{id,name,amount,count}], total:{amount,count}, previous_total:{amount,count}, change_pct:number\|null}`. `status:"recorded"` only. |
+
+Phase 10 notes (implementation-confirmed):
+
+- **Windows.** With a `cadence` (`month` default, plus `quarter`, `half_year`,
+  `year`, `custom`) the window comes from the shared resolver `internal/period`,
+  so "this quarter" means the same here as on every other Part 2 report: EAT
+  midnight, half-open `[from, to)`, and the echoed `to` is the **exclusive** end.
+  Without a cadence, `GET /expenses` reads `from`/`to` as plain **inclusive**
+  dates and either may be omitted. `anchor` (a date) moves the window a
+  PeriodPicker has navigated to. A custom range needs both dates and may not
+  exceed five years (400 on `cadence`).
+- **Summary grouping** is zero-filled from the org's own rows rather than from
+  the expenses: `group_by=property` returns a group per live property and
+  `group_by=category` one per **active** category, spend or no spend, so a chart
+  keeps its bars and their colours from one month to the next. Rows filed under
+  no category come back as an extra group with `id:null`, `name:"Uncategorised"`,
+  and only when it holds something. Groups are sorted by `amount` descending,
+  ties broken by name. `property_id` narrows both the groups and the totals.
+- **`change_pct`** is the movement against `previous_total`, rounded to one
+  decimal place, and **null when the previous window is empty** — a rise from
+  nothing is a first month, not "+100%". The arithmetic is
+  `internal/expense.ChangePct`, table-tested apart from the database.
+- **Pagination** carries the whole sort tuple: the cursor is base64url of
+  `incurred_on,created_at,id`, because a ledger sorted by a date alone would
+  drop rows at every page boundary that lands inside a busy day. It is therefore
+  not interchangeable with the `(timestamp,id)` cursor of the other listings.
+- **`q`** matches `vendor`, `reference` and `note` with `ILIKE`, its wildcards
+  escaped the way `/units` and `/renters` escape theirs (Phase 8), so a search
+  for `%` finds the vendor actually named with one.
+- **Receipts** live in bucket `receipts` under `{org_id}/{expense_id}.{jpg|png|pdf}`
+  — both segments are ids the server holds, so no request can steer the key.
+  - `POST /expenses/{id}/receipt` `{content_type:"image/jpeg"|"image/png"|"application/pdf", size(1…5 MiB)}`
+    → `200 {upload_url, object_key, expires_in:900, headers:{"Content-Type":…}}`.
+    The presigned PUT **must** carry that `Content-Type`: the completion callback
+    checks what MinIO stored. Rate limited to **30 per hour per org**; a voided
+    expense → 409 `expense_voided`; MinIO down → 503.
+  - `POST /expenses/{id}/receipt/complete` `{object_key?}` → `200 {expense}`.
+    The key is rebuilt from the org and the expense and only then matched against
+    what was sent, so a foreign prefix is a 400 before object storage is asked
+    anything; omitting it stats the three candidate keys. The object must exist,
+    be ≤ 5 MiB, and carry a content type matching the extension it was issued
+    under — otherwise it is deleted and the answer is 400. The accepted type and
+    the real size are stored (migration `000013_expense_receipts` adds
+    `expenses.receipt_content_type` and `receipt_size`) so a page of fifty ledger
+    rows renders its receipt chips without fifty round trips to MinIO. Audited
+    `expense.receipt_attach`.
+  - `GET /expenses/{id}/receipt` → `{url, expires_in:900}`, a presigned GET; no
+    receipt → 404.
+  - `DELETE /expenses/{id}/receipt` → `200 {expense}`, clears the three columns
+    and removes the object. This is the one deletion in the ledger, and it is
+    deliberate: the receipt is an attachment, the expense row is the record.
+    Audited `expense.receipt_remove`.
+- **Schema:** the tables came with `000012_part2_foundations`; Phase 10 adds only
+  `000013_expense_receipts` (the two receipt metadata columns). `expenses` and
+  `expense_categories` join the SPEC §2.1 org-scope guard, so a query against
+  either without an `org_id =` filter now fails the build.
+
+Phase 10 audit actions: `expense_category.create`, `expense_category.update`,
+`expense_category.delete`, `expense.create`, `expense.update`, `expense.void`,
+`expense.receipt_attach`, `expense.receipt_remove`.

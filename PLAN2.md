@@ -48,7 +48,7 @@ Confirmed with the client (5 Sep 2026, second round):
 
 **Exit:** navigating between tenant pages keeps the nav mounted (no refetch flash); only one period shows "Recommended"; the JJnE test contract shows "TZS 300,000 per Quarterly (90 days) (TZS 100,000 / 30 days)"; the renter contract fits at 375px with no clipped text; `PeriodPicker` renders in the design-system page; tests green.
 
-## Phase 10 — Expenses (1 day)
+## Phase 10 — Expenses (1 day) — ✅ done 5 Sep 2026
 
 Schema:
 ```
@@ -57,10 +57,10 @@ expenses            org_id, property_id, unit_id NULLABLE, category_id, amount (
                     vendor, reference, note, receipt_object_key NULLABLE, recorded_by_user_id,
                     status (recorded|voided), voided_at, void_reason, deleted_at
 ```
-- [ ] API (`/expenses`, `/org/expense-categories`): CRUD categories; `POST /expenses` (validation: amount bounds, date ≤ today+1, property in org, unit belongs to property), `PATCH` (same day edits allowed; audited before/after), `POST /expenses/{id}/void {reason}` (append-style correction, like payment reverse), `GET /expenses?property_id=&unit_id=&category_id=&from=&to=&cursor=` + `format=csv`, receipt presigned upload/complete/view (bucket `receipts`, `{org_id}/{expense_id}.{ext}`, ≤5 MiB, image/pdf), `GET /expenses/summary?cadence=&from=&to=&group_by=property|category` → totals per group + grand total (all-properties view).
-- [ ] Tenant screens: **Expenses** nav item → ledger (PeriodPicker, property/category filters, totals with double rule, CSV export), "Record expense" sheet (with receipt upload), expense detail (receipt viewer, void with reason), per-property tab on the property page, settings → expense categories manager.
-- [ ] Reports hook: expenses feed Phase 11 net figures.
-- [ ] Tests: validation, void restores nothing (append semantics), CSV formula-neutralised, isolation (org B → 404 on every expense route; census table extended — build fails otherwise), summary math by property/category.
+- [x] API (`/expenses`, `/org/expense-categories`): CRUD categories; `POST /expenses` (validation: amount bounds, date ≤ today+1, property in org, unit belongs to property), `PATCH` (same day edits allowed; audited before/after), `POST /expenses/{id}/void {reason}` (append-style correction, like payment reverse), `GET /expenses?property_id=&unit_id=&category_id=&from=&to=&cursor=` + `format=csv`, receipt presigned upload/complete/view (bucket `receipts`, `{org_id}/{expense_id}.{ext}`, ≤5 MiB, image/pdf), `GET /expenses/summary?cadence=&from=&to=&group_by=property|category` → totals per group + grand total (all-properties view).
+- [x] Tenant screens: **Expenses** nav item → ledger (PeriodPicker, property/category filters, totals with double rule, CSV export), "Record expense" sheet (with receipt upload), expense detail (receipt viewer, void with reason), per-property tab on the property page, settings → expense categories manager.
+- [x] Reports hook: expenses feed Phase 11 net figures.
+- [x] Tests: validation, void restores nothing (append semantics), CSV formula-neutralised, isolation (org B → 404 on every expense route; census table extended — build fails otherwise), summary math by property/category.
 
 **Exit:** landlord records an expense with receipt on Mbezi Beach Block A, sees it in the property tab and in the all-properties summary; void audited; CSV downloads.
 
