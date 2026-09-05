@@ -19,6 +19,7 @@ import {
   type ApiError,
   methodLabel,
   type Payment,
+  paymentWho,
   type Schedule,
   isUnsettled,
   remainingOn,
@@ -266,27 +267,28 @@ export function PaymentsTable({
           <>
             {rows.map((p) => {
               const reversed = p.status === 'reversed';
+              const who = paymentWho(p);
               return (
                 <tr key={p.id} style={reversed ? { color: 'var(--ink-soft)' } : undefined}>
                   <td>{fmtDateTime(p.paid_at)}</td>
                   {showRenter ? (
                     <td>
-                      {p.contract?.renter_user_id ? (
-                        <Link href={`/renters/${p.contract.renter_user_id}`} style={{ color: 'inherit' }}>
-                          {p.contract.renter_name}
+                      {who.renterUserId ? (
+                        <Link href={`/renters/${who.renterUserId}`} style={{ color: 'inherit' }}>
+                          {who.renterName}
                         </Link>
                       ) : (
-                        (p.contract?.renter_name ?? '—')
+                        who.renterName
                       )}
                     </td>
                   ) : null}
                   {showUnit ? (
                     <td>
                       <Link href={`/contracts/${p.contract_id}`} style={{ color: 'inherit' }}>
-                        {p.contract?.unit_name ?? 'Contract'}
+                        {who.unitName}
                       </Link>
                       <div style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>
-                        {p.contract?.property_name ?? ''}
+                        {who.propertyName}
                       </div>
                     </td>
                   ) : null}

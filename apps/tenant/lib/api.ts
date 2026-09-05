@@ -958,8 +958,31 @@ export interface Payment {
   reversal_reason: string | null;
   applied: PaymentAllocation[] | null;
   created_at: string;
-  /** Present on some list payloads so history can name the unit/renter. */
+  /**
+   * `GET /payments` denormalises the contract onto the payment itself rather
+   * than nesting it the way `GET /schedules` does. Both are tolerated —
+   * `paymentWho()` reads whichever arrived.
+   */
+  unit_name?: string | null;
+  property_name?: string | null;
+  renter_name?: string | null;
+  renter_user_id?: string | null;
   contract?: ScheduleContractRef | null;
+}
+
+/** Who and what a payment was against, from either payload shape. */
+export function paymentWho(p: Payment): {
+  renterName: string;
+  renterUserId: string | null;
+  unitName: string;
+  propertyName: string;
+} {
+  return {
+    renterName: p.renter_name ?? p.contract?.renter_name ?? '—',
+    renterUserId: p.renter_user_id ?? p.contract?.renter_user_id ?? null,
+    unitName: p.unit_name ?? p.contract?.unit_name ?? 'Contract',
+    propertyName: p.property_name ?? p.contract?.property_name ?? '',
+  };
 }
 
 export interface PaymentInput {
