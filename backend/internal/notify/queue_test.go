@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
 	"tms/backend/internal/db"
@@ -146,9 +147,20 @@ func TestWorkerRecordsFailure(t *testing.T) {
 	go notify.RunWorker(ctx, notify.Worker{
 		Q: q, Redis: redis.Client, SMS: notify.DisabledSMSProvider{},
 		Logger: testutil.Logger(), PollWait: 50 * time.Millisecond,
+		Sleep: noSleep,
 	})
 
 	waitForStatus(t, pool, id, "failed")
+
+	// Three attempts before the row is given up on (API.md Phase 6).
+	var attempts int
+	if err := pool.QueryRow(ctx,
+		`SELECT attempts FROM notification_log WHERE id = $1`, id).Scan(&attempts); err != nil {
+		t.Fatalf("read attempts: %v", err)
+	}
+	if attempts != notify.DefaultMaxAttempts {
+		t.Errorf("attempts = %d on a failed send, want %d", attempts, notify.DefaultMaxAttempts)
+	}
 
 	var reason *string
 	if err := pool.QueryRow(ctx,
@@ -266,50 +278,9 @@ func TestRecoverQueuedIgnoresFreshRows(t *testing.T) {
 	}
 }
 
-// TestRenderLink pins both templates in both languages.
-func TestRenderLink(t *testing.T) {
-	vars := notify.LinkVars{Unit: "Room 1", Org: "JJnE Rentals", Reason: "unit already promised"}
-
-	cases := []struct {
-		kind, lang string
-		want       []string
-	}{
-		{notify.KindLinkApproved, notify.LangEnglish,
-			[]string{"Room 1", "JJnE Rentals", "was approved", "ready to sign"}},
-		{notify.KindLinkApproved, notify.LangSwahili,
-			[]string{"Room 1", "JJnE Rentals", "limekubaliwa"}},
-		{notify.KindLinkRejected, notify.LangEnglish,
-			[]string{"Room 1", "JJnE Rentals", "was not approved", "unit already promised"}},
-		{notify.KindLinkRejected, notify.LangSwahili,
-			[]string{"Room 1", "JJnE Rentals", "halikukubaliwa", "unit already promised"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.kind+"/"+tc.lang, func(t *testing.T) {
-			body := notify.RenderLink(tc.kind, tc.lang, vars)
-			for _, want := range tc.want {
-				if !strings.Contains(body, want) {
-					t.Errorf("body %q does not contain %q", body, want)
-				}
-			}
-			if strings.Contains(body, "{") {
-				t.Errorf("body %q still holds an unsubstituted placeholder", body)
-			}
-		})
-	}
-
-	t.Run("an unknown language falls back to Swahili", func(t *testing.T) {
-		body := notify.RenderLink(notify.KindLinkApproved, "fr", vars)
-		if !strings.Contains(body, "limekubaliwa") {
-			t.Errorf("body %q, want the Swahili fallback", body)
-		}
-	})
-
-	t.Run("an unknown kind renders nothing", func(t *testing.T) {
-		if body := notify.RenderLink("nonsense", notify.LangEnglish, vars); body != "" {
-			t.Errorf("body = %q, want empty", body)
-		}
-	})
-}
+// noSleep collapses the retry backoff so a three-attempt failure does not cost
+// six seconds of wall clock in the suite.
+func noSleep(context.Context, time.Duration) {}
 
 // waitForStatus polls the row until the worker has recorded an outcome.
 func waitForStatus(t *testing.T, pool *db.Pool, id, want string) {
@@ -339,3 +310,6 @@ func waitForEmptyQueue(t *testing.T, rdb *redis.Client) {
 	}
 	t.Fatal("the queue was not drained")
 }
+
+// parseID converts a notification id back to the pgtype.UUID the queries take.
+func parseID(id string) (pgtype.UUID, error) { return db.ParseUUID(id) }

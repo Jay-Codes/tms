@@ -22,8 +22,9 @@ type SMSCapture struct {
 
 // SMSMessage is one captured SMS.
 type SMSMessage struct {
-	To   string
-	Body string
+	To     string
+	Body   string
+	Sender string
 }
 
 // NewSMSCapture wraps a LogProvider so messages are both logged and captured.
@@ -32,11 +33,11 @@ func NewSMSCapture() *SMSCapture {
 }
 
 // Send records the message and forwards it to the wrapped provider.
-func (c *SMSCapture) Send(ctx context.Context, to, body string) (string, error) {
+func (c *SMSCapture) Send(ctx context.Context, to, body, senderName string) (string, error) {
 	c.mu.Lock()
-	c.messages = append(c.messages, SMSMessage{To: to, Body: body})
+	c.messages = append(c.messages, SMSMessage{To: to, Body: body, Sender: senderName})
 	c.mu.Unlock()
-	return c.inner.Send(ctx, to, body)
+	return c.inner.Send(ctx, to, body, senderName)
 }
 
 // Messages returns a copy of everything captured so far.

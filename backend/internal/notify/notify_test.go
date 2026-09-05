@@ -16,7 +16,7 @@ func TestLogProviderLogsRecipientAndBody(t *testing.T) {
 	var buf bytes.Buffer
 	p := notify.NewLogProvider(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
-	id, err := p.Send(context.Background(), "+255700000001", "Your TMS code is 123456")
+	id, err := p.Send(context.Background(), "+255700000001", "Your TMS code is 123456", "JJNE")
 	if err != nil {
 		t.Fatalf("Send() error = %v", err)
 	}
@@ -25,7 +25,7 @@ func TestLogProviderLogsRecipientAndBody(t *testing.T) {
 	}
 
 	out := buf.String()
-	for _, want := range []string{"sms_to=+255700000001", "sms_body=", "123456", "level=INFO"} {
+	for _, want := range []string{"sms_to=+255700000001", "sms_sender=JJNE", "sms_body=", "123456", "level=INFO"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log output missing %q\ngot: %s", want, out)
 		}
@@ -38,7 +38,7 @@ func TestBeemProviderUnconfiguredErrors(t *testing.T) {
 	if p.Configured() {
 		t.Fatal("Configured() = true with empty credentials")
 	}
-	if _, err := p.Send(context.Background(), "+255700000001", "hi"); !errors.Is(err, notify.ErrBeemNotConfigured) {
+	if _, err := p.Send(context.Background(), "+255700000001", "hi", ""); !errors.Is(err, notify.ErrBeemNotConfigured) {
 		t.Fatalf("Send() error = %v, want ErrBeemNotConfigured", err)
 	}
 	if got := notify.ErrBeemNotConfigured.Error(); got != "beem: not configured" {
@@ -101,7 +101,7 @@ func TestProvidersRefusedInProd(t *testing.T) {
 }
 
 func TestDisabledProvidersError(t *testing.T) {
-	if _, err := (notify.DisabledSMSProvider{}).Send(context.Background(), "+255700000001", "hi"); !errors.Is(err, notify.ErrProviderDisabled) {
+	if _, err := (notify.DisabledSMSProvider{}).Send(context.Background(), "+255700000001", "hi", ""); !errors.Is(err, notify.ErrProviderDisabled) {
 		t.Errorf("DisabledSMSProvider.Send error = %v", err)
 	}
 	if _, err := (notify.DisabledEmailProvider{}).Send(context.Background(), "a@b.test", "s", "l", "b"); !errors.Is(err, notify.ErrProviderDisabled) {

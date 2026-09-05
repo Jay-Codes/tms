@@ -138,6 +138,11 @@ type OrgSettings struct {
 	// until PUT /org/bank-account sets it, and is read through the dedicated
 	// endpoint rather than PATCH /org.
 	BankAccount *BankAccount `json:"bank_account,omitempty"`
+	// Notifications is the Phase 6 messaging configuration — sender name,
+	// send hour, per-kind toggles and template overrides. Absent until
+	// PUT /org/notification-settings writes it; the defaults apply meanwhile.
+	// Like BankAccount it round-trips untouched through PATCH /org.
+	Notifications *NotificationSettings `json:"notifications,omitempty"`
 }
 
 // DefaultOrgSettings mirrors the column default in migration 000002.

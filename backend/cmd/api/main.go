@@ -17,6 +17,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/redis/go-redis/v9"
+
 	"tms/backend/internal/cache"
 	"tms/backend/internal/config"
 	"tms/backend/internal/contract"
@@ -149,14 +151,24 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 	// `queued` until a healthy run picks them up (SPEC §2.2).
 	if deps.Pool != nil && redisClient != nil {
 		go notify.RunWorker(ctx, notify.Worker{
-			Q:      sqlc.New(deps.Pool),
-			Redis:  redisClient.Client,
-			SMS:    deps.SMS,
-			Logger: logger,
+			Q:       sqlc.New(deps.Pool),
+			Redis:   redisClient.Client,
+			SMS:     deps.SMS,
+			Logger:  logger,
+			Workers: cfg.NotifyWorkers,
 		})
 	} else {
 		logger.Warn("notification worker not started: postgres or redis unavailable")
 	}
+
+	// The notification scheduler derives the Flow 8 timeline from Postgres
+	// every five minutes — reminders before and on the due date, the daily
+	// overdue chase, and the nudge for a contract still unsigned — and queues
+	// each send under a dedupe key so a repeat tick costs nothing (SPEC §2.2).
+	go notify.RunScheduler(ctx, deps.Pool, redisOf(redisClient), logger, notify.Options{
+		BaseURL:  cfg.PublicBaseURL,
+		Settings: httpserver.SchedulerSettings,
+	})
 
 	// The contract lifecycle sweep flags contracts approaching their end date
 	// and closes the ones past it. It runs once at startup and hourly after
@@ -177,6 +189,14 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 		return 1
 	}
 	return 0
+}
+
+// redisOf unwraps the cache client, tolerating a nil (Redis-less) run.
+func redisOf(c *cache.Client) *redis.Client {
+	if c == nil {
+		return nil
+	}
+	return c.Client
 }
 
 func providerName(p notify.SMSProvider) string {

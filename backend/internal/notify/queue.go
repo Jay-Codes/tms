@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -28,9 +29,32 @@ const QueueKey = "sms:queue"
 // assumes its Redis entry was lost and re-enqueues it.
 const staleAfter = time.Minute
 
+// stuckSendingAfter is how long a row may stay claimed (`sending`) before the
+// sweep decides the worker holding it died and returns it to the queue.
+const stuckSendingAfter = 5 * time.Minute
+
 // recoverLimit caps one recovery sweep, so a large backlog is drained in
 // batches rather than loaded into memory at once.
 const recoverLimit = 500
+
+// DefaultWorkers is the size of the sending pool (API.md Phase 6: N=3). It is
+// overridable with NOTIFY_WORKERS.
+const DefaultWorkers = 3
+
+// DefaultBackoff is the retry schedule for one message: three attempts, the
+// second and third preceded by a pause, so a provider blip does not turn into
+// a failed send (SPEC §6: "retry/backoff, 3 attempts").
+//
+// The three rungs are the schedule; with MaxAttempts at its default of 3 the
+// sends land at 0s, 1s and 6s, and the 25s rung is what a fourth attempt would
+// wait — it stays in the table so the schedule is written down in one place.
+//
+//nolint:gochecknoglobals // fixed retry schedule, read-only.
+var DefaultBackoff = []time.Duration{time.Second, 5 * time.Second, 25 * time.Second}
+
+// DefaultMaxAttempts is how many times one message is sent before it is
+// recorded `failed` (API.md Phase 6: a 3-attempt backoff).
+const DefaultMaxAttempts = 3
 
 // Msg is one SMS to queue. Body is the already-rendered message text: the
 // template (and the org's language) is resolved by the caller, because only
@@ -42,6 +66,9 @@ type Msg struct {
 	DedupeKey string
 	Phone     string
 	Body      string
+	// BatchID groups the rows of one landlord broadcast (API.md:
+	// `POST /notifications/custom`). Empty for every other kind.
+	BatchID string
 }
 
 // ErrDuplicate reports that a message with the same dedupe key already exists,
@@ -76,8 +103,14 @@ func Queue(ctx context.Context, q *sqlc.Queries, m Msg) (string, error) {
 			return "", fmt.Errorf("notify: user id %q: %w", m.UserID, err)
 		}
 	}
+	var batchID pgtype.UUID
+	if m.BatchID != "" {
+		if batchID, err = db.ParseUUID(m.BatchID); err != nil {
+			return "", fmt.Errorf("notify: batch id %q: %w", m.BatchID, err)
+		}
+	}
 
-	row, err := q.InsertNotification(ctx, sqlc.InsertNotificationParams{
+	row, err := q.InsertBatchNotification(ctx, sqlc.InsertBatchNotificationParams{
 		OrgID:     orgID,
 		UserID:    userID,
 		Kind:      m.Kind,
@@ -85,6 +118,7 @@ func Queue(ctx context.Context, q *sqlc.Queries, m Msg) (string, error) {
 		Payload:   payload,
 		ToPhone:   m.Phone,
 		Body:      m.Body,
+		BatchID:   batchID,
 	})
 	// ON CONFLICT DO NOTHING returns no row when the key was already taken.
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -128,14 +162,27 @@ type Worker struct {
 	SMS      SMSProvider
 	Logger   *slog.Logger
 	PollWait time.Duration // BRPOP timeout; 0 means 5 seconds
+
+	// Workers is the pool size; 0 means DefaultWorkers.
+	Workers int
+	// Backoff is the pause before each retry; nil means DefaultBackoff.
+	Backoff []time.Duration
+	// MaxAttempts is how many sends one message gets; 0 means
+	// DefaultMaxAttempts.
+	MaxAttempts int
+	// Sleep waits out a backoff pause. Tests inject a no-op so a 3-attempt
+	// failure does not take six seconds of wall clock.
+	Sleep func(ctx context.Context, d time.Duration)
 }
 
-// RunWorker starts the notification worker and blocks until ctx is cancelled.
+// RunWorker starts the notification worker pool and blocks until ctx is
+// cancelled.
 //
-// It is deliberately minimal for Phase 3: one goroutine, one attempt per
-// message, no backoff. Phase 6 replaces it with the scheduler and a retrying
-// worker pool; the notification_log contract (queued → sent | failed) is
-// already the one that scheduler will use.
+// N goroutines each BRPOP the same list and claim their row atomically, so a
+// message is sent exactly once even when the same id is pushed twice. Before
+// the pool starts, the recovery sweep re-enqueues everything Postgres still
+// believes is unsent — the rows a lost Redis, or a killed worker, left behind
+// (SPEC §2.2).
 func RunWorker(ctx context.Context, w Worker) {
 	logger := w.Logger
 	if logger == nil {
@@ -149,12 +196,30 @@ func RunWorker(ctx context.Context, w Worker) {
 	if wait <= 0 {
 		wait = 5 * time.Second
 	}
+	workers := w.Workers
+	if workers <= 0 {
+		workers = DefaultWorkers
+	}
 
-	// Anything left `queued` from a previous run (or from a Redis restart)
-	// goes back on the list before the loop starts.
+	// Anything left `queued` from a previous run (or from a Redis restart),
+	// and anything a dead worker left claimed, goes back on the list before
+	// the pool starts.
 	RecoverQueued(ctx, w.Q, w.Redis, logger)
 
-	logger.Info("notification worker started", "queue", QueueKey)
+	logger.Info("notification worker pool started", "queue", QueueKey, "workers", workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			w.loop(ctx, logger, wait)
+		}(i)
+	}
+	wg.Wait()
+}
+
+// loop is one worker: pop an id, deliver it, repeat until ctx is cancelled.
+func (w Worker) loop(ctx context.Context, logger *slog.Logger, wait time.Duration) {
 	for {
 		if ctx.Err() != nil {
 			return
@@ -183,51 +248,132 @@ func RunWorker(ctx context.Context, w Worker) {
 	}
 }
 
-// deliver sends one notification and records the outcome.
+// deliver claims one notification, sends it with backoff, and records the
+// outcome.
+//
+// The claim is the whole of the concurrency story: `UPDATE … SET
+// status='sending' WHERE id=$1 AND status='queued' RETURNING` returns a row to
+// exactly one caller, so three workers holding the same id produce one SMS.
 func (w Worker) deliver(ctx context.Context, logger *slog.Logger, rawID string) {
 	id, err := db.ParseUUID(rawID)
 	if err != nil {
 		logger.Warn("notification worker: malformed id on queue", "id", rawID)
 		return
 	}
-	row, err := w.Q.GetNotificationForSend(ctx, id)
+
+	row, err := w.Q.ClaimNotification(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return // deleted between queue and pop
-	}
-	if err != nil {
-		logger.Error("notification worker: load failed", "id", rawID, "error", err)
+		// Already claimed, already sent, or deleted between push and pop.
 		return
 	}
-	if row.Status != "queued" {
-		return // already handled (a duplicate push, or the recovery sweep racing)
+	if err != nil {
+		logger.Error("notification worker: claim failed", "id", rawID, "error", err)
+		return
 	}
 
-	msgID, sendErr := w.SMS.Send(ctx, row.ToPhone, row.Body)
+	msgID, attempts, sendErr := w.send(ctx, row)
 	if sendErr != nil {
+		// A cancelled context is a shutdown, not a provider failure: put the
+		// message back rather than burning it.
+		if ctx.Err() != nil {
+			if relErr := w.Q.ReleaseNotification(context.WithoutCancel(ctx), id); relErr != nil {
+				logger.Error("notification worker: release failed", "id", rawID, "error", relErr)
+			}
+			return
+		}
 		reason := sendErr.Error()
 		if err := w.Q.MarkNotificationFailed(ctx, sqlc.MarkNotificationFailedParams{
-			ID: id, Error: &reason,
+			ID: id, Attempts: attempts, Error: &reason,
 		}); err != nil {
 			logger.Error("notification worker: mark failed", "id", rawID, "error", err)
 		}
-		logger.Warn("notification send failed", "id", rawID, "kind", row.Kind, "error", sendErr)
+		logger.Warn("notification send failed",
+			"id", rawID, "kind", row.Kind, "attempts", attempts, "error", sendErr)
 		return
 	}
 	if err := w.Q.MarkNotificationSent(ctx, sqlc.MarkNotificationSentParams{
-		ID: id, ProviderMsgID: db.Str(msgID),
+		ID: id, Attempts: attempts, ProviderMsgID: db.Str(msgID),
 	}); err != nil {
 		logger.Error("notification worker: mark sent", "id", rawID, "error", err)
 		return
 	}
-	logger.Info("notification sent", "id", rawID, "kind", row.Kind, "provider_msg_id", msgID)
+	logger.Info("notification sent",
+		"id", rawID, "kind", row.Kind, "attempts", attempts, "provider_msg_id", msgID)
 }
 
-// RecoverQueued re-pushes rows that are still `queued` well after they were
-// written — the messages whose Redis entry was lost with the cache.
+// send tries one message up to MaxAttempts times, pausing between attempts,
+// and reports the provider message id, how many attempts it took, and the last
+// error.
+func (w Worker) send(ctx context.Context, row sqlc.ClaimNotificationRow) (string, int32, error) {
+	backoff := w.Backoff
+	if backoff == nil {
+		backoff = DefaultBackoff
+	}
+	maxAttempts := w.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = DefaultMaxAttempts
+	}
+	sleep := w.Sleep
+	if sleep == nil {
+		sleep = sleepCtx
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			sleep(ctx, backoff[(attempt-2)%len(backoff)])
+			if ctx.Err() != nil {
+				return "", int32(attempt - 1), ctx.Err()
+			}
+		}
+		msgID, err := w.SMS.Send(ctx, row.ToPhone, row.Body, row.SenderName)
+		if err == nil {
+			return msgID, int32(attempt), nil
+		}
+		lastErr = err
+	}
+	return "", int32(maxAttempts), lastErr
+}
+
+// sleepCtx waits for d unless the context is cancelled first.
+func sleepCtx(ctx context.Context, d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+	case <-t.C:
+	}
+}
+
+// RecoverQueued re-pushes the messages Postgres still believes are unsent:
+// rows still `queued` well after they were written (their Redis entry went
+// with the cache) and rows left `sending` by a worker that died holding them.
 func RecoverQueued(ctx context.Context, q *sqlc.Queries, rdb *redis.Client, logger *slog.Logger) {
 	if q == nil || rdb == nil {
 		return
 	}
+
+	// Rows a dead worker left claimed come back to `queued` first, so the
+	// sweep below can pick them up in the same pass.
+	stuck, err := q.ListStaleSendingNotifications(ctx, sqlc.ListStaleSendingNotificationsParams{
+		OlderThan: interval(stuckSendingAfter),
+		RowLimit:  recoverLimit,
+	})
+	if err != nil && logger != nil {
+		logger.Warn("notification stuck-sending sweep failed", "error", err)
+	}
+	for _, id := range stuck {
+		if err := q.RequeueSendingNotification(ctx, id); err != nil && logger != nil {
+			logger.Warn("notification requeue failed", "id", db.UUIDString(id), "error", err)
+		}
+	}
+	if len(stuck) > 0 && logger != nil {
+		logger.Info("returned stranded notifications to the queue", "count", len(stuck))
+	}
+
 	ids, err := q.ListStaleQueuedNotifications(ctx, sqlc.ListStaleQueuedNotificationsParams{
 		OlderThan: interval(staleAfter),
 		RowLimit:  recoverLimit,
