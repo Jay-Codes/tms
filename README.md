@@ -76,6 +76,11 @@ Other targets (`make help` lists all):
 | `make build` / `make test` / `make lint` | Build, test, lint backend + frontends |
 | `make images` | Build all deployable Docker images |
 | `make deploy` | `images` + bring the full compose profile up |
+| `make seed` | Seed a load-test org (`load@tms.local`/`password123`: 5 properties, 50 units, 40 renters, contracts, payments) |
+| `make seed-demo` | Demo data for JJnE Rentals (overdue/paid/pending contracts, link request; owner `demo@jjne.test`/`password123`) |
+| `make loadtest` | 20-worker load pass against hot endpoints; results in `docs/LOADTEST.md` |
+| `make test-isolation` | Cross-org / cross-renter / admin isolation census (every registered route must be covered) |
+| `make test-race` | Race-detector run for httpserver, notify, payment (~2 min) |
 | `make deploy-down` | Stop/remove the deployed app containers (infra untouched) |
 | `make logs` | Tail the deployed services' logs |
 | `make tls-selfsigned` | Write a self-signed cert/key pair into `.dev/tls` |
@@ -159,3 +164,7 @@ Phase 0–1 of [PLAN.md](PLAN.md): compose infra up, `backend/` skeleton, migrat
 - Contracts snapshot terms + price at activation. Contract documents are **app-native**: rich-text template edited in-app, rendered with the org's uploaded letterhead/logo, printed via browser — no server-side PDF in MVP. Digitally signed in-app: renter accepts via OTP to registered phone (+ optional drawn signature), landlord countersigns on activation; snapshot hash + OTP/IP/UA evidence stored append-only.
 - MVP payments are offline-recorded; gateway (scan-to-pay) is a reserved post-MVP seam.
 - Append-only audit log on every mutation.
+
+## UAT
+
+Testing checklist: [docs/UAT.md](docs/UAT.md) (flows 1–11, accounts, OTP-from-log). Load results: [docs/LOADTEST.md](docs/LOADTEST.md).

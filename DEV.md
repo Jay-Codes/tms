@@ -94,3 +94,26 @@ The first platform admin is seeded on startup from `ADMIN_EMAIL` / `ADMIN_PASSWO
 - Presigned MinIO URLs are signed against `MINIO_PUBLIC_URL` (defaults to `APP_BASE_URL`), so QR PNGs open from a phone through the tunnel. Set it to the current ngrok URL after `make preview`; leave it at `http://localhost:8080` when there is no tunnel. The bucket paths above are forwarded to MinIO with Host and path unchanged so the V4 signature validates. Presigned GETs are method-bound: `curl -I` (HEAD) returns 403, a GET returns 200.
 - Hot reload works through the tunnel; edit `apps/*/app/page.tsx` and the browser updates.
 - First install: `make install` (npm workspaces).
+
+## Seed, UAT and hardening
+
+```bash
+make seed
+```
+
+```bash
+make seed-demo
+```
+
+```bash
+make loadtest
+```
+
+```bash
+make test-isolation
+```
+
+- `make seed` — load-test org `Load Test Estates` (`load@tms.local` / `password123`); `make seed -- -reset` style flags via `go run ./backend/cmd/seed -reset`.
+- `make seed-demo` — JJnE Rentals demo data (adds owner `demo@jjne.test` / `password123`); prints unit codes for QR testing.
+- `make test-race` — race detector on the concurrency-sensitive packages.
+- UAT script: `docs/UAT.md`. OTPs in dev: `make api-log` (look for `sms_body`).
