@@ -112,6 +112,17 @@ func (m *Manager) require(audience, wantKind string, roles ...string) func(http.
 				httpx.WriteProblem(w, http.StatusForbidden, "forbidden", "your role is not permitted to perform this action")
 				return
 			}
+			// A suspended tenant is closed to its own staff: every org route
+			// answers 403 `org_suspended` until a platform admin reactivates
+			// it (API.md Phase 7). Renters and platform admins are unaffected
+			// — the renter's landlord being suspended is not the renter's
+			// account being suspended.
+			if wantKind == KindOrgUser && m.OrgSuspended(r.Context(), p.OrgID) {
+				httpx.WriteProblemCode(w, http.StatusForbidden, "org_suspended",
+					"organisation suspended",
+					"this organisation has been suspended; contact the platform administrator")
+				return
+			}
 			next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), p)))
 		})
 	}
@@ -139,6 +150,12 @@ func (m *Manager) RequireContractParty() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if p, ok := m.Resolve(r, AudienceOrg); ok && p.Kind == KindOrgUser {
+				if m.OrgSuspended(r.Context(), p.OrgID) {
+					httpx.WriteProblemCode(w, http.StatusForbidden, "org_suspended",
+						"organisation suspended",
+						"this organisation has been suspended; contact the platform administrator")
+					return
+				}
 				next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), p)))
 				return
 			}

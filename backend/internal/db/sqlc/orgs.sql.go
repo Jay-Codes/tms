@@ -15,7 +15,7 @@ const createOrg = `-- name: CreateOrg :one
 
 INSERT INTO orgs (name, slug, settings)
 VALUES ($1, $2, $3)
-RETURNING id, name, slug, status, settings, created_at, updated_at, deleted_at
+RETURNING id, name, slug, status, settings, created_at, updated_at, deleted_at, suspended_at, suspended_reason
 `
 
 type CreateOrgParams struct {
@@ -38,12 +38,14 @@ func (q *Queries) CreateOrg(ctx context.Context, arg CreateOrgParams) (Org, erro
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.SuspendedAt,
+		&i.SuspendedReason,
 	)
 	return i, err
 }
 
 const getOrg = `-- name: GetOrg :one
-SELECT id, name, slug, status, settings, created_at, updated_at, deleted_at FROM orgs WHERE id = $1 AND deleted_at IS NULL
+SELECT id, name, slug, status, settings, created_at, updated_at, deleted_at, suspended_at, suspended_reason FROM orgs WHERE id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) GetOrg(ctx context.Context, id pgtype.UUID) (Org, error) {
@@ -58,12 +60,14 @@ func (q *Queries) GetOrg(ctx context.Context, id pgtype.UUID) (Org, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.SuspendedAt,
+		&i.SuspendedReason,
 	)
 	return i, err
 }
 
 const getOrgBySlug = `-- name: GetOrgBySlug :one
-SELECT id, name, slug, status, settings, created_at, updated_at, deleted_at FROM orgs WHERE slug = $1 AND deleted_at IS NULL
+SELECT id, name, slug, status, settings, created_at, updated_at, deleted_at, suspended_at, suspended_reason FROM orgs WHERE slug = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) GetOrgBySlug(ctx context.Context, slug string) (Org, error) {
@@ -78,6 +82,8 @@ func (q *Queries) GetOrgBySlug(ctx context.Context, slug string) (Org, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.SuspendedAt,
+		&i.SuspendedReason,
 	)
 	return i, err
 }
@@ -98,7 +104,7 @@ UPDATE orgs
 SET name     = COALESCE($1, name),
     settings = COALESCE($2, settings)
 WHERE id = $3 AND deleted_at IS NULL
-RETURNING id, name, slug, status, settings, created_at, updated_at, deleted_at
+RETURNING id, name, slug, status, settings, created_at, updated_at, deleted_at, suspended_at, suspended_reason
 `
 
 type UpdateOrgParams struct {
@@ -119,6 +125,8 @@ func (q *Queries) UpdateOrg(ctx context.Context, arg UpdateOrgParams) (Org, erro
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.SuspendedAt,
+		&i.SuspendedReason,
 	)
 	return i, err
 }

@@ -244,6 +244,11 @@ func (s *Server) routes() chi.Router {
 			r.Get("/notifications/log", s.handleListNotificationLog)
 			r.Post("/notifications/log/{id}/retry", s.handleRetryNotification)
 
+			// --- Phase 7: reports ---
+			r.Get("/reports/summary", s.handleReportSummary)
+			r.Get("/reports/payment-status", s.handleReportPaymentStatus)
+			r.Get("/reports/collections", s.handleReportCollections)
+
 			// --- Phase 4: branding ---
 			r.Get("/org/branding", s.handleGetBranding)
 			r.Put("/org/branding", s.handlePutBranding)
@@ -289,12 +294,21 @@ func (s *Server) routes() chi.Router {
 			r.Get("/contracts/{id}/schedules", s.handleContractSchedules)
 		})
 
-		// --- Phase 4: platform admin jobs (tms_a) ---
+		// --- Phase 4/7: platform admin (tms_a) ---
 		r.Group(func(r chi.Router) {
 			r.Use(s.sessions.RequireAdmin())
 			r.Post("/admin/jobs/contract-lifecycle", s.handleContractLifecycleJob)
 			r.Post("/admin/jobs/overdue", s.handleOverdueJob)
 			r.Post("/admin/jobs/notifications", s.handleNotificationsJob)
+
+			// --- Phase 7: org supervision, platform metrics, audit search ---
+			r.Get("/admin/jobs", s.handleAdminJobs)
+			r.Get("/admin/orgs", s.handleAdminListOrgs)
+			r.Get("/admin/orgs/{id}", s.handleAdminGetOrg)
+			r.Post("/admin/orgs/{id}/suspend", s.handleAdminSuspendOrg)
+			r.Post("/admin/orgs/{id}/activate", s.handleAdminActivateOrg)
+			r.Get("/admin/metrics", s.handleAdminMetrics)
+			r.Get("/admin/audit-log", s.handleAdminAuditLog)
 		})
 
 		// --- Phase 2: public (no session; rate limited per IP) ---

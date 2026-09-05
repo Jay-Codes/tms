@@ -98,6 +98,12 @@ const (
 	ActionNotificationCustom   = "notification.custom"
 	ActionNotificationRetry    = "notification.retry"
 	ActionNotificationRun      = "notification.scheduler_run"
+
+	// Phase 7 — platform-admin suspension. Both rows carry the *target* org
+	// as org_id and the admin as actor, so the trail reads the same from the
+	// org's own audit page as from the platform one.
+	ActionOrgSuspend  = "org.suspend"
+	ActionOrgActivate = "org.activate"
 )
 
 // Entity types.
