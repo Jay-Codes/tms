@@ -11,15 +11,18 @@ import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { ContractsTable } from '../../../components/ContractBits';
 import { ProblemNote } from '../../../components/FormBits';
+import { PaymentsTable } from '../../../components/PaymentBits';
 import { Facts, KycStamp, LinkStatusStamp, ViewIdDocButton } from '../../../components/RenterBits';
 import { PageHead, Shell } from '../../../components/Shell';
 import {
   ApiError,
   contractsApi,
   hasKycDoc,
+  paymentsApi,
   rentersApi,
   toApiError,
   type Contract,
+  type Payment,
   type RenterDetail,
 } from '../../../lib/api';
 import { Amount, fmtDate } from '../../../lib/format';
@@ -37,7 +40,21 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function RenterBody({ userId }: { userId: string }) {
   const [data, setData] = useState<RenterDetail | null>(null);
   const [contractRows, setContractRows] = useState<Contract[] | null>(null);
+  const [payments, setPayments] = useState<Payment[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
+
+  // Payment history across every contract this renter has with the org. It is
+  // a read on its own so a Phase 5 outage cannot take the KYC record down.
+  useEffect(() => {
+    const ac = new AbortController();
+    paymentsApi
+      .list({ renter_user_id: userId, limit: 200 }, ac.signal)
+      .then((r) => setPayments(r.items ?? []))
+      .catch((e) => {
+        if (!(e instanceof DOMException)) setPayments([]);
+      });
+    return () => ac.abort();
+  }, [userId]);
 
   useEffect(() => {
     const ac = new AbortController();
@@ -222,6 +239,14 @@ function RenterBody({ userId }: { userId: string }) {
 
       <Section title="Contracts">
         <ContractsTable items={contracts} showRenter={false} emptyText="No contracts with this renter yet." />
+      </Section>
+
+      <Section title="Payment history">
+        <PaymentsTable
+          items={payments}
+          showRenter={false}
+          emptyText="No payments recorded from this renter yet."
+        />
       </Section>
     </>
   );

@@ -5,8 +5,9 @@ import Link from 'next/link';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useReadyToCountersign } from '../components/ContractBits';
 import { PageHead, Shell, pendingLabel, usePendingLinkRequests } from '../components/Shell';
-import { propertiesApi, type Property } from '../lib/api';
+import { paymentsApi, propertiesApi, schedulesApi, type Property } from '../lib/api';
 import { useMe } from '../lib/auth';
+import { fmtTZS, monthStartISO } from '../lib/format';
 
 /**
  * Dashboard shell (FLOWS flow 1 step 4). Ledger data arrives in later phases;
@@ -34,11 +35,91 @@ function EmptyCard({
   );
 }
 
+/**
+ * The two numbers a landlord opens the app for (FLOWS flow 9): what is late and
+ * what came in this month. Both are read straight off the Phase 5 endpoints and
+ * summed for display only — the backend still owns every figure. A failure is
+ * silent and the card simply says nothing, because a dashboard tile must never
+ * take the page with it.
+ */
+function useCollections() {
+  const [overdue, setOverdue] = useState<{ count: number; total: number } | null>(null);
+  const [collected, setCollected] = useState<number | null>(null);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    schedulesApi
+      .list({ status: 'overdue', limit: 200 }, ac.signal)
+      .then((r) => {
+        const rows = r.items ?? [];
+        setOverdue({
+          count: rows.length,
+          total: rows.reduce((t, s) => t + Math.max(0, (s.amount ?? 0) - (s.paid_amount ?? 0)), 0),
+        });
+      })
+      .catch(() => setOverdue(null));
+    paymentsApi
+      .list({ from: monthStartISO(), limit: 200 }, ac.signal)
+      .then((r) =>
+        setCollected(
+          (r.items ?? [])
+            .filter((p) => p.status !== 'reversed')
+            .reduce((t, p) => t + (p.amount ?? 0), 0),
+        ),
+      )
+      .catch(() => setCollected(null));
+    return () => ac.abort();
+  }, []);
+
+  return { overdue, collected };
+}
+
+function MoneyCard({
+  icon,
+  label,
+  value,
+  sub,
+  tone,
+  href,
+  cta,
+}: {
+  icon: string;
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: 'overdue';
+  href: string;
+  cta: string;
+}) {
+  return (
+    <div className="sheet" style={{ padding: 'var(--sp-5)', display: 'grid', gap: 'var(--sp-2)', alignContent: 'start' }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+        <Icon icon={icon} width={18} /> {label}
+      </span>
+      <strong
+        style={{
+          fontSize: 'var(--text-2xl)',
+          color: tone === 'overdue' ? 'var(--stamp-overdue)' : 'var(--ink)',
+        }}
+      >
+        {value}
+      </strong>
+      {sub ? <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{sub}</span> : null}
+      <div style={{ marginTop: 'var(--sp-2)' }}>
+        <Link href={href} className="btn btn-quiet" style={{ minHeight: 36 }}>
+          {cta}
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 function DashboardBody() {
   const { user, org } = useMe();
   const [firstProperty, setFirstProperty] = useState<Property | null>(null);
   const pending = usePendingLinkRequests();
   const countersign = useReadyToCountersign();
+  const { overdue, collected } = useCollections();
 
   // The QR empty-state card jumps straight to a printable sheet once there is
   // something to print; until then it points at the properties screen.
@@ -72,10 +153,53 @@ function DashboardBody() {
 
       <hr className="rule rule-strong" />
 
-      <p style={{ marginTop: 'var(--sp-5)' }}>
-        Nothing has been recorded yet. Add your first property and units, then print the QR stickers so
-        renters can connect themselves.
-      </p>
+      {overdue || collected !== null ? (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+            gap: 'var(--sp-4)',
+            marginTop: 'var(--sp-5)',
+          }}
+        >
+          {overdue ? (
+            <MoneyCard
+              icon="solar:bell-bing-linear"
+              label="Overdue"
+              tone={overdue.count > 0 ? 'overdue' : undefined}
+              value={
+                overdue.count === 0
+                  ? 'Nothing overdue'
+                  : `${overdue.count} · ${fmtTZS(overdue.total)}`
+              }
+              sub={
+                overdue.count === 0
+                  ? 'Every payment that has fallen due has been settled.'
+                  : `${overdue.count} payment${overdue.count === 1 ? '' : 's'} past their due date.`
+              }
+              href="/payments?tab=overdue"
+              cta={overdue.count === 0 ? 'Open payments' : 'Chase them'}
+            />
+          ) : null}
+          {collected !== null ? (
+            <MoneyCard
+              icon="solar:wallet-money-linear"
+              label="Collected this month"
+              value={fmtTZS(collected)}
+              sub="Payments recorded since the first of the month, reversals excluded."
+              href="/payments?tab=history"
+              cta="Payment history"
+            />
+          ) : null}
+        </div>
+      ) : null}
+
+      {firstProperty === null ? (
+        <p style={{ marginTop: 'var(--sp-5)' }}>
+          Nothing has been recorded yet. Add your first property and units, then print the QR stickers so
+          renters can connect themselves.
+        </p>
+      ) : null}
 
       <div
         style={{

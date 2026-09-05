@@ -26,6 +26,12 @@ export class ApiError extends Error {
   readonly title: string;
   readonly detail: string;
   readonly errors: Record<string, string>;
+  /**
+   * The whole problem document. Some 409s carry extra fields the UI needs —
+   * `overpay_confirm_required` ships `excess` and `next_schedule` so the
+   * confirm prompt can name the money and the date (API.md Phase 5).
+   */
+  readonly body: Record<string, unknown>;
 
   constructor(status: number, problem: Problem) {
     const detail = problem.detail || problem.title || `Request failed (${status})`;
@@ -35,11 +41,18 @@ export class ApiError extends Error {
     this.title = problem.title || 'Error';
     this.detail = detail;
     this.errors = problem.errors || {};
+    this.body = problem as Record<string, unknown>;
   }
 
   /** True when the caller has no valid session for this audience. */
   get isUnauthorized() {
     return this.status === 401;
+  }
+
+  /** Error codes ride in the problem `type` (DECISIONS.md). */
+  get code(): string {
+    const t = this.body.type;
+    return typeof t === 'string' && t !== 'about:blank' ? t : '';
   }
 }
 
@@ -885,4 +898,173 @@ export async function uploadToPresignedUrl(ticket: UploadTicket, file: File): Pr
       detail: 'The file could not be uploaded. Please try again.',
     });
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Shapes — mirror API.md Phase 5 exactly.                             */
+/* ------------------------------------------------------------------ */
+
+export type PaymentMethod = 'cash' | 'bank_transfer' | 'mobile_money_manual';
+export type PaymentStatus = 'recorded' | 'reversed';
+
+/** Every method the MVP records. Gateway entry is post-MVP (SPEC §5.7). */
+export const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
+  { value: 'cash', label: 'Cash' },
+  { value: 'bank_transfer', label: 'Bank transfer' },
+  { value: 'mobile_money_manual', label: 'Mobile money' },
+];
+
+export function methodLabel(m: string | null | undefined): string {
+  return PAYMENT_METHODS.find((x) => x.value === m)?.label ?? (m ? String(m).replace(/_/g, ' ') : '—');
+}
+
+/** The contract a schedule row belongs to, as `GET /schedules` denormalises it. */
+export interface ScheduleContractRef {
+  id: string;
+  unit_name: string;
+  property_name: string;
+  renter_name: string;
+  renter_user_id: string;
+}
+
+/**
+ * A schedule row. `GET /contracts/{id}/schedules` omits the denormalised
+ * `contract` block (the page already knows the contract) — hence optional.
+ */
+export interface Schedule extends ScheduleRow {
+  contract_id?: string;
+  days_overdue?: number | null;
+  contract?: ScheduleContractRef | null;
+}
+
+/** One slice of a payment as the backend allocated it across schedules. */
+export interface PaymentAllocation {
+  schedule_id: string;
+  amount: number;
+}
+
+export interface Payment {
+  id: string;
+  contract_id: string;
+  schedule_id: string | null;
+  amount: number;
+  method: PaymentMethod | string;
+  reference: string | null;
+  paid_at: string;
+  note: string | null;
+  status: PaymentStatus | string;
+  recorded_by: { user_id: string; name: string } | null;
+  reversed_at: string | null;
+  reversal_reason: string | null;
+  applied: PaymentAllocation[] | null;
+  created_at: string;
+  /** Present on some list payloads so history can name the unit/renter. */
+  contract?: ScheduleContractRef | null;
+}
+
+export interface PaymentInput {
+  contract_id: string;
+  schedule_id?: string;
+  amount: number;
+  method: PaymentMethod;
+  reference?: string;
+  paid_at?: string;
+  note?: string;
+  allow_overpay_rollover?: boolean;
+}
+
+/** `201 {payment, schedules}` — the rows the allocation moved. */
+export interface PaymentResult {
+  payment: Payment;
+  schedules: Schedule[];
+}
+
+export interface BankAccount {
+  bank_name: string;
+  account_name: string;
+  account_number: string;
+  instructions: string;
+}
+
+/**
+ * The 409 the record form must handle by asking, not by failing: the money is
+ * more than the target schedule needs and the landlord has not yet said the
+ * excess may roll forward.
+ */
+export interface OverpayPrompt {
+  excess: number;
+  next_schedule: Schedule | null;
+  detail: string;
+}
+
+/** Read the overpay 409's extra fields; null when this is any other error. */
+export function overpayPrompt(e: ApiError): OverpayPrompt | null {
+  if (e.status !== 409 || e.code !== 'overpay_confirm_required') return null;
+  const excess = Number(e.body.excess ?? 0);
+  return {
+    excess: Number.isFinite(excess) ? excess : 0,
+    next_schedule: (e.body.next_schedule as Schedule | undefined) ?? null,
+    detail: e.detail,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 5 endpoint helpers (audience org)                              */
+/* ------------------------------------------------------------------ */
+
+export const schedulesApi = {
+  list: (
+    query: {
+      status?: ScheduleStatus | '';
+      contract_id?: string;
+      renter_user_id?: string;
+      due_from?: string;
+      due_to?: string;
+      cursor?: string;
+      limit?: number;
+    } = {},
+    signal?: AbortSignal,
+  ) =>
+    api.get<{ items: Schedule[]; next_cursor?: string | null }>('/schedules', { query, signal }),
+};
+
+export const paymentsApi = {
+  list: (
+    query: {
+      contract_id?: string;
+      renter_user_id?: string;
+      method?: PaymentMethod | '';
+      from?: string;
+      to?: string;
+      cursor?: string;
+      limit?: number;
+    } = {},
+    signal?: AbortSignal,
+  ) => api.get<{ items: Payment[]; next_cursor?: string | null }>('/payments', { query, signal }),
+  get: (id: string, signal?: AbortSignal) =>
+    api.get<{ payment: Payment } | Payment>(`/payments/${id}`, { signal }),
+  record: (body: PaymentInput) => api.post<PaymentResult>('/payments', body),
+  reverse: (id: string, reason: string) =>
+    api.post<PaymentResult>(`/payments/${id}/reverse`, { reason }),
+};
+
+export const bankAccountApi = {
+  get: (signal?: AbortSignal) =>
+    api.get<{ bank_account: BankAccount | null } | BankAccount>('/org/bank-account', { signal }),
+  save: (body: BankAccount) =>
+    api.put<{ bank_account: BankAccount } | BankAccount>('/org/bank-account', body),
+};
+
+export const unwrapPayment = (res: { payment: Payment } | Payment) => unwrap<Payment>(res, 'payment');
+export const unwrapBankAccount = (res: { bank_account: BankAccount | null } | BankAccount) =>
+  unwrap<BankAccount | null>(res, 'bank_account');
+
+/** A schedule still owes money — the ones "Record payment" may target. */
+export function isUnsettled(s: Pick<Schedule, 'status'>): boolean {
+  return s.status === 'pending' || s.status === 'partial' || s.status === 'overdue';
+}
+
+/** What is still outstanding on a row; the record form prefills with it. */
+export function remainingOn(s: Pick<Schedule, 'amount' | 'paid_amount'>): number {
+  return Math.max(0, (s.amount ?? 0) - (s.paid_amount ?? 0));
 }
