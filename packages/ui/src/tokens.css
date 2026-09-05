@@ -1,0 +1,100 @@
+/* ============================================================
+   @tms/ui — Design Tokens v1 (base design system, all apps)
+   Mobile-first PWA. Legibility and simplicity over decoration.
+
+   Two layers:
+   1. CORE — fixed for the whole platform. Never overridden.
+   2. THEME — org-configurable defaults (colors + font).
+      The enduser and tenant apps override these at runtime via
+      applyOrgTheme() from the org's branding settings.
+      The admin app always uses these defaults.
+   ============================================================ */
+
+:root {
+  /* ===================== THEME (org-configurable) ============ */
+  --primary: #0f766e;        /* teal 700 — default brand */
+  --primary-strong: #115e59; /* pressed states (derived from --primary) */
+  --primary-soft: #ccfbf1;   /* tinted backgrounds (derived) */
+  --on-primary: #ffffff;     /* auto black/white by contrast */
+  --font-sans: var(--font-jakarta), system-ui, -apple-system, sans-serif;
+
+  /* ===================== CORE (fixed) ======================== */
+
+  /* --- Neutrals (warm gray) --- */
+  --bg: #fafaf9;
+  --surface: #ffffff;
+  --surface-sunken: #f5f5f4;
+  --border: #e7e5e4;
+  --text: #1c1917;           /* 16.8:1 on bg */
+  --text-muted: #57534e;     /* 7.3:1 on bg */
+  --text-faint: #a8a29e;     /* placeholders, disabled only */
+
+  /* --- Payment status (semantic, never decorative, never themed) --- */
+  --status-paid: #15803d;
+  --status-paid-bg: #dcfce7;
+  --status-pending: #a16207;
+  --status-pending-bg: #fef9c3;
+  --status-overdue: #b91c1c;
+  --status-overdue-bg: #fee2e2;
+
+  /* --- Type scale (1.25 ratio, 16px base) --- */
+  --text-xs: 0.8125rem;   /* 13px — chips, captions */
+  --text-sm: 0.875rem;    /* 14px — secondary text */
+  --text-md: 1rem;        /* 16px — body, inputs (never smaller: iOS zoom) */
+  --text-lg: 1.25rem;     /* 20px — section titles */
+  --text-xl: 1.5625rem;   /* 25px — page titles */
+  --text-2xl: 1.9375rem;  /* 31px — hero amounts */
+  --leading-tight: 1.25;
+  --leading-body: 1.5;
+
+  /* --- Spacing (4px grid) --- */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: 2rem;
+  --sp-7: 3rem;
+
+  /* --- Shape & elevation --- */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-full: 999px;
+  --shadow-card: 0 1px 2px rgb(28 25 23 / 0.05), 0 1px 3px rgb(28 25 23 / 0.06);
+  --shadow-raised: 0 4px 12px rgb(28 25 23 / 0.10);
+
+  /* --- Touch --- */
+  --touch-min: 44px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  line-height: var(--leading-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 {
+  line-height: var(--leading-tight);
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Money amounts always align in columns */
+.amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}

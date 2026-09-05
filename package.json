@@ -1,0 +1,8 @@
+{
+  "name": "tms",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "enduser",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3001"
+  },
+  "dependencies": {
+    "@iconify/react": "^6.0.2",
+    "next": "^15.5.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "@tms/ui": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "typescript": "^5.6.0"
+  }
+}

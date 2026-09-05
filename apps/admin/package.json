@@ -1,0 +1,18 @@
+{
+  "name": "admin",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3003"
+  },
+  "dependencies": {
+    "next": "^15.5.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "@tms/ui": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "typescript": "^5.6.0"
+  }
+}
