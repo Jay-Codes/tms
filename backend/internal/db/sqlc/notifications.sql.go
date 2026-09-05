@@ -11,6 +11,55 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimNotification = `-- name: ClaimNotification :one
+
+UPDATE notification_log n
+SET status = 'sending'
+FROM orgs o
+WHERE n.id = $1 AND n.status = 'queued' AND o.id = n.org_id
+RETURNING n.id, n.org_id, n.user_id, n.kind, n.dedupe_key, n.to_phone, n.body,
+          n.attempts, COALESCE(o.settings #>> '{notifications,sender_name}', '')::text AS sender_name
+`
+
+type ClaimNotificationRow struct {
+	ID         pgtype.UUID `json:"id"`
+	OrgID      pgtype.UUID `json:"org_id"`
+	UserID     pgtype.UUID `json:"user_id"`
+	Kind       string      `json:"kind"`
+	DedupeKey  string      `json:"dedupe_key"`
+	ToPhone    string      `json:"to_phone"`
+	Body       string      `json:"body"`
+	Attempts   int32       `json:"attempts"`
+	SenderName string      `json:"sender_name"`
+}
+
+// ------------------------------------------------- Phase 6: worker pool --
+// ClaimNotification is the atomic claim three workers race for: the row moves
+// from `queued` to `sending` in one statement, and only the worker whose UPDATE
+// returned a row goes on to call the provider. Without it two workers popping
+// the same id (a re-push, the recovery sweep) would both send.
+//
+// It resolves the org's sender ID at the same time, so the send path stays one
+// round trip: the org's own approved name if it has set one, else the platform
+// default the provider supplies.
+// guard-exempt: the worker claims one notification by id and has no org context.
+func (q *Queries) ClaimNotification(ctx context.Context, id pgtype.UUID) (ClaimNotificationRow, error) {
+	row := q.db.QueryRow(ctx, claimNotification, id)
+	var i ClaimNotificationRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.UserID,
+		&i.Kind,
+		&i.DedupeKey,
+		&i.ToPhone,
+		&i.Body,
+		&i.Attempts,
+		&i.SenderName,
+	)
+	return i, err
+}
+
 const getNotificationForSend = `-- name: GetNotificationForSend :one
 SELECT id, org_id, user_id, kind, dedupe_key, to_phone, body, status, attempts
 FROM notification_log
@@ -47,6 +96,119 @@ func (q *Queries) GetNotificationForSend(ctx context.Context, id pgtype.UUID) (G
 	return i, err
 }
 
+const getOrgNotification = `-- name: GetOrgNotification :one
+SELECT n.id, n.user_id, n.kind, n.dedupe_key, n.to_phone, n.body, n.status,
+       n.provider_msg_id, n.error, n.attempts, n.batch_id, n.sent_at, n.created_at,
+       COALESCE(ru.full_name, '')::text AS renter_name
+FROM notification_log n
+LEFT JOIN users ru ON ru.id = n.user_id
+WHERE n.org_id = $1 AND n.id = $2
+`
+
+type GetOrgNotificationParams struct {
+	OrgID pgtype.UUID `json:"org_id"`
+	ID    pgtype.UUID `json:"id"`
+}
+
+type GetOrgNotificationRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	UserID        pgtype.UUID        `json:"user_id"`
+	Kind          string             `json:"kind"`
+	DedupeKey     string             `json:"dedupe_key"`
+	ToPhone       string             `json:"to_phone"`
+	Body          string             `json:"body"`
+	Status        string             `json:"status"`
+	ProviderMsgID *string            `json:"provider_msg_id"`
+	Error         *string            `json:"error"`
+	Attempts      int32              `json:"attempts"`
+	BatchID       pgtype.UUID        `json:"batch_id"`
+	SentAt        pgtype.Timestamptz `json:"sent_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	RenterName    string             `json:"renter_name"`
+}
+
+// GetOrgNotification resolves one row inside its org, so another org's
+// notification is a 404 rather than something a landlord can read or retry.
+func (q *Queries) GetOrgNotification(ctx context.Context, arg GetOrgNotificationParams) (GetOrgNotificationRow, error) {
+	row := q.db.QueryRow(ctx, getOrgNotification, arg.OrgID, arg.ID)
+	var i GetOrgNotificationRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Kind,
+		&i.DedupeKey,
+		&i.ToPhone,
+		&i.Body,
+		&i.Status,
+		&i.ProviderMsgID,
+		&i.Error,
+		&i.Attempts,
+		&i.BatchID,
+		&i.SentAt,
+		&i.CreatedAt,
+		&i.RenterName,
+	)
+	return i, err
+}
+
+const insertBatchNotification = `-- name: InsertBatchNotification :one
+INSERT INTO notification_log (org_id, user_id, kind, channel, dedupe_key, payload, to_phone, body, batch_id)
+VALUES (
+    $1, $2, $3, 'sms',
+    $4, $5, $6, $7,
+    $8
+)
+ON CONFLICT (dedupe_key) DO NOTHING
+RETURNING id, org_id, user_id, kind, channel, dedupe_key, payload, provider_msg_id, status, sent_at, created_at, updated_at, to_phone, body, error, attempts, batch_id
+`
+
+type InsertBatchNotificationParams struct {
+	OrgID     pgtype.UUID `json:"org_id"`
+	UserID    pgtype.UUID `json:"user_id"`
+	Kind      string      `json:"kind"`
+	DedupeKey string      `json:"dedupe_key"`
+	Payload   []byte      `json:"payload"`
+	ToPhone   string      `json:"to_phone"`
+	Body      string      `json:"body"`
+	BatchID   pgtype.UUID `json:"batch_id"`
+}
+
+// InsertBatchNotification is Queue's bulk twin: it carries the batch a custom
+// send belongs to, so the log can group and count one broadcast.
+func (q *Queries) InsertBatchNotification(ctx context.Context, arg InsertBatchNotificationParams) (NotificationLog, error) {
+	row := q.db.QueryRow(ctx, insertBatchNotification,
+		arg.OrgID,
+		arg.UserID,
+		arg.Kind,
+		arg.DedupeKey,
+		arg.Payload,
+		arg.ToPhone,
+		arg.Body,
+		arg.BatchID,
+	)
+	var i NotificationLog
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.UserID,
+		&i.Kind,
+		&i.Channel,
+		&i.DedupeKey,
+		&i.Payload,
+		&i.ProviderMsgID,
+		&i.Status,
+		&i.SentAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ToPhone,
+		&i.Body,
+		&i.Error,
+		&i.Attempts,
+		&i.BatchID,
+	)
+	return i, err
+}
+
 const insertNotification = `-- name: InsertNotification :one
 
 INSERT INTO notification_log (org_id, user_id, kind, channel, dedupe_key, payload, to_phone, body)
@@ -55,7 +217,7 @@ VALUES (
     $4, $5, $6, $7
 )
 ON CONFLICT (dedupe_key) DO NOTHING
-RETURNING id, org_id, user_id, kind, channel, dedupe_key, payload, provider_msg_id, status, sent_at, created_at, updated_at, to_phone, body, error, attempts
+RETURNING id, org_id, user_id, kind, channel, dedupe_key, payload, provider_msg_id, status, sent_at, created_at, updated_at, to_phone, body, error, attempts, batch_id
 `
 
 type InsertNotificationParams struct {
@@ -102,27 +264,142 @@ func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotification
 		&i.Body,
 		&i.Error,
 		&i.Attempts,
+		&i.BatchID,
 	)
 	return i, err
 }
 
-const listNotificationsForOrg = `-- name: ListNotificationsForOrg :many
-SELECT id, org_id, user_id, kind, dedupe_key, to_phone, body, status,
-       provider_msg_id, error, attempts, sent_at, created_at
-FROM notification_log
-WHERE org_id = $1
-ORDER BY created_at DESC
-LIMIT $2
+const listActiveOrgs = `-- name: ListActiveOrgs :many
+
+SELECT o.id, o.name, o.settings,
+       COALESCE(b.display_name, o.name)::text AS display_name
+FROM orgs o
+LEFT JOIN org_branding b ON b.org_id = o.id
+WHERE o.status = 'active' AND o.deleted_at IS NULL
+ORDER BY o.created_at, o.id
 `
 
-type ListNotificationsForOrgParams struct {
-	OrgID    pgtype.UUID `json:"org_id"`
-	RowLimit int32       `json:"row_limit"`
+type ListActiveOrgsRow struct {
+	ID          pgtype.UUID `json:"id"`
+	Name        string      `json:"name"`
+	Settings    []byte      `json:"settings"`
+	DisplayName string      `json:"display_name"`
 }
 
-type ListNotificationsForOrgRow struct {
+// ------------------------------------------- Phase 6: scheduler targets --
+// ListActiveOrgs feeds the notification scheduler, which walks every live
+// tenant once per tick and applies that org's own settings.
+func (q *Queries) ListActiveOrgs(ctx context.Context) ([]ListActiveOrgsRow, error) {
+	rows, err := q.db.Query(ctx, listActiveOrgs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActiveOrgsRow{}
+	for rows.Next() {
+		var i ListActiveOrgsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Settings,
+			&i.DisplayName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveRenterRecipients = `-- name: ListActiveRenterRecipients :many
+
+SELECT DISTINCT ON (c.renter_user_id)
+       c.renter_user_id, ru.full_name AS renter_name, ru.phone AS renter_phone,
+       u.name AS unit_name, p.name AS property_name
+FROM contracts c
+JOIN units u      ON u.id = c.unit_id AND u.org_id = c.org_id
+JOIN properties p ON p.id = u.property_id AND p.org_id = c.org_id
+JOIN users ru     ON ru.id = c.renter_user_id
+WHERE c.org_id = $1 AND c.deleted_at IS NULL
+  AND c.status IN ('active', 'expiring')
+ORDER BY c.renter_user_id, c.created_at DESC
+`
+
+type ListActiveRenterRecipientsRow struct {
+	RenterUserID pgtype.UUID `json:"renter_user_id"`
+	RenterName   string      `json:"renter_name"`
+	RenterPhone  *string     `json:"renter_phone"`
+	UnitName     string      `json:"unit_name"`
+	PropertyName string      `json:"property_name"`
+}
+
+// ------------------------------------------- Phase 6: custom bulk sends --
+// ListActiveRenterRecipients is `recipients: "all_active"`: every renter the
+// org has a running (or expiring) contract with, once each even when they rent
+// several units, with the unit and property of their most recent contract for
+// the `{{unit}}` / `{{property}}` variables.
+func (q *Queries) ListActiveRenterRecipients(ctx context.Context, orgID pgtype.UUID) ([]ListActiveRenterRecipientsRow, error) {
+	rows, err := q.db.Query(ctx, listActiveRenterRecipients, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActiveRenterRecipientsRow{}
+	for rows.Next() {
+		var i ListActiveRenterRecipientsRow
+		if err := rows.Scan(
+			&i.RenterUserID,
+			&i.RenterName,
+			&i.RenterPhone,
+			&i.UnitName,
+			&i.PropertyName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgNotifications = `-- name: ListOrgNotifications :many
+
+SELECT n.id, n.user_id, n.kind, n.dedupe_key, n.to_phone, n.body, n.status,
+       n.provider_msg_id, n.error, n.attempts, n.batch_id, n.sent_at, n.created_at,
+       COALESCE(ru.full_name, '')::text AS renter_name
+FROM notification_log n
+LEFT JOIN users ru ON ru.id = n.user_id
+WHERE n.org_id = $1
+  AND ($2::text IS NULL OR n.kind = $2::text)
+  AND ($3::text IS NULL OR n.status = $3::text)
+  AND ($4::uuid IS NULL OR n.user_id = $4::uuid)
+  AND ($5::timestamptz IS NULL OR n.created_at >= $5::timestamptz)
+  AND ($6::timestamptz IS NULL OR n.created_at <= $6::timestamptz)
+  AND ($7::timestamptz IS NULL
+       OR (n.created_at, n.id) < ($7::timestamptz, $8::uuid))
+ORDER BY n.created_at DESC, n.id DESC
+LIMIT $9
+`
+
+type ListOrgNotificationsParams struct {
+	OrgID    pgtype.UUID        `json:"org_id"`
+	Kind     *string            `json:"kind"`
+	Status   *string            `json:"status"`
+	UserID   pgtype.UUID        `json:"user_id"`
+	FromAt   pgtype.Timestamptz `json:"from_at"`
+	ToAt     pgtype.Timestamptz `json:"to_at"`
+	CursorAt pgtype.Timestamptz `json:"cursor_at"`
+	CursorID pgtype.UUID        `json:"cursor_id"`
+	RowLimit int32              `json:"row_limit"`
+}
+
+type ListOrgNotificationsRow struct {
 	ID            pgtype.UUID        `json:"id"`
-	OrgID         pgtype.UUID        `json:"org_id"`
 	UserID        pgtype.UUID        `json:"user_id"`
 	Kind          string             `json:"kind"`
 	DedupeKey     string             `json:"dedupe_key"`
@@ -132,22 +409,37 @@ type ListNotificationsForOrgRow struct {
 	ProviderMsgID *string            `json:"provider_msg_id"`
 	Error         *string            `json:"error"`
 	Attempts      int32              `json:"attempts"`
+	BatchID       pgtype.UUID        `json:"batch_id"`
 	SentAt        pgtype.Timestamptz `json:"sent_at"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	RenterName    string             `json:"renter_name"`
 }
 
-func (q *Queries) ListNotificationsForOrg(ctx context.Context, arg ListNotificationsForOrgParams) ([]ListNotificationsForOrgRow, error) {
-	rows, err := q.db.Query(ctx, listNotificationsForOrg, arg.OrgID, arg.RowLimit)
+// ------------------------------------------ Phase 6: the landlord's log --
+// ListOrgNotifications is GET /notifications/log: one org's sends, newest
+// first, filtered and cursor-paged by (created_at, id). The renter's name is
+// resolved here so the landlord's log reads as people rather than user ids.
+func (q *Queries) ListOrgNotifications(ctx context.Context, arg ListOrgNotificationsParams) ([]ListOrgNotificationsRow, error) {
+	rows, err := q.db.Query(ctx, listOrgNotifications,
+		arg.OrgID,
+		arg.Kind,
+		arg.Status,
+		arg.UserID,
+		arg.FromAt,
+		arg.ToAt,
+		arg.CursorAt,
+		arg.CursorID,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListNotificationsForOrgRow{}
+	items := []ListOrgNotificationsRow{}
 	for rows.Next() {
-		var i ListNotificationsForOrgRow
+		var i ListOrgNotificationsRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.OrgID,
 			&i.UserID,
 			&i.Kind,
 			&i.DedupeKey,
@@ -157,8 +449,166 @@ func (q *Queries) ListNotificationsForOrg(ctx context.Context, arg ListNotificat
 			&i.ProviderMsgID,
 			&i.Error,
 			&i.Attempts,
+			&i.BatchID,
 			&i.SentAt,
 			&i.CreatedAt,
+			&i.RenterName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listScheduleReminderTargets = `-- name: ListScheduleReminderTargets :many
+SELECT s.id, s.contract_id, s.due_date, s.amount, s.paid_amount, s.status,
+       c.renter_user_id,
+       u.name AS unit_name, p.name AS property_name,
+       ru.full_name AS renter_name, ru.phone AS renter_phone,
+       nd.due_date AS next_due_date
+FROM payment_schedules s
+JOIN contracts c  ON c.id = s.contract_id AND c.org_id = s.org_id AND c.deleted_at IS NULL
+JOIN units u      ON u.id = c.unit_id AND u.org_id = c.org_id
+JOIN properties p ON p.id = u.property_id AND p.org_id = c.org_id
+JOIN users ru     ON ru.id = c.renter_user_id
+LEFT JOIN LATERAL (
+    SELECT s2.due_date FROM payment_schedules s2
+    WHERE s2.contract_id = c.id AND s2.org_id = c.org_id AND s2.deleted_at IS NULL
+      AND s2.status IN ('pending', 'partial', 'overdue') AND s2.due_date > s.due_date
+    ORDER BY s2.due_date, s2.period_start LIMIT 1
+) nd ON true
+WHERE s.org_id = $1 AND s.deleted_at IS NULL
+  AND c.status IN ('active', 'expiring')
+  AND s.status = ANY($2::text[])
+  AND ($3::date IS NULL OR s.due_date = $3::date)
+  AND ($4::date IS NULL OR s.due_date <= $4::date)
+ORDER BY s.due_date, s.id
+`
+
+type ListScheduleReminderTargetsParams struct {
+	OrgID     pgtype.UUID `json:"org_id"`
+	Statuses  []string    `json:"statuses"`
+	DueOn     pgtype.Date `json:"due_on"`
+	DueBefore pgtype.Date `json:"due_before"`
+}
+
+type ListScheduleReminderTargetsRow struct {
+	ID           pgtype.UUID `json:"id"`
+	ContractID   pgtype.UUID `json:"contract_id"`
+	DueDate      pgtype.Date `json:"due_date"`
+	Amount       int64       `json:"amount"`
+	PaidAmount   int64       `json:"paid_amount"`
+	Status       string      `json:"status"`
+	RenterUserID pgtype.UUID `json:"renter_user_id"`
+	UnitName     string      `json:"unit_name"`
+	PropertyName string      `json:"property_name"`
+	RenterName   string      `json:"renter_name"`
+	RenterPhone  *string     `json:"renter_phone"`
+	NextDueDate  pgtype.Date `json:"next_due_date"`
+}
+
+// ListScheduleReminderTargets resolves, for one org, the payment schedules a
+// reminder is owed on: everything a message needs in one row, so the scheduler
+// renders without a second query per renter.
+//
+// `due_on` selects a single date (reminder_7d, reminder_due); `overdue_only`
+// takes every unresolved row past its due date (overdue_daily). Contracts that
+// are not running are excluded — a terminated tenancy is not chased for rent.
+func (q *Queries) ListScheduleReminderTargets(ctx context.Context, arg ListScheduleReminderTargetsParams) ([]ListScheduleReminderTargetsRow, error) {
+	rows, err := q.db.Query(ctx, listScheduleReminderTargets,
+		arg.OrgID,
+		arg.Statuses,
+		arg.DueOn,
+		arg.DueBefore,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListScheduleReminderTargetsRow{}
+	for rows.Next() {
+		var i ListScheduleReminderTargetsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ContractID,
+			&i.DueDate,
+			&i.Amount,
+			&i.PaidAmount,
+			&i.Status,
+			&i.RenterUserID,
+			&i.UnitName,
+			&i.PropertyName,
+			&i.RenterName,
+			&i.RenterPhone,
+			&i.NextDueDate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSelectedRenterRecipients = `-- name: ListSelectedRenterRecipients :many
+SELECT DISTINCT ON (ru.id)
+       ru.id AS renter_user_id, ru.full_name AS renter_name, ru.phone AS renter_phone,
+       COALESCE(u.name, '')::text AS unit_name,
+       COALESCE(p.name, '')::text AS property_name
+FROM users ru
+LEFT JOIN LATERAL (
+    SELECT c.unit_id FROM contracts c
+    WHERE c.renter_user_id = ru.id AND c.org_id = $1 AND c.deleted_at IS NULL
+    ORDER BY c.created_at DESC LIMIT 1
+) lc ON true
+LEFT JOIN units u      ON u.id = lc.unit_id AND u.org_id = $1
+LEFT JOIN properties p ON p.id = u.property_id AND p.org_id = $1
+WHERE ru.id = ANY($2::uuid[]) AND ru.deleted_at IS NULL
+  AND (EXISTS (SELECT 1 FROM contracts c2
+               WHERE c2.renter_user_id = ru.id AND c2.org_id = $1 AND c2.deleted_at IS NULL)
+    OR EXISTS (SELECT 1 FROM unit_link_requests lr
+               WHERE lr.renter_user_id = ru.id AND lr.org_id = $1 AND lr.deleted_at IS NULL))
+ORDER BY ru.id
+`
+
+type ListSelectedRenterRecipientsParams struct {
+	OrgID   pgtype.UUID   `json:"org_id"`
+	UserIds []pgtype.UUID `json:"user_ids"`
+}
+
+type ListSelectedRenterRecipientsRow struct {
+	RenterUserID pgtype.UUID `json:"renter_user_id"`
+	RenterName   string      `json:"renter_name"`
+	RenterPhone  *string     `json:"renter_phone"`
+	UnitName     string      `json:"unit_name"`
+	PropertyName string      `json:"property_name"`
+}
+
+// ListSelectedRenterRecipients is `recipients: "selected"`: the named renters,
+// but only those this org actually knows (a contract or a link request). An id
+// from another org's directory simply does not come back, and is counted as
+// skipped — never as a send, and never as a probe that confirms it exists.
+func (q *Queries) ListSelectedRenterRecipients(ctx context.Context, arg ListSelectedRenterRecipientsParams) ([]ListSelectedRenterRecipientsRow, error) {
+	rows, err := q.db.Query(ctx, listSelectedRenterRecipients, arg.OrgID, arg.UserIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSelectedRenterRecipientsRow{}
+	for rows.Next() {
+		var i ListSelectedRenterRecipientsRow
+		if err := rows.Scan(
+			&i.RenterUserID,
+			&i.RenterName,
+			&i.RenterPhone,
+			&i.UnitName,
+			&i.PropertyName,
 		); err != nil {
 			return nil, err
 		}
@@ -205,37 +655,190 @@ func (q *Queries) ListStaleQueuedNotifications(ctx context.Context, arg ListStal
 	return items, nil
 }
 
+const listStaleSendingNotifications = `-- name: ListStaleSendingNotifications :many
+SELECT id FROM notification_log
+WHERE status = 'sending' AND updated_at < now() - $1::interval
+ORDER BY updated_at
+LIMIT $2
+`
+
+type ListStaleSendingNotificationsParams struct {
+	OlderThan pgtype.Interval `json:"older_than"`
+	RowLimit  int32           `json:"row_limit"`
+}
+
+// ListStaleSendingNotifications finds rows a worker claimed and never
+// finished — a crash between the claim and the provider's answer. The startup
+// sweep flips them back to `queued` and re-pushes them.
+// guard-exempt: startup recovery sweeps every org's stranded messages.
+func (q *Queries) ListStaleSendingNotifications(ctx context.Context, arg ListStaleSendingNotificationsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listStaleSendingNotifications, arg.OlderThan, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnsignedContractsForOrg = `-- name: ListUnsignedContractsForOrg :many
+SELECT c.id, c.created_at, c.renter_user_id, c.rent_amount,
+       u.name AS unit_name, p.name AS property_name,
+       ru.full_name AS renter_name, ru.phone AS renter_phone
+FROM contracts c
+JOIN units u      ON u.id = c.unit_id AND u.org_id = c.org_id
+JOIN properties p ON p.id = u.property_id AND p.org_id = c.org_id
+JOIN users ru     ON ru.id = c.renter_user_id
+WHERE c.org_id = $1 AND c.deleted_at IS NULL
+  AND c.status = 'pending_signature'
+  AND c.created_at <= $2
+  AND NOT EXISTS (
+      SELECT 1 FROM contract_signatures sig
+      WHERE sig.contract_id = c.id AND sig.org_id = c.org_id AND sig.party = 'renter'
+  )
+ORDER BY c.created_at, c.id
+`
+
+type ListUnsignedContractsForOrgParams struct {
+	OrgID         pgtype.UUID        `json:"org_id"`
+	CreatedBefore pgtype.Timestamptz `json:"created_before"`
+}
+
+type ListUnsignedContractsForOrgRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	RenterUserID pgtype.UUID        `json:"renter_user_id"`
+	RentAmount   int64              `json:"rent_amount"`
+	UnitName     string             `json:"unit_name"`
+	PropertyName string             `json:"property_name"`
+	RenterName   string             `json:"renter_name"`
+	RenterPhone  *string            `json:"renter_phone"`
+}
+
+// ListUnsignedContractsForOrg finds contracts still waiting on the renter's
+// signature after the org's `after_days` cushion — the nudge of API.md's
+// `unsigned_reminder`. A contract the renter has already signed is excluded by
+// the absence of a `renter` signature row, not by its status, so a contract
+// awaiting only the landlord is never chased.
+func (q *Queries) ListUnsignedContractsForOrg(ctx context.Context, arg ListUnsignedContractsForOrgParams) ([]ListUnsignedContractsForOrgRow, error) {
+	rows, err := q.db.Query(ctx, listUnsignedContractsForOrg, arg.OrgID, arg.CreatedBefore)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUnsignedContractsForOrgRow{}
+	for rows.Next() {
+		var i ListUnsignedContractsForOrgRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CreatedAt,
+			&i.RenterUserID,
+			&i.RentAmount,
+			&i.UnitName,
+			&i.PropertyName,
+			&i.RenterName,
+			&i.RenterPhone,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markNotificationFailed = `-- name: MarkNotificationFailed :exec
 UPDATE notification_log
-SET status = 'failed', attempts = attempts + 1, error = $1
-WHERE id = $2
+SET status = 'failed', attempts = $1, error = $2
+WHERE id = $3
 `
 
 type MarkNotificationFailedParams struct {
-	Error *string     `json:"error"`
-	ID    pgtype.UUID `json:"id"`
+	Attempts int32       `json:"attempts"`
+	Error    *string     `json:"error"`
+	ID       pgtype.UUID `json:"id"`
 }
 
-// guard-exempt: the worker records the provider's answer against one row it already popped.
+// guard-exempt: the worker records the provider's answer against one row it already claimed.
 func (q *Queries) MarkNotificationFailed(ctx context.Context, arg MarkNotificationFailedParams) error {
-	_, err := q.db.Exec(ctx, markNotificationFailed, arg.Error, arg.ID)
+	_, err := q.db.Exec(ctx, markNotificationFailed, arg.Attempts, arg.Error, arg.ID)
 	return err
 }
 
 const markNotificationSent = `-- name: MarkNotificationSent :exec
 UPDATE notification_log
 SET status = 'sent', provider_msg_id = $1,
-    sent_at = now(), attempts = attempts + 1, error = NULL
-WHERE id = $2
+    sent_at = now(), attempts = $2, error = NULL
+WHERE id = $3
 `
 
 type MarkNotificationSentParams struct {
 	ProviderMsgID *string     `json:"provider_msg_id"`
+	Attempts      int32       `json:"attempts"`
 	ID            pgtype.UUID `json:"id"`
 }
 
-// guard-exempt: the worker records the provider's answer against one row it already popped.
+// guard-exempt: the worker records the provider's answer against one row it already claimed.
 func (q *Queries) MarkNotificationSent(ctx context.Context, arg MarkNotificationSentParams) error {
-	_, err := q.db.Exec(ctx, markNotificationSent, arg.ProviderMsgID, arg.ID)
+	_, err := q.db.Exec(ctx, markNotificationSent, arg.ProviderMsgID, arg.Attempts, arg.ID)
 	return err
+}
+
+const releaseNotification = `-- name: ReleaseNotification :exec
+UPDATE notification_log SET status = 'queued'
+WHERE id = $1 AND status = 'sending'
+`
+
+// ReleaseNotification puts a claimed row back on the queue — the path taken
+// when the worker is shutting down mid-flight, so the message is retried
+// rather than stranded in `sending`.
+// guard-exempt: the worker releases one notification it already claimed.
+func (q *Queries) ReleaseNotification(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, releaseNotification, id)
+	return err
+}
+
+const requeueSendingNotification = `-- name: RequeueSendingNotification :exec
+UPDATE notification_log SET status = 'queued'
+WHERE id = $1 AND status = 'sending'
+`
+
+// guard-exempt: startup recovery returns one stranded message to the queue.
+func (q *Queries) RequeueSendingNotification(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, requeueSendingNotification, id)
+	return err
+}
+
+const retryOrgNotification = `-- name: RetryOrgNotification :one
+UPDATE notification_log
+SET status = 'queued', error = NULL
+WHERE org_id = $1 AND id = $2 AND status = 'failed'
+RETURNING id
+`
+
+type RetryOrgNotificationParams struct {
+	OrgID pgtype.UUID `json:"org_id"`
+	ID    pgtype.UUID `json:"id"`
+}
+
+// RetryOrgNotification is POST /notifications/log/{id}/retry: only a `failed`
+// row goes back on the queue, and only inside its own org. The attempt counter
+// is left standing — the log should show that the first three tries happened.
+func (q *Queries) RetryOrgNotification(ctx context.Context, arg RetryOrgNotificationParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, retryOrgNotification, arg.OrgID, arg.ID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }

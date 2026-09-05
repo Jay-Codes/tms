@@ -32,5 +32,5 @@ export const STEPS: WizardStep[] = [
   { id: 'periods', label: 'Payment periods', phase: 2, built: true, Body: PaymentPeriodsStep },
   { id: 'units', label: 'Units', phase: 2, built: true, Body: UnitsStep },
   { id: 'template', label: 'Contract template', phase: 4, built: true, Body: ContractTemplateStep },
-  { id: 'notifications', label: 'Notifications', phase: 6, Body: NotificationsStep },
+  { id: 'notifications', label: 'Notifications', phase: 6, built: true, Body: NotificationsStep },
 ];

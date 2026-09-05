@@ -271,8 +271,9 @@ func (s *Server) createContractTx(
 		OrgID: db.UUIDString(in.OrgID), UserID: db.UUIDString(renter.ID),
 		ContractID: db.UUIDString(created.ID), Kind: notify.KindContractReady,
 		Lang: settings.SMSLanguage, Phone: db.StrVal(renter.Phone),
-		Vars: notify.ContractVars{
-			Unit: unit.Name, Org: displayName,
+		Overrides: settings.notifyOverrides(),
+		Vars: notify.Vars{
+			Name: renter.FullName, Unit: unit.Name, Org: displayName,
 			Link: s.cfg.AppBaseURL + "/enduser/contract/" + db.UUIDString(created.ID),
 		},
 	})
@@ -631,7 +632,13 @@ func (s *Server) handleContractSignOTP(w http.ResponseWriter, r *http.Request) {
 
 	body := fmt.Sprintf("TMS: your code to sign the contract for %s is %s. It expires in 5 minutes.",
 		row.UnitName, code)
-	if _, err := s.deps.SMS.Send(r.Context(), phone, body); err != nil {
+	// The signing code names the landlord's own sender ID where they have one:
+	// the renter is being asked to sign that org's contract.
+	sender := ""
+	if org, err := s.q.GetOrg(r.Context(), row.OrgID); err == nil {
+		sender = parseSettings(org.Settings).senderNameOf()
+	}
+	if _, err := s.deps.SMS.Send(r.Context(), phone, body, sender); err != nil {
 		s.logger.Error("contract sign otp send failed", "error", err)
 	}
 	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
@@ -995,8 +1002,10 @@ func (s *Server) handleActivateContract(w http.ResponseWriter, r *http.Request) 
 			OrgID: db.UUIDString(row.OrgID), UserID: db.UUIDString(row.RenterUserID),
 			ContractID: db.UUIDString(row.ID), Kind: notify.KindWelcome,
 			Lang: settings.SMSLanguage, Phone: db.StrVal(row.RenterPhone),
-			Vars: notify.ContractVars{
-				Unit: row.UnitName, Org: brand.DisplayName,
+			Overrides: settings.notifyOverrides(),
+			Vars: notify.Vars{
+				Name: row.RenterName, Unit: row.UnitName, Org: brand.DisplayName,
+				Property:  row.PropertyName,
 				StartDate: row.StartDate.Time.Format(dateLayout),
 				Amount:    formatTZS(rows[0].Amount),
 				DueDate:   rows[0].DueDate.Format(dateLayout),
@@ -1120,7 +1129,11 @@ func (s *Server) handleTerminateContract(w http.ResponseWriter, r *http.Request)
 			OrgID: db.UUIDString(row.OrgID), UserID: db.UUIDString(row.RenterUserID),
 			ContractID: db.UUIDString(row.ID), Kind: notify.KindContractTerminated,
 			Lang: settings.SMSLanguage, Phone: db.StrVal(row.RenterPhone),
-			Vars: notify.ContractVars{Unit: row.UnitName, Org: brand.DisplayName, Reason: reason},
+			Overrides: settings.notifyOverrides(),
+			Vars: notify.Vars{
+				Name: row.RenterName, Unit: row.UnitName, Property: row.PropertyName,
+				Org: brand.DisplayName, Reason: reason,
+			},
 		})
 		return err
 	}); err != nil {
@@ -1295,7 +1308,8 @@ type contractMessage struct {
 	Kind       string
 	Lang       string
 	Phone      string
-	Vars       notify.ContractVars
+	Vars       notify.Vars
+	Overrides  notify.Overrides
 }
 
 // queueContractSMS writes the notification row inside the caller's transaction
@@ -1309,7 +1323,7 @@ func (s *Server) queueContractSMS(ctx context.Context, q *sqlc.Queries, m contra
 	id, err := notify.Queue(ctx, q, notify.Msg{
 		OrgID: m.OrgID, UserID: m.UserID, Kind: m.Kind,
 		DedupeKey: m.Kind + ":" + m.ContractID, Phone: m.Phone,
-		Body: notify.RenderContract(m.Kind, m.Lang, m.Vars),
+		Body: notify.Render(m.Kind, m.Lang, m.Vars, m.Overrides),
 	})
 	if errors.Is(err, notify.ErrDuplicate) {
 		return "", nil
@@ -1386,19 +1400,4 @@ func dueDayString(v *int32) string {
 
 // formatTZS renders whole shillings with thousands separators ("TZS 250,000"),
 // the form the SMS and the rendered terms both use.
-func formatTZS(amount int64) string {
-	digits := strconv.FormatInt(amount, 10)
-	neg := strings.HasPrefix(digits, "-")
-	digits = strings.TrimPrefix(digits, "-")
-	var b strings.Builder
-	for i, r := range digits {
-		if i > 0 && (len(digits)-i)%3 == 0 {
-			b.WriteByte(',')
-		}
-		b.WriteRune(r)
-	}
-	if neg {
-		return "TZS -" + b.String()
-	}
-	return "TZS " + b.String()
-}
+func formatTZS(amount int64) string { return notify.FormatTZS(amount) }

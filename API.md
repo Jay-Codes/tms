@@ -238,3 +238,29 @@ Schedules for a renter show `status` chip: paid (stamp), pending (pencil), overd
 - **Schema:** migration `000007_payments` adds `payments.reversed_at/reversal_reason/reversed_by_user_id` (with a check constraint that a reversal carries both timestamp and reason) and the `payment_allocations` table (`org_id, payment_id, schedule_id, amount`, unique per `(payment_id, schedule_id)`). `notification_log` already accepted `thank_you`; `orgs.settings.bank_account` is JSON inside the existing column, so neither needed a change.
 
 Phase 5 audit actions: `payment.record`, `payment.reverse`, `payment.overdue_run`, `org.bank_account_update`.
+
+## Phase 6 — notifications end-to-end
+
+### Org settings (audience org)
+| `GET /org/notification-settings` | → `{sender_name(≤11, null = platform default), language:"sw"|"en", send_hour_local:9, kinds:{reminder_7d:{enabled,offset_days:7},reminder_due:{enabled},overdue_daily:{enabled},thank_you:{enabled},unsigned_reminder:{enabled,after_days:7}}, templates:{[kind]:{sw:string,en:string}|null}}` (null template = platform default). Variables: `{{name}} {{amount}} {{due_date}} {{property}} {{unit}} {{org}} {{next_due_date}} {{link}}`. |
+| `PUT /org/notification-settings` | partial merge → `200 {settings}` (the same shape as the GET, not a `settings` wrapper); validates hour 0–23, offsets and `after_days` 0–30, sender name ≤ 11, template length ≤ 320 chars, unknown variables rejected 400. A `null` template clears the override. Stored in `orgs.settings.notifications`; `language` is the existing `orgs.settings.sms_language` surfaced under the name API.md gives it, so PATCH `/org` and this endpoint agree. Audited `org.notification_settings_update`. |
+| `POST /notifications/custom` | `{recipients:"all_active"|"selected", renter_user_ids?:[uuid ≤500], body(1–320)}` → `202 {batch_id, queued:n, skipped:n}`; body variables limited to `{{name}} {{unit}} {{property}} {{org}}`; a renter with no phone on file, and a `selected` id this org does not know, are counted in `skipped` (never a 404, so a broadcast cannot probe another org's directory); only renters with an active/expiring contract in the org (for `all_active`) or related renters (for `selected`); dedupe_key `custom:{batch_id}:{user_id}`; owner + manager; audited `notification.custom` with count + body. Rate limit 10 batches/hour/org. |
+| `GET /notifications/log?kind=&status=&user_id=&from=&to=&limit=&cursor=` | → `{items:[{id,kind,to_phone(full — the landlord already holds the renter's number),renter_name,body,status:"queued"|"sending"|"sent"|"failed",provider_msg_id,error,attempts,batch_id,created_at,sent_at}],next_cursor}`; newest first, cursor over `(created_at,id)`. |
+| `POST /notifications/log/{id}/retry` | failed → re-queue → `202 {id,status:"queued"}`; any other status → 409 `not_failed`; another org's row → 404. Audited `notification.retry`. |
+
+### Scheduler (system)
+`internal/notify/scheduler.go` — 5-min ticker (and `POST /admin/jobs/notifications {date?, force_hour?:bool}` → `200 {queued:{kind:n}}`, platform-admin only, audited `notification.scheduler_run`):
+- For each org (with settings): local time zone Africa/Dar_es_Salaam; only enqueue kinds whose `send_hour_local` has been reached today.
+- `reminder_7d`: schedules `pending|partial` with `due_date = today + offset_days` → dedupe `reminder_7d:{schedule_id}:{date}`.
+- `reminder_due`: `due_date = today` → `reminder_due:{schedule_id}:{date}`.
+- `overdue_daily`: status `overdue` → `overdue_daily:{schedule_id}:{date}` (daily until paid/waived).
+- `unsigned_reminder`: contracts `pending_signature` without renter signature, `created_at + after_days <= now` → `unsigned:{contract_id}:{date}`.
+- `thank_you` stays event-driven (Phase 5). Templates: org override else platform default, SW/EN.
+Worker pool: N=3 workers (`NOTIFY_WORKERS`), atomic claim (`UPDATE notification_log SET status='sending' WHERE id=$1 AND status='queued' RETURNING`), Beem call with 3 attempts on the 1s/5s/25s schedule — with three attempts the pauses used are 1s and 5s — then `sent` (+`provider_msg_id`, `attempts`) or `failed` (+`error`, `attempts`). Redis loss safe: the startup sweep re-enqueues rows still `queued` after a minute and returns rows left `sending` for over five minutes to the queue.
+Beem provider: POST `https://apisms.beem.africa/v1/send` basic auth (`api_key:secret_key`), body `{source_addr, schedule_time:"", encoding:0, message, recipients:[{recipient_id:1, dest_addr:"255…"}]}`, 10s timeout; parse `request_id`; non-2xx or `successful:false` → error; `ENV=prod` requires creds. `source_addr` = the org's `sender_name` if set, else `BEEM_SENDER_ID`, else `INFO`.
+
+**Rendering:** every kind — `link_approved`, `link_rejected`, `contract_ready`, `welcome`, `contract_terminated`, `thank_you`, `reminder_7d`, `reminder_due`, `overdue_daily`, `unsigned_reminder`, `custom` — goes through one `notify.Render(kind, lang, vars, orgOverrides)`. Placeholders are `{{…}}`. The eight variables above are the ones an org may write; the platform defaults additionally use `{{reason}}` (rejection, termination), `{{start_date}}` (welcome) and `{{next_amount}}` (thank-you), which an org override cannot name — an override of those kinds simply does without them. `thank_you` keeps its two platform wordings (with and without a next instalment); an org override of `thank_you` is used for both.
+
+**Schema:** migration `000008_notifications` adds kind `unsigned_reminder` and status `sending` to `notification_log`, a `batch_id` column for custom broadcasts, an `(org_id, created_at DESC, id DESC)` index for the log listing and a partial index on claimed rows for the startup sweep.
+
+Phase 6 audit actions: `org.notification_settings_update`, `notification.custom`, `notification.retry`, `notification.scheduler_run`.

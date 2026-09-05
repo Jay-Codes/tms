@@ -94,6 +94,7 @@ type NotificationLog struct {
 	Body          string             `json:"body"`
 	Error         *string            `json:"error"`
 	Attempts      int32              `json:"attempts"`
+	BatchID       pgtype.UUID        `json:"batch_id"`
 }
 
 type Org struct {

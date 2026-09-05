@@ -404,6 +404,29 @@ function SettingsBody() {
 
       <section style={{ paddingTop: 'var(--sp-7)' }}>
         <hr className="rule rule-strong" />
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-end',
+            justifyContent: 'space-between',
+            gap: 'var(--sp-4)',
+            margin: 'var(--sp-4) 0',
+          }}
+        >
+          <div>
+            <h2 style={{ fontSize: 'var(--text-lg)' }}>Notifications</h2>
+            <p style={{ marginTop: 'var(--sp-2)', color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+              Which rent reminders go out, at what hour, in which language, and the words they use.
+            </p>
+          </div>
+          <Link href="/settings/notifications" className="btn btn-secondary">
+            Edit notifications
+          </Link>
+        </div>
+      </section>
+
+      <section style={{ paddingTop: 'var(--sp-7)' }}>
+        <hr className="rule rule-strong" />
         <h2 style={{ fontSize: 'var(--text-lg)', margin: 'var(--sp-4) 0' }}>Staff</h2>
         <Members canManage={orgRef?.role === 'org_owner'} />
       </section>

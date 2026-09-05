@@ -62,3 +62,12 @@
 - Verified live: UI record (Room 3 → PAID, thank-you SMS w/ next due in log), overpay confirm → rollover across two rows, reversal restores, bank account round-trip, renter ledger stamps/pencils.
 
 **Deferred:** overdue red-stamp path not exercised with real aged data in UI (backend tests cover the sweep); Phase 8 seed will backdate rows for UAT.
+
+## 2026-09-05 — Phase 6: Notifications end-to-end ✅ (live Beem deferred)
+
+**Shipped**
+- Backend: migration `000008_notifications`; unified `notify.Render` for all 11 kinds (SW/EN, org overrides, whitelist); scheduler (5-min ticker, EAT local date, send-hour gate, reminder_7d / reminder_due / overdue_daily / unsigned_reminder with dedupe keys, `/admin/jobs/notifications`); worker pool N=3 with atomic claim + backoff + stale-`sending` sweep; real Beem HTTP client (httptest-covered); notification settings, custom bulk SMS (rate-limited, audited), log + retry.
+- Tenant: `/settings/notifications` (sender, language, hour, per-kind toggles, template overrides w/ chips), `/notifications` (Log + Send message composer w/ preview + confirm), wizard Notifications step, renter Messages section.
+- Verified live: settings save + 400 on unknown variable; custom SMS → log SENT with sender `JJNE`; admin job with date overrides queued reminder_7d / reminder_due (dedupe on re-run).
+
+**Deferred:** live Beem smoke (no credentials — set `BEEM_API_KEY/BEEM_SECRET_KEY/BEEM_SENDER_ID` in `.env`, `make api-restart`, send a custom message). Queued messages of a later-suspended org still send (small window).

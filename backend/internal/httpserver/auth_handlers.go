@@ -89,7 +89,9 @@ func (s *Server) handleOTPSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	body_ := fmt.Sprintf("TMS: your verification code is %s. It expires in 5 minutes.", code)
-	if _, err := s.deps.SMS.Send(r.Context(), phone, body_); err != nil {
+	// Sender: the platform default. An OTP is sent before any org is known —
+	// the number may not belong to a renter of anyone yet.
+	if _, err := s.deps.SMS.Send(r.Context(), phone, body_, ""); err != nil {
 		s.logger.Error("otp sms send failed", "error", err)
 	}
 

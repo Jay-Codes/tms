@@ -87,6 +87,17 @@ const (
 	ActionPaymentReverse    = "payment.reverse"
 	ActionOverdueRun        = "payment.overdue_run"
 	ActionBankAccountUpdate = "org.bank_account_update"
+
+	// Phase 6 — notification settings, the landlord's bulk SMS, a manual
+	// retry and the scheduler sweep.
+	//
+	// `notification.custom` records the message body as well as the count:
+	// a broadcast is the one send a landlord composes themselves, so the
+	// trail must be able to answer "what did they text forty renters?".
+	ActionNotificationSettings = "org.notification_settings_update"
+	ActionNotificationCustom   = "notification.custom"
+	ActionNotificationRetry    = "notification.retry"
+	ActionNotificationRun      = "notification.scheduler_run"
 )
 
 // Entity types.
@@ -110,6 +121,8 @@ const (
 
 	EntityPayment         = "payment"
 	EntityPaymentSchedule = "payment_schedule"
+
+	EntityNotification = "notification"
 )
 
 type ctxKey int

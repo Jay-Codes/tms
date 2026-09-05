@@ -237,6 +237,13 @@ func (s *Server) routes() chi.Router {
 			r.Get("/org/bank-account", s.handleGetBankAccount)
 			r.Put("/org/bank-account", s.handlePutBankAccount)
 
+			// --- Phase 6: notification settings, bulk SMS, delivery log ---
+			r.Get("/org/notification-settings", s.handleGetNotificationSettings)
+			r.Put("/org/notification-settings", s.handlePutNotificationSettings)
+			r.Post("/notifications/custom", s.handleCustomSMS)
+			r.Get("/notifications/log", s.handleListNotificationLog)
+			r.Post("/notifications/log/{id}/retry", s.handleRetryNotification)
+
 			// --- Phase 4: branding ---
 			r.Get("/org/branding", s.handleGetBranding)
 			r.Put("/org/branding", s.handlePutBranding)
@@ -287,6 +294,7 @@ func (s *Server) routes() chi.Router {
 			r.Use(s.sessions.RequireAdmin())
 			r.Post("/admin/jobs/contract-lifecycle", s.handleContractLifecycleJob)
 			r.Post("/admin/jobs/overdue", s.handleOverdueJob)
+			r.Post("/admin/jobs/notifications", s.handleNotificationsJob)
 		})
 
 		// --- Phase 2: public (no session; rate limited per IP) ---

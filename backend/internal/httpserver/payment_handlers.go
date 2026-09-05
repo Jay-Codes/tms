@@ -199,8 +199,9 @@ func (s *Server) handleRecordPayment(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// The thank-you names what comes next, or says everything is settled.
-		vars := notify.PaymentVars{
-			Amount: formatTZS(body.Amount), Unit: contract.UnitName, Org: brand.DisplayName,
+		vars := notify.Vars{
+			Name: contract.RenterName, Amount: formatTZS(body.Amount),
+			Unit: contract.UnitName, Property: contract.PropertyName, Org: brand.DisplayName,
 		}
 		if next := payment.EarliestUnpaid(schedules); next >= 0 {
 			vars.NextDueDate = schedules[next].DueDate
@@ -210,6 +211,8 @@ func (s *Server) handleRecordPayment(w http.ResponseWriter, r *http.Request) {
 			OrgID: p.OrgIDString(), UserID: db.UUIDString(contract.RenterUserID),
 			PaymentID: paymentID, Lang: settings.SMSLanguage,
 			Phone: db.StrVal(contract.RenterPhone), Vars: vars,
+			Overrides: settings.notifyOverrides(),
+			Enabled:   notificationSettingsOf(settings).Kinds.ThankYou.Enabled,
 		})
 		return err
 	})
@@ -737,12 +740,21 @@ type paymentMessage struct {
 	PaymentID string
 	Lang      string
 	Phone     string
-	Vars      notify.PaymentVars
+	Vars      notify.Vars
+	Overrides notify.Overrides
+	// Enabled is the org's `kinds.thank_you.enabled` switch.
+	Enabled bool
 }
 
 // queuePaymentSMS writes the thank-you row inside the caller's transaction and
 // returns the id to push onto Redis after the commit.
 func (s *Server) queuePaymentSMS(ctx context.Context, q *sqlc.Queries, m paymentMessage) (string, error) {
+	// `kinds.thank_you.enabled` is a switch the landlord is offered on the
+	// notifications screen; an event-driven kind has to read it too, or turning
+	// it off would change the screen and nothing else.
+	if !m.Enabled {
+		return "", nil
+	}
 	if m.Phone == "" {
 		s.logger.Warn("thank-you notification skipped: renter has no phone number",
 			"payment_id", m.PaymentID)
@@ -751,7 +763,7 @@ func (s *Server) queuePaymentSMS(ctx context.Context, q *sqlc.Queries, m payment
 	id, err := notify.Queue(ctx, q, notify.Msg{
 		OrgID: m.OrgID, UserID: m.UserID, Kind: notify.KindThankYou,
 		DedupeKey: notify.KindThankYou + ":" + m.PaymentID, Phone: m.Phone,
-		Body: notify.RenderPayment(notify.KindThankYou, m.Lang, m.Vars),
+		Body: notify.Render(notify.KindThankYou, m.Lang, m.Vars, m.Overrides),
 	})
 	if errors.Is(err, notify.ErrDuplicate) {
 		return "", nil

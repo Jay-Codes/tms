@@ -243,6 +243,7 @@ func (s *Server) handleCreateLinkRequest(w http.ResponseWriter, r *http.Request)
 			OrgID: orgID, RenterUserID: p.UserIDString(), RequestID: db.UUIDString(created.ID),
 			Kind: notify.KindLinkApproved, Lang: settings.SMSLanguage,
 			Unit: unit.Name, Org: org.Name, Phone: db.StrVal(renter.Phone),
+			Name: renter.FullName, Overrides: settings.notifyOverrides(),
 		})
 		return err
 	}); err != nil {
@@ -759,6 +760,9 @@ type linkDecision struct {
 	Org          string
 	Reason       string
 	Phone        string
+	Name         string
+	Property     string
+	Overrides    notify.Overrides
 }
 
 // queueLinkDecision writes the notification_log row inside the decision's own
@@ -771,9 +775,9 @@ func (s *Server) queueLinkDecision(ctx context.Context, q *sqlc.Queries, d linkD
 			"request_id", d.RequestID, "kind", d.Kind)
 		return "", nil
 	}
-	body := notify.RenderLink(d.Kind, d.Lang, notify.LinkVars{
-		Unit: d.Unit, Org: d.Org, Reason: d.Reason,
-	})
+	body := notify.Render(d.Kind, d.Lang, notify.Vars{
+		Name: d.Name, Unit: d.Unit, Property: d.Property, Org: d.Org, Reason: d.Reason,
+	}, d.Overrides)
 	id, err := notify.Queue(ctx, q, notify.Msg{
 		OrgID: d.OrgID, UserID: d.RenterUserID, Kind: d.Kind,
 		DedupeKey: d.Kind + ":" + d.RequestID, Phone: d.Phone, Body: body,
