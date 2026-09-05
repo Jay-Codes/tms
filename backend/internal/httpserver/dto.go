@@ -145,7 +145,7 @@ func DefaultOrgSettings() OrgSettings {
 	return OrgSettings{
 		AutoApproveLinks:     false,
 		DueDay:               nil,
-		GraceDays: 0,
+		GraceDays:            3,
 		ReminderOffsetsDays:  []int{7, 0},
 		UnsignedReminderDays: 7,
 		SMSLanguage:          "sw",
