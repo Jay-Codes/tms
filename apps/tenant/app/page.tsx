@@ -3,7 +3,7 @@
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useEffect, useState, type ReactNode } from 'react';
-import { PageHead, Shell } from '../components/Shell';
+import { PageHead, Shell, pendingLabel, usePendingLinkRequests } from '../components/Shell';
 import { propertiesApi, type Property } from '../lib/api';
 import { useMe } from '../lib/auth';
 
@@ -36,6 +36,7 @@ function EmptyCard({
 function DashboardBody() {
   const { user, org } = useMe();
   const [firstProperty, setFirstProperty] = useState<Property | null>(null);
+  const pending = usePendingLinkRequests();
 
   // The QR empty-state card jumps straight to a printable sheet once there is
   // something to print; until then it points at the properties screen.
@@ -82,6 +83,23 @@ function DashboardBody() {
           marginTop: 'var(--sp-5)',
         }}
       >
+        {/* FLOWS flow 3 step 1 — the pending badge lives here as well as in the rail. */}
+        <EmptyCard
+          icon="solar:inbox-in-linear"
+          title={
+            pending ? `${pendingLabel(pending)} link request${pending === 1 ? '' : 's'} waiting` : 'Link requests'
+          }
+          body={
+            pending
+              ? 'A renter scanned one of your QR codes. Read their KYC, then approve or reject.'
+              : 'When a renter scans a unit QR code and asks to be linked, the request lands here.'
+          }
+          action={
+            <Link href="/link-requests" className={pending ? 'btn btn-primary' : 'btn btn-secondary'}>
+              {pending ? 'Review requests' : 'Open the inbox'}
+            </Link>
+          }
+        />
         <EmptyCard
           icon="solar:qr-code-linear"
           title="Print QR codes"

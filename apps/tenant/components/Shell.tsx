@@ -8,9 +8,37 @@
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState, type ReactNode } from 'react';
-import { ApiError, authApi } from '../lib/api';
+import { useEffect, useState, type ReactNode } from 'react';
+import { ApiError, authApi, linkRequestsApi } from '../lib/api';
 import { RequireAuth, useMe } from '../lib/auth';
+
+/** How many pending requests the badge will count before it gives up and says "50+". */
+const PENDING_BADGE_CAP = 50;
+
+/**
+ * Pending link-request count for the nav badge (FLOWS flow 3 step 1). The list
+ * endpoint has no count, so we ask for one page and read its length; a full
+ * page means "at least this many". Errors are silent — a badge must never
+ * break the chrome.
+ */
+export function usePendingLinkRequests(): number | null {
+  const [count, setCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    linkRequestsApi
+      .list({ status: 'pending', limit: PENDING_BADGE_CAP }, ac.signal)
+      .then((r) => setCount(typeof r.total === 'number' ? r.total : (r.items ?? []).length))
+      .catch(() => setCount(null));
+    return () => ac.abort();
+  }, []);
+
+  return count;
+}
+
+export function pendingLabel(count: number): string {
+  return count >= PENDING_BADGE_CAP ? `${PENDING_BADGE_CAP}+` : String(count);
+}
 
 export interface NavItem {
   href: string;
@@ -24,7 +52,8 @@ export const NAV: NavItem[] = [
   { href: '/', label: 'Dashboard', icon: 'solar:home-2-linear' },
   { href: '/properties', label: 'Properties', icon: 'solar:buildings-2-linear' },
   { href: '/units', label: 'Units', icon: 'solar:widget-4-linear' },
-  { href: '/renters', label: 'Renters', icon: 'solar:users-group-rounded-linear', phase: 3 },
+  { href: '/link-requests', label: 'Link requests', icon: 'solar:inbox-in-linear' },
+  { href: '/renters', label: 'Renters', icon: 'solar:users-group-rounded-linear' },
   { href: '/contracts', label: 'Contracts', icon: 'solar:document-text-linear', phase: 4 },
   { href: '/payments', label: 'Payments', icon: 'solar:wallet-money-linear', phase: 5 },
   { href: '/reports', label: 'Reports', icon: 'solar:chart-square-linear', phase: 7 },
@@ -84,6 +113,7 @@ function VerifyBanner() {
 function Rail() {
   const pathname = usePathname();
   const { org } = useMe();
+  const pending = usePendingLinkRequests();
 
   return (
     <aside
@@ -124,6 +154,24 @@ function Rail() {
             <Link key={item.href} href={item.href} className="tab" aria-current={current ? 'page' : undefined}>
               <Icon icon={item.icon} width={20} />
               <span style={{ flex: 1 }}>{item.label}</span>
+              {item.href === '/link-requests' && pending ? (
+                <span
+                  aria-label={`${pendingLabel(pending)} pending`}
+                  style={{
+                    minWidth: 20,
+                    padding: '0 6px',
+                    borderRadius: 999,
+                    background: 'var(--primary)',
+                    color: 'var(--on-primary)',
+                    fontSize: 'var(--text-xs)',
+                    fontWeight: 600,
+                    textAlign: 'center',
+                    lineHeight: '18px',
+                  }}
+                >
+                  {pendingLabel(pending)}
+                </span>
+              ) : null}
               {item.phase ? (
                 <span style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-faint)' }}>P{item.phase}</span>
               ) : null}
