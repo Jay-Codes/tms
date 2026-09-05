@@ -40,13 +40,13 @@ Execution plan for [SPEC.md](SPEC.md) / [FLOWS.md](FLOWS.md). Target: **testing-
 
 ## Phase 2 — Properties, units, QR, pricing, vacancy (Sep 7, 1 day)
 
-- [ ] CRUD properties + units; `unit_code` (unguessable base32).
-- [ ] QR generation → PNG → MinIO `qr` bucket, presigned download; per-unit + bulk-per-property print sheet (§3.1, §5.3).
-- [ ] Price plans: `{amount, period_days, effective_from}`, history endpoint; bulk update.
-- [ ] Payment periods: `CRUD /org/payment-periods` (unlimited custom day-counts, recommended flag, ordering, deactivate); per-unit `allowed_period_ids`; settings screen + wizard step.
-- [ ] Vacancy board `GET /units?status=vacant`; status overrides.
-- [ ] `GET /public/units/{unit_code}` + `GET /public/orgs/{slug}/branding` (rate-limited).
-- [ ] Tenant app: properties/units screens, price history, vacancy board, QR print (Flows 4, 5).
+- [x] CRUD properties + units; `unit_code` (unguessable base32).
+- [x] QR generation → PNG → MinIO `qr` bucket, presigned download; per-unit + bulk-per-property print sheet (§3.1, §5.3).
+- [x] Price plans: `{amount, period_days, effective_from}`, history endpoint; bulk update.
+- [x] Payment periods: `CRUD /org/payment-periods` (unlimited custom day-counts, recommended flag, ordering, deactivate); per-unit `allowed_period_ids`; settings screen + wizard step.
+- [x] Vacancy board `GET /units?status=vacant`; status overrides.
+- [x] `GET /public/units/{unit_code}` + `GET /public/orgs/{slug}/branding` (rate-limited).
+- [x] Tenant app: properties/units screens, price history, vacancy board, QR print (Flows 4, 5).
 
 **Exit:** landlord creates property + units, prints QRs; scan URL resolves branding + unit summary pre-auth.
 
