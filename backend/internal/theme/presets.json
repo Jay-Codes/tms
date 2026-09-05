@@ -1,0 +1,122 @@
+[
+  {
+    "id": "ledger",
+    "name": "Ledger",
+    "dark": false,
+    "font_id": "bricolage",
+    "tokens": {
+      "paper": "#fbfbf7",
+      "surface": "#ffffff",
+      "ink": "#1c2b5a",
+      "ink_muted": "#4a5680",
+      "rule": "#cbd3e8",
+      "primary": "#2b4fd0",
+      "accent": "#2b4fd0"
+    }
+  },
+  {
+    "id": "night_ledger",
+    "name": "Night ledger",
+    "dark": true,
+    "font_id": "bricolage",
+    "tokens": {
+      "paper": "#14161c",
+      "surface": "#1c1f27",
+      "ink": "#e8eaf2",
+      "ink_muted": "#aab1c7",
+      "rule": "#343a4a",
+      "primary": "#96b4ff",
+      "accent": "#96b4ff"
+    }
+  },
+  {
+    "id": "warm_paper",
+    "name": "Warm paper",
+    "dark": false,
+    "font_id": "instrument",
+    "tokens": {
+      "paper": "#faf5ec",
+      "surface": "#fffdf8",
+      "ink": "#33291d",
+      "ink_muted": "#6b5844",
+      "rule": "#ddd0b8",
+      "primary": "#9a5423",
+      "accent": "#9a5423"
+    }
+  },
+  {
+    "id": "cool_slate",
+    "name": "Cool slate",
+    "dark": false,
+    "font_id": "archivo",
+    "tokens": {
+      "paper": "#f3f5f7",
+      "surface": "#ffffff",
+      "ink": "#1f2933",
+      "ink_muted": "#4d5a67",
+      "rule": "#ccd5dd",
+      "primary": "#2f6382",
+      "accent": "#2f6382"
+    }
+  },
+  {
+    "id": "forest",
+    "name": "Forest",
+    "dark": false,
+    "font_id": "hanken",
+    "tokens": {
+      "paper": "#f3f7f2",
+      "surface": "#ffffff",
+      "ink": "#1b2e21",
+      "ink_muted": "#45604d",
+      "rule": "#c9dbc9",
+      "primary": "#1f6640",
+      "accent": "#1f6640"
+    }
+  },
+  {
+    "id": "ocean",
+    "name": "Ocean",
+    "dark": false,
+    "font_id": "archivo",
+    "tokens": {
+      "paper": "#f1f6fa",
+      "surface": "#ffffff",
+      "ink": "#14303f",
+      "ink_muted": "#43606f",
+      "rule": "#c3d7e3",
+      "primary": "#12607f",
+      "accent": "#12607f"
+    }
+  },
+  {
+    "id": "high_contrast",
+    "name": "High contrast",
+    "dark": false,
+    "font_id": "archivo",
+    "tokens": {
+      "paper": "#ffffff",
+      "surface": "#ffffff",
+      "ink": "#000000",
+      "ink_muted": "#1a1a1a",
+      "rule": "#000000",
+      "primary": "#0000c8",
+      "accent": "#0000c8"
+    }
+  },
+  {
+    "id": "minimal_white",
+    "name": "Minimal white",
+    "dark": false,
+    "font_id": "hanken",
+    "tokens": {
+      "paper": "#ffffff",
+      "surface": "#fafafa",
+      "ink": "#18181b",
+      "ink_muted": "#52525b",
+      "rule": "#dcdce0",
+      "primary": "#3f3f46",
+      "accent": "#3f3f46"
+    }
+  }
+]

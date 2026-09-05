@@ -100,6 +100,10 @@ var isoRoutes = []isoCase{
 		method: "GET", pattern: "/public/units/{unit_code}", aud: isoOpen,
 		note: "deliberately public: the QR sticker resolves before the scanner has an account (SPEC §3.1)",
 	},
+	{
+		method: "GET", pattern: "/themes/presets", aud: isoOpen, want: []int{200},
+		note: "the eight shipped presets are platform data, identical for every org (PLAN2 Phase 12)",
+	},
 
 	// ------------------------------------------ org: the caller's own org --
 	{method: "GET", pattern: "/org", aud: isoOrg, want: []int{200}},

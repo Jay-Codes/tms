@@ -590,3 +590,120 @@ Phase 11 notes:
   window is at most ~1830 rows per series.
 - Every series endpoint runs the org-scoped overdue flip first, as the Phase 7
   reports do.
+
+## Part 2 — Phase 12 (shipped)
+
+Theming v2 (SPEC §2.0/§4 `org_themes`, PLAN2 Phase 12). **The backend is the
+source of truth for themes**: the eight presets and the contrast validator live
+in `backend/internal/theme` (`presets.json`, `go:embed`-ed), and the frontends
+fetch them rather than keeping a second copy that could disagree with the copy
+the server will accept.
+
+A theme is **seven colours and a font**:
+
+`tokens` = `{paper, surface, ink, ink_muted, rule, primary, accent}`, each a
+canonical lower-case `#rrggbb` (`#0A7C4A` is accepted on input and stored and
+returned as `#0a7c4a`; shorthand `#abc` and named colours are refused).
+`font_id` ∈ `bricolage | archivo | instrument | hanken`.
+
+Everything derived from those — pressed/tinted primaries, `on-primary`, faint
+ink — is computed **client-side** and never stored: a derived value in the
+database is a value that can disagree with the thing it derives from.
+
+`theme` shape (returned by every branding endpoint):
+`{preset_id:string|null, tokens:{7 keys}, font_id, dark:bool, source:"preset"|"custom"|"legacy"|"default", primary_color}`
+— `primary_color` is `tokens.primary` under its Phase 4 name, kept (with
+`font_id`) so clients written against Phase 4 keep working unchanged.
+
+### `GET /themes/presets`
+
+Public, rate-limited per IP like the other `/public` routes (60/min) →
+`{presets:[{id, name, dark, tokens, font_id}]}`, in display order:
+
+| id | name | dark | font | paper | surface | ink | ink_muted | rule | primary = accent |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ledger` | Ledger | no | bricolage | `#fbfbf7` | `#ffffff` | `#1c2b5a` | `#4a5680` | `#cbd3e8` | `#2b4fd0` |
+| `night_ledger` | Night ledger | **yes** | bricolage | `#14161c` | `#1c1f27` | `#e8eaf2` | `#aab1c7` | `#343a4a` | `#96b4ff` |
+| `warm_paper` | Warm paper | no | instrument | `#faf5ec` | `#fffdf8` | `#33291d` | `#6b5844` | `#ddd0b8` | `#9a5423` |
+| `cool_slate` | Cool slate | no | archivo | `#f3f5f7` | `#ffffff` | `#1f2933` | `#4d5a67` | `#ccd5dd` | `#2f6382` |
+| `forest` | Forest | no | hanken | `#f3f7f2` | `#ffffff` | `#1b2e21` | `#45604d` | `#c9dbc9` | `#1f6640` |
+| `ocean` | Ocean | no | archivo | `#f1f6fa` | `#ffffff` | `#14303f` | `#43606f` | `#c3d7e3` | `#12607f` |
+| `high_contrast` | High contrast | no | archivo | `#ffffff` | `#ffffff` | `#000000` | `#1a1a1a` | `#000000` | `#0000c8` |
+| `minimal_white` | Minimal white | no | hanken | `#ffffff` | `#fafafa` | `#18181b` | `#52525b` | `#dcdce0` | `#3f3f46` |
+
+`ledger` is byte-identical to `packages/ui/src/tokens.css`, and a test pins it
+there so the served default and the CSS fallback cannot drift apart.
+
+### The contrast guard
+
+`theme.Validate(tokens, font_id)` returns a `Failure` per broken rule —
+`{pair, ratio, minimum, message}` — using WCAG 2.x relative luminance on sRGB:
+
+| pair | minimum | why |
+| --- | --- | --- |
+| `ink/paper`, `ink/surface` | 4.5 | AA body text, on the page **and** on a sheet |
+| `ink_muted/paper`, `ink_muted/surface` | 4.5 | AA secondary text |
+| `on_primary/primary` | 4.5 | the button label; `on_primary` is `#ffffff`, or `#1c1917` when `luminance(primary) > 0.4` — the same rule the UI applies |
+| `primary/paper` | 3.0 | AA non-text UI: a button must be findable |
+| `rule/paper` | 1.2 | not a WCAG number — a ledger rule below it is simply not there |
+
+Hex-format and font-id problems are reported first and **short-circuit** the
+contrast pass (a ratio measured against a colour that does not parse is a
+number that means nothing). Every shipped preset passes; a test asserts it.
+
+### `GET /org/branding`, `PUT /org/branding`
+
+`theme` on the response is the **resolved** block above. `PUT` accepts
+`theme:{preset_id?, tokens?, font_id?, primary_color?}` — every member
+optional:
+
+- `preset_id` must be one of the eight (else 400 `errors["theme.preset_id"]`).
+- `tokens`, if present, must be the **whole** seven-key set — a missing or an
+  unknown key is a 400 on `errors["theme.tokens"]`. A partial override would
+  leave the rest to whatever the app last had.
+- `primary_color` alone (the Phase 4 body) still works: it recolours
+  `primary`+`accent` on top of the current base and is validated like any other
+  custom set.
+- `font_id` outside the whitelist → 400 `errors["theme.font_id"]`. Field-level
+  problems are reported **together**, not one per round trip.
+
+A theme that fails the contrast guard is **400 `application/problem+json`**
+with both `errors` (`{"theme.tokens": "3 contrast failures"}`, for the form)
+and a top-level **`failures:[{pair, ratio, minimum, message}]`** array, for the
+advanced panel's per-swatch badges. Nothing is written on a rejection.
+
+On success the choice is upserted into `org_themes` (`org_id` PK: preset id,
+`tokens` — `{}` for a plain preset — and font), audited **`branding.theme_update`**
+with before/after, and the resolved `primary_color`/`font_id` are **mirrored
+into the legacy `org_branding.theme` JSON** so every Phase 4 reader still sees a
+coherent answer.
+
+**Resolution order** (`theme.Resolve`), highest first:
+
+1. explicit `tokens` on the `org_themes` row → `source:"custom"` (the row's
+   `preset_id` survives as the label the base came from — "Night ledger, edited");
+2. the row's `preset_id` → `source:"preset"`;
+3. a Phase 4 `org_branding.theme.primary_color` that differs from the schema
+   default `#1B4DB1` → ledger with `primary`+`accent` replaced by it and the
+   legacy font, `source:"legacy"`;
+4. the `ledger` preset → `source:"default"`.
+
+`dark` is computed from `paper` (`luminance < 0.5`), so an override of a dark
+preset with a white paper is correctly no longer dark.
+
+### `GET /public/orgs/{slug}/branding`, `GET /public/units/{unit_code}`
+
+Both return the same fully resolved `theme` object (including `primary_color`
+and `font_id`), so a renter's QR landing and the landlord's own screens paint
+identically from one theme — **one theme covers both apps** (DECISIONS.md) —
+and the renter app paints without a second call.
+
+Phase 12 notes:
+
+- **Isolation.** The theme is written from the session's own org, so there is
+  no cross-org write to attempt; the suite instead asserts that org A saving a
+  theme leaves org B's private *and* public branding untouched. `/themes/presets`
+  is in the route census as `open` — platform data, identical for every org.
+- **`org_themes` has no separate `org_id` index**: `org_id` is its primary key,
+  and a second index on the same column would be dead weight. The migration
+  guard was widened to accept that shape.

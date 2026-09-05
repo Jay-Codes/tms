@@ -33,9 +33,10 @@ var orgScopedTables = []string{
 	"payment_allocations",
 	"notification_log",
 	"audit_log",
-	// Part 2 (migration 000012): the expense ledger.
+	// Part 2 (migration 000012): the expense ledger and the org theme.
 	"expense_categories",
 	"expenses",
+	"org_themes",
 }
 
 var (

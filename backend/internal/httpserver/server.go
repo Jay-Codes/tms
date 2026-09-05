@@ -350,6 +350,8 @@ func (s *Server) routes() chi.Router {
 		// --- Phase 2: public (no session; rate limited per IP) ---
 		r.Get("/public/orgs/{slug}/branding", s.publicRateLimited(s.handlePublicBranding))
 		r.Get("/public/units/{unit_code}", s.publicRateLimited(s.handlePublicUnit))
+		// --- Phase 12: the shipped theme presets (public, cacheable) ---
+		r.Get("/themes/presets", s.publicRateLimited(s.handleThemePresets))
 		r.Group(func(r chi.Router) {
 			r.Use(s.sessions.RequireOrg(auth.RoleOwner))
 			r.Post("/org/members", s.handleCreateMember)
