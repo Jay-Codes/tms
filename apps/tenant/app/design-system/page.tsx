@@ -10,15 +10,21 @@ import {
   RowBar,
   Sparkline,
   StatTile,
+  FONT_LABELS,
+  LEDGER_THEME,
+  PRESETS,
   TableScroll,
-  ThemeSwitcher,
+  applyOrgTheme,
   compactNumber,
   fullTZS,
   pctLabel,
   resolvePeriod,
+  themeContrastReport,
   type PeriodValue,
+  type ThemePreset,
 } from '@tms/ui';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { ThemeMiniature } from '../../components/ThemePanel';
 
 /* ------------------------------------------------------------------ */
 /* Design-system preview, landlord side (desktop).                     */
@@ -324,6 +330,79 @@ function ChartsDemo() {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Themes (Phase 12). Eight presets, each drawn as a live miniature so  */
+/* the gallery is the design system rather than a swatch strip. The     */
+/* toggle applies one to this whole page — that is how the charts,      */
+/* stamps, rules, buttons, inputs and nav get checked under a dark      */
+/* preset without a login.                                             */
+/* ------------------------------------------------------------------ */
+
+function ThemesDemo() {
+  const [applied, setApplied] = useState<string | null>(null);
+
+  /* Leaving the page must not strand the reader in someone else's colours. */
+  useEffect(() => () => applyOrgTheme(LEDGER_THEME), []);
+
+  const apply = (preset: ThemePreset) => {
+    const next = applied === preset.id ? null : preset.id;
+    setApplied(next);
+    const chosen = next ? preset : null;
+    applyOrgTheme(
+      chosen
+        ? { preset_id: chosen.id, tokens: chosen.tokens, font_id: chosen.font_id, dark: chosen.dark }
+        : LEDGER_THEME,
+    );
+  };
+
+  return (
+    <div style={{ display: 'grid', gap: 'var(--sp-4)' }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
+          gap: 'var(--sp-3)',
+        }}
+      >
+        {PRESETS.map((p) => {
+          const on = applied === p.id;
+          const worst = Math.min(...themeContrastReport(p.tokens).map((r) => r.ratio / r.minimum));
+          return (
+            <div key={p.id} style={{ display: 'grid', gap: 'var(--sp-2)' }}>
+              <ThemeMiniature tokens={p.tokens} font={p.font_id} dark={p.dark} />
+              <button
+                type="button"
+                className={on ? 'btn btn-primary' : 'btn btn-secondary'}
+                aria-pressed={on}
+                onClick={() => apply(p)}
+                style={{ minHeight: 36, fontSize: 'var(--text-sm)' }}
+              >
+                {on ? `${p.name} — on` : p.name}
+              </button>
+              <span className="hint" style={{ fontSize: 'var(--text-xs)' }}>
+                {p.dark ? 'Dark · ' : ''}
+                {FONT_LABELS[p.font_id]} · AA {worst >= 1 ? 'passes' : 'FAILS'}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <div>
+        <button
+          type="button"
+          className="btn btn-quiet"
+          onClick={() => {
+            setApplied(null);
+            applyOrgTheme(LEDGER_THEME);
+          }}
+        >
+          Back to Ledger
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Section({ title, lead, children }: { title: string; lead: string; children: ReactNode }) {
   return (
     <section style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 'var(--sp-6)', paddingTop: 'var(--sp-6)' }}>
@@ -352,10 +431,10 @@ export default function DesignSystem() {
       <Dashboard />
 
       <Section
-        title="The landlord's two knobs"
-        lead="Brand colour and typeface. Both are applied at runtime from the org's settings; nothing else is exposed."
+        title="Themes"
+        lead="Seven colours and a typeface, applied at runtime from the org's settings. Eight presets ship with the platform; each is AA-validated. Turn one on to check this whole page under it — charts re-step on the dark preset, stamps never move."
       >
-        <ThemeSwitcher />
+        <ThemesDemo />
       </Section>
 
       <Section

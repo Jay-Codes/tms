@@ -901,7 +901,9 @@ func TestBranding(t *testing.T) {
 	if updated.str(t, "branding", "display_name") != "Brand Estates" {
 		t.Errorf("display_name = %q", updated.str(t, "branding", "display_name"))
 	}
-	if updated.str(t, "branding", "theme", "primary_color") != "#0A7C4A" {
+	// Phase 12 canonicalises colours to lower-case `#rrggbb`: one form for a
+	// value that ends up in a CSS custom property.
+	if updated.str(t, "branding", "theme", "primary_color") != "#0a7c4a" {
 		t.Errorf("primary_color = %q", updated.str(t, "branding", "theme", "primary_color"))
 	}
 	if updated.str(t, "branding", "document_footer_text") != "Registered in Dar es Salaam" {

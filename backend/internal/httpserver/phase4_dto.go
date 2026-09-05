@@ -140,7 +140,7 @@ type brandingResponse struct {
 	DisplayName        string         `json:"display_name"`
 	LogoURL            *string        `json:"logo_url"`
 	LetterheadURL      *string        `json:"letterhead_url"`
-	Theme              orgTheme       `json:"theme"`
+	Theme              themeBlock     `json:"theme"`
 	DashboardPrefs     map[string]any `json:"dashboard_prefs"`
 	DocumentFooterText *string        `json:"document_footer_text"`
 }

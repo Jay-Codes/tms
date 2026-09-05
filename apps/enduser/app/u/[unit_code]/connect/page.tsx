@@ -74,7 +74,7 @@ function ConnectContent() {
   const [error, setError] = useState<string | null>(null);
   const [needsKyc, setNeedsKyc] = useState(false);
 
-  useOrgTheme(unit?.branding);
+  useOrgTheme(unit?.branding, unit?.org?.slug);
 
   useEffect(() => {
     if (unitCode) rememberScannedUnit(unitCode);

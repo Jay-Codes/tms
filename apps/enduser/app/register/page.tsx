@@ -18,6 +18,7 @@ import { ApiError, authApi } from '../../lib/api';
 import { readNextParam, useMe, useNextParam } from '../../lib/auth';
 import { countdown, displayPhone, errorMessage, isValidPhone, isValidPin, normalizePhone } from '../../lib/format';
 import { Notice, Screen, ScreenHeader } from '../../components/Screen';
+import { PlatformTheme } from '../../components/OrgThemeSync';
 
 type Step = 'phone' | 'otp' | 'pin';
 
@@ -143,6 +144,7 @@ export default function RegisterPage() {
 
   return (
     <Screen>
+      <PlatformTheme />
       <ScreenHeader
         eyebrow={`Step ${step === 'phone' ? 1 : step === 'otp' ? 2 : 3} of 3`}
         title={

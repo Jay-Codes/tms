@@ -166,6 +166,36 @@
 /* ============================ PRINT ======================== */
 
 @media print {
+  /* A contract prints as a contract: black ink on white paper, whatever
+     theme the renter reads it in. Forcing only `html`/`body` below is not
+     enough — every rule, muted label and value inside the sheet reads a
+     token, and under a dark theme those tokens are pale (invisible on
+     paper). So the themable set is pinned back to preset "Ledger" for the
+     print box, and the app's inline `<html style>` overridden with
+     `!important`. Stamps are fixed platform-wide and print as they are. */
+  :root {
+    --paper: #ffffff !important;
+    --surface: #ffffff !important;
+    --sheet: #ffffff !important;
+    --sheet-tint: #ffffff !important;
+    --ink: #000000 !important;
+    --ink-muted: #333333 !important;
+    --ink-soft: #333333 !important;
+    --ink-faint: #666666 !important;
+    --rule: #999999 !important;
+    --rule-strong: #000000 !important;
+    --shadow-sheet: none !important;
+    color-scheme: light !important;
+  }
+
+  /* The on-screen white backing under a signature/letterhead image is
+     redundant on paper and would print as a grey-edged box. */
+  [data-theme='dark'] .doc-sig-image,
+  [data-theme='dark'] .doc-letterhead {
+    background: transparent !important;
+    padding: 0 !important;
+  }
+
   .no-print,
   .bottom-bar,
   .doc-cta,

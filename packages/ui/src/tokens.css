@@ -9,7 +9,8 @@
 
    Two layers:
    1. CORE  — fixed platform-wide. Never overridden.
-   2. THEME — org-configurable (primary color + font). The
+   2. THEME — org-configurable (a preset of seven colours + a
+      font; see packages/ui/src/theme.ts). The
       enduser and tenant apps apply an org's theme at runtime
       via applyOrgTheme(); the admin app keeps the defaults.
       Identity lives in structure, so a font/color swap can't
@@ -22,11 +23,12 @@
   --primary-strong: #203ba0; /* derived: pressed */
   --primary-soft: #e6ebfa;   /* derived: tinted fills */
   --on-primary: #ffffff;     /* derived by contrast */
+  --accent: #2b4fd0;         /* highlights: link underlines, the active nav mark */
+  --accent-soft: #e6ebfa;    /* derived: accent tint */
   --font-sans: var(--font-bricolage), system-ui, -apple-system, sans-serif;
 
-  /* ===================== CORE (fixed) ======================== */
-
-  /* Paper & ink */
+  /* Paper & ink — themable since Phase 12 (applyOrgTheme writes all of
+     these); the values below are the "Ledger" preset, i.e. the default. */
   --paper: #fbfbf7;          /* page background */
   --sheet: #ffffff;          /* a separate sheet (dialog, panel) */
   --sheet-tint: #f4f5f0;     /* wells, input fill */
@@ -36,7 +38,12 @@
   --rule: #cbd3e8;           /* ledger rules (the blue lines) */
   --rule-strong: var(--ink); /* totals, section rules */
 
-  /* Stamp inks (semantic; never used decoratively, never themed) */
+  /* ===================== CORE (fixed) ======================== */
+
+  /* Stamp inks (semantic; never used decoratively, never org-themable).
+     They get a dark *step* further down — the same treatment the chart
+     palette gets — because ink chosen for white paper is unreadable on a
+     dark sheet. A landlord still cannot set them. */
   --stamp-paid: #1e7a46;
   --stamp-overdue: #b42318;
   --pencil: var(--ink-soft); /* pending = written in pencil, not stamped */
@@ -67,7 +74,7 @@
   --radius-sm: 3px;   /* inputs, stamps */
   --radius-md: 4px;   /* buttons */
   --radius-lg: 6px;   /* sheets */
-  --shadow-sheet: 0 12px 32px rgb(28 43 90 / 0.14); /* only for raised sheets (dialogs) */
+  --shadow-sheet: 0 12px 32px color-mix(in srgb, var(--ink) 14%, transparent); /* only for raised sheets (dialogs) */
 
   /* Ledger */
   --row-h: 52px;      /* ledger row height — also the touch minimum */
@@ -109,6 +116,14 @@ h1, h2, h3 {
 p {
   margin: 0;
   max-width: var(--measure);
+}
+
+/* Links: ink text, accent underline. The accent token exists so a landlord can
+   mark "where you are / where you can go" without repainting every button. */
+a {
+  color: inherit;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 0.15em;
 }
 
 button, input, select, textarea {
@@ -378,7 +393,7 @@ button, input, select, textarea {
 }
 
 .tab[aria-current='page'] {
-  border-left-color: var(--primary);
+  border-left-color: var(--accent);
   color: var(--ink);
   background: var(--sheet);
 }
@@ -404,7 +419,7 @@ button, input, select, textarea {
 }
 
 .bottom-bar .tab[aria-current='page'] {
-  border-top-color: var(--primary);
+  border-top-color: var(--accent);
   background: transparent;
 }
 
@@ -472,7 +487,7 @@ button, input, select, textarea {
   inset: 0;
   z-index: 50;
   display: flex;
-  background: rgb(28 43 90 / 0.35);
+  background: color-mix(in srgb, var(--ink) 35%, transparent);
 }
 
 .shell-drawer {
@@ -568,10 +583,10 @@ button, input, select, textarea {
   overflow-x: auto;
   max-width: 100%;
   background:
-    linear-gradient(to right, var(--paper) 40%, rgb(255 255 255 / 0)) left center / 28px 100% no-repeat local,
-    linear-gradient(to left, var(--paper) 40%, rgb(255 255 255 / 0)) right center / 28px 100% no-repeat local,
-    radial-gradient(farthest-side at 0 50%, rgb(28 43 90 / 0.14), rgb(255 255 255 / 0)) left center / 12px 100% no-repeat scroll,
-    radial-gradient(farthest-side at 100% 50%, rgb(28 43 90 / 0.14), rgb(255 255 255 / 0)) right center / 12px 100% no-repeat scroll;
+    linear-gradient(to right, var(--paper) 40%, transparent) left center / 28px 100% no-repeat local,
+    linear-gradient(to left, var(--paper) 40%, transparent) right center / 28px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, color-mix(in srgb, var(--ink) 14%, transparent), transparent) left center / 12px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--ink) 14%, transparent), transparent) right center / 12px 100% no-repeat scroll;
 }
 
 .table-scroll > table {
@@ -744,12 +759,25 @@ button, input, select, textarea {
 /*
    Dark is a *selected* set of steps for a dark surface, not an inversion — the
    same eight hues re-stepped and re-validated (worst adjacent CVD ΔE 8.4).
-   It is scoped to an explicit `data-theme="dark"` only: the shell's paper and
-   ink are still light-only, so flipping the charts on `prefers-color-scheme`
-   alone would put dark-surface steps on white paper. When the shell gains a
-   dark theme (Phase 12) it stamps that attribute and the charts follow.
+   It is scoped to an explicit `data-theme="dark"` only: `prefers-color-scheme`
+   alone would put dark-surface steps on white paper. applyOrgTheme() stamps the
+   attribute on <html> for a dark theme; the selector is deliberately not
+   `:root`-anchored so a scoped preview (a preset card on the Branding screen)
+   re-steps inside its own box too.
 */
-:root[data-theme='dark'] {
+/*
+   Stamp inks re-stepped for a dark surface. Not a theme knob: `data-theme`
+   is stamped by applyOrgTheme() from the preset's own `dark` flag (or a dark
+   custom paper), and these two values are fixed. On the Night ledger paper
+   they read 7.9:1 and 7.9:1 respectively, against 3.4 and 2.8 for the light
+   inks — the difference between a stamp and a smudge.
+*/
+[data-theme='dark'] {
+  --stamp-paid: #4ec07f;
+  --stamp-overdue: #ff8a80;
+}
+
+[data-theme='dark'] {
   --chart-1: #3987e5;
   --chart-2: #d95926;
   --chart-3: #199e70;

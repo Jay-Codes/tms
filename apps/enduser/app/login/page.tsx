@@ -13,6 +13,7 @@ import { authApi } from '../../lib/api';
 import { readNextParam, useMe, useNextParam } from '../../lib/auth';
 import { countdown, displayPhone, errorMessage, isValidPhone, normalizePhone } from '../../lib/format';
 import { Notice, Screen, ScreenHeader } from '../../components/Screen';
+import { PlatformTheme } from '../../components/OrgThemeSync';
 
 type Mode = 'pin' | 'otp-send' | 'otp-verify';
 
@@ -116,6 +117,7 @@ export default function LoginPage() {
 
   return (
     <Screen>
+      <PlatformTheme />
       <ScreenHeader
         eyebrow="Welcome back"
         title={mode === 'otp-verify' ? 'Enter the code' : 'Sign in'}

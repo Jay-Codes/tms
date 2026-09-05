@@ -31,7 +31,7 @@ export default function UnitLandingPage() {
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useOrgTheme(unit?.branding);
+  useOrgTheme(unit?.branding, unit?.org?.slug);
 
   /* Keep the code for the length of the tab: `?next=` covers the normal
      register/login round trip, this covers a renter who wanders off it. */

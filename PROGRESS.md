@@ -132,3 +132,13 @@
 **Verified**: `make build/test/lint` green; browser on live data: Overview tiles (collected 1,000,000 / expected 1,590,000 / expenses 137,000 / net 863,000, collection rate 63%, occupancy 46%), Revenue tab line/area chart with by-property toggle.
 
 **Notes**: `occupancy_pct` is 0–100, `collection_rate` 0–1. Unknown cadence spelling → 400; unsatisfiable window → 422. Chart dark steps apply under `[data-theme="dark"]` only (paper/ink still light-only until Phase 12).
+
+## Phase 12 — Theming v2: presets + advanced override (5 Sep 2026) — branch `phase-12-theming`
+
+**Shipped**
+- Backend `internal/theme`: 8 presets (`presets.json`, go:embed), WCAG validator (7 pairs), `Resolve` precedence (custom → preset → legacy primary → ledger), `GET /themes/presets`, `theme` block on `GET/PUT /org/branding` + public branding/unit endpoints, `org_themes` upsert, audit `branding.theme_update`, 400 problem+json with `failures[]`. Drift guard test against the UI copy.
+- `packages/ui` theme v2: `ThemeTokens`/`ResolvedTheme`, `deriveTokens` (15 CSS vars, mixes toward paper so dark presets work), `validateTheme` (same pairs as server), `applyOrgTheme` v2 (+ legacy input), `resetOrgTheme`, generated `PRESETS`; tokens.css tokenised, `--accent` used for links/active nav, dark stamp step.
+- Tenant Branding: preset gallery with live mini-ledger previews, Advanced panel (7 colours + font, live contrast badges, Save disabled on failure, server failures surfaced), live page preview with revert, no-flash cache `tms.tenant.theme`; design-system "Themes" section.
+- Enduser: `lib/theme.ts` adapter (v2 + legacy), full theme applied pre-auth (QR landing/connect) and signed-in, cache migrated to v2 shape, `theme-color` meta from paper, dark-aware document/signature/letterhead, print pinned to light paper.
+
+**Verified**: `make build/test/lint` green; curl: 8 presets, preset save → public endpoints, low-contrast 400 with failures, legacy PUT; browser with JJnE on Night ledger: tenant reports dark (paper #14161c, stamp-paid #4ec07f, charts re-stepped), renter rent book dark with theme-color #14161c. JJnE restored to `ledger`.

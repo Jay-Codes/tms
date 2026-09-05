@@ -153,6 +153,10 @@ func TestDownMigrationReversesUp(t *testing.T) {
 // TestOrgScopedTablesAreIndexedOnOrgID enforces SPEC §2.1: every org-scoped
 // table has an index whose leading column is org_id, because every query
 // against it filters on org_id.
+//
+// A table keyed *by* the org (`org_id UUID PRIMARY KEY`, as org_themes is)
+// satisfies this with the primary key's own index; a second index on the same
+// column would be dead weight Postgres still has to maintain.
 func TestOrgScopedTablesAreIndexedOnOrgID(t *testing.T) {
 	var b strings.Builder
 	for _, m := range schemaMigrations {
@@ -162,7 +166,8 @@ func TestOrgScopedTablesAreIndexedOnOrgID(t *testing.T) {
 	sql := strings.ToLower(b.String())
 	for _, tbl := range orgScopedTables {
 		idx := regexp.MustCompile(`create (?:unique )?index [a-z0-9_]+\s+on ` + tbl + `\s+\(org_id`)
-		if !idx.MatchString(sql) {
+		pk := regexp.MustCompile(`create table ` + tbl + `\s*\(\s*org_id\s+uuid\s+primary key`)
+		if !idx.MatchString(sql) && !pk.MatchString(sql) {
 			t.Errorf("table %q has no index leading with org_id", tbl)
 		}
 	}

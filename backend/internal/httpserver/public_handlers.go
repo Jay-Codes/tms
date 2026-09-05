@@ -14,6 +14,7 @@ import (
 	"tms/backend/internal/db"
 	"tms/backend/internal/httpx"
 	"tms/backend/internal/storage"
+	"tms/backend/internal/theme"
 )
 
 // The public surface is unauthenticated (a QR sticker is the only credential),
@@ -46,11 +47,14 @@ type publicOrg struct {
 	Slug string `json:"slug"`
 }
 
-// publicBranding is the branding block of both public endpoints.
+// publicBranding is the branding block of both public endpoints. Its `theme`
+// is the fully resolved Phase 12 token set (preset merged with any override),
+// so a QR landing page and the landlord's own screens paint identically —
+// one theme covers both apps (DECISIONS.md).
 type publicBranding struct {
-	DisplayName string   `json:"display_name"`
-	LogoURL     *string  `json:"logo_url"`
-	Theme       orgTheme `json:"theme"`
+	DisplayName string     `json:"display_name"`
+	LogoURL     *string    `json:"logo_url"`
+	Theme       themeBlock `json:"theme"`
 }
 
 // publicRateLimited wraps the public routes in the per-IP fixed window.
@@ -68,13 +72,16 @@ func (s *Server) publicRateLimited(next http.HandlerFunc) http.HandlerFunc {
 // brandingFor loads an org's branding, tolerating a missing row (an org
 // created before branding existed still resolves, with defaults).
 func (s *Server) brandingFor(ctx context.Context, orgID pgtype.UUID, fallbackName string) publicBranding {
-	out := publicBranding{DisplayName: fallbackName, Theme: defaultTheme()}
+	out := publicBranding{DisplayName: fallbackName, Theme: toThemeBlock(theme.Default())}
 	row, err := s.q.GetOrgBranding(ctx, orgID)
 	if err != nil {
+		// An org with no branding row still resolves — it may still have a
+		// theme of its own.
+		out.Theme = s.resolveTheme(ctx, orgID, nil)
 		return out
 	}
 	out.DisplayName = row.DisplayName
-	out.Theme = parseTheme(row.Theme)
+	out.Theme = s.resolveTheme(ctx, orgID, row.Theme)
 	if row.LogoObjectKey != nil && *row.LogoObjectKey != "" && s.deps.Storage != nil {
 		if url, err := s.deps.Storage.PresignGet(ctx, storage.BucketBranding, *row.LogoObjectKey, storage.DefaultPresignTTL); err == nil {
 			out.LogoURL = &url

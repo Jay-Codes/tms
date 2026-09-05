@@ -17,6 +17,7 @@ import (
 	"tms/backend/internal/db/sqlc"
 	"tms/backend/internal/httpx"
 	"tms/backend/internal/storage"
+	"tms/backend/internal/theme"
 	"tms/backend/internal/validate"
 )
 
@@ -126,14 +127,14 @@ type brandingAssetSet struct {
 	LogoURL       *string
 	LetterheadURL *string
 	FooterText    *string
-	Theme         orgTheme
+	Theme         themeBlock
 }
 
 // brandingAssets loads an org's branding and presigns whatever images it has.
 // A missing row or an unreachable MinIO degrades to name + defaults rather than
 // failing the document: the terms are the contract, the letterhead is dressing.
 func (s *Server) brandingAssets(ctx context.Context, orgID pgtype.UUID, fallbackName string) brandingAssetSet {
-	out := brandingAssetSet{DisplayName: fallbackName, Theme: defaultTheme()}
+	out := brandingAssetSet{DisplayName: fallbackName, Theme: toThemeBlock(theme.Default())}
 	row, err := s.q.GetOrgBranding(ctx, orgID)
 	if err != nil {
 		return out
@@ -141,7 +142,7 @@ func (s *Server) brandingAssets(ctx context.Context, orgID pgtype.UUID, fallback
 	if row.DisplayName != "" {
 		out.DisplayName = row.DisplayName
 	}
-	out.Theme = parseTheme(row.Theme)
+	out.Theme = s.resolveTheme(ctx, orgID, row.Theme)
 	out.FooterText = row.DocumentFooterText
 	out.LogoURL = s.presignBranding(ctx, row.LogoObjectKey)
 	out.LetterheadURL = s.presignBranding(ctx, row.LetterheadObjectKey)
@@ -170,7 +171,7 @@ func (s *Server) toBranding(ctx context.Context, row sqlc.OrgBranding) brandingR
 		DisplayName:        row.DisplayName,
 		LogoURL:            s.presignBranding(ctx, row.LogoObjectKey),
 		LetterheadURL:      s.presignBranding(ctx, row.LetterheadObjectKey),
-		Theme:              parseTheme(row.Theme),
+		Theme:              s.resolveTheme(ctx, row.OrgID, row.Theme),
 		DashboardPrefs:     prefs,
 		DocumentFooterText: row.DocumentFooterText,
 	}
@@ -204,11 +205,8 @@ func (s *Server) handlePutBranding(w http.ResponseWriter, r *http.Request) {
 	p := auth.MustFromContext(r.Context())
 
 	var body struct {
-		DisplayName *string `json:"display_name"`
-		Theme       *struct {
-			PrimaryColor string `json:"primary_color"`
-			FontID       string `json:"font_id"`
-		} `json:"theme"`
+		DisplayName        *string        `json:"display_name"`
+		Theme              *themeInput    `json:"theme"`
 		DashboardPrefs     map[string]any `json:"dashboard_prefs"`
 		DocumentFooterText *string        `json:"document_footer_text"`
 	}
@@ -222,14 +220,32 @@ func (s *Server) handlePutBranding(w http.ResponseWriter, r *http.Request) {
 		v := f.MaxLen("display_name", f.Required("display_name", *body.DisplayName), 120)
 		params.DisplayName = &v
 	}
+
+	// The theme (Phase 12). What the row stores is the choice — a preset, an
+	// override, a font — while `org_branding.theme` keeps carrying the
+	// resolved brand colour and font, so a Phase 4 client reading this org
+	// still sees a coherent (if smaller) answer.
+	var (
+		decision themeDecision
+		before   themeBlock
+	)
 	if body.Theme != nil {
-		colour := strings.TrimSpace(body.Theme.PrimaryColor)
-		if !hexColor.MatchString(colour) {
-			f.Add("theme.primary_color", "must be a hex colour like #1B4DB1")
+		before = s.resolveTheme(r.Context(), p.OrgID, nil)
+		if row, err := s.q.GetOrgBranding(r.Context(), p.OrgID); err == nil {
+			before = s.resolveTheme(r.Context(), p.OrgID, row.Theme)
 		}
-		font := f.OneOf("theme.font_id", strings.ToLower(strings.TrimSpace(body.Theme.FontID)), brandingFonts...)
+		var fails []theme.Failure
+		decision, fails = parseThemeInput(&f, *body.Theme, theme.Resolved{
+			PresetID: before.PresetID, Tokens: before.Tokens, FontID: before.FontID, Dark: before.Dark,
+		})
+		if len(fails) > 0 {
+			writeThemeFailures(w, fails)
+			return
+		}
 		if f.Empty() {
-			raw, err := json.Marshal(orgTheme{PrimaryColor: colour, FontID: font})
+			raw, err := json.Marshal(orgTheme{
+				PrimaryColor: decision.resolved.Tokens.Primary, FontID: decision.resolved.FontID,
+			})
 			if err != nil {
 				s.serverError(w, r, "branding.theme", err)
 				return
@@ -267,6 +283,30 @@ func (s *Server) handlePutBranding(w http.ResponseWriter, r *http.Request) {
 		updated, err = q.UpdateOrgBranding(r.Context(), params)
 		if err != nil {
 			return err
+		}
+		if body.Theme != nil {
+			tokens := []byte("{}")
+			if decision.tokens != nil {
+				if tokens, err = json.Marshal(decision.tokens); err != nil {
+					return err
+				}
+			}
+			if _, err = q.UpsertOrgTheme(r.Context(), sqlc.UpsertOrgThemeParams{
+				OrgID: p.OrgID, PresetID: decision.presetID, Tokens: tokens, FontID: decision.fontID,
+			}); err != nil {
+				return err
+			}
+			if err = audit.Record(r.Context(), q, audit.Entry{
+				OrgID:       p.OrgIDString(),
+				ActorUserID: p.UserIDString(),
+				Action:      audit.ActionBrandingThemeUpdate,
+				EntityType:  audit.EntityOrgBranding,
+				EntityID:    p.OrgIDString(),
+				Before:      map[string]any{"theme": before},
+				After:       map[string]any{"theme": toThemeBlock(decision.resolved)},
+			}); err != nil {
+				return err
+			}
 		}
 		return audit.Record(r.Context(), q, audit.Entry{
 			OrgID:       p.OrgIDString(),

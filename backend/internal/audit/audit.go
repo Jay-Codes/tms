@@ -120,6 +120,12 @@ const (
 	ActionExpenseReceiptAttach  = "expense.receipt_attach"
 	ActionExpenseReceiptRemove  = "expense.receipt_remove"
 
+	// Phase 12 — theming v2. The theme is its own action rather than part of
+	// `org.branding_update`: it is the one setting that changes what every
+	// renter of the org sees, so "who repainted the app, and to what?" must
+	// be answerable by filtering on the action alone.
+	ActionBrandingThemeUpdate = "branding.theme_update"
+
 	// Phase 7 — platform-admin suspension. Both rows carry the *target* org
 	// as org_id and the admin as actor, so the trail reads the same from the
 	// org's own audit page as from the platform one.

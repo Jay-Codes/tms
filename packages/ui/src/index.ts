@@ -1,11 +1,38 @@
 export {
   FONT_IDS,
   FONT_LABELS,
+  PRESET_IDS,
+  PRESETS,
   DEFAULT_THEME,
+  LEDGER_THEME,
+  CONTRAST_PAIRS,
   derivePrimaryTokens,
+  deriveTokens,
+  themeStyle,
+  contrastRatio,
+  luminance,
+  onPrimary,
+  mix,
+  isHexColor,
+  normalizeHex,
+  presetById,
+  themeContrastReport,
+  validateTheme,
+  toResolvedTheme,
   applyOrgTheme,
+  resetOrgTheme,
 } from './theme';
-export type { FontId, OrgTheme } from './theme';
+export type {
+  FontId,
+  OrgTheme,
+  LegacyOrgTheme,
+  PresetId,
+  ThemeTokens,
+  ResolvedTheme,
+  ThemePreset,
+  ThemeFailure,
+  CssVars,
+} from './theme';
 export { ThemeSwitcher } from './ThemeSwitcher';
 export { TableScroll } from './TableScroll';
 export { PeriodPicker } from './PeriodPicker';
