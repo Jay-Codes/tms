@@ -101,3 +101,20 @@ export type {
   NiceDomain,
   Band,
 } from './charts';
+export {
+  I18nProvider,
+  useI18n,
+  useT,
+  useLocale,
+  makeTranslator,
+  interpolate,
+  isLocale,
+  guessLocale,
+  intlTag,
+  formatDateIntl,
+  formatNumberIntl,
+  LOCALES,
+  DEFAULT_LOCALE,
+  LOCALE_LABELS,
+} from './i18n';
+export type { Locale, Messages, Vars, Translator, I18nProviderProps } from './i18n';

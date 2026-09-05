@@ -162,6 +162,9 @@ test-race: ## Run the concurrent packages under the race detector
 	@cd backend && TEST_DATABASE_URL="$${TEST_DATABASE_URL:-postgres://tms:tms_dev@localhost:5433/tms_test?sslmode=disable}" \
 		go test -race -p 1 -count=1 ./internal/httpserver/... ./internal/notify/... ./internal/payment/...
 
+i18n-check: ## Verify sw/en dictionaries share the same keys (enduser + tenant)
+	@for a in enduser tenant; do if [ -d apps/$$a/i18n ]; then node packages/ui/scripts/i18n-check.mjs apps/$$a/i18n || exit 1; fi; done
+
 lint: ## Lint backend (golangci-lint, falls back to go vet) and frontends
 	@cd backend && \
 		if command -v golangci-lint >/dev/null 2>&1; then golangci-lint run ./...; \
@@ -169,6 +172,7 @@ lint: ## Lint backend (golangci-lint, falls back to go vet) and frontends
 		     echo "      install: brew install golangci-lint"; \
 		     go vet ./...; fi
 	@npm run lint --workspaces --if-present
+	@$(MAKE) --no-print-directory i18n-check
 
 # --- deployment (full compose profile) ---
 
