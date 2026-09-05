@@ -238,3 +238,23 @@ Schedules for a renter show `status` chip: paid (stamp), pending (pencil), overd
 - **Schema:** migration `000007_payments` adds `payments.reversed_at/reversal_reason/reversed_by_user_id` (with a check constraint that a reversal carries both timestamp and reason) and the `payment_allocations` table (`org_id, payment_id, schedule_id, amount`, unique per `(payment_id, schedule_id)`). `notification_log` already accepted `thank_you`; `orgs.settings.bank_account` is JSON inside the existing column, so neither needed a change.
 
 Phase 5 audit actions: `payment.record`, `payment.reverse`, `payment.overdue_run`, `org.bank_account_update`.
+
+## Phase 6 — notifications end-to-end
+
+### Org settings (audience org)
+| `GET /org/notification-settings` | → `{sender_name(≤11, null = platform default), language:"sw"|"en", send_hour_local:9, kinds:{reminder_7d:{enabled,offset_days:7},reminder_due:{enabled},overdue_daily:{enabled},thank_you:{enabled},unsigned_reminder:{enabled,after_days:7}}, templates:{[kind]:{sw:string,en:string}|null}}` (null template = platform default). Variables: `{{name}} {{amount}} {{due_date}} {{property}} {{unit}} {{org}} {{next_due_date}} {{link}}`. |
+| `PUT /org/notification-settings` | partial merge → `200 {settings}`; validates hour 0–23, offsets 0–30, template length ≤ 320 chars, unknown variables rejected 400. Stored in `orgs.settings.notifications`. Audited. |
+| `POST /notifications/custom` | `{recipients:"all_active"|"selected", renter_user_ids?:[uuid ≤500], body(1–320)}` → `202 {queued:n, skipped:n}`; only renters with an active/expiring contract in the org (for `all_active`) or related renters (for `selected`); dedupe_key `custom:{batch_id}:{user_id}`; owner + manager; audited `notification.custom` with count + body. Rate limit 10 batches/hour/org. |
+| `GET /notifications/log?kind=&status=&user_id=&from=&to=&cursor=` | → `{items:[{id,kind,to_phone(masked •••last4 for managers? no — landlords see full),renter_name,body,status:"queued"|"sent"|"failed",provider_msg_id,error,attempts,created_at,sent_at}],next_cursor}` |
+| `POST /notifications/log/{id}/retry` | failed → re-queue → `202`. |
+
+### Scheduler (system)
+`internal/notify/scheduler.go` — 5-min ticker (and `POST /admin/jobs/notifications {date?}` for tests):
+- For each org (with settings): local time zone Africa/Dar_es_Salaam; only enqueue kinds whose `send_hour_local` has been reached today.
+- `reminder_7d`: schedules `pending|partial` with `due_date = today + offset_days` → dedupe `reminder_7d:{schedule_id}:{date}`.
+- `reminder_due`: `due_date = today` → `reminder_due:{schedule_id}:{date}`.
+- `overdue_daily`: status `overdue` → `overdue_daily:{schedule_id}:{date}` (daily until paid/waived).
+- `unsigned_reminder`: contracts `pending_signature` without renter signature, `created_at + after_days <= now` → `unsigned:{contract_id}:{date}`.
+- `thank_you` stays event-driven (Phase 5). Templates: org override else platform default, SW/EN.
+Worker pool: N=3 workers, atomic claim (`UPDATE notification_log SET status='sending' WHERE id=$1 AND status='queued' RETURNING`), Beem call with 3-attempt backoff (1s/5s/25s), `sent`/`failed`. Redis loss safe (startup sweep re-enqueues `queued`).
+Beem provider: POST `https://apisms.beem.africa/v1/send` basic auth (`api_key:secret_key`), body `{source_addr, schedule_time:"", encoding:0, message, recipients:[{recipient_id, dest_addr}]}`; parse `request_id`/`successful`; `ENV=prod` requires creds.
