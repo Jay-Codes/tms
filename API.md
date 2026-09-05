@@ -264,3 +264,25 @@ Beem provider: POST `https://apisms.beem.africa/v1/send` basic auth (`api_key:se
 **Schema:** migration `000008_notifications` adds kind `unsigned_reminder` and status `sending` to `notification_log`, a `batch_id` column for custom broadcasts, an `(org_id, created_at DESC, id DESC)` index for the log listing and a partial index on claimed rows for the startup sweep.
 
 Phase 6 audit actions: `org.notification_settings_update`, `notification.custom`, `notification.retry`, `notification.scheduler_run`.
+
+## Phase 7 — reports, dashboard prefs, admin, PWA
+
+### Reports (audience org)
+| `GET /reports/summary?period=month|YYYY-MM` | → `{assets:{properties,units,occupied,vacant,maintenance,unlisted,occupancy_rate(0–1)}, renters:{active}, contracts:{active,expiring,pending_signature}, period:{from,to,expected,collected,outstanding,overdue_count,overdue_amount}, vacant_units:[{unit_id,name,property_name,days_vacant}] (≤20, longest first)}`. Expected = schedules with due_date in period (excl. waived); collected = non-reversed payments with paid_at in period. |
+| `GET /reports/payment-status?status=&property_id=&format=json|csv` | per renter with active/expiring contract: `{items:[{renter_user_id,renter_name,phone,unit_name,property_name,contract_id,status:"paid"|"pending"|"overdue"|"partial",next_due_date,next_due_amount,outstanding,overdue_amount,last_payment_at}]}`; `format=csv` → `text/csv` attachment `payment-status-{date}.csv`. Status = worst of the renter's unsettled schedules (overdue > partial > pending; paid when none unsettled). |
+| `GET /reports/collections?from&to&group=day|week|month` | → `{buckets:[{start,expected,collected}], totals:{expected,collected}}` |
+| `GET /reports/audit?...` | (already `GET /audit-log`) |
+
+### Dashboard prefs
+`PUT /org/branding {dashboard_prefs:{cards:["assets","renters","payment_status","collections","link_requests","overdue"], layout:"grid"|"list"}}` — free JSON validated to known card ids; frontend orders cards by it.
+
+### Platform admin (audience admin `tms_a`)
+| `GET /admin/orgs?q=&status=&cursor=` | → `{items:[{id,name,slug,status,owner:{name,email},counts:{properties,units,renters,active_contracts},sms:{sent_30d,failed_30d},created_at}],next_cursor}` |
+| `GET /admin/orgs/{id}` | detail incl. settings summary, members |
+| `POST /admin/orgs/{id}/suspend {reason}` / `POST /admin/orgs/{id}/activate` | → `{org}`; suspended org: org users get 403 `org_suspended` on every org route, public unit endpoints 404, scheduler skips. Audited (org_id set, actor admin). |
+| `GET /admin/metrics` | → `{orgs:{total,active,suspended},renters:{total},units:{total,occupied},contracts:{active},sms:{sent_24h,failed_24h,queued},payments:{recorded_30d,amount_30d},db:{ok},redis:{ok},minio:{ok}}` |
+| `GET /admin/audit-log?org_id=&actor=&entity_type=&entity_id=&q=&from=&to=&cursor=` | cross-org audit search |
+| `GET /admin/jobs` | list of jobs + last run; existing `POST /admin/jobs/{contract-lifecycle|overdue|notifications}` |
+
+### PWA
+Each app: `public/manifest.webmanifest` (name per app, `start_url` = basePath, display standalone, theme_color from core palette, icons 192/512 generated PNG), `<link rel=manifest>` in layout, service worker `public/sw.js` registered client-side: cache-first for app shell (`/_next/static/*`, manifest, icons), network-only for `/api/*` and presigned bucket paths, navigation fallback = cached shell; no offline writes. Registered only in production builds or when `NEXT_PUBLIC_ENABLE_SW=1` (avoid HMR interference in dev).
