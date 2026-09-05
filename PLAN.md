@@ -27,14 +27,14 @@ Execution plan for [SPEC.md](SPEC.md) / [FLOWS.md](FLOWS.md). Target: **testing-
 
 ## Phase 1 — Schema, auth, org onboarding (Sep 5–6, 1.5 days)
 
-- [ ] Migrations: all §4 tables (orgs, org_branding, users, org_members, renter_profiles, properties, units, price_plans, payment_periods, contract_templates, contracts, unit_link_requests, payment_schedules, payments, notification_log, audit_log, sessions). Seed recommended payment periods (30/90/180/365d) on org creation. pgcrypto for `nida_number`. Audit table: no UPDATE/DELETE grants.
-- [ ] Repository layer: org_id mandatory param guard (§2.1).
-- [ ] Sessions: opaque token, httpOnly cookie, Redis + Postgres fallback. argon2id.
-- [ ] Renter auth: register → Beem OTP → PIN; login phone+PIN; OTP rate limits (Redis). Beem client stubbed behind interface (real creds later; dev mode logs OTP).
-- [ ] Landlord/admin auth: email+password, verification link. RBAC middleware (`org_owner`, `org_manager`, `renter`, `platform_admin`).
-- [ ] `POST /orgs` (owner signup), `GET/PATCH /org`, org member CRUD (§5.2).
-- [ ] Audit middleware: every mutation → audit_log row.
-- [ ] Frontend: tenant-app signup/login + wizard shell (Flow 1); enduser login/register/OTP screens.
+- [x] Migrations: all §4 tables (orgs, org_branding, users, org_members, renter_profiles, properties, units, price_plans, payment_periods, contract_templates, contracts, unit_link_requests, payment_schedules, payments, notification_log, audit_log, sessions). Seed recommended payment periods (30/90/180/365d) on org creation. pgcrypto for `nida_number`. Audit table: no UPDATE/DELETE grants.
+- [x] Repository layer: org_id mandatory param guard (§2.1).
+- [x] Sessions: opaque token, httpOnly cookie, Redis + Postgres fallback. argon2id.
+- [x] Renter auth: register → Beem OTP → PIN; login phone+PIN; OTP rate limits (Redis). Beem client stubbed behind interface (real creds later; dev mode logs OTP).
+- [x] Landlord/admin auth: email+password, verification link. RBAC middleware (`org_owner`, `org_manager`, `renter`, `platform_admin`).
+- [x] `POST /orgs` (owner signup), `GET/PATCH /org`, org member CRUD (§5.2).
+- [x] Audit middleware: every mutation → audit_log row.
+- [x] Frontend: tenant-app signup/login + wizard shell (Flow 1); enduser login/register/OTP screens.
 
 **Exit:** org can be created, owner logs in, staff invited; renter registers with OTP (dev-logged); cross-org access returns 404 (first isolation tests green).
 

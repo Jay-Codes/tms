@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"tms/backend/internal/config"
@@ -39,11 +40,25 @@ func (p *BeemProvider) Send(_ context.Context, _, _ string) (string, error) {
 	return "", ErrBeemNotConfigured
 }
 
-// ProviderFor picks the SMS provider for the current configuration: Beem when
-// BEEM_API_KEY is set, otherwise the dev LogProvider.
-func ProviderFor(cfg config.Config, logger *slog.Logger) SMSProvider {
+// SMSProviderFor picks the SMS provider for the current configuration: Beem
+// when BEEM_API_KEY is set, otherwise the dev LogProvider. In ENV=prod the dev
+// fallback is refused (ErrDevProviderInProd) so the binary fails startup rather
+// than printing OTP codes to the production log.
+func SMSProviderFor(cfg config.Config, logger *slog.Logger) (SMSProvider, error) {
 	if cfg.BeemAPIKey != "" {
-		return NewBeemProvider(cfg)
+		return NewBeemProvider(cfg), nil
 	}
-	return NewLogProvider(logger)
+	if !cfg.IsDev() {
+		return nil, fmt.Errorf("sms: %w (set BEEM_API_KEY/BEEM_SECRET_KEY)", ErrDevProviderInProd)
+	}
+	return NewLogProvider(logger), nil
+}
+
+// EmailProviderFor picks the email provider. Only the dev LogEmailProvider
+// exists in MVP scope (DECISIONS.md), so ENV=prod is refused.
+func EmailProviderFor(cfg config.Config, logger *slog.Logger) (EmailProvider, error) {
+	if !cfg.IsDev() {
+		return nil, fmt.Errorf("email: %w (no production email provider is configured)", ErrDevProviderInProd)
+	}
+	return NewLogEmailProvider(logger), nil
 }

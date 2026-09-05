@@ -1,52 +1,44 @@
 package httpserver
 
 import (
-	"encoding/json"
-	"log/slog"
 	"net/http"
+
+	"tms/backend/internal/httpx"
 )
 
 // ProblemContentType is the media type mandated by RFC 7807.
-const ProblemContentType = "application/problem+json"
+const ProblemContentType = httpx.ProblemContentType
 
 // Problem is an RFC 7807 problem detail document.
-type Problem struct {
-	Type     string `json:"type"`
-	Title    string `json:"title"`
-	Status   int    `json:"status"`
-	Detail   string `json:"detail,omitempty"`
-	Instance string `json:"instance,omitempty"`
-}
+type Problem = httpx.Problem
 
 // WriteProblem writes an RFC 7807 error response.
-//
-// It is exported through the package-level `problem` helper value so callers
-// can write `problem.Write(w, status, title, detail)`.
 func WriteProblem(w http.ResponseWriter, status int, title, detail string) {
-	p := Problem{
-		Type:   "about:blank",
-		Title:  title,
-		Status: status,
-		Detail: detail,
-	}
-	w.Header().Set("Content-Type", ProblemContentType)
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(p); err != nil {
-		slog.Error("write problem response", "error", err)
-	}
+	httpx.WriteProblem(w, status, title, detail)
 }
 
-// problemWriter namespaces the RFC 7807 helper.
+// WriteProblemFields writes an RFC 7807 error response carrying per-field
+// validation messages in `errors`.
+func WriteProblemFields(w http.ResponseWriter, status int, title, detail string, fields map[string]string) {
+	httpx.WriteProblemFields(w, status, title, detail, fields)
+}
+
+// problemWriter namespaces the RFC 7807 helpers.
 type problemWriter struct{}
 
 // Write emits an RFC 7807 problem document.
 func (problemWriter) Write(w http.ResponseWriter, status int, title, detail string) {
-	WriteProblem(w, status, title, detail)
+	httpx.WriteProblem(w, status, title, detail)
+}
+
+// Fields emits an RFC 7807 problem document with field errors.
+func (problemWriter) Fields(w http.ResponseWriter, status int, title, detail string, fields map[string]string) {
+	httpx.WriteProblemFields(w, status, title, detail, fields)
 }
 
 // Problem is the package-level entry point for RFC 7807 errors:
 //
-//	httpserver.problem.Write(w, http.StatusNotFound, "not found", "no such unit")
+//	problem.Write(w, http.StatusNotFound, "not found", "no such unit")
 //
 //nolint:gochecknoglobals // intentional stateless helper namespace
 var problem problemWriter

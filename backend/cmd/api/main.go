@@ -22,6 +22,7 @@ import (
 	"tms/backend/internal/db"
 	"tms/backend/internal/httpserver"
 	"tms/backend/internal/notify"
+	"tms/backend/internal/platform"
 	"tms/backend/internal/storage"
 )
 
@@ -84,6 +85,23 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 
 	deps := httpserver.Deps{}
 
+	// Notification providers are fatal: in ENV=prod the dev log providers are
+	// refused (they would write OTP codes and invite links to the log), so the
+	// binary must not start rather than degrade.
+	sms, err := notify.SMSProviderFor(cfg, logger)
+	if err != nil {
+		logger.Error("sms provider unavailable; refusing to start", "env", string(cfg.Env), "error", err)
+		return 2
+	}
+	email, err := notify.EmailProviderFor(cfg, logger)
+	if err != nil {
+		logger.Error("email provider unavailable; refusing to start", "env", string(cfg.Env), "error", err)
+		return 2
+	}
+	deps.SMS = sms
+	deps.Email = email
+	logger.Info("sms provider selected", "beem_configured", cfg.BeemAPIKey != "", "provider_type", providerName(deps.SMS))
+
 	pool, err := db.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		logger.Error("postgres unavailable at startup; serving degraded", "error", err)
@@ -93,6 +111,10 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 			logger.Error("postgres ping failed at startup; serving degraded", "error", pingErr)
 		}
 		deps.DB = pool
+		deps.Pool = pool
+		if seedErr := platform.SeedAdmin(ctx, pool, cfg, logger); seedErr != nil {
+			logger.Error("platform admin seeding failed", "error", seedErr)
+		}
 	}
 
 	redisClient, err := cache.Open(cfg.RedisURL)
@@ -104,6 +126,7 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 			logger.Warn("redis ping failed; running degraded", "error", pingErr)
 		}
 		deps.Redis = redisClient
+		deps.Cache = redisClient
 	}
 
 	minioClient, err := storage.Open(cfg.MinioEndpoint, cfg.MinioAccessKey, cfg.MinioSecretKey, cfg.MinioUseSSL)
@@ -115,9 +138,6 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 		}
 		deps.Minio = minioClient
 	}
-
-	sms := notify.ProviderFor(cfg, logger)
-	logger.Info("sms provider selected", "beem_configured", cfg.BeemAPIKey != "", "provider_type", providerName(sms))
 
 	srv := httpserver.New(cfg, deps, logger)
 	if err := srv.ListenAndServe(ctx); err != nil {

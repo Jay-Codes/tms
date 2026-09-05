@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Env names the deployment environment.
@@ -17,6 +18,10 @@ const (
 	EnvDev  Env = "dev"
 	EnvProd Env = "prod"
 )
+
+// DefaultTrustedProxyCIDRs is the TRUSTED_PROXY_CIDRS default: loopback only,
+// i.e. the dev Go proxy is the only hop allowed to set forwarded-for headers.
+const DefaultTrustedProxyCIDRs = "127.0.0.0/8,::1/128"
 
 // Config holds all runtime configuration for the API binary.
 type Config struct {
@@ -39,9 +44,21 @@ type Config struct {
 
 	SessionTTLHours int
 
+	// NidaEncKey is the pgcrypto symmetric key for renter_profiles.nida_number.
+	NidaEncKey string
+
+	// AdminEmail/AdminPassword seed the first platform admin on startup when
+	// no platform_admin user exists yet. Empty disables seeding.
+	AdminEmail    string
+	AdminPassword string
+
 	BeemAPIKey    string
 	BeemSecretKey string
 	BeemSenderID  string
+
+	// TrustedProxyCIDRs is the comma-separated set of networks whose requests
+	// may carry X-Forwarded-For / X-Real-IP on a caller's behalf.
+	TrustedProxyCIDRs string
 }
 
 // Load reads configuration from the process environment.
@@ -63,9 +80,15 @@ func Load() Config {
 
 		SessionTTLHours: getint("SESSION_TTL_HOURS", 720),
 
+		NidaEncKey:    getenv("NIDA_ENC_KEY", "dev-nida-key-change-me"),
+		AdminEmail:    getenv("ADMIN_EMAIL", ""),
+		AdminPassword: getenv("ADMIN_PASSWORD", ""),
+
 		BeemAPIKey:    getenv("BEEM_API_KEY", ""),
 		BeemSecretKey: getenv("BEEM_SECRET_KEY", ""),
 		BeemSenderID:  getenv("BEEM_SENDER_ID", ""),
+
+		TrustedProxyCIDRs: getenv("TRUSTED_PROXY_CIDRS", DefaultTrustedProxyCIDRs),
 	}
 	if c.PublicBaseURL == "" {
 		c.PublicBaseURL = c.AppBaseURL
@@ -78,6 +101,14 @@ func (c Config) IsDev() bool { return c.Env != EnvProd }
 
 // Addr is the listen address for the HTTP server.
 func (c Config) Addr() string { return ":" + c.Port }
+
+// SessionTTL is the opaque-session lifetime.
+func (c Config) SessionTTL() time.Duration {
+	return time.Duration(c.SessionTTLHours) * time.Hour
+}
+
+// CookieSecure reports whether session cookies must carry the Secure flag.
+func (c Config) CookieSecure() bool { return !c.IsDev() }
 
 func getenv(key, def string) string {
 	if v, ok := os.LookupEnv(key); ok && strings.TrimSpace(v) != "" {
