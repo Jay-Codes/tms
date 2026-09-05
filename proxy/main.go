@@ -25,6 +25,9 @@ func main() {
 		"/enduser": mustProxy("http://localhost:3001"),
 		"/tenant":  mustProxy("http://localhost:3002"),
 		"/admin":   mustProxy("http://localhost:3003"),
+		// Go REST API. The backend serves under /api/v1 itself, so the path
+		// is forwarded unchanged.
+		"/api": mustProxy("http://localhost:8081"),
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
