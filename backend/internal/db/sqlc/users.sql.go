@@ -208,6 +208,41 @@ func (q *Queries) SetUserEmail(ctx context.Context, arg SetUserEmailParams) (Use
 	return i, err
 }
 
+const setUserFullName = `-- name: SetUserFullName :one
+UPDATE users SET full_name = $1
+WHERE id = $2 AND deleted_at IS NULL
+RETURNING id, kind, phone, email, full_name, pin_hash, password_hash, email_verified_at, status, created_at, updated_at, deleted_at
+`
+
+type SetUserFullNameParams struct {
+	FullName string      `json:"full_name"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// SetUserFullName keeps the account's display name in step with the renter
+// profile: PUT /me/profile writes the name a renter types, and the landlord
+// directory reads `users.full_name` in places the profile row is not joined,
+// so leaving the two apart shows the same person under two names.
+func (q *Queries) SetUserFullName(ctx context.Context, arg SetUserFullNameParams) (User, error) {
+	row := q.db.QueryRow(ctx, setUserFullName, arg.FullName, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.Phone,
+		&i.Email,
+		&i.FullName,
+		&i.PinHash,
+		&i.PasswordHash,
+		&i.EmailVerifiedAt,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const setUserPassword = `-- name: SetUserPassword :exec
 UPDATE users SET password_hash = $1 WHERE id = $2
 `

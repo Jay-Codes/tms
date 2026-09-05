@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"tms/backend/internal/db"
 	"tms/backend/internal/db/sqlc"
 	"tms/backend/internal/notify"
@@ -158,6 +160,52 @@ func TestWorkerRecordsFailure(t *testing.T) {
 	}
 }
 
+// TestWorkerDoesNotSendTwiceForARepushedID: the recovery sweep and a retried
+// push can both put the same id on the list. The row's status is what decides
+// whether it still needs sending, so a second pop of an already-sent message
+// must be a no-op rather than a second SMS to the renter.
+func TestWorkerDoesNotSendTwiceForARepushedID(t *testing.T) {
+	pool := testutil.Pool(t)
+	redis := testutil.Redis(t)
+	q := sqlc.New(pool)
+	orgID, userID := seedOrgAndRenter(t, q)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sms := testutil.NewSMSCapture()
+	id, err := notify.Queue(ctx, q, notify.Msg{
+		OrgID: orgID, UserID: userID, Kind: notify.KindLinkApproved,
+		DedupeKey: "link_approved:repushed", Phone: "+255799000001", Body: "approved",
+	})
+	if err != nil {
+		t.Fatalf("Queue: %v", err)
+	}
+	notify.Enqueue(ctx, redis.Client, testutil.Logger(), id)
+
+	go notify.RunWorker(ctx, notify.Worker{
+		Q: q, Redis: redis.Client, SMS: sms, Logger: testutil.Logger(),
+		PollWait: 50 * time.Millisecond,
+	})
+	waitForStatus(t, pool, id, "sent")
+
+	// The same id arrives again — a lost ack, a manual re-enqueue, the sweep.
+	notify.Enqueue(ctx, redis.Client, testutil.Logger(), id)
+	waitForEmptyQueue(t, redis.Client)
+	time.Sleep(200 * time.Millisecond) // let a (wrong) second send land if it is going to
+
+	if got := len(sms.Messages()); got != 1 {
+		t.Errorf("the provider saw %d messages after a re-push, want 1", got)
+	}
+	var attempts int
+	if err := pool.QueryRow(ctx,
+		`SELECT attempts FROM notification_log WHERE id = $1`, id).Scan(&attempts); err != nil {
+		t.Fatalf("read attempts: %v", err)
+	}
+	if attempts != 1 {
+		t.Errorf("attempts = %d after a re-push, want 1", attempts)
+	}
+}
+
 // TestRecoverQueuedRepushesLostWork is the Redis-loss safety net: rows written
 // before the cache was cleared must find their way back onto the list.
 func TestRecoverQueuedRepushesLostWork(t *testing.T) {
@@ -276,4 +324,18 @@ func waitForStatus(t *testing.T, pool *db.Pool, id, want string) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("notification %s has status %q, want %q", id, got, want)
+}
+
+// waitForEmptyQueue blocks until the worker has taken everything off the list.
+func waitForEmptyQueue(t *testing.T, rdb *redis.Client) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		n, err := rdb.LLen(context.Background(), notify.QueueKey).Result()
+		if err == nil && n == 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("the queue was not drained")
 }

@@ -106,8 +106,11 @@ build: ## Build backend, proxy and all Next.js apps (next builds are slow)
 	@mkdir -p $(DEVDIR) && cd proxy && go build -o ../$(DEVDIR)/proxy-bin .
 	@npm run build --workspaces --if-present
 
+# -p 1 runs one package at a time: every DB-backed package truncates the SAME
+# tms_test database between tests, so packages running in parallel wipe each
+# other's rows and fail at random.
 test: ## Run backend Go tests and workspace tests
-	@cd backend && TEST_DATABASE_URL="$${TEST_DATABASE_URL:-postgres://tms:tms_dev@localhost:5433/tms_test?sslmode=disable}" go test ./...
+	@cd backend && TEST_DATABASE_URL="$${TEST_DATABASE_URL:-postgres://tms:tms_dev@localhost:5433/tms_test?sslmode=disable}" go test -p 1 ./...
 	@npm test --workspaces --if-present
 
 lint: ## Lint backend (golangci-lint, falls back to go vet) and frontends

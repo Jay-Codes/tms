@@ -192,6 +192,54 @@ func TestProfileKeepsExistingNIDAWhenOmitted(t *testing.T) {
 	}
 }
 
+// TestProfileNameStaysInSyncWithTheAccount: a renter registers under one name
+// and corrects it on the KYC form. The account row and the profile row must
+// then agree — the renter's own header reads `users.full_name` while the
+// landlord's screens read the profile, and showing one person under two names
+// makes the directory unusable.
+func TestProfileNameStaysInSyncWithTheAccount(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newLinkFixture(t, "Sync", "0712003060", "+255712003061")
+
+	// The applicant is what makes the renter visible to the org at all.
+	fix.renter.do(http.MethodPost, "/units/"+fix.unitCode+"/link",
+		linkBody(fix.periodID, testTermDays)).
+		mustStatus(t, http.StatusCreated, "apply")
+
+	const corrected = "Asha Mwakalinga"
+	fix.renter.completeProfile(t, corrected, validNIDA)
+
+	// The renter's own view: account name and profile name both updated.
+	me := fix.renter.do(http.MethodGet, "/me/profile", nil).
+		mustStatus(t, http.StatusOK, "get profile after rename")
+	if got := me.str(t, "user", "full_name"); got != corrected {
+		t.Errorf("user.full_name = %q after PUT /me/profile, want %q", got, corrected)
+	}
+	if got := me.str(t, "profile", "full_name"); got != corrected {
+		t.Errorf("profile.full_name = %q, want %q", got, corrected)
+	}
+
+	// The landlord's directory and request detail show the same name.
+	detail := fix.owner.do(http.MethodGet, "/renters/"+fix.renterID, nil).
+		mustStatus(t, http.StatusOK, "renter detail")
+	if got := detail.str(t, "renter", "full_name"); got != corrected {
+		t.Errorf("directory renter.full_name = %q, want %q", got, corrected)
+	}
+	if got := detail.str(t, "profile", "full_name"); got != corrected {
+		t.Errorf("directory profile.full_name = %q, want %q", got, corrected)
+	}
+	inbox := fix.owner.do(http.MethodGet, "/link-requests", nil).
+		mustStatus(t, http.StatusOK, "inbox")
+	items := listOf(t, inbox)
+	if len(items) != 1 {
+		t.Fatalf("the inbox holds %d requests, want 1", len(items))
+	}
+	renterBlock, _ := items[0]["renter"].(map[string]any)
+	if renterBlock == nil || renterBlock["full_name"] != corrected {
+		t.Errorf("inbox renter.full_name = %v, want %q", renterBlock["full_name"], corrected)
+	}
+}
+
 func TestProfileValidation(t *testing.T) {
 	h := newHarness(t)
 	renter := h.registerRenter("+255712003003", "Halima Said", defaultPIN)
@@ -313,6 +361,29 @@ func TestKYCUploadCompleteChecksTheObject(t *testing.T) {
 		renter.do(http.MethodPost, "/me/profile/kyc-upload/complete",
 			map[string]any{"object_key": key}).
 			mustStatus(t, http.StatusBadRequest, "another renter's key")
+	})
+
+	// A key may only ever be `{caller}/{name}`: a prefix match on its own would
+	// accept a traversal that names someone else's document.
+	t.Run("a key that walks out of the caller's prefix is rejected", func(t *testing.T) {
+		other := h.registerRenter("+255712003008", "Traversal Target", defaultPIN)
+		otherMe := other.do(http.MethodGet, "/me/profile", nil).mustStatus(t, http.StatusOK, "me")
+		otherID := otherMe.str(t, "user", "id")
+		put(t, otherID+"/theirs-2.png", "image/png", 100)
+
+		for _, key := range []string{
+			userID + "/../" + otherID + "/theirs-2.png",
+			userID + "/sub/" + otherID + "/theirs-2.png",
+		} {
+			renter.do(http.MethodPost, "/me/profile/kyc-upload/complete",
+				map[string]any{"object_key": key}).
+				mustStatus(t, http.StatusBadRequest, "traversal key "+key)
+		}
+		// …and the target's document is still theirs.
+		doc := other.do(http.MethodGet, "/me/profile/kyc-doc", nil)
+		if doc.Code == http.StatusOK {
+			t.Error("the traversal attempt registered a document on the target profile")
+		}
 	})
 
 	t.Run("a key that was never uploaded is rejected", func(t *testing.T) {
@@ -837,6 +908,58 @@ func TestRenterDirectory(t *testing.T) {
 			t.Errorf("link_requests = %d, want 1", got)
 		}
 	})
+}
+
+// TestPhase3AuditCoverage: every Phase 3 decision leaves a trail (SPEC §8).
+// The actions are named in API.md, and a missing row is invisible until an
+// audit asks for it, so they are pinned here rather than left to inspection.
+func TestPhase3AuditCoverage(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newLinkFixture(t, "Audit", "0712003500", "+255712003501")
+	apply := func(t *testing.T) string {
+		t.Helper()
+		return fix.renter.do(http.MethodPost, "/units/"+fix.unitCode+"/link",
+			linkBody(fix.periodID, testTermDays)).
+			mustStatus(t, http.StatusCreated, "apply").str(t, "request", "id")
+	}
+
+	cancelled := apply(t)
+	fix.renter.do(http.MethodDelete, "/me/link-requests/"+cancelled, nil).
+		mustStatus(t, http.StatusNoContent, "cancel")
+
+	approved := apply(t)
+	fix.owner.do(http.MethodPost, "/link-requests/"+approved+"/approve", nil).
+		mustStatus(t, http.StatusOK, "approve")
+
+	rejected := apply(t)
+	fix.owner.do(http.MethodPost, "/link-requests/"+rejected+"/reject",
+		map[string]any{"reason": "unit already promised"}).
+		mustStatus(t, http.StatusOK, "reject")
+
+	for action, want := range map[string]int{
+		"renter_profile.update": 1, // from the fixture's completeProfile
+		"link_request.create":   3,
+		"link_request.cancel":   1,
+		"link_request.approve":  1,
+		"link_request.reject":   1,
+	} {
+		if got := len(h.auditPayloads(t, action)); got != want {
+			t.Errorf("audit_log holds %d %q rows, want %d", got, action, want)
+		}
+	}
+	// The rejection reason belongs in the trail; the NIDA number never does.
+	for _, p := range h.auditPayloads(t, "link_request.reject") {
+		if !strings.Contains(p, "unit already promised") {
+			t.Errorf("the reject audit row does not record the reason: %s", p)
+		}
+	}
+	for _, action := range []string{"link_request.create", "link_request.approve", "link_request.reject"} {
+		for _, p := range h.auditPayloads(t, action) {
+			if strings.Contains(p, validNIDA) {
+				t.Errorf("%s audit payload leaks the NIDA number: %s", action, p)
+			}
+		}
+	}
 }
 
 // --------------------------------------------------------- isolation --

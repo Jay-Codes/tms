@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -160,6 +161,15 @@ func (s *Server) handlePutMyProfile(w http.ResponseWriter, r *http.Request) {
 			// this handler must not lower — that is the query doing its job.
 			return err
 		}
+		// The account carries a display name of its own, and the landlord's
+		// screens read it wherever the profile row is not joined. A renter who
+		// corrects their name on this form must not end up shown under two
+		// names, so both records take the value they just typed.
+		if _, err := q.SetUserFullName(r.Context(), sqlc.SetUserFullNameParams{
+			ID: p.UserID, FullName: fullName,
+		}); err != nil {
+			return err
+		}
 		if email != nil {
 			if _, err := q.SetUserEmail(r.Context(), sqlc.SetUserEmailParams{
 				ID: p.UserID, Email: email,
@@ -277,9 +287,12 @@ func (s *Server) handleKYCUploadComplete(w http.ResponseWriter, r *http.Request)
 	}
 	f := validate.Fields{}
 	objectKey := f.Required("object_key", body.ObjectKey)
-	// The prefix check is the authorisation: a renter may only complete an
-	// upload under their own key space, whatever key they send.
-	if objectKey != "" && !strings.HasPrefix(objectKey, p.UserIDString()+"/") {
+	// The key check is the authorisation: a renter may only complete an upload
+	// under their own key space, whatever key they send. The shape is checked
+	// too, not only the prefix — a prefix alone would accept
+	// `{me}/../{someone else}/x.jpg`, which any path-normalising hop between
+	// here and MinIO would resolve into another renter's document.
+	if objectKey != "" && !isOwnKYCKey(objectKey, p.UserIDString()) {
 		f.Add("object_key", "must be an upload issued to you")
 	}
 	if !f.Empty() {
@@ -401,6 +414,18 @@ func (s *Server) writeKYCDocURL(w http.ResponseWriter, r *http.Request, subjectI
 func kycStorageUnavailable(w http.ResponseWriter) {
 	httpx.WriteProblem(w, http.StatusServiceUnavailable, "storage unavailable",
 		"identity documents cannot be uploaded or read right now")
+}
+
+// kycKeyPattern is the shape handleKYCUpload issues: one prefix segment, one
+// file name, one image extension. Holding the key to two segments is what
+// makes the prefix check load-bearing — `{me}/../{someone else}/x.jpg` starts
+// with the caller's own id but names another renter's document once any hop
+// between here and MinIO normalises the path.
+var kycKeyPattern = regexp.MustCompile(`^[^/]+/[A-Za-z0-9][A-Za-z0-9._-]*\.(jpg|jpeg|png)$`)
+
+// isOwnKYCKey reports whether key is a KYC object key issued to this user.
+func isOwnKYCKey(key, userID string) bool {
+	return kycKeyPattern.MatchString(key) && strings.HasPrefix(key, userID+"/")
 }
 
 // randomUUID draws a version-4 UUID for an object key.

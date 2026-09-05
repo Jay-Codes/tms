@@ -268,3 +268,42 @@ func TestProrate(t *testing.T) {
 		})
 	}
 }
+
+// TestGenerateTotalTracksTheTermPrice: rounding happens per row, so the sum of
+// a schedule can differ from the price of the whole term — but only by the
+// rounding of each row, never more. A schedule that drifts further would bill
+// a renter for days nobody agreed to.
+func TestGenerateTotalTracksTheTermPrice(t *testing.T) {
+	cases := []struct {
+		rent, basis, term, cadence int
+	}{
+		{250_000, 30, 180, 30},
+		{300_000, 30, 100, 30},
+		{250_000, 30, 14, 7},
+		{70_000, 7, 365, 30},
+		{123_457, 30, 365, 45},
+		{999_999, 31, 400, 7},
+		{1, 30, 90, 30},
+		{250_000, 30, 10, 30}, // term shorter than the cadence: one row
+	}
+	for _, tc := range cases {
+		rows := Generate(tc.rent, tc.basis, tc.term, tc.cadence, date("2026-01-01"), nil)
+		if len(rows) == 0 {
+			t.Fatalf("rent %d/%dd over %dd at %dd cadence produced no rows",
+				tc.rent, tc.basis, tc.term, tc.cadence)
+		}
+		var sum int64
+		for _, row := range rows {
+			sum += row.Amount
+		}
+		whole := Prorate(int64(tc.rent), tc.term, tc.basis)
+		drift := sum - whole
+		if drift < 0 {
+			drift = -drift
+		}
+		if drift > int64(len(rows)) {
+			t.Errorf("rent %d/%dd over %dd at %dd cadence: rows sum to %d, the whole term prices at %d (drift %d over %d rows)",
+				tc.rent, tc.basis, tc.term, tc.cadence, sum, whole, drift, len(rows))
+		}
+	}
+}
