@@ -213,6 +213,30 @@ func (s *Server) routes() chi.Router {
 			r.Get("/renters", s.handleListRenters)
 			r.Get("/renters/{user_id}", s.handleGetRenter)
 			r.Get("/renters/{user_id}/kyc-doc", s.handleRenterKYCDoc)
+
+			// --- Phase 4: contract templates ---
+			r.Get("/contract-templates", s.handleListTemplates)
+			r.Post("/contract-templates", s.handleCreateTemplate)
+			r.Get("/contract-templates/{id}", s.handleGetTemplate)
+			r.Patch("/contract-templates/{id}", s.handlePatchTemplate)
+			r.Delete("/contract-templates/{id}", s.handleDeleteTemplate)
+			r.Post("/contract-templates/{id}/preview", s.handlePreviewTemplate)
+
+			// --- Phase 4: contracts ---
+			r.Get("/contracts", s.handleListContracts)
+			r.Post("/contracts", s.handleCreateContract)
+			r.Post("/contracts/{id}/activate", s.handleActivateContract)
+			r.Post("/contracts/{id}/terminate", s.handleTerminateContract)
+
+			// --- Phase 4: branding ---
+			r.Get("/org/branding", s.handleGetBranding)
+			r.Put("/org/branding", s.handlePutBranding)
+			r.Post("/org/branding/logo", s.handleBrandingUpload)
+			r.Post("/org/branding/logo/complete", s.handleBrandingUploadComplete)
+			r.Delete("/org/branding/logo", s.handleBrandingDelete)
+			r.Post("/org/branding/letterhead", s.handleBrandingUpload)
+			r.Post("/org/branding/letterhead/complete", s.handleBrandingUploadComplete)
+			r.Delete("/org/branding/letterhead", s.handleBrandingDelete)
 		})
 
 		// --- Phase 3: renter scope (tms_r) ---
@@ -226,6 +250,30 @@ func (s *Server) routes() chi.Router {
 			r.Get("/me/link-requests", s.handleListMyLinkRequests)
 			r.Delete("/me/link-requests/{id}", s.handleCancelMyLinkRequest)
 			r.Post("/units/{unit_code}/link", s.handleCreateLinkRequest)
+
+			// --- Phase 4: the renter's own contracts and money ---
+			r.Get("/me/contracts", s.handleListMyContracts)
+			r.Get("/me/schedules", s.handleMySchedules)
+			r.Post("/contracts/{id}/sign/otp", s.handleContractSignOTP)
+			r.Post("/contracts/{id}/signature-upload", s.handleSignatureUpload)
+			r.Post("/contracts/{id}/sign", s.handleSignContract)
+		})
+
+		// --- Phase 4: contract reads, open to either party (tms_o or tms_r) ---
+		// One document, two readers (SPEC §5.5); the handlers scope by
+		// whichever principal arrives, so the other party's contract is a 404.
+		r.Group(func(r chi.Router) {
+			r.Use(s.sessions.RequireContractParty())
+			r.Get("/contracts/{id}", s.handleGetContract)
+			r.Get("/contracts/{id}/document", s.handleContractDocument)
+			r.Get("/contracts/{id}/verify", s.handleVerifyContract)
+			r.Get("/contracts/{id}/schedules", s.handleContractSchedules)
+		})
+
+		// --- Phase 4: platform admin jobs (tms_a) ---
+		r.Group(func(r chi.Router) {
+			r.Use(s.sessions.RequireAdmin())
+			r.Post("/admin/jobs/contract-lifecycle", s.handleContractLifecycleJob)
 		})
 
 		// --- Phase 2: public (no session; rate limited per IP) ---

@@ -63,13 +63,13 @@ Execution plan for [SPEC.md](SPEC.md) / [FLOWS.md](FLOWS.md). Target: **testing-
 
 ## Phase 4 — Contracts & schedules (Sep 9, 1 day)
 
-- [ ] Contract template CRUD (markdown, default flag).
-- [ ] Contracts: create (from approval or manual), activate = snapshot terms + price basis + period days, generate all payment_schedules across `term_days` at `payment_period_days` cadence, last row truncated, amounts prorated from price basis, optional `due_day` snapping (§4 rules). Table-driven tests: 180d/45d, 100d/30d, 7d cadence, due_day snapping.
-- [ ] Renter onboarding + public unit endpoint show offered periods with prorated amounts and schedule preview.
-- [ ] Lifecycle: draft → pending_signature → active → expiring (30d job) → ended | terminated. Terminate cancels/waives remaining schedules, unit → vacant.
-- [ ] `GET /contracts/{id}/document`: app-native document payload (letterhead/logo URLs, resolved `terms_snapshot_html`, parties, schedule summary, footer). Frontend document view + print stylesheet (browser "Save as PDF"). No server PDF.
+- [x] Contract template CRUD (rich-text HTML, sanitized allowlist, default flag, preview).
+- [x] Contracts: create (from approval or manual), activate = snapshot terms + price basis + period days, generate all payment_schedules across `term_days` at `payment_period_days` cadence, last row truncated, amounts prorated from price basis, optional `due_day` snapping (§4 rules). Table-driven tests: 180d/45d, 100d/30d, 7d cadence, due_day snapping.
+- [x] Renter onboarding + public unit endpoint show offered periods with prorated amounts and schedule preview.
+- [x] Lifecycle: draft → pending_signature → active → expiring (30d job) → ended | terminated. Terminate cancels/waives remaining schedules, unit → vacant.
+- [x] `GET /contracts/{id}/document`: app-native document payload (letterhead/logo URLs, resolved `terms_snapshot_html`, parties, schedule summary, footer). Frontend document view + print stylesheet (browser "Save as PDF"). No server PDF.
 - [ ] Rich-text template editor in tenant app (sanitized HTML, variable insertion, live letterhead preview); letterhead upload + footer text in branding settings.
-- [ ] Digital signing: `snapshot_hash` at pending_signature; `contract_signatures` table; `POST /contracts/{id}/sign/otp` + `/sign` (OTP verify, IP/UA capture); optional drawn signature (canvas → presigned PUT to `signatures` bucket); activate requires renter signature and records landlord row; `GET /contracts/{id}/verify`.
+- [x] Digital signing: `snapshot_hash` at pending_signature; `contract_signatures` table; `POST /contracts/{id}/sign/otp` + `/sign` (OTP verify, IP/UA capture); optional drawn signature (canvas → presigned PUT to `signatures` bucket); activate requires renter signature and records landlord row; `GET /contracts/{id}/verify`.
 - [ ] Screens: templates editor (with snapshot-rule banner), contract detail (both apps), renter "Accept & sign" flow (document → OTP → optional draw → confirmation), landlord "Ready to countersign" → Activate, signature block + hash in document view.
 - [ ] Unsigned-contract reminder (org setting, default 7 days) wired into Phase 6 scheduler.
 

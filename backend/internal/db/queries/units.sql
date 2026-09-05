@@ -140,3 +140,14 @@ LEFT JOIN LATERAL (
 ) pp ON true
 WHERE u.unit_code = sqlc.arg(unit_code)
   AND u.deleted_at IS NULL AND p.deleted_at IS NULL;
+
+-- SetUnitStatusDerived is the contract lifecycle writing a unit's status:
+-- activation makes it occupied, an ending or termination makes it vacant. Both
+-- clear the landlord's override — a derived status is the newer fact, and a
+-- unit left `maintenance` after a tenancy ended never reaches the vacancy board
+-- (API.md, Phase 4 notes).
+-- name: SetUnitStatusDerived :one
+UPDATE units
+SET status = sqlc.arg(status), status_override = false
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND deleted_at IS NULL
+RETURNING *;

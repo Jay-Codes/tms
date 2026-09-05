@@ -61,3 +61,85 @@ func (q *Queries) GetOrgBranding(ctx context.Context, orgID pgtype.UUID) (OrgBra
 	)
 	return i, err
 }
+
+const setBrandingAsset = `-- name: SetBrandingAsset :one
+UPDATE org_branding
+SET logo_object_key       = CASE WHEN $1::text = 'logo'
+                                 THEN $2 ELSE logo_object_key END,
+    letterhead_object_key = CASE WHEN $1::text = 'letterhead'
+                                 THEN $2 ELSE letterhead_object_key END
+WHERE org_id = $3
+RETURNING id, org_id, display_name, logo_object_key, letterhead_object_key, theme, dashboard_prefs, document_footer_text, created_at, updated_at
+`
+
+type SetBrandingAssetParams struct {
+	Which     string      `json:"which"`
+	ObjectKey *string     `json:"object_key"`
+	OrgID     pgtype.UUID `json:"org_id"`
+}
+
+// SetBrandingAsset writes (or clears) one of the two image keys. `which` picks
+// the column so the presign/complete/delete handlers share a single statement.
+func (q *Queries) SetBrandingAsset(ctx context.Context, arg SetBrandingAssetParams) (OrgBranding, error) {
+	row := q.db.QueryRow(ctx, setBrandingAsset, arg.Which, arg.ObjectKey, arg.OrgID)
+	var i OrgBranding
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.DisplayName,
+		&i.LogoObjectKey,
+		&i.LetterheadObjectKey,
+		&i.Theme,
+		&i.DashboardPrefs,
+		&i.DocumentFooterText,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateOrgBranding = `-- name: UpdateOrgBranding :one
+UPDATE org_branding
+SET display_name         = COALESCE($1, display_name),
+    theme                = COALESCE($2, theme),
+    dashboard_prefs      = COALESCE($3, dashboard_prefs),
+    document_footer_text = CASE WHEN $4::boolean
+                                THEN $5
+                                ELSE document_footer_text END
+WHERE org_id = $6
+RETURNING id, org_id, display_name, logo_object_key, letterhead_object_key, theme, dashboard_prefs, document_footer_text, created_at, updated_at
+`
+
+type UpdateOrgBrandingParams struct {
+	DisplayName        *string     `json:"display_name"`
+	Theme              []byte      `json:"theme"`
+	DashboardPrefs     []byte      `json:"dashboard_prefs"`
+	SetFooter          bool        `json:"set_footer"`
+	DocumentFooterText *string     `json:"document_footer_text"`
+	OrgID              pgtype.UUID `json:"org_id"`
+}
+
+func (q *Queries) UpdateOrgBranding(ctx context.Context, arg UpdateOrgBrandingParams) (OrgBranding, error) {
+	row := q.db.QueryRow(ctx, updateOrgBranding,
+		arg.DisplayName,
+		arg.Theme,
+		arg.DashboardPrefs,
+		arg.SetFooter,
+		arg.DocumentFooterText,
+		arg.OrgID,
+	)
+	var i OrgBranding
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.DisplayName,
+		&i.LogoObjectKey,
+		&i.LetterheadObjectKey,
+		&i.Theme,
+		&i.DashboardPrefs,
+		&i.DocumentFooterText,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}

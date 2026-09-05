@@ -202,7 +202,7 @@ func (s *Server) handleCreateLinkRequest(w http.ResponseWriter, r *http.Request)
 	orgID := db.UUIDString(unit.OrgID)
 
 	var created sqlc.UnitLinkRequest
-	var queuedID string
+	var queuedID, contractQueuedID string
 	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
 		var err error
 		created, err = q.CreateLinkRequest(r.Context(), sqlc.CreateLinkRequestParams{
@@ -235,7 +235,8 @@ func (s *Server) handleCreateLinkRequest(w http.ResponseWriter, r *http.Request)
 		}
 		// Auto-approval is a decision, so it takes the same hook and the same
 		// notification as a landlord pressing Approve.
-		if err := onLinkApproved(r.Context(), q, created); err != nil {
+		_, contractQueuedID, _, err = s.onLinkApproved(r.Context(), q, created, p.UserIDString())
+		if err != nil {
 			return err
 		}
 		queuedID, err = s.queueLinkDecision(r.Context(), q, linkDecision{
@@ -251,11 +252,17 @@ func (s *Server) handleCreateLinkRequest(w http.ResponseWriter, r *http.Request)
 				"you already have a pending request for this unit")
 			return
 		}
+		if writeCreateError(w, err) {
+			// Auto-approve could not produce a contract (an unpriced unit, a
+			// missing template): the application is refused whole rather than
+			// left approved with nothing to sign.
+			return
+		}
 		s.serverError(w, r, "link.create.tx", err)
 		return
 	}
-	// Redis only learns about the message once the row is durable.
-	s.enqueueNotifications(r.Context(), queuedID)
+	// Redis only learns about the messages once the rows are durable.
+	s.enqueueNotifications(r.Context(), queuedID, contractQueuedID)
 
 	row, err := s.q.GetLinkRequest(r.Context(), sqlc.GetLinkRequestParams{
 		ID: created.ID, RenterUserID: p.UserID,
@@ -537,6 +544,13 @@ func (s *Server) decideLinkRequest(w http.ResponseWriter, r *http.Request, statu
 		return
 	}
 	if row.Status != linkPending {
+		// Approving an already-approved request is how a landlord asks for the
+		// contract that approval should have created (API.md, Phase 4 notes);
+		// everything else about a decided request is still a 409.
+		if status == linkApproved && row.Status == linkApproved {
+			s.backfillApprovedRequest(w, r, p, row)
+			return
+		}
 		conflictCode(w, "not_pending", "request already decided",
 			"only a pending request can be approved or rejected")
 		return
@@ -556,7 +570,9 @@ func (s *Server) decideLinkRequest(w http.ResponseWriter, r *http.Request, statu
 		rejectionReason = &reason
 	}
 
-	var queuedID string
+	var queuedID, contractQueuedID string
+	var createdContract sqlc.Contract
+	var madeContract bool
 	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
 		decided, err := q.DecideLinkRequest(r.Context(), sqlc.DecideLinkRequestParams{
 			Status: status, RejectionReason: rejectionReason,
@@ -585,7 +601,9 @@ func (s *Server) decideLinkRequest(w http.ResponseWriter, r *http.Request, statu
 			return err
 		}
 		if status == linkApproved {
-			if err := onLinkApproved(r.Context(), q, decided); err != nil {
+			createdContract, contractQueuedID, madeContract, err = s.onLinkApproved(
+				r.Context(), q, decided, p.UserIDString())
+			if err != nil {
 				return err
 			}
 		}
@@ -602,10 +620,16 @@ func (s *Server) decideLinkRequest(w http.ResponseWriter, r *http.Request, statu
 				"only a pending request can be approved or rejected")
 			return
 		}
+		if writeCreateError(w, err) {
+			// The contract could not be written, so the approval is refused
+			// whole: a renter must never be told "approved" with nothing to
+			// sign behind it.
+			return
+		}
 		s.serverError(w, r, "link.decide.tx", err)
 		return
 	}
-	s.enqueueNotifications(r.Context(), queuedID)
+	s.enqueueNotifications(r.Context(), queuedID, contractQueuedID)
 
 	reloaded, err := s.q.GetLinkRequest(r.Context(), sqlc.GetLinkRequestParams{ID: row.ID, OrgID: p.OrgID})
 	if err != nil {
@@ -615,19 +639,113 @@ func (s *Server) decideLinkRequest(w http.ResponseWriter, r *http.Request, statu
 	lr := linkRowOfGet(reloaded)
 	out := toLinkRequest(lr, true)
 	out.SchedulePreview = previewFor(lr)
-	WriteJSON(w, http.StatusOK, map[string]any{"request": out})
+	body := map[string]any{"request": out}
+	if madeContract {
+		if contractOut, ok := s.reloadContract(w, r, createdContract.ID, p.OrgID, pgtype.UUID{}); ok {
+			body["contract"] = contractOut
+		}
+	}
+	WriteJSON(w, http.StatusOK, body)
 }
 
-// onLinkApproved is the seam Phase 4 fills in: approving a request is what
-// creates the contract (SPEC §3.1 — "approval creates/activates the contract").
+// onLinkApproved is what makes approval mean something: it creates the
+// contract from the request, in the approval's own transaction (SPEC §3.1 —
+// "approval creates/activates the contract"; FLOWS 3.3).
 //
-// In Phase 3 approval is only a decision. The unit deliberately stays vacant:
-// it becomes occupied when a contract activates, not when an application is
-// accepted, so an approved-then-abandoned request cannot strand a unit.
+// The unit deliberately stays vacant: it becomes occupied when the contract is
+// activated, not when the application is accepted, so an approved-then-
+// abandoned request cannot strand a unit.
 //
-//nolint:revive // the unused parameters are the Phase 4 signature, kept stable.
-func onLinkApproved(_ context.Context, _ *sqlc.Queries, _ sqlc.UnitLinkRequest) error {
-	return nil
+// It is idempotent by way of `contracts.link_request_id`: a request that
+// already has a contract yields that contract and writes nothing, which is what
+// makes the backfill path on an already-approved request safe.
+func (s *Server) onLinkApproved(
+	ctx context.Context, q *sqlc.Queries, req sqlc.UnitLinkRequest, actorUserID string,
+) (sqlc.Contract, string, bool, error) {
+	if existing, err := q.GetContractForLinkRequest(ctx, sqlc.GetContractForLinkRequestParams{
+		OrgID: req.OrgID, LinkRequestID: req.ID,
+	}); err == nil && existing.Valid {
+		return sqlc.Contract{}, "", false, nil
+	} else if err != nil && !isNoRows(err) {
+		return sqlc.Contract{}, "", false, err
+	}
+
+	termDays := int32(0)
+	if req.TermDays != nil {
+		termDays = *req.TermDays
+	}
+	created, notifyID, err := s.createContractTx(ctx, q, contractInput{
+		OrgID:           req.OrgID,
+		UnitID:          req.UnitID,
+		RenterUserID:    req.RenterUserID,
+		PaymentPeriodID: req.PaymentPeriodID,
+		TermDays:        termDays,
+		StartDate:       req.StartDate.Time,
+		LinkRequestID:   req.ID,
+		ActorUserID:     actorUserID,
+	})
+	if err != nil {
+		return sqlc.Contract{}, "", false, err
+	}
+	return created, notifyID, true, nil
+}
+
+// backfillApprovedRequest is the second half of POST /link-requests/{id}/approve:
+// a request approved before Phase 4 landed (or by a run where contract creation
+// failed) carries no contract, and re-approving it is how a landlord asks for
+// one. An already-approved request that DOES have a contract is still a 409 —
+// there is nothing left to do (API.md, Phase 4 notes).
+func (s *Server) backfillApprovedRequest(w http.ResponseWriter, r *http.Request, p auth.Principal, row sqlc.GetLinkRequestRow) {
+	existing, err := s.q.GetContractForLinkRequest(r.Context(), sqlc.GetContractForLinkRequestParams{
+		OrgID: p.OrgID, LinkRequestID: row.ID,
+	})
+	if err != nil && !isNoRows(err) {
+		s.serverError(w, r, "link.backfill.lookup", err)
+		return
+	}
+	if err == nil && existing.Valid {
+		conflictCode(w, "not_pending", "request already decided",
+			"this request is already approved and its contract exists")
+		return
+	}
+
+	var created sqlc.Contract
+	var queuedID string
+	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
+		var err error
+		created, queuedID, _, err = s.onLinkApproved(r.Context(), q, linkRequestOf(row), p.UserIDString())
+		return err
+	}); err != nil {
+		if writeCreateError(w, err) {
+			return
+		}
+		s.serverError(w, r, "link.backfill.tx", err)
+		return
+	}
+	s.enqueueNotifications(r.Context(), queuedID)
+
+	reloaded, err := s.q.GetLinkRequest(r.Context(), sqlc.GetLinkRequestParams{ID: row.ID, OrgID: p.OrgID})
+	if err != nil {
+		s.serverError(w, r, "link.backfill.reload", err)
+		return
+	}
+	lr := linkRowOfGet(reloaded)
+	out := toLinkRequest(lr, true)
+	out.SchedulePreview = previewFor(lr)
+	body := map[string]any{"request": out}
+	if contractOut, ok := s.reloadContract(w, r, created.ID, p.OrgID, pgtype.UUID{}); ok {
+		body["contract"] = contractOut
+	}
+	WriteJSON(w, http.StatusOK, body)
+}
+
+// linkRequestOf narrows the joined read row to the table row the hook takes.
+func linkRequestOf(row sqlc.GetLinkRequestRow) sqlc.UnitLinkRequest {
+	return sqlc.UnitLinkRequest{
+		ID: row.ID, OrgID: row.OrgID, UnitID: row.UnitID, RenterUserID: row.RenterUserID,
+		Status: row.Status, PaymentPeriodID: row.PaymentPeriodID,
+		TermDays: row.TermDays, StartDate: row.StartDate, EndDate: row.EndDate,
+	}
 }
 
 // linkDecision carries what a decision SMS needs.
