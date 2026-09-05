@@ -129,7 +129,7 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 		deps.Cache = redisClient
 	}
 
-	minioClient, err := storage.Open(cfg.MinioEndpoint, cfg.MinioAccessKey, cfg.MinioSecretKey, cfg.MinioUseSSL)
+	minioClient, err := storage.Open(cfg.MinioEndpoint, cfg.MinioAccessKey, cfg.MinioSecretKey, cfg.MinioUseSSL, cfg.MinioPublicURL)
 	if err != nil {
 		logger.Warn("minio unavailable; running without object storage", "error", err)
 	} else {

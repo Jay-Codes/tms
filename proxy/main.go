@@ -21,6 +21,7 @@ func mustProxy(target string) *httputil.ReverseProxy {
 }
 
 func main() {
+	minioProxy := mustProxy("http://localhost:9000")
 	routes := map[string]*httputil.ReverseProxy{
 		"/enduser": mustProxy("http://localhost:3001"),
 		"/tenant":  mustProxy("http://localhost:3002"),
@@ -28,6 +29,16 @@ func main() {
 		// Go REST API. The backend serves under /api/v1 itself, so the path
 		// is forwarded unchanged.
 		"/api": mustProxy("http://localhost:8081"),
+		// MinIO buckets. Presigned URLs are signed against the public origin
+		// (MINIO_PUBLIC_URL), so the path and the Host header must both reach
+		// MinIO unchanged or the V4 signature will not validate.
+		// httputil.NewSingleHostReverseProxy's director rewrites only
+		// req.URL.{Scheme,Host}; it leaves req.Host alone, so the inbound Host
+		// is forwarded as-is.
+		"/branding":   minioProxy,
+		"/qrcodes":    minioProxy,
+		"/kyc":        minioProxy,
+		"/signatures": minioProxy,
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

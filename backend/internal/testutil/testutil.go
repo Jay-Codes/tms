@@ -131,7 +131,7 @@ func Storage(t *testing.T) *storage.Client {
 	if secret == "" {
 		secret = "tms_dev_secret"
 	}
-	client, err := storage.Open(endpoint, access, secret, false)
+	client, err := storage.Open(endpoint, access, secret, false, "")
 	if err != nil {
 		return nil
 	}
