@@ -16,9 +16,13 @@ const DefaultTemplateName = "Standard tenancy agreement"
 // Variables are the substitutions a template body may use (API.md). They are
 // listed on GET /contract-templates/{id} so the editor can offer them.
 //
+// `rent` is the amount due once per payment period; `rent_basis` is the unit's
+// own price and the days it covers ("TZS 100,000 / 30 days"), for landlords who
+// want both figures in the document (PLAN2 Phase 9).
+//
 //nolint:gochecknoglobals // a fixed vocabulary, read-only.
 var Variables = []string{
-	"renter_name", "unit", "property", "rent", "start_date", "end_date",
+	"renter_name", "unit", "property", "rent", "rent_basis", "start_date", "end_date",
 	"payment_period", "org_name", "term_days", "due_day",
 }
 
@@ -89,6 +93,16 @@ func DueDayPhrase(dueDay *int) string {
 	return "day " + strconv.Itoa(*dueDay)
 }
 
+// RentBasisPhrase renders `{{rent_basis}}`: the unit's own price and the span
+// it covers, as "TZS 100,000 / 30 days".
+//
+// The amount arrives already formatted — money formatting lives in one place
+// (notify.FormatTZS) and this package does not import it — so the phrase reads
+// the same wherever it is built.
+func RentBasisPhrase(formattedAmount string, rentPeriodDays int) string {
+	return formattedAmount + " / " + strconv.Itoa(rentPeriodDays) + " days"
+}
+
 // SampleVars are the placeholder values POST /contract-templates/{id}/preview
 // substitutes, so a landlord sees the shape of a real document while editing.
 func SampleVars(orgName string) map[string]string {
@@ -97,6 +111,7 @@ func SampleVars(orgName string) map[string]string {
 		"unit":           "Room 2",
 		"property":       "Mbezi Beach Block A",
 		"rent":           "TZS 250,000",
+		"rent_basis":     "TZS 250,000 / 30 days",
 		"start_date":     "2026-10-01",
 		"end_date":       "2027-03-29",
 		"payment_period": "Monthly (30 days)",

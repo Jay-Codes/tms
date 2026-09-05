@@ -183,6 +183,10 @@ func (s *Server) routes() chi.Router {
 			r.Post("/org/payment-periods/restore-recommended", s.handleRestoreRecommendedPeriods)
 			r.Patch("/org/payment-periods/{id}", s.handlePatchPaymentPeriod)
 			r.Delete("/org/payment-periods/{id}", s.handleDeletePaymentPeriod)
+			// Part 2: the "Recommended" badge is exclusive and moves through
+			// its own endpoint (PLAN2 #8) — PATCH cannot express a write to
+			// the period that loses it.
+			r.Post("/org/payment-periods/{id}/recommend", s.handleRecommendPaymentPeriod)
 
 			// --- Phase 2: properties ---
 			r.Get("/properties", s.handleListProperties)

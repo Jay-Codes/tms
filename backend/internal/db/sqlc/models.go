@@ -77,6 +77,39 @@ type ContractTemplate struct {
 	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
 }
 
+type Expense struct {
+	ID               pgtype.UUID        `json:"id"`
+	OrgID            pgtype.UUID        `json:"org_id"`
+	PropertyID       pgtype.UUID        `json:"property_id"`
+	UnitID           pgtype.UUID        `json:"unit_id"`
+	CategoryID       pgtype.UUID        `json:"category_id"`
+	Amount           int64              `json:"amount"`
+	IncurredOn       pgtype.Date        `json:"incurred_on"`
+	Vendor           string             `json:"vendor"`
+	Reference        string             `json:"reference"`
+	Note             string             `json:"note"`
+	ReceiptObjectKey *string            `json:"receipt_object_key"`
+	RecordedByUserID pgtype.UUID        `json:"recorded_by_user_id"`
+	Status           string             `json:"status"`
+	VoidedAt         pgtype.Timestamptz `json:"voided_at"`
+	VoidReason       *string            `json:"void_reason"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type ExpenseCategory struct {
+	ID        pgtype.UUID        `json:"id"`
+	OrgID     pgtype.UUID        `json:"org_id"`
+	Name      string             `json:"name"`
+	IsDefault bool               `json:"is_default"`
+	SortOrder int32              `json:"sort_order"`
+	Active    bool               `json:"active"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+}
+
 type NotificationLog struct {
 	ID            pgtype.UUID        `json:"id"`
 	OrgID         pgtype.UUID        `json:"org_id"`
@@ -132,6 +165,21 @@ type OrgMember struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type OrgSmsCredit struct {
+	OrgID        pgtype.UUID        `json:"org_id"`
+	Balance      int32              `json:"balance"`
+	LowWatermark int32              `json:"low_watermark"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type OrgTheme struct {
+	OrgID     pgtype.UUID        `json:"org_id"`
+	PresetID  *string            `json:"preset_id"`
+	Tokens    []byte             `json:"tokens"`
+	FontID    *string            `json:"font_id"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Payment struct {
@@ -192,6 +240,27 @@ type PaymentSchedule struct {
 	PaidAmount  int64              `json:"paid_amount"`
 }
 
+type PlatformTemplate struct {
+	Kind             string             `json:"kind"`
+	Sw               string             `json:"sw"`
+	En               string             `json:"en"`
+	Variables        []string           `json:"variables"`
+	Locked           bool               `json:"locked"`
+	UpdatedByAdminID pgtype.UUID        `json:"updated_by_admin_id"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	Version          int32              `json:"version"`
+}
+
+type PlatformTemplateVersion struct {
+	ID          pgtype.UUID        `json:"id"`
+	Kind        string             `json:"kind"`
+	Version     int32              `json:"version"`
+	Sw          string             `json:"sw"`
+	En          string             `json:"en"`
+	AdminUserID pgtype.UUID        `json:"admin_user_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type PricePlan struct {
 	ID              pgtype.UUID        `json:"id"`
 	OrgID           pgtype.UUID        `json:"org_id"`
@@ -248,6 +317,18 @@ type Session struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type SmsCreditLedger struct {
+	ID             pgtype.UUID        `json:"id"`
+	OrgID          pgtype.UUID        `json:"org_id"`
+	Delta          int32              `json:"delta"`
+	BalanceAfter   int32              `json:"balance_after"`
+	Reason         string             `json:"reason"`
+	NotificationID pgtype.UUID        `json:"notification_id"`
+	AdminUserID    pgtype.UUID        `json:"admin_user_id"`
+	Note           string             `json:"note"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type Unit struct {
 	ID               pgtype.UUID        `json:"id"`
 	OrgID            pgtype.UUID        `json:"org_id"`
@@ -294,4 +375,5 @@ type User struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	Locale          string             `json:"locale"`
 }

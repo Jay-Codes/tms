@@ -307,3 +307,68 @@ func TestGenerateTotalTracksTheTermPrice(t *testing.T) {
 		}
 	}
 }
+
+// TestRentPerPeriodMatchesAFullScheduleRow is the whole point of the function:
+// the figure the contract document states must be the figure the renter is
+// actually billed. A schedule row covering a full payment period is that bill,
+// so the two are checked against each other rather than against a constant
+// worked out by hand.
+//
+// The bug it closes (PLAN2 Phase 9): the document used to print the unit price
+// beside the payment-period label — "TZS 100,000 per Quarterly (90 days)" for a
+// unit priced per 30 days — while the first schedule row said 300,000.
+func TestRentPerPeriodMatchesAFullScheduleRow(t *testing.T) {
+	cases := []struct {
+		name              string
+		rent              int64
+		rentPeriodDays    int
+		paymentPeriodDays int
+		want              int64
+	}{
+		{"quarterly on a monthly price", 100_000, 30, 90, 300_000},
+		{"same basis", 300_000, 30, 30, 300_000},
+		{"yearly on a monthly price", 100_000, 30, 365, 1_216_667},
+		{"monthly on a quarterly price", 300_000, 90, 30, 100_000},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := RentPerPeriod(tc.rent, tc.rentPeriodDays, tc.paymentPeriodDays)
+			if got != tc.want {
+				t.Errorf("RentPerPeriod(%d, %d, %d) = %d, want %d",
+					tc.rent, tc.rentPeriodDays, tc.paymentPeriodDays, got, tc.want)
+			}
+
+			// A term of exactly one payment period yields one full row, whose
+			// amount must be the same number.
+			rows := Generate(int(tc.rent), tc.rentPeriodDays,
+				tc.paymentPeriodDays, tc.paymentPeriodDays,
+				time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC), nil)
+			if len(rows) != 1 {
+				t.Fatalf("Generate produced %d rows, want 1", len(rows))
+			}
+			if rows[0].Amount != got {
+				t.Errorf("schedule row = %d, RentPerPeriod = %d — the document would state the wrong figure",
+					rows[0].Amount, got)
+			}
+
+			// And over a longer term every full row agrees too.
+			long := Generate(int(tc.rent), tc.rentPeriodDays,
+				tc.paymentPeriodDays*3, tc.paymentPeriodDays,
+				time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC), nil)
+			for i, row := range long {
+				if row.Days == tc.paymentPeriodDays && row.Amount != got {
+					t.Errorf("row %d (%d days) = %d, want %d", i, row.Days, row.Amount, got)
+				}
+			}
+		})
+	}
+}
+
+// TestRentBasisPhrase: the unit price and the span it covers, as the document
+// prints it beside the per-period figure.
+func TestRentBasisPhrase(t *testing.T) {
+	if got := RentBasisPhrase("TZS 100,000", 30); got != "TZS 100,000 / 30 days" {
+		t.Errorf("RentBasisPhrase = %q, want \"TZS 100,000 / 30 days\"", got)
+	}
+}

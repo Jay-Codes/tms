@@ -3,6 +3,7 @@ package httpserver
 import (
 	"time"
 
+	"tms/backend/internal/contract"
 	"tms/backend/internal/db"
 	"tms/backend/internal/db/sqlc"
 )
@@ -85,13 +86,18 @@ type schedulesSummary struct {
 
 // contractResponse is the `contract` shape from API.md.
 type contractResponse struct {
-	ID                string           `json:"id"`
-	Unit              contractUnit     `json:"unit"`
-	Renter            contractRenter   `json:"renter"`
-	TemplateID        *string          `json:"template_id"`
-	Status            string           `json:"status"`
-	RentAmount        int64            `json:"rent_amount"`
-	RentPeriodDays    int32            `json:"rent_period_days"`
+	ID             string         `json:"id"`
+	Unit           contractUnit   `json:"unit"`
+	Renter         contractRenter `json:"renter"`
+	TemplateID     *string        `json:"template_id"`
+	Status         string         `json:"status"`
+	RentAmount     int64          `json:"rent_amount"`
+	RentPeriodDays int32          `json:"rent_period_days"`
+	// RentPerPeriod is rent_amount scaled from rent_period_days to the payment
+	// period, with the schedule's rounding: the figure the document states and
+	// the amount a full schedule row carries. Derived, never stored — the
+	// snapshot columns remain the source of truth (PLAN2 Phase 9).
+	RentPerPeriod     int64            `json:"rent_per_period"`
 	PaymentPeriod     *contractPeriod  `json:"payment_period"`
 	TermDays          int32            `json:"term_days"`
 	StartDate         string           `json:"start_date"`
@@ -155,15 +161,17 @@ func toContract(r contractRow, signatures []signatureBlock) contractResponse {
 		Status:         r.Status,
 		RentAmount:     r.RentAmount,
 		RentPeriodDays: r.RentPeriodDays,
-		TermDays:       r.TermDays,
-		StartDate:      r.StartDate.Time.Format(dateLayout),
-		EndDate:        r.EndDate.Time.Format(dateLayout),
-		DueDay:         r.DueDay,
-		SnapshotHash:   db.StrVal(r.SnapshotHash),
-		Signatures:     signatures,
-		CreatedAt:      r.CreatedAt.Time,
-		ActivatedAt:    timePtr(r.ActivatedAt.Valid, r.ActivatedAt.Time),
-		TerminatedAt:   timePtr(r.TerminatedAt.Valid, r.TerminatedAt.Time),
+		RentPerPeriod: contract.RentPerPeriod(
+			r.RentAmount, int(r.RentPeriodDays), int(r.PaymentPeriodDays)),
+		TermDays:     r.TermDays,
+		StartDate:    r.StartDate.Time.Format(dateLayout),
+		EndDate:      r.EndDate.Time.Format(dateLayout),
+		DueDay:       r.DueDay,
+		SnapshotHash: db.StrVal(r.SnapshotHash),
+		Signatures:   signatures,
+		CreatedAt:    r.CreatedAt.Time,
+		ActivatedAt:  timePtr(r.ActivatedAt.Valid, r.ActivatedAt.Time),
+		TerminatedAt: timePtr(r.TerminatedAt.Valid, r.TerminatedAt.Time),
 
 		TerminationReason: r.TerminationReason,
 		SchedulesSummary: schedulesSummary{

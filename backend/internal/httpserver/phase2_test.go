@@ -254,6 +254,118 @@ func TestPaymentPeriodConstraints(t *testing.T) {
 	}
 }
 
+// recommendedOf returns the labels of the periods carrying the badge.
+func recommendedOf(t *testing.T, items []map[string]any) []string {
+	t.Helper()
+	var out []string
+	for _, p := range items {
+		if rec, _ := p["is_recommended"].(bool); rec {
+			label, _ := p["label"].(string)
+			out = append(out, label)
+		}
+	}
+	return out
+}
+
+// TestRecommendedPaymentPeriodIsExclusive covers PLAN2 #8: the "Recommended"
+// badge is a landlord saying "choose this one", which is only information while
+// exactly one period carries it. Before Part 2 all four bootstrap presets were
+// flagged, so the badge appeared on every row and meant nothing.
+func TestRecommendedPaymentPeriodIsExclusive(t *testing.T) {
+	h := newHarness(t)
+	owner, _ := h.createOrg("Badge Ltd", "Owner", "badge@jjne.test", "0712000209", "supersecret")
+
+	items := listOf(t, owner.do(http.MethodGet, "/org/payment-periods", nil).
+		mustStatus(t, http.StatusOK, "list periods"))
+	if got := recommendedOf(t, items); len(got) != 1 || got[0] != "Monthly" {
+		t.Fatalf("bootstrap recommended periods = %v, want exactly [Monthly]", got)
+	}
+
+	byLabel := map[string]string{}
+	for _, p := range items {
+		label, _ := p["label"].(string)
+		id, _ := p["id"].(string)
+		byLabel[label] = id
+	}
+
+	// PATCH cannot move the badge: the field is not part of its body, and the
+	// decoder refuses unknown keys rather than dropping them silently.
+	owner.do(http.MethodPatch, "/org/payment-periods/"+byLabel["Quarterly"],
+		map[string]any{"is_recommended": true}).
+		mustStatus(t, http.StatusBadRequest, "PATCH is_recommended")
+
+	// The dedicated endpoint moves it, and the response is the same `{period}`
+	// shape PATCH returns.
+	moved := owner.do(http.MethodPost, "/org/payment-periods/"+byLabel["Quarterly"]+"/recommend", nil).
+		mustStatus(t, http.StatusOK, "recommend Quarterly")
+	if rec, _ := moved.Body["period"].(map[string]any)["is_recommended"].(bool); !rec {
+		t.Errorf("recommended period is not flagged: %s", moved.Raw)
+	}
+	if got := recommendedOf(t, listOf(t, owner.do(http.MethodGet, "/org/payment-periods", nil))); len(got) != 1 || got[0] != "Quarterly" {
+		t.Fatalf("recommended periods = %v, want exactly [Quarterly]", got)
+	}
+
+	// Idempotent: recommending the period that already has the badge is a
+	// no-op, not a unique-index violation.
+	owner.do(http.MethodPost, "/org/payment-periods/"+byLabel["Quarterly"]+"/recommend", nil).
+		mustStatus(t, http.StatusOK, "recommend Quarterly again")
+	if got := recommendedOf(t, listOf(t, owner.do(http.MethodGet, "/org/payment-periods", nil))); len(got) != 1 {
+		t.Fatalf("recommended periods after a repeat = %v, want one", got)
+	}
+
+	// And back.
+	owner.do(http.MethodPost, "/org/payment-periods/"+byLabel["Monthly"]+"/recommend", nil).
+		mustStatus(t, http.StatusOK, "recommend Monthly")
+	if got := recommendedOf(t, listOf(t, owner.do(http.MethodGet, "/org/payment-periods", nil))); len(got) != 1 || got[0] != "Monthly" {
+		t.Fatalf("recommended periods = %v, want exactly [Monthly]", got)
+	}
+
+	// A period nobody is offered cannot be the one the landlord recommends.
+	owner.do(http.MethodDelete, "/org/payment-periods/"+byLabel["Yearly"], nil).
+		mustStatus(t, http.StatusNoContent, "deactivate Yearly")
+	owner.do(http.MethodPost, "/org/payment-periods/"+byLabel["Yearly"]+"/recommend", nil).
+		mustStatus(t, http.StatusConflict, "recommend an inactive period")
+
+	// Unknown and malformed ids are 404, like every other period route.
+	owner.do(http.MethodPost, "/org/payment-periods/00000000-0000-0000-0000-000000000000/recommend", nil).
+		mustStatus(t, http.StatusNotFound, "recommend an unknown period")
+	owner.do(http.MethodPost, "/org/payment-periods/not-a-uuid/recommend", nil).
+		mustStatus(t, http.StatusNotFound, "recommend a malformed id")
+
+	// The move is audited with both sides of it, so the trail says which period
+	// lost the badge as well as which gained it.
+	log := owner.do(http.MethodGet, "/audit-log", nil).mustStatus(t, http.StatusOK, "audit log")
+	entries, _ := log.Body["items"].([]any)
+	found := false
+	for _, raw := range entries {
+		m, ok := raw.(map[string]any)
+		if !ok || m["action"] != "payment_period.recommend" {
+			continue
+		}
+		found = true
+		before, _ := m["before"].(map[string]any)
+		after, _ := m["after"].(map[string]any)
+		if before == nil || after == nil {
+			t.Fatalf("payment_period.recommend carries no before/after: %v", m)
+		}
+		if before["recommended_period_id"] == after["recommended_period_id"] {
+			t.Errorf("audit before and after name the same period: %v", m)
+		}
+		break
+	}
+	if !found {
+		t.Errorf("no payment_period.recommend audit row: %s", log.Raw)
+	}
+
+	// restore-recommended recreates missing presets but must never mint a
+	// second badge.
+	owner.do(http.MethodPost, "/org/payment-periods/restore-recommended", nil).
+		mustStatus(t, http.StatusOK, "restore recommended")
+	if got := recommendedOf(t, listOf(t, owner.do(http.MethodGet, "/org/payment-periods", nil))); len(got) != 1 {
+		t.Fatalf("recommended periods after restore = %v, want exactly one", got)
+	}
+}
+
 // ---------------------------------------------- properties, units, status --
 
 func TestPropertyAndUnitCRUD(t *testing.T) {

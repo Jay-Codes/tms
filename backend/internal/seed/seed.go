@@ -61,15 +61,17 @@ const (
 )
 
 // recommendedPeriods mirrors httpserver's org bootstrap: every org starts with
-// the four recommended payment periods.
+// the four preset payment periods, of which exactly one — Monthly — carries the
+// "Recommended" badge (PLAN2 #8; migration 000012 enforces the one-per-org rule).
 var recommendedPeriods = []struct {
-	label string
-	days  int32
+	label       string
+	days        int32
+	recommended bool
 }{
-	{"Monthly", 30},
-	{"Quarterly", 90},
-	{"Half-year", 180},
-	{"Yearly", 365},
+	{"Monthly", 30, true},
+	{"Quarterly", 90, false},
+	{"Half-year", 180, false},
+	{"Yearly", 365, false},
 }
 
 // Seeder writes seed data against one database.
@@ -250,7 +252,7 @@ func (s *Seeder) ensureOrg(ctx context.Context, name, slug, ownerName, ownerEmai
 			for i, p := range recommendedPeriods {
 				if _, err := q.CreatePaymentPeriod(ctx, sqlc.CreatePaymentPeriodParams{
 					OrgID: org.ID, Label: p.label, Days: p.days,
-					IsRecommended: true, SortOrder: int32(i + 1),
+					IsRecommended: p.recommended, SortOrder: int32(i + 1),
 				}); err != nil {
 					return err
 				}
@@ -546,10 +548,15 @@ func (s *Seeder) ensureContract(ctx context.Context, spec contractSpec) (contrac
 	start := spec.start.UTC().Truncate(24 * time.Hour)
 	end := contract.EndDate(start, int(spec.termDays))
 	terms := contract.Render(contract.SanitizeHTML(contract.DefaultTemplateBody), map[string]string{
-		"renter_name":    spec.renter.FullName,
-		"unit":           spec.unit.unit.Name,
-		"property":       spec.unit.property.Name,
-		"rent":           notify.FormatTZS(spec.unit.price),
+		"renter_name": spec.renter.FullName,
+		"unit":        spec.unit.unit.Name,
+		"property":    spec.unit.property.Name,
+		// The document states what falls due each payment period, with the
+		// unit's own price beside it (PLAN2 Phase 9).
+		"rent": notify.FormatTZS(contract.RentPerPeriod(
+			spec.unit.price, int(spec.unit.periodDays), int(spec.period.Days))),
+		"rent_basis": contract.RentBasisPhrase(
+			notify.FormatTZS(spec.unit.price), int(spec.unit.periodDays)),
 		"start_date":     start.Format(DateLayout),
 		"end_date":       end.Format(DateLayout),
 		"payment_period": fmt.Sprintf("%s (%d days)", spec.period.Label, spec.period.Days),

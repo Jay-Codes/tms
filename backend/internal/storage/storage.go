@@ -20,6 +20,10 @@ const (
 	BucketQR         = "qrcodes"
 	BucketKYC        = "kyc"
 	BucketSignatures = "signatures"
+	// BucketReceipts holds expense receipts (PLAN2 Phase 10, key
+	// `{org_id}/{expense_id}.{ext}`). Created in Phase 9 so the bucket exists
+	// before the endpoints that write to it.
+	BucketReceipts = "receipts"
 )
 
 // minioRegion is the region presigned URLs are signed for. MinIO serves a

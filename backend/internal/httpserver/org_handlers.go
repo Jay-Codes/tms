@@ -18,19 +18,26 @@ import (
 	"tms/backend/internal/validate"
 )
 
-// seededPeriod is one of the recommended payment periods every new org gets
-// (SPEC §4: 30 / 90 / 180 / 365 days, flagged recommended and shown first).
+// seededPeriod is one of the payment periods every new org is bootstrapped
+// with (SPEC §4: 30 / 90 / 180 / 365 days).
+//
+// Exactly one of them carries the "Recommended" badge — Monthly, until the
+// landlord moves it with POST /org/payment-periods/{id}/recommend. The other
+// three are presets: offered, restorable, unbadged. A badge on all four told
+// the renter nothing (PLAN2 #8), and migration 000012's partial unique index
+// now makes a second recommended period impossible.
 type seededPeriod struct {
-	label string
-	days  int32
+	label       string
+	days        int32
+	recommended bool
 }
 
 //nolint:gochecknoglobals // fixed product data, not configuration
 var recommendedPeriods = []seededPeriod{
-	{"Monthly", 30},
-	{"Quarterly", 90},
-	{"Half-year", 180},
-	{"Yearly", 365},
+	{"Monthly", 30, true},
+	{"Quarterly", 90, false},
+	{"Half-year", 180, false},
+	{"Yearly", 365, false},
 }
 
 // ------------------------------------------------------------- POST /orgs --
@@ -136,7 +143,7 @@ func (s *Server) handleCreateOrg(w http.ResponseWriter, r *http.Request) {
 				OrgID:         org.ID,
 				Label:         p.label,
 				Days:          p.days,
-				IsRecommended: true,
+				IsRecommended: p.recommended,
 				SortOrder:     int32(i + 1),
 			}); err != nil {
 				return err
