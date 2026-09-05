@@ -71,3 +71,12 @@
 - Verified live: settings save + 400 on unknown variable; custom SMS → log SENT with sender `JJNE`; admin job with date overrides queued reminder_7d / reminder_due (dedupe on re-run).
 
 **Deferred:** live Beem smoke (no credentials — set `BEEM_API_KEY/BEEM_SECRET_KEY/BEEM_SENDER_ID` in `.env`, `make api-restart`, send a custom message). Queued messages of a later-suspended org still send (small window).
+
+## 2026-09-05 — Phase 7: Reports, branding, admin app, PWA ✅
+
+**Shipped**
+- Backend: migration `000009_phase7`; reports (summary, payment-status json+CSV w/ formula neutralisation, collections buckets), dashboard_prefs validation, platform admin (orgs list/detail, suspend/activate w/ Redis flag + DB fallback, metrics, cross-org audit search, jobs); suspension enforced on org routes, public 404, scheduler/claim skip.
+- Tenant: Reports (Overview / Payment status + CSV / Collections SVG chart), dashboard cards ordered by prefs + Customize sheet, audit filters + diff expander, PWA (manifest, sw.js, icons). Admin app: login, metrics, orgs, suspend/activate, audit search, jobs runner, PWA. Enduser: PWA + install banner + org theme sync on protected pages.
+- Verified live: reports numbers for JJnE (2 props, 7 units, 33% occupancy), CSV download, dashboard customize persisted, admin suspended/activated Org B, audit search shows both events.
+
+**Carried to Phase 8:** `units`/`renters` `q` ILIKE wildcard escaping; global `audit_log(at,id)` index; shared tz package; `PUT /org/branding` dashboard_prefs replace semantics doc.

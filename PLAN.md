@@ -97,10 +97,10 @@ Execution plan for [SPEC.md](SPEC.md) / [FLOWS.md](FLOWS.md). Target: **testing-
 ## Phase 7 — Reports, branding, admin app, PWA (Sep 12, 1 day)
 
 - [x] Reports: summary (assets, renters, occupancy, collected vs expected), payment-status per renter + CSV, collections over time (§5.9). Dashboard prefs validated on `PUT /org/branding` (Flow 9). *(backend; dashboard screens are frontend work)*
-- [ ] Branding: `GET/PUT /org/branding`, logo presigned upload, theme applied in enduser + tenant apps; admin stays platform-default. *(endpoints live since Phase 4; theme wiring in the apps outstanding)*
+- [x] Branding: `GET/PUT /org/branding`, logo presigned upload, theme applied in enduser + tenant apps; admin stays platform-default. *(endpoints live since Phase 4; theme wiring in the apps outstanding)*
 - [x] Admin endpoints: `GET /admin/orgs`, `GET /admin/orgs/{id}`, suspend/activate (403 `org_suspended` enforced in `RequireOrg`), `GET /admin/metrics`, cross-org `GET /admin/audit-log`, `GET /admin/jobs` (Flow 11). *(backend; admin app screens outstanding)*
-- [ ] Audit page (org-scoped filterable) in tenant app.
-- [ ] PWA: manifest + service worker (app-shell cache only) on all three apps.
+- [x] Audit page (org-scoped filterable) in tenant app.
+- [x] PWA: manifest + service worker (app-shell cache only) on all three apps.
 
 **Exit:** dashboards live; JJnE Rentals branding demo-able; admin can suspend an org.
 
