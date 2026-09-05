@@ -114,3 +114,35 @@ func assertDates(t *testing.T, what string, got []time.Time, want []string) {
 		}
 	}
 }
+
+// TestCSVCell: a cell opening with a formula character is defused, everything
+// else is passed through byte for byte.
+func TestCSVCell(t *testing.T) {
+	cases := map[string]string{
+		"":                    "",
+		"Asha Mollel":         "Asha Mollel",
+		"=1+1":                "'=1+1",
+		"+255716000001":       "'+255716000001",
+		"-2":                  "'-2",
+		"@SUM(A1)":            "'@SUM(A1)",
+		"\tstart":             "'\tstart",
+		"\rstart":             "'\rstart",
+		"Block B, \"annexe\"": "Block B, \"annexe\"",
+		"a=b":                 "a=b",
+	}
+	for in, want := range cases {
+		if got := report.CSVCell(in); got != want {
+			t.Errorf("CSVCell(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestBucketsStopJustPastTheCap: the handler rejects an over-long range, but it
+// must not have to materialise a million-element slice to find that out.
+func TestBucketsStopJustPastTheCap(t *testing.T) {
+	from := time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC)
+	if got := len(report.Buckets(from, to, report.GroupDay)); got != report.MaxBuckets+1 {
+		t.Errorf("Buckets over an absurd range returned %d, want %d", got, report.MaxBuckets+1)
+	}
+}

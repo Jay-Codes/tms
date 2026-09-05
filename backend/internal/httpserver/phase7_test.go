@@ -6,12 +6,14 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"tms/backend/internal/auth"
 	"tms/backend/internal/db"
 	"tms/backend/internal/httpserver"
 	"tms/backend/internal/notify"
@@ -26,6 +28,7 @@ import (
 type reportFixture struct {
 	owner       *client
 	orgID       string
+	propertyID  string // property A, for the cross-org `property_id` filter
 	unitIDs     []string
 	unitCodes   []string
 	paidRenter  *client
@@ -45,7 +48,7 @@ func (h *harness) newReportFixture(t *testing.T, tag, ownerPhone, phoneA, phoneB
 	base := h.newOrgWithUnits(tag, strings.ToLower(tag)+"@jjne.test", ownerPhone,
 		[]string{"A1", "A2"}, testUnitAmount)
 	out := reportFixture{
-		owner: base.client, orgID: base.orgID,
+		owner: base.client, orgID: base.orgID, propertyID: base.propertyID,
 		unitIDs: base.unitIDs, unitCodes: base.unitCodes,
 		paidRenterN: tag + " Settled", lateRenterN: tag + " Late",
 	}
@@ -438,7 +441,7 @@ func TestReportsAreOwnOrgOnly(t *testing.T) {
 	// A property id belonging to another org filters to nothing, never to a
 	// leak or a 500.
 	filtered := arrayOf(t, b.client.do(http.MethodGet,
-		"/reports/payment-status?property_id="+a.unitIDs[0], nil).
+		"/reports/payment-status?property_id="+a.propertyID, nil).
 		mustStatus(t, http.StatusOK, "cross-org property filter"), "items")
 	if len(filtered) != 0 {
 		t.Errorf("a cross-org property_id returned %d rows", len(filtered))
@@ -829,5 +832,140 @@ func TestSuspendedOrgMessagesAreNotClaimed(t *testing.T) {
 	}
 	if _, err := h.queries().ClaimNotification(context.Background(), db.MustUUID(id)); err != nil {
 		t.Errorf("claim after reactivation: %v", err)
+	}
+}
+
+// ------------------------------------------------- Phase 7 review additions --
+
+// TestReportCSVNeutralisesFormulaInjection: a renter or a property can be named
+// anything, and a CSV cell opening with `=`, `+`, `-` or `@` is a live formula
+// the moment the landlord double-clicks the download. Every free-text cell is
+// prefixed with an apostrophe; commas, quotes and newlines stay `encoding/csv`'s
+// problem and must survive a round trip through a CSV reader.
+func TestReportCSVNeutralisesFormulaInjection(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newReportFixture(t, "Inj", "0716000900", "+255716000901", "+255716000902")
+
+	const evilName = `=cmd|' /c calc'!A1`
+	const evilProperty = "Blo,ck \"B\"\nrow two"
+	if _, err := h.pool.Exec(context.Background(),
+		`UPDATE users SET full_name = $2 WHERE id =
+		   (SELECT renter_user_id FROM contracts WHERE id = $1)`,
+		fix.lateLink, evilName); err != nil {
+		t.Fatalf("rename renter: %v", err)
+	}
+	if _, err := h.pool.Exec(context.Background(),
+		`UPDATE properties SET name = $2 WHERE org_id = $1 AND name LIKE '%Block B'`,
+		fix.orgID, evilProperty); err != nil {
+		t.Fatalf("rename property: %v", err)
+	}
+
+	rec := fix.owner.raw(http.MethodGet, "/reports/payment-status?format=csv")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("csv export: status = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	records, err := csv.NewReader(strings.NewReader(rec.Body.String())).ReadAll()
+	if err != nil {
+		t.Fatalf("parse csv: %v — body: %s", err, rec.Body.String())
+	}
+
+	var sawName, sawProperty bool
+	for _, row := range records[1:] {
+		if row[0] == "'"+evilName {
+			sawName = true
+		}
+		if row[0] == evilName {
+			t.Errorf("a formula reached the export unescaped: %q", row[0])
+		}
+		// The comma/quote/newline property name round-trips exactly: the CSV
+		// writer quoted it, and it does not open with a formula character.
+		if row[2] == evilProperty {
+			sawProperty = true
+		}
+		// A `+`-prefixed phone is a formula to a spreadsheet too.
+		if strings.HasPrefix(row[1], "+") {
+			t.Errorf("a +phone reached the export unescaped: %q", row[1])
+		}
+	}
+	if !sawName {
+		t.Errorf("no apostrophe-prefixed renter name in the export: %v", records)
+	}
+	if !sawProperty {
+		t.Errorf("the comma/quote/newline property name did not round-trip: %v", records)
+	}
+}
+
+// TestReportPaymentStatusRejectsAnAbsurdRange: `from`/`to` are free-form dates,
+// so the bucket cap has to be reached without first enumerating a few million
+// days into a slice.
+func TestReportCollectionsRejectsAnAbsurdRange(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newOrgWithUnits("Span", "span@jjne.test", "0716000910", nil, 0)
+
+	bad := fix.client.do(http.MethodGet,
+		"/reports/collections?from=0001-01-01&to=9999-12-31&group=day", nil).
+		mustStatus(t, http.StatusBadRequest, "absurd day range")
+	if errs, _ := bad.Body["errors"].(map[string]any); errs["group"] == nil {
+		t.Errorf("the range was refused without naming `group`: %v", bad.Body)
+	}
+	fix.client.do(http.MethodGet, "/reports/collections?from=2026-01-01&to=2026-03-31&group=day", nil).
+		mustStatus(t, http.StatusOK, "a sane day range")
+}
+
+// TestSuspensionSurvivesAColdCache: the Redis flag is a cache, not the truth.
+// With the flag gone — an evicted key, a restarted Redis — the org route still
+// has to answer 403 from the `orgs.status` fallback.
+func TestSuspensionSurvivesAColdCache(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newOrgWithUnits("Cold", "cold@jjne.test", "0716000920", nil, 0)
+	admin := h.adminClient(t)
+
+	admin.do(http.MethodPost, "/admin/orgs/"+fix.orgID+"/suspend",
+		map[string]any{"reason": "cache test"}).mustStatus(t, http.StatusOK, "suspend")
+
+	ctx := context.Background()
+	if err := h.redis.Del(ctx, auth.SuspensionKey(fix.orgID)).Err(); err != nil {
+		t.Fatalf("drop the suspension flag: %v", err)
+	}
+	locked := fix.client.do(http.MethodGet, "/org", nil).
+		mustStatus(t, http.StatusForbidden, "suspended org with a cold cache")
+	if got := locked.Body["type"]; got != "org_suspended" {
+		t.Errorf("cold-cache lockout type = %v, want org_suspended", got)
+	}
+
+	// Activation clears the flag as well as the column: the very next request
+	// is served, without waiting out the cache TTL.
+	admin.do(http.MethodPost, "/admin/orgs/"+fix.orgID+"/activate", nil).
+		mustStatus(t, http.StatusOK, "activate")
+	fix.client.do(http.MethodGet, "/org", nil).
+		mustStatus(t, http.StatusOK, "activated org, warm flag")
+	if v, err := h.redis.Get(ctx, auth.SuspensionKey(fix.orgID)).Result(); err != nil || v != "0" {
+		t.Errorf("activation left the cached flag at %q (err %v), want \"0\"", v, err)
+	}
+}
+
+// TestAdminSearchTreatsWildcardsAsText: `q` is wrapped as `%q%`, so a `%` or a
+// `_` an operator types has to match itself rather than silently widening the
+// search to everything.
+func TestAdminSearchTreatsWildcardsAsText(t *testing.T) {
+	h := newHarness(t)
+	h.newOrgWithUnits("WildOne", "wild1@jjne.test", "0716000930", nil, 0)
+	h.newOrgWithUnits("WildTwo", "wild2@jjne.test", "0716000931", nil, 0)
+	admin := h.adminClient(t)
+
+	for _, q := range []string{"%", "_", `\`, "Wild%One"} {
+		got := arrayOf(t, admin.do(http.MethodGet, "/admin/orgs?q="+url.QueryEscape(q), nil).
+			mustStatus(t, http.StatusOK, "org search for "+q), "items")
+		if len(got) != 0 {
+			t.Errorf("q=%q matched %d orgs, want none — the wildcard was not escaped", q, len(got))
+		}
+	}
+	if got := arrayOf(t, admin.do(http.MethodGet, "/admin/audit-log?q="+url.QueryEscape("%"), nil).
+		mustStatus(t, http.StatusOK, "audit search for %"), "items"); len(got) != 0 {
+		t.Errorf("audit q=%% matched %d rows, want none", len(got))
+	}
+	if got := arrayOf(t, admin.do(http.MethodGet, "/admin/orgs?q=WildOne", nil).
+		mustStatus(t, http.StatusOK, "plain org search"), "items"); len(got) != 1 {
+		t.Errorf("a plain search matched %d orgs, want 1", len(got))
 	}
 }

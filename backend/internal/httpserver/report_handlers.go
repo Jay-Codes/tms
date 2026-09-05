@@ -267,8 +267,12 @@ func writePaymentStatusCSV(w http.ResponseWriter, items []paymentStatusRow) {
 	rec := make([]string, len(paymentStatusCSVHeader))
 	_ = cw.Write(paymentStatusCSVHeader)
 	for _, it := range items {
-		rec[0], rec[1] = it.RenterName, it.Phone
-		rec[2], rec[3] = it.PropertyName, it.UnitName
+		// Every free-text cell is defused before it is written: a renter or a
+		// property named `=HYPERLINK(...)` is a formula the landlord's
+		// spreadsheet would run on open. Commas, quotes and newlines are
+		// `encoding/csv`'s job.
+		rec[0], rec[1] = report.CSVCell(it.RenterName), report.CSVCell(it.Phone)
+		rec[2], rec[3] = report.CSVCell(it.PropertyName), report.CSVCell(it.UnitName)
 		rec[4] = it.Status
 		rec[5], rec[6] = "", ""
 		if it.NextDueDate != nil {
@@ -328,8 +332,8 @@ func (s *Server) handleReportCollections(w http.ResponseWriter, r *http.Request)
 	}
 	buckets := report.Buckets(from, to, group)
 	if f.Empty() && len(buckets) > report.MaxBuckets {
-		f.Add("group", "the range is too long for this grouping — "+
-			strconv.Itoa(len(buckets))+" buckets, at most "+strconv.Itoa(report.MaxBuckets))
+		f.Add("group", "the range is too long for this grouping — at most "+
+			strconv.Itoa(report.MaxBuckets)+" buckets; narrow the range or group more coarsely")
 	}
 	if !f.Empty() {
 		badRequest(w, f)

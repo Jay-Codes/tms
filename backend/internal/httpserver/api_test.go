@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"testing"
 
+	"tms/backend/internal/cache"
 	"tms/backend/internal/config"
 	"tms/backend/internal/db"
 	"tms/backend/internal/httpserver"
@@ -23,6 +24,7 @@ type harness struct {
 	sms   *testutil.SMSCapture
 	email *testutil.EmailCapture
 	pool  *db.Pool
+	redis *cache.Client
 	// store is nil when MinIO is unreachable; the QR tests skip in that case.
 	store *storage.Client
 }
@@ -48,7 +50,7 @@ func newHarness(t *testing.T) *harness {
 		DB: pool, Redis: redis, Pool: pool, Cache: redis, SMS: sms, Email: email, Storage: store,
 	}, testutil.Logger())
 
-	return &harness{t: t, srv: srv, sms: sms, email: email, pool: pool, store: store}
+	return &harness{t: t, srv: srv, sms: sms, email: email, pool: pool, redis: redis, store: store}
 }
 
 // client is one browser: it keeps the cookies the server sets.

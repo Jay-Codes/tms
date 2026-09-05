@@ -2,6 +2,7 @@ package report
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -125,14 +126,21 @@ func TruncBucket(d time.Time, group string) time.Time {
 // Buckets enumerates every bucket start from `from` to `to` inclusive, so a
 // month in which nothing happened is reported as a zero rather than as a gap in
 // the series.
+//
+// It stops one past MaxBuckets: the caller rejects an over-long range anyway,
+// and `from=0001-01-01&to=9999-12-31&group=day` must not build a three-million
+// element slice before that rejection.
 func Buckets(from, to time.Time, group string) []time.Time {
 	if to.Before(from) {
 		return nil
 	}
-	var out []time.Time
+	out := make([]time.Time, 0, MaxBuckets+1)
 	cur := TruncBucket(from, group)
 	last := TruncBucket(to, group)
 	for !cur.After(last) {
+		if len(out) > MaxBuckets {
+			return out
+		}
 		out = append(out, cur)
 		switch group {
 		case GroupMonth:
@@ -149,3 +157,26 @@ func Buckets(from, to time.Time, group string) []time.Time {
 // MaxBuckets caps a collections series. A day-grouped decade would be four
 // thousand points nobody reads and one response nobody wants to parse.
 const MaxBuckets = 400
+
+// ------------------------------------------------------------------- CSV --
+
+// csvInjectionPrefixes are the characters a spreadsheet reads as the start of a
+// formula. A renter called `=cmd|'/c calc'!A1` is a live payload in Excel,
+// LibreOffice and Sheets the moment a landlord opens the export.
+const csvInjectionPrefixes = "=+-@\t\r"
+
+// CSVCell neutralises formula injection in one exported cell.
+//
+// The value is prefixed with an apostrophe when it opens with a character a
+// spreadsheet treats as a formula, which every spreadsheet then shows as the
+// literal text. Quoting, commas, quotes and newlines are `encoding/csv`'s job
+// and are left to it — this only defuses the cell's *first* character.
+func CSVCell(v string) string {
+	if v == "" {
+		return v
+	}
+	if strings.ContainsRune(csvInjectionPrefixes, rune(v[0])) {
+		return "'" + v
+	}
+	return v
+}

@@ -45,6 +45,18 @@ var adminJobs = []adminJobRow{
 	},
 }
 
+// likeEscaper neutralises the LIKE metacharacters in a user-typed search term.
+// The queries wrap `q` as `'%' || q || '%'`, so an unescaped `%` or `_` would
+// silently turn a search into a wildcard the operator did not ask for.
+// Backslash goes first: it is Postgres' default LIKE escape character, so it
+// has to be doubled before it is used to escape anything else.
+//
+//nolint:gochecknoglobals // stateless replacer, safe for concurrent use.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// escapeLike prepares a search term for the `ILIKE '%' || $1 || '%'` filters.
+func escapeLike(q string) string { return likeEscaper.Replace(q) }
+
 // toAdminOrgRow renders one org list row.
 func toAdminOrgRow(row sqlc.AdminListOrgsPageRow) adminOrgRow {
 	out := adminOrgRow{
@@ -81,7 +93,8 @@ func (s *Server) handleAdminListOrgs(w http.ResponseWriter, r *http.Request) {
 	params := sqlc.AdminListOrgsPageParams{RowLimit: adminOrgsDefaultLimit}
 
 	if v := strings.TrimSpace(qs.Get("q")); v != "" {
-		params.Q = &v
+		term := escapeLike(v)
+		params.Q = &term
 	}
 	if v := strings.TrimSpace(qs.Get("status")); v != "" {
 		status := f.OneOf("status", strings.ToLower(v), "active", "suspended")
@@ -351,7 +364,8 @@ func (s *Server) handleAdminAuditLog(w http.ResponseWriter, r *http.Request) {
 		params.EntityType = &v
 	}
 	if v := strings.TrimSpace(qs.Get("q")); v != "" {
-		params.Q = &v
+		term := escapeLike(v)
+		params.Q = &term
 	}
 	if v := strings.TrimSpace(qs.Get("from")); v != "" {
 		t, err := time.Parse(time.RFC3339, v)

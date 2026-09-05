@@ -96,9 +96,9 @@ Execution plan for [SPEC.md](SPEC.md) / [FLOWS.md](FLOWS.md). Target: **testing-
 
 ## Phase 7 — Reports, branding, admin app, PWA (Sep 12, 1 day)
 
-- [ ] Reports: summary (assets, renters, occupancy, collected vs expected), payment-status per renter + CSV, collections over time (§5.9). Dashboard per org prefs (Flow 9).
-- [ ] Branding: `GET/PUT /org/branding`, logo presigned upload, theme applied in enduser + tenant apps; admin stays platform-default.
-- [ ] Admin app: org list activate/suspend, platform metrics, cross-org audit search (Flow 11).
+- [x] Reports: summary (assets, renters, occupancy, collected vs expected), payment-status per renter + CSV, collections over time (§5.9). Dashboard prefs validated on `PUT /org/branding` (Flow 9). *(backend; dashboard screens are frontend work)*
+- [ ] Branding: `GET/PUT /org/branding`, logo presigned upload, theme applied in enduser + tenant apps; admin stays platform-default. *(endpoints live since Phase 4; theme wiring in the apps outstanding)*
+- [x] Admin endpoints: `GET /admin/orgs`, `GET /admin/orgs/{id}`, suspend/activate (403 `org_suspended` enforced in `RequireOrg`), `GET /admin/metrics`, cross-org `GET /admin/audit-log`, `GET /admin/jobs` (Flow 11). *(backend; admin app screens outstanding)*
 - [ ] Audit page (org-scoped filterable) in tenant app.
 - [ ] PWA: manifest + service worker (app-shell cache only) on all three apps.
 
