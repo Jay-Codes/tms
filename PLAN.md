@@ -52,7 +52,7 @@ Execution plan for [SPEC.md](SPEC.md) / [FLOWS.md](FLOWS.md). Target: **testing-
 
 ## Phase 3 — Renter onboarding, KYC, linking (Sep 8, 1 day)
 
-- [ ] `/enduser/u/{unit_code}` landing: org-branded (applyOrgTheme from public branding), unit summary, register/login CTA (Flow 2).
+- [x] `/enduser/u/{unit_code}` landing: org-branded (applyOrgTheme from public branding), unit summary, register/login CTA (Flow 2).
 - [x] KYC: `GET/PUT /me/profile` (NIDA encrypted, masked last-4 in UI), optional ID upload → presigned PUT to `kyc`. *(backend)*
 - [x] Link requests: create from scan, landlord inbox, approve/reject, auto-approve org setting; occupied-unit edge case. *(backend)*
 - [x] Renter directory + KYC view — endpoints live; tenant-app screens outstanding.

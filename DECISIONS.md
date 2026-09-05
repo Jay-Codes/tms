@@ -21,3 +21,4 @@
 | 2026-09-05 | Approving a link request leaves the unit `vacant`; `onLinkApproved(ctx, q, req)` in `link_handlers.go` is the (no-op) seam where Phase 4 creates the contract. | A unit becomes occupied when a contract activates, so an approved-then-abandoned request cannot strand it. |
 | 2026-09-05 | `notification_log` gains `to_phone`, `body`, `error`, `attempts`; the Phase 3 worker makes one attempt with no backoff. | The worker sends from a single row read; the 3-attempt retry pool is Phase 6 scope (SPEC §6). |
 | 2026-09-05 | `unit_link_requests.reason` (000002) replaced by `rejection_reason` in 000004. | Two columns for the same fact leave two places to look. |
+| 2026-09-05 | Auto-approved link requests have `decided_by_user_id` NULL (system decision). `end_date` is inclusive: `start_date + term_days − 1`. | Spec silent; matches schedule generator and renter UI. |
