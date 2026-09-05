@@ -45,6 +45,19 @@ url: ## Print the current ngrok public URL
 	done
 	@echo "routes: /enduser  /tenant  /admin"
 
+apps-restart: ## Restart only the three Next.js dev servers (keeps proxy, ngrok, api)
+	@mkdir -p $(DEVDIR)
+	@for app in enduser tenant admin; do \
+		f=$(DEVDIR)/$$app.pid; \
+		if [ -f "$$f" ]; then pkill -P "$$(cat $$f)" 2>/dev/null; kill "$$(cat $$f)" 2>/dev/null; rm -f "$$f"; fi; \
+	done; true
+	@for port in 3001 3002 3003; do lsof -ti tcp:$$port | xargs kill 2>/dev/null; true; done; sleep 1
+	@rm -rf apps/enduser/.next apps/tenant/.next apps/admin/.next
+	@nohup npm run dev --workspace apps/enduser > $(DEVDIR)/enduser.log 2>&1 & echo $$! > $(DEVDIR)/enduser.pid
+	@nohup npm run dev --workspace apps/tenant  > $(DEVDIR)/tenant.log  2>&1 & echo $$! > $(DEVDIR)/tenant.pid
+	@nohup npm run dev --workspace apps/admin   > $(DEVDIR)/admin.log   2>&1 & echo $$! > $(DEVDIR)/admin.pid
+	@echo "restarted enduser (:3001), tenant (:3002), admin (:3003)"
+
 stop: ## Stop dev servers, proxy, and ngrok
 	@for f in $(DEVDIR)/*.pid; do \
 		[ -f "$$f" ] && kill "$$(cat $$f)" 2>/dev/null; rm -f "$$f"; \
@@ -124,7 +137,7 @@ loadtest: ## Hammer the hot endpoints for 20s (needs `make seed` and a running A
 build: ## Build backend, proxy and all Next.js apps (next builds are slow)
 	@cd backend && go build ./...
 	@mkdir -p $(DEVDIR) && cd proxy && go build -o ../$(DEVDIR)/proxy-bin .
-	@npm run build --workspaces --if-present
+	@NEXT_DIST_DIR=.next-build npm run build --workspaces --if-present
 
 # -p 1 runs one package at a time: every DB-backed package truncates the SAME
 # tms_test database between tests, so packages running in parallel wipe each

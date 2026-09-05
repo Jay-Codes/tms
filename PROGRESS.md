@@ -92,3 +92,23 @@
 - Restart ngrok (`make preview` or ngrok alone) and set `APP_BASE_URL` + `MINIO_PUBLIC_URL` in `.env`, then `make api-restart`, so QR scan URLs and presigned images resolve from phones.
 - Supply Beem creds for the live SMS smoke (PLAN Phase 6 item).
 - golangci-lint not installed locally (`brew install golangci-lint`); `make lint` falls back to `go vet`.
+
+## Phase 9 — Foundations + end-to-end fixes (5 Sep 2026) — branch `phase-9-foundations`
+
+**Shipped**
+- Docs first: SPEC §2.0/§3.2/§4/§5.1–5.13/§6/§7/§10, FLOWS 1/2/5/6/8/9 + new 12 (Expenses) and 13 (Admin templates & credits), API.md "Part 2 planned contract", 9 DECISIONS rows.
+- Nav remount fix: `<Shell>` mounted once in `apps/tenant/app/(portal)/layout.tsx` (and admin); 29 pages lost their wrapper; `useNavBadges` refreshes on focus + 60 s; ESLint `no-restricted-imports` guard forbids `Shell` in pages.
+- Responsive tenant shell: hamburger drawer + fixed bottom bar under 768 px, `TableScroll` wrapper on main tables, full-screen sheets on mobile; desktop unchanged.
+- `PeriodPicker` + pure `period.ts` helpers in `packages/ui` (9 node tests), demo on `/tenant/design-system`.
+- Backend `internal/period` resolver (month/quarter/half_year/year/custom, EAT, previous window, bucket sizing, ≤400 buckets) with table tests.
+- Single recommended period: migration 000012 data fix + partial unique index, `POST /org/payment-periods/{id}/recommend` (audited `payment_period.recommend`), bootstrap/seed/restore only badge Monthly, PATCH rejects `is_recommended`; UI "Set as recommended".
+- Rent per payment period: `contract.RentPerPeriod`, `{{rent}}` scaled, new `{{rent_basis}}`, `rent_per_period` on contract DTOs; default template sentence updated; renter document shows "TZS 300,000 / Quarterly (90 days)" + basis line.
+- Renter contract overflow fixed (app-scoped `enduser.css` + document.css: `.ledger-kv`, wrapping `.num` inside docs, nowrap dates); verified 320/375/414 with zero overflowing elements.
+- Migration 000012 also adds `users.locale`, empty `expense_categories`, `expenses`, `org_themes`, `platform_templates(+locked)`, `platform_template_versions`, `org_sms_credits`, `sms_credit_ledger` (append-only), `held_no_credit` status; `receipts` bucket in compose + proxy route.
+- `make build` now uses `NEXT_DIST_DIR=.next-build`; new `make apps-restart`.
+
+**Verified**: `make build/test/lint` green; curl: one recommended per org, recommend round-trip, audit rows; browser: tenant 375 px shell + 1280 periods page, renter contract at 375 px, no page horizontal scroll.
+
+**Incident**: `make build` (plain `next build`) overwrote the three dev servers' `.next` → 404 chunks / 500s. Fixed the Makefile and restarted only the Next.js dev servers via the new `make apps-restart` (proxy, ngrok, api untouched). Dev servers' pids in `.dev/*.pid` changed.
+
+**Deferred**: `setup` page lives inside `(portal)`; `design-system` stays outside (unauthenticated reference page). `.stamp` rotation bleeds ~2 px on the renter contract header (cosmetic, packages/ui, Phase 15 pass).
