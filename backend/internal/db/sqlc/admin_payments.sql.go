@@ -19,7 +19,7 @@ FROM orgs o
 WHERE o.id = s.org_id
   AND s.status IN ('pending', 'partial')
   AND s.deleted_at IS NULL
-  AND s.due_date + COALESCE((o.settings ->> 'grace_days')::int, 0) < CURRENT_DATE
+  AND s.due_date + COALESCE((o.settings ->> 'grace_days')::int, 3) < CURRENT_DATE
   AND ($1::uuid IS NULL OR s.org_id = $1::uuid)
 RETURNING s.id, s.org_id
 `
