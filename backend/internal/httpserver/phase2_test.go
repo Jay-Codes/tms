@@ -2,8 +2,11 @@ package httpserver_test
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -752,4 +755,238 @@ func TestPhase2RoutesRequireAnOrgSession(t *testing.T) {
 	for _, path := range []string{"/properties", "/units", "/org/payment-periods"} {
 		anon.do(http.MethodGet, path, nil).mustStatus(t, http.StatusUnauthorized, "anonymous "+path)
 	}
+}
+
+// ------------------------------------------------- Phase 2 review regressions --
+
+// TestBulkPriceIsAllOrNothing pins API.md's "one unknown/foreign unit_id → 404
+// and no prices are written": the whole batch must be one transaction, not a
+// loop that commits as it goes.
+func TestBulkPriceIsAllOrNothing(t *testing.T) {
+	h := newHarness(t)
+	a := h.newOrgWithUnits("Atomic Ltd", "atomic@jjne.test", "0712000220",
+		[]string{"Room 1", "Room 2"}, 250_000)
+	b := h.newOrgWithUnits("Foreign Ltd", "foreign-bulk@jjne.test", "0712000221",
+		[]string{"Room 1"}, 100_000)
+
+	before := len(listOf(t, a.client.do(http.MethodGet, "/units/"+a.unitIDs[0]+"/prices", nil)))
+
+	// The foreign id sits LAST, so a per-row implementation would already have
+	// written the first unit's new price before noticing.
+	a.client.do(http.MethodPost, "/units/bulk-price", map[string]any{
+		"unit_ids": []string{a.unitIDs[0], a.unitIDs[1], b.unitIDs[0]},
+		"mode":     "set", "value": 999_000,
+	}).mustStatus(t, http.StatusNotFound, "bulk price with a foreign unit id")
+
+	for i, id := range a.unitIDs {
+		history := listOf(t, a.client.do(http.MethodGet, "/units/"+id+"/prices", nil))
+		if len(history) != before {
+			t.Errorf("unit %d has %d price rows after a rejected bulk update, want %d",
+				i, len(history), before)
+		}
+		unit := a.client.do(http.MethodGet, "/units/"+id, nil).mustStatus(t, http.StatusOK, "get unit")
+		if got := num(t, unit, "unit", "current_price", "amount"); got != 250_000 {
+			t.Errorf("unit %d current_price = %v after a rejected bulk update, want 250000", i, got)
+		}
+	}
+
+	// Same rule for the 409: a percentage cannot apply to a unit with no price,
+	// and the units before it in the list must stay untouched.
+	unpriced := a.client.do(http.MethodPost, "/properties/"+a.propertyID+"/units",
+		map[string]any{"name": "Room 3 (no price)"}).
+		mustStatus(t, http.StatusCreated, "create unpriced unit").str(t, "unit", "id")
+
+	a.client.do(http.MethodPost, "/units/bulk-price", map[string]any{
+		"unit_ids": []string{a.unitIDs[0], unpriced}, "mode": "percent", "value": 10,
+	}).mustStatus(t, http.StatusConflict, "percent on a unit with no price")
+
+	unit := a.client.do(http.MethodGet, "/units/"+a.unitIDs[0], nil).mustStatus(t, http.StatusOK, "get unit")
+	if got := num(t, unit, "unit", "current_price", "amount"); got != 250_000 {
+		t.Errorf("current_price = %v after a rejected percent batch, want 250000", got)
+	}
+}
+
+// TestPublicUnitHiddenAfterSoftDelete: a deleted unit — and every unit of a
+// deleted property — must stop resolving publicly, or its sticker outlives it.
+func TestPublicUnitHiddenAfterSoftDelete(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newOrgWithUnits("Gone Ltd", "gone@jjne.test", "0712000222",
+		[]string{"Room 1", "Room 2"}, 250_000)
+	anon := h.client()
+
+	anon.do(http.MethodGet, "/public/units/"+fix.unitCodes[0], nil).
+		mustStatus(t, http.StatusOK, "unit resolves before deletion")
+
+	fix.client.do(http.MethodDelete, "/units/"+fix.unitIDs[0], nil).
+		mustStatus(t, http.StatusNoContent, "delete unit")
+	anon.do(http.MethodGet, "/public/units/"+fix.unitCodes[0], nil).
+		mustStatus(t, http.StatusNotFound, "deleted unit is gone publicly")
+	fix.client.do(http.MethodGet, "/units/"+fix.unitIDs[0], nil).
+		mustStatus(t, http.StatusNotFound, "deleted unit is gone for the landlord too")
+
+	// Deleting the property takes its remaining units with it.
+	fix.client.do(http.MethodDelete, "/properties/"+fix.propertyID, nil).
+		mustStatus(t, http.StatusNoContent, "delete property")
+	anon.do(http.MethodGet, "/public/units/"+fix.unitCodes[1], nil).
+		mustStatus(t, http.StatusNotFound, "unit of a deleted property is gone publicly")
+	units := listOf(t, fix.client.do(http.MethodGet, "/units", nil).
+		mustStatus(t, http.StatusOK, "vacancy board"))
+	if len(units) != 0 {
+		t.Errorf("vacancy board still lists %d units of a deleted property", len(units))
+	}
+}
+
+// TestPublicUnitIsCaseInsensitiveAndCarriesNoPII pins the two properties the
+// sticker endpoint must have: a hand-typed code resolves whatever its case,
+// and the payload never grows renter- or contract-shaped fields.
+func TestPublicUnitIsCaseInsensitiveAndCarriesNoPII(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newOrgWithUnits("Sticker Ltd", "sticker@jjne.test", "0712000223",
+		[]string{"Room 1"}, 250_000)
+	anon := h.client()
+
+	resp := anon.do(http.MethodGet, "/public/units/"+strings.ToLower(fix.unitCodes[0]), nil).
+		mustStatus(t, http.StatusOK, "lower-case unit code")
+
+	for _, key := range []string{
+		"renter", "renter_name", "tenant", "contract", "contracts", "phone",
+		"email", "owner", "user", "org_user", "notes",
+	} {
+		if _, present := resp.Body[key]; present {
+			t.Errorf("public unit payload exposes %q", key)
+		}
+	}
+	unit, _ := resp.Body["unit"].(map[string]any)
+	for _, key := range []string{"property_id", "org_id", "status_override", "created_at"} {
+		if _, present := unit[key]; present {
+			t.Errorf("public unit block exposes internal field %q", key)
+		}
+	}
+	prop, _ := resp.Body["property"].(map[string]any)
+	if _, present := prop["id"]; present {
+		t.Error("public property block exposes the internal property id")
+	}
+}
+
+// TestPublicUnitHiddenForSuspendedOrg: suspending an org takes its stickers
+// offline (API.md), rather than leaving them serving that org's data.
+func TestPublicUnitHiddenForSuspendedOrg(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newOrgWithUnits("Suspended Ltd", "suspended@jjne.test", "0712000224",
+		[]string{"Room 1"}, 250_000)
+	anon := h.client()
+	anon.do(http.MethodGet, "/public/units/"+fix.unitCodes[0], nil).
+		mustStatus(t, http.StatusOK, "active org resolves")
+
+	if _, err := h.pool.Exec(context.Background(),
+		"UPDATE orgs SET status = 'suspended' WHERE id = $1", fix.orgID); err != nil {
+		t.Fatalf("suspend org: %v", err)
+	}
+	anon.do(http.MethodGet, "/public/units/"+fix.unitCodes[0], nil).
+		mustStatus(t, http.StatusNotFound, "suspended org's unit")
+	anon.do(http.MethodGet, "/public/orgs/"+slugOf(t, fix.client)+"/branding", nil).
+		mustStatus(t, http.StatusNotFound, "suspended org's branding")
+}
+
+// slugOf reads the caller's org slug from the session endpoint.
+func slugOf(t *testing.T, c *client) string {
+	t.Helper()
+	return c.do(http.MethodGet, "/auth/me?audience=org", nil).str(t, "org", "slug")
+}
+
+// TestListCursorTampering: a hand-edited cursor is a client mistake (400),
+// never a 500, and never a way to page across orgs.
+func TestListCursorTampering(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newOrgWithUnits("Cursor Ltd", "cursor@jjne.test", "0712000225",
+		[]string{"Room 1", "Room 2"}, 250_000)
+
+	bad := []string{
+		"not-base64!!",
+		base64.RawURLEncoding.EncodeToString([]byte("no-comma-here")),
+		base64.RawURLEncoding.EncodeToString([]byte("2026-13-45T99:99:99Z,not-a-uuid")),
+		base64.RawURLEncoding.EncodeToString([]byte("2026-01-01T00:00:00Z,not-a-uuid")),
+		base64.RawURLEncoding.EncodeToString([]byte("' OR 1=1 --,00000000-0000-0000-0000-000000000000")),
+	}
+	for _, base := range []string{"/properties", "/units"} {
+		for _, cursor := range bad {
+			fix.client.do(http.MethodGet, base+"?cursor="+url.QueryEscape(cursor), nil).
+				mustStatus(t, http.StatusBadRequest, "tampered cursor on "+base)
+		}
+		fix.client.do(http.MethodGet, base+"?limit=0", nil).
+			mustStatus(t, http.StatusBadRequest, "limit 0 on "+base)
+		fix.client.do(http.MethodGet, base+"?limit=201", nil).
+			mustStatus(t, http.StatusBadRequest, "limit 201 on "+base)
+		fix.client.do(http.MethodGet, base+"?limit=abc", nil).
+			mustStatus(t, http.StatusBadRequest, "non-numeric limit on "+base)
+	}
+
+	// A well-formed cursor still pages normally.
+	page := fix.client.do(http.MethodGet, "/units?limit=1", nil).
+		mustStatus(t, http.StatusOK, "first page")
+	next, _ := page.Body["next_cursor"].(string)
+	if next == "" {
+		t.Fatal("a full first page returned no next_cursor")
+	}
+	fix.client.do(http.MethodGet, "/units?limit=1&cursor="+url.QueryEscape(next), nil).
+		mustStatus(t, http.StatusOK, "second page")
+}
+
+// TestMoneyAndPeriodBounds keeps absurd inputs out of the price tables: the
+// public endpoint prorates amount × days in int64.
+func TestMoneyAndPeriodBounds(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newOrgWithUnits("Bounds Ltd", "bounds@jjne.test", "0712000226",
+		[]string{"Room 1"}, 250_000)
+	unitID := fix.unitIDs[0]
+
+	cases := []struct {
+		name string
+		body map[string]any
+	}{
+		{"zero amount", map[string]any{"amount": 0, "period_days": 30}},
+		{"negative amount", map[string]any{"amount": -1, "period_days": 30}},
+		{"amount at one trillion", map[string]any{"amount": 1_000_000_000_000, "period_days": 30}},
+		{"zero period", map[string]any{"amount": 1000, "period_days": 0}},
+		{"period beyond ten years", map[string]any{"amount": 1000, "period_days": 4000}},
+		{"unparsable date", map[string]any{"amount": 1000, "period_days": 30, "effective_from": "01/02/2026"}},
+		{"unknown field", map[string]any{"amount": 1000, "period_days": 30, "sneaky": 1}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fix.client.do(http.MethodPost, "/units/"+unitID+"/prices", tc.body).
+				mustStatus(t, http.StatusBadRequest, tc.name)
+		})
+	}
+
+	// The same bounds apply to the bulk endpoint's inputs.
+	fix.client.do(http.MethodPost, "/units/bulk-price", map[string]any{
+		"unit_ids": []string{unitID}, "mode": "set", "value": 5_000_000_000_000,
+	}).mustStatus(t, http.StatusBadRequest, "bulk set beyond the amount ceiling")
+	fix.client.do(http.MethodPost, "/units/bulk-price", map[string]any{
+		"unit_ids": []string{unitID}, "mode": "percent", "value": 100000,
+	}).mustStatus(t, http.StatusBadRequest, "bulk percent beyond the ceiling")
+	fix.client.do(http.MethodPost, "/units/bulk-price", map[string]any{
+		"unit_ids": []string{}, "mode": "set", "value": 1000,
+	}).mustStatus(t, http.StatusBadRequest, "empty unit_ids")
+
+	// And to the unit's inline first price and to payment periods.
+	fix.client.do(http.MethodPost, "/properties/"+fix.propertyID+"/units", map[string]any{
+		"name": "Room X", "price": map[string]any{"amount": 0, "period_days": 30},
+	}).mustStatus(t, http.StatusBadRequest, "inline price of zero")
+	fix.client.do(http.MethodPost, "/org/payment-periods", map[string]any{
+		"label": "Forever", "days": 100000,
+	}).mustStatus(t, http.StatusBadRequest, "payment period beyond ten years")
+
+	// Names are bounded too (API.md: unit 1–60, bulk list 1–200).
+	fix.client.do(http.MethodPost, "/properties/"+fix.propertyID+"/units", map[string]any{
+		"name": strings.Repeat("x", 61),
+	}).mustStatus(t, http.StatusBadRequest, "unit name over 60 characters")
+	tooMany := make([]string, 201)
+	for i := range tooMany {
+		tooMany[i] = fmt.Sprintf("Room %d", i)
+	}
+	fix.client.do(http.MethodPost, "/properties/"+fix.propertyID+"/units/bulk",
+		map[string]any{"names": tooMany}).
+		mustStatus(t, http.StatusBadRequest, "201 unit names")
 }

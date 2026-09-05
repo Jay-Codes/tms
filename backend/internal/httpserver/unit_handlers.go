@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"strings"
@@ -20,6 +21,29 @@ import (
 
 // currencyTZS is the only currency in the MVP (SPEC §4).
 const currencyTZS = "TZS"
+
+// Money and period bounds. A price is a whole number of shillings below one
+// trillion, over a period of at most ten years: the public endpoint prorates
+// (amount × days) in int64, so unbounded inputs would overflow the arithmetic
+// long before they made sense as rent.
+const (
+	amountMax     = 1_000_000_000_000 // exclusive
+	periodDaysMax = 3650
+)
+
+// checkAmount records the shared bounds for a money field.
+func checkAmount(f validate.Fields, field string, amount int64) {
+	if amount <= 0 || amount >= amountMax {
+		f.Add(field, "must be a whole number of shillings between 1 and 999,999,999,999")
+	}
+}
+
+// checkPeriodDays records the shared bounds for a period length in days.
+func checkPeriodDays(f validate.Fields, field string, days int32) {
+	if days <= 0 || days > periodDaysMax {
+		f.Add(field, "must be a whole number of days between 1 and 3650")
+	}
+}
 
 func todayDate() pgtype.Date {
 	now := time.Now().UTC()
@@ -281,13 +305,16 @@ func (s *Server) handleUnitQR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.deps.Storage == nil {
-		httpx.WriteProblem(w, http.StatusServiceUnavailable, "storage unavailable",
-			"QR codes cannot be generated right now")
+		storageUnavailable(w)
 		return
 	}
 
 	unitID := db.UUIDString(unit.ID)
 	scanURL, pngURL, err := s.generateQR(r.Context(), p.OrgIDString(), unitID, unit.UnitCode)
+	if errors.Is(err, errStorageUnavailable) {
+		storageUnavailable(w)
+		return
+	}
 	if err != nil {
 		s.serverError(w, r, "units.qr", err)
 		return
@@ -362,12 +389,8 @@ func (s *Server) handleCreatePrice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f := validate.Fields{}
-	if body.Amount <= 0 {
-		f.Add("amount", "must be a whole number greater than 0")
-	}
-	if body.PeriodDays <= 0 {
-		f.Add("period_days", "must be a whole number greater than 0")
-	}
+	checkAmount(f, "amount", body.Amount)
+	checkPeriodDays(f, "period_days", body.PeriodDays)
 	effectiveFrom := optDate(f, "effective_from", body.EffectiveFrom)
 	if !f.Empty() {
 		badRequest(w, f)
@@ -383,46 +406,55 @@ func (s *Server) handleCreatePrice(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusCreated, map[string]any{"price": price})
 }
 
-// insertPrice writes one price row plus its audit entry in a transaction.
+// insertPrice writes one price row plus its audit entry in its own transaction.
 func (s *Server) insertPrice(r *http.Request, p auth.Principal, unitID pgtype.UUID,
 	amount int64, periodDays int32, effectiveFrom pgtype.Date, action string, extra map[string]any,
 ) (priceResponse, error) {
 	var out priceResponse
 	err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
-		row, err := q.CreatePricePlan(r.Context(), sqlc.CreatePricePlanParams{
-			OrgID: p.OrgID, UnitID: unitID, Amount: amount, Currency: currencyTZS,
-			PeriodDays: periodDays, EffectiveFrom: effectiveFrom, CreatedByUserID: p.UserID,
-		})
-		if err != nil {
-			return err
-		}
-		after := map[string]any{
-			"amount": row.Amount, "period_days": row.PeriodDays,
-			"effective_from": row.EffectiveFrom.Time.Format(dateLayout),
-		}
-		for k, v := range extra {
-			after[k] = v
-		}
-		if err := audit.Record(r.Context(), q, audit.Entry{
-			OrgID:       p.OrgIDString(),
-			ActorUserID: p.UserIDString(),
-			Action:      action,
-			EntityType:  audit.EntityPricePlan,
-			EntityID:    db.UUIDString(row.ID),
-			After:       after,
-		}); err != nil {
-			return err
-		}
-		out = priceResponse{
-			ID:            db.UUIDString(row.ID),
-			Amount:        row.Amount,
-			Currency:      row.Currency,
-			PeriodDays:    row.PeriodDays,
-			EffectiveFrom: row.EffectiveFrom.Time.Format(dateLayout),
-		}
-		return nil
+		var err error
+		out, err = s.insertPriceIn(r, q, p, unitID, amount, periodDays, effectiveFrom, action, extra)
+		return err
 	})
 	return out, err
+}
+
+// insertPriceIn writes one price row plus its audit entry inside a transaction
+// the caller owns, so a bulk change is all-or-nothing.
+func (s *Server) insertPriceIn(r *http.Request, q *sqlc.Queries, p auth.Principal, unitID pgtype.UUID,
+	amount int64, periodDays int32, effectiveFrom pgtype.Date, action string, extra map[string]any,
+) (priceResponse, error) {
+	row, err := q.CreatePricePlan(r.Context(), sqlc.CreatePricePlanParams{
+		OrgID: p.OrgID, UnitID: unitID, Amount: amount, Currency: currencyTZS,
+		PeriodDays: periodDays, EffectiveFrom: effectiveFrom, CreatedByUserID: p.UserID,
+	})
+	if err != nil {
+		return priceResponse{}, err
+	}
+	after := map[string]any{
+		"amount": row.Amount, "period_days": row.PeriodDays,
+		"effective_from": row.EffectiveFrom.Time.Format(dateLayout),
+	}
+	for k, v := range extra {
+		after[k] = v
+	}
+	if err := audit.Record(r.Context(), q, audit.Entry{
+		OrgID:       p.OrgIDString(),
+		ActorUserID: p.UserIDString(),
+		Action:      action,
+		EntityType:  audit.EntityPricePlan,
+		EntityID:    db.UUIDString(row.ID),
+		After:       after,
+	}); err != nil {
+		return priceResponse{}, err
+	}
+	return priceResponse{
+		ID:            db.UUIDString(row.ID),
+		Amount:        row.Amount,
+		Currency:      row.Currency,
+		PeriodDays:    row.PeriodDays,
+		EffectiveFrom: row.EffectiveFrom.Time.Format(dateLayout),
+	}, nil
 }
 
 // -------------------------------------------------- POST /units/bulk-price --
@@ -450,14 +482,14 @@ func (s *Server) handleBulkPrice(w http.ResponseWriter, r *http.Request) {
 	}
 	unitIDs := parseUUIDList(f, "unit_ids", body.UnitIDs)
 	mode := f.OneOf("mode", body.Mode, "percent", "set")
-	if mode == "set" && body.Value <= 0 {
-		f.Add("value", "must be greater than 0")
+	if mode == "set" && (body.Value <= 0 || body.Value >= amountMax) {
+		f.Add("value", "must be an amount between 1 and 999,999,999,999")
 	}
-	if mode == "percent" && body.Value <= -100 {
-		f.Add("value", "must be greater than -100 (a price cannot go below zero)")
+	if mode == "percent" && (body.Value <= -100 || body.Value > 1000) {
+		f.Add("value", "must be between -100 (exclusive) and 1000 percent")
 	}
-	if body.PeriodDays != nil && *body.PeriodDays <= 0 {
-		f.Add("period_days", "must be a whole number greater than 0")
+	if body.PeriodDays != nil {
+		checkPeriodDays(f, "period_days", *body.PeriodDays)
 	}
 	effectiveFrom := optDate(f, "effective_from", body.EffectiveFrom)
 	if !f.Empty() {
@@ -465,12 +497,18 @@ func (s *Server) handleBulkPrice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items := make([]priceResponse, 0, len(unitIDs))
+	// Resolve and price every unit BEFORE writing anything: one unknown or
+	// foreign id (or one unit a percentage cannot apply to) must leave the
+	// whole batch unwritten (API.md → 404 / 409, nothing written).
+	type plannedPrice struct {
+		unitID     pgtype.UUID
+		amount     int64
+		periodDays int32
+	}
+	planned := make([]plannedPrice, 0, len(unitIDs))
 	for _, unitID := range unitIDs {
 		unit, err := s.q.GetUnit(r.Context(), sqlc.GetUnitParams{OrgID: p.OrgID, ID: unitID})
 		if isNoRows(err) {
-			// One foreign id fails the whole call: a partial bulk price change
-			// is worse than none.
 			notFoundUnit(w)
 			return
 		}
@@ -478,20 +516,30 @@ func (s *Server) handleBulkPrice(w http.ResponseWriter, r *http.Request) {
 			s.serverError(w, r, "prices.bulk.unit", err)
 			return
 		}
-
 		amount, periodDays, ok := s.bulkAmountFor(w, unit, mode, body.Value, body.PeriodDays)
 		if !ok {
 			return
 		}
-		price, err := s.insertPrice(r, p, unit.ID, amount, periodDays, effectiveFrom,
-			audit.ActionPriceBulkUpdate, map[string]any{
-				"unit_id": db.UUIDString(unit.ID), "mode": mode, "value": body.Value,
-			})
-		if err != nil {
-			s.serverError(w, r, "prices.bulk.tx", err)
-			return
+		planned = append(planned, plannedPrice{unitID: unit.ID, amount: amount, periodDays: periodDays})
+	}
+
+	items := make([]priceResponse, 0, len(planned))
+	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
+		items = items[:0]
+		for _, pl := range planned {
+			price, err := s.insertPriceIn(r, q, p, pl.unitID, pl.amount, pl.periodDays, effectiveFrom,
+				audit.ActionPriceBulkUpdate, map[string]any{
+					"unit_id": db.UUIDString(pl.unitID), "mode": mode, "value": body.Value,
+				})
+			if err != nil {
+				return err
+			}
+			items = append(items, price)
 		}
-		items = append(items, price)
+		return nil
+	}); err != nil {
+		s.serverError(w, r, "prices.bulk.tx", err)
+		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"items": items})
 }
@@ -518,8 +566,12 @@ func (s *Server) bulkAmountFor(w http.ResponseWriter, unit sqlc.GetUnitRow, mode
 		return 0, 0, false
 	}
 	amount := int64(math.Round(float64(unit.PriceAmount) * (1 + value/100)))
-	if amount < 0 {
-		amount = 0
+	// A percentage of a large price can leave the range a price may occupy;
+	// refusing beats silently storing an amount the rest of the API rejects.
+	if amount < 1 || amount >= amountMax {
+		httpx.WriteProblem(w, http.StatusConflict, "price out of range",
+			"the new price for unit "+unit.Name+" falls outside the allowed range")
+		return 0, 0, false
 	}
 	return amount, basis, true
 }

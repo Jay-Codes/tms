@@ -368,7 +368,13 @@ export const propertiesApi = {
   }) => api.post<{ property: Property } | Property>('/properties', body),
   update: (
     id: string,
-    body: { name?: string; location_text?: string; lat?: number | null; lng?: number | null; notes?: string },
+    body: {
+      name?: string;
+      location_text?: string;
+      lat?: number | null;
+      lng?: number | null;
+      notes?: string | null;
+    },
   ) => api.patch<{ property: Property } | Property>(`/properties/${id}`, body),
   remove: (id: string) => api.del<void>(`/properties/${id}`),
   units: (id: string, signal?: AbortSignal) =>
@@ -377,7 +383,10 @@ export const propertiesApi = {
     id: string,
     body: { name: string; price?: PriceInput; allowed_period_ids?: string[] | null },
   ) => api.post<{ unit: Unit } | Unit>(`/properties/${id}/units`, body),
-  addUnitsBulk: (id: string, body: { names: string[]; price?: PriceInput }) =>
+  addUnitsBulk: (
+    id: string,
+    body: { names: string[]; price?: PriceInput; allowed_period_ids?: string[] | null },
+  ) =>
     api.post<{ items: Unit[] }>(`/properties/${id}/units/bulk`, body),
   qrSheet: (id: string, signal?: AbortSignal) =>
     api.get<{ items: QrSheetItem[] }>(`/properties/${id}/qr-sheet`, { signal }),
@@ -409,10 +418,12 @@ export const unitsApi = {
 };
 
 export const publicApi = {
+  // slug and unit_code are typed by a human (or read off a sticker), so they
+  // are escaped: an unencoded '/' or '?' would rewrite the request path.
   branding: (slug: string, signal?: AbortSignal) =>
-    api.get<PublicBranding>(`/public/orgs/${slug}/branding`, { signal }),
+    api.get<PublicBranding>(`/public/orgs/${encodeURIComponent(slug)}/branding`, { signal }),
   unit: (unitCode: string, signal?: AbortSignal) =>
-    api.get<unknown>(`/public/units/${unitCode}`, { signal }),
+    api.get<unknown>(`/public/units/${encodeURIComponent(unitCode)}`, { signal }),
 };
 
 /* ------------------------------------------------------------------ */

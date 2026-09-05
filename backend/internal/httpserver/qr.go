@@ -71,12 +71,14 @@ func (s *Server) generateQR(ctx context.Context, orgID, unitID, unitCode string)
 		return scanURL, "", fmt.Errorf("qr encode: %w", err)
 	}
 	key := qrObjectKey(orgID, unitID)
+	// A storage failure is wrapped so the handlers can answer 503 rather than
+	// 500: MinIO being down is not a bug in the request (API.md).
 	if err := s.deps.Storage.PutBytes(ctx, storage.BucketQR, key, png, "image/png"); err != nil {
-		return scanURL, "", err
+		return scanURL, "", fmt.Errorf("%w: %v", errStorageUnavailable, err)
 	}
 	pngURL, err = s.deps.Storage.PresignGet(ctx, storage.BucketQR, key, qrPresignTTL)
 	if err != nil {
-		return scanURL, "", err
+		return scanURL, "", fmt.Errorf("%w: %v", errStorageUnavailable, err)
 	}
 	return scanURL, pngURL, nil
 }

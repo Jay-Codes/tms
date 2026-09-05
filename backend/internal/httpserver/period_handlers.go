@@ -56,9 +56,7 @@ func (s *Server) handleCreatePaymentPeriod(w http.ResponseWriter, r *http.Reques
 	}
 	f := validate.Fields{}
 	label := f.MaxLen("label", f.Required("label", body.Label), periodLabelMax)
-	if body.Days <= 0 {
-		f.Add("days", "must be a whole number of days greater than 0")
-	}
+	checkPeriodDays(f, "days", body.Days)
 	if !f.Empty() {
 		badRequest(w, f)
 		return
@@ -141,9 +139,7 @@ func (s *Server) handlePatchPaymentPeriod(w http.ResponseWriter, r *http.Request
 		params.Label = &label
 	}
 	if body.Days != nil {
-		if *body.Days <= 0 {
-			f.Add("days", "must be a whole number of days greater than 0")
-		}
+		checkPeriodDays(f, "days", *body.Days)
 		params.Days = body.Days
 	}
 	params.SortOrder = body.SortOrder

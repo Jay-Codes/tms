@@ -20,6 +20,13 @@ import (
 // MinIO is unreachable.
 var errStorageUnavailable = errors.New("object storage unavailable")
 
+// storageUnavailable is the 503 both QR routes answer when MinIO cannot be
+// reached (API.md: "With MinIO unreachable the QR routes answer 503").
+func storageUnavailable(w http.ResponseWriter) {
+	httpx.WriteProblem(w, http.StatusServiceUnavailable, "storage unavailable",
+		"QR codes cannot be generated right now")
+}
+
 // Field bounds for properties and units (API.md).
 const (
 	propertyNameMax  = 120
@@ -27,6 +34,15 @@ const (
 	propertyNotesMax = 2000
 	unitNameMax      = 60
 )
+
+// currentCounts carries a property's unit breakdown across an update (the
+// update statement itself does not recount, and a rename cannot change it).
+func currentCounts(r sqlc.GetPropertyRow) unitCounts {
+	return unitCounts{
+		Total: r.Total, Vacant: r.Vacant, Occupied: r.Occupied,
+		Maintenance: r.Maintenance, Unlisted: r.Unlisted,
+	}
+}
 
 // notFoundProperty / notFoundUnit keep cross-org probing indistinguishable
 // from a missing row: the lookup is org-scoped, the answer is always 404.
@@ -219,17 +235,13 @@ func (s *Server) handlePatchProperty(w http.ResponseWriter, r *http.Request) {
 			EntityType:  audit.EntityProperty,
 			EntityID:    db.UUIDString(updated.ID),
 			Before:      toGetPropertyRow(current),
-			After:       toProperty(updated, unitCounts{}),
+			After:       toProperty(updated, currentCounts(current)),
 		})
 	}); err != nil {
 		s.serverError(w, r, "properties.patch.tx", err)
 		return
 	}
-	counts := unitCounts{
-		Total: current.Total, Vacant: current.Vacant, Occupied: current.Occupied,
-		Maintenance: current.Maintenance, Unlisted: current.Unlisted,
-	}
-	WriteJSON(w, http.StatusOK, map[string]any{"property": toProperty(updated, counts)})
+	WriteJSON(w, http.StatusOK, map[string]any{"property": toProperty(updated, currentCounts(current))})
 }
 
 // ------------------------------------------------ DELETE /properties/{id} --
@@ -324,15 +336,11 @@ func (in *unitPriceInput) validated(f validate.Fields, prefix string) *unitPrice
 	if in == nil {
 		return nil
 	}
-	if in.Amount <= 0 {
-		f.Add(prefix+".amount", "must be a whole number greater than 0")
-	}
+	checkAmount(f, prefix+".amount", in.Amount)
 	if in.PeriodDays == 0 {
 		in.PeriodDays = 30
 	}
-	if in.PeriodDays <= 0 {
-		f.Add(prefix+".period_days", "must be a whole number greater than 0")
-	}
+	checkPeriodDays(f, prefix+".period_days", in.PeriodDays)
 	return in
 }
 
@@ -494,8 +502,7 @@ func (s *Server) handleQRSheet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.deps.Storage == nil {
-		httpx.WriteProblem(w, http.StatusServiceUnavailable, "storage unavailable",
-			"QR codes cannot be generated right now")
+		storageUnavailable(w)
 		return
 	}
 
@@ -511,6 +518,10 @@ func (s *Server) handleQRSheet(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		unitID := db.UUIDString(row.ID)
 		scanURL, pngURL, err := s.generateQR(r.Context(), p.OrgIDString(), unitID, row.UnitCode)
+		if errors.Is(err, errStorageUnavailable) {
+			storageUnavailable(w)
+			return
+		}
 		if err != nil {
 			s.serverError(w, r, "qrsheet.generate", err)
 			return
