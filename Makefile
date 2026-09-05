@@ -120,3 +120,34 @@ lint: ## Lint backend (golangci-lint, falls back to go vet) and frontends
 		     echo "      install: brew install golangci-lint"; \
 		     go vet ./...; fi
 	@npm run lint --workspaces --if-present
+
+# --- deployment (full compose profile) ---
+
+.PHONY: images deploy deploy-down logs tls-selfsigned
+
+images: ## Build all deployable images (api, 3 apps, proxy)
+	docker compose --profile full build
+
+deploy: images ## Build images and bring the full stack up (proxy on $PROXY_HTTP_PORT, default 80)
+	docker compose --profile full up -d --wait api enduser tenant admin proxy
+	@echo "full stack up — proxy on http://localhost:$${PROXY_HTTP_PORT:-80}  (/enduser /tenant /admin /api)"
+
+# Stops and removes only the application containers. Postgres, Redis and MinIO
+# are deliberately left running: they are shared with the dev loop and hold the
+# data volumes.
+deploy-down: ## Stop and remove the full-profile app containers (infra stays up)
+	docker compose --profile full stop api enduser tenant admin proxy
+	docker compose --profile full rm -f api enduser tenant admin proxy
+	@echo "full-profile services removed; postgres/redis/minio still running."
+
+logs: ## Tail logs from the full-profile services
+	docker compose --profile full logs -f --tail=100
+
+tls-selfsigned: ## Generate a self-signed cert/key pair into .dev/tls for the proxy
+	@mkdir -p $(DEVDIR)/tls
+	@openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+		-keyout $(DEVDIR)/tls/key.pem -out $(DEVDIR)/tls/cert.pem \
+		-subj "/CN=$${TLS_CN:-localhost}" \
+		-addext "subjectAltName=DNS:$${TLS_CN:-localhost},DNS:localhost,IP:127.0.0.1" 2>/dev/null
+	@echo "wrote $(DEVDIR)/tls/cert.pem and $(DEVDIR)/tls/key.pem"
+	@echo "enable TLS: set TLS_CERT_FILE=/etc/tms/tls/cert.pem TLS_KEY_FILE=/etc/tms/tls/key.pem in .env, then make deploy"

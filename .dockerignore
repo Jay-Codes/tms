@@ -1,0 +1,24 @@
+# Build context excludes. Every image builds from the repo root, so this file
+# keeps host-only artefacts (installed deps, dev output, secrets) out of the
+# context — smaller uploads and no chance of a host node_modules leaking into
+# a linux image.
+node_modules
+**/node_modules
+.next
+**/.next
+.next-build
+**/.next-build
+.dev
+.git
+.gitignore
+*.log
+.DS_Store
+**/.DS_Store
+.env
+next-env.d.ts
+**/next-env.d.ts
+**/tsconfig.tsbuildinfo
+backend/bin
+Dockerfile
+**/Dockerfile
+.dockerignore
