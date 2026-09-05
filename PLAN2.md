@@ -64,14 +64,14 @@ expenses            org_id, property_id, unit_id NULLABLE, category_id, amount (
 
 **Exit:** landlord records an expense with receipt on Mbezi Beach Block A, sees it in the property tab and in the all-properties summary; void audited; CSV downloads.
 
-## Phase 11 — Reports v2: cadence + time-series + trends (1 day)
+## Phase 11 — Reports v2: cadence + time-series + trends (1 day) — ✅ done 5 Sep 2026
 
-- [ ] **Cadence everywhere (#3)**: `cadence=month|quarter|half_year|year|custom&from&to&anchor` accepted by `/reports/summary`, `/reports/payment-status`, `/reports/collections`, `/expenses/summary`; response echoes the resolved `{from,to,cadence}` and a `previous` window for comparison.
-- [ ] **Revenue series (#1)**: `GET /reports/revenue?cadence=&from=&to=&bucket=&property_id=` → `{buckets:[{start,expected,collected,expenses,net}], totals, previous_totals, change_pct:{collected,expenses,net}, trend:{slope_collected_per_bucket}}`. Cash basis (non-reversed payments by `paid_at`), expected = schedules due in bucket (excl. waived), expenses by `incurred_on` (excl. voided). Zero-filled buckets; ≤ 400 buckets.
-- [ ] **Per-property breakdown**: `group_by=property` variant for revenue + expenses; occupancy series `GET /reports/occupancy?cadence…` (units occupied per bucket end).
-- [ ] Tenant **Reports** rework: Overview (period tiles + Δ vs previous period), **Revenue** tab (line/area chart collected vs expected, bars expenses, net line; hover tooltips; per-property toggle), Expenses tab (stacked bars by category + table), Payment status, Collections; every tab driven by the shared `PeriodPicker`; charts as inline SVG in `packages/ui/charts` (no chart lib; follow the dataviz skill for color/legend/axis rules; dark/light aware).
-- [ ] Dashboard cards: "Revenue this period" sparkline + Δ%, "Net income", "Expenses" card added to `dashboard_prefs.cards`.
-- [ ] Tests: period resolver (month/quarter/half-year/year boundaries in EAT, custom validation, max range 5 years), bucket auto-sizing, revenue math on seeded org (reconcile totals with `/payments` and `/expenses` sums), previous-period comparison, per-property sums equal grand total.
+- [x] **Cadence everywhere (#3)**: `cadence=month|quarter|half_year|year|custom&from&to&anchor` accepted by `/reports/summary`, `/reports/payment-status`, `/reports/collections`, `/expenses/summary`; response echoes the resolved `{from,to,cadence}` and a `previous` window for comparison.
+- [x] **Revenue series (#1)**: `GET /reports/revenue?cadence=&from=&to=&bucket=&property_id=` → `{buckets:[{start,expected,collected,expenses,net}], totals, previous_totals, change_pct:{collected,expenses,net}, trend:{slope_collected_per_bucket}}`. Cash basis (non-reversed payments by `paid_at`), expected = schedules due in bucket (excl. waived), expenses by `incurred_on` (excl. voided). Zero-filled buckets; ≤ 400 buckets.
+- [x] **Per-property breakdown**: `group_by=property` variant for revenue + expenses; occupancy series `GET /reports/occupancy?cadence…` (units occupied per bucket end).
+- [x] Tenant **Reports** rework: Overview (period tiles + Δ vs previous period), **Revenue** tab (line/area chart collected vs expected, bars expenses, net line; hover tooltips; per-property toggle), Expenses tab (stacked bars by category + table), Payment status, Collections; every tab driven by the shared `PeriodPicker`; charts as inline SVG in `packages/ui/charts` (no chart lib; follow the dataviz skill for color/legend/axis rules; dark/light aware).
+- [x] Dashboard cards: "Revenue this period" sparkline + Δ%, "Net income", "Expenses" card added to `dashboard_prefs.cards`.
+- [x] Tests: period resolver (month/quarter/half-year/year boundaries in EAT, custom validation, max range 5 years), bucket auto-sizing, revenue math on seeded org (reconcile totals with `/payments` and `/expenses` sums), previous-period comparison, per-property sums equal grand total.
 
 **Exit:** Reports show revenue vs expected vs expenses vs net over any cadence incl. custom range, with % change vs previous period; per-property breakdown; seed data produces a visibly correct chart.
 

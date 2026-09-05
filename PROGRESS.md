@@ -122,3 +122,13 @@
 **Verified**: `make build/test/lint` green; browser: record with PNG receipt via proxy, property tab, all-properties summary, void, CSV (`text/csv`, attachment filename), 375/1280 px. API.md "Part 2 — Phase 10 (shipped)" section added.
 
 **Notes**: `receipt/complete` requires `{object_key}` (frontend echoes the ticket's key). Summary `previous` carries `cadence`; `Uncategorised` group appears only when non-empty. Three test expenses remain in JJnE's September ledger (dev data).
+
+## Phase 11 — Reports v2: cadence + time-series + trends (5 Sep 2026) — branch `phase-11-reports-v2`
+
+**Shipped**
+- Backend: cadence (`month|quarter|half_year|year|custom`, `anchor`, `from`, `to`) on summary / payment-status / collections / expenses-summary with `window`, `previous`, `previous_totals`, `change_pct`; legacy `period=YYYY-MM` still accepted. `GET /reports/revenue` (day-grain SQL, Go bucketing day/week/month, zero-filled, ≤400 buckets → 422 `too_many_buckets`, `trend.slope_collected_per_bucket`, `collection_rate`, `group_by=property`), `GET /reports/occupancy` (per-bucket-end occupancy, terminated contracts through effective date). `internal/report/trend.go` (ChangePct/Slope/Rate). Migration 000014 report indexes. Loadtest routes added. Isolation census green. Seed org `cadence=year` answers in 3–8 ms.
+- Tenant: `packages/ui/src/charts` (LineAreaChart, BarChart, Sparkline, StatTile/ChangeMark/RowBar, Legend, ChartFrame, axis/scale/format helpers; dataviz palette tokens `--chart-1…8` + role aliases), Reports page rewritten with one PeriodPicker + property filter and six tabs (Overview, Revenue, Expenses, Occupancy, Payment status, Collections), dashboard cards `revenue` (sparkline) and `net_income` (allowlisted server-side), charts demo on the design-system page.
+
+**Verified**: `make build/test/lint` green; browser on live data: Overview tiles (collected 1,000,000 / expected 1,590,000 / expenses 137,000 / net 863,000, collection rate 63%, occupancy 46%), Revenue tab line/area chart with by-property toggle.
+
+**Notes**: `occupancy_pct` is 0–100, `collection_rate` 0–1. Unknown cadence spelling → 400; unsatisfiable window → 422. Chart dark steps apply under `[data-theme="dark"]` only (paper/ink still light-only until Phase 12).
