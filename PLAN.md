@@ -68,10 +68,10 @@ Execution plan for [SPEC.md](SPEC.md) / [FLOWS.md](FLOWS.md). Target: **testing-
 - [x] Renter onboarding + public unit endpoint show offered periods with prorated amounts and schedule preview.
 - [x] Lifecycle: draft → pending_signature → active → expiring (30d job) → ended | terminated. Terminate cancels/waives remaining schedules, unit → vacant.
 - [x] `GET /contracts/{id}/document`: app-native document payload (letterhead/logo URLs, resolved `terms_snapshot_html`, parties, schedule summary, footer). Frontend document view + print stylesheet (browser "Save as PDF"). No server PDF.
-- [ ] Rich-text template editor in tenant app (sanitized HTML, variable insertion, live letterhead preview); letterhead upload + footer text in branding settings.
+- [x] Rich-text template editor in tenant app (sanitized HTML, variable insertion, live letterhead preview); letterhead upload + footer text in branding settings.
 - [x] Digital signing: `snapshot_hash` at pending_signature; `contract_signatures` table; `POST /contracts/{id}/sign/otp` + `/sign` (OTP verify, IP/UA capture); optional drawn signature (canvas → presigned PUT to `signatures` bucket); activate requires renter signature and records landlord row; `GET /contracts/{id}/verify`.
-- [ ] Screens: templates editor (with snapshot-rule banner), contract detail (both apps), renter "Accept & sign" flow (document → OTP → optional draw → confirmation), landlord "Ready to countersign" → Activate, signature block + hash in document view.
-- [ ] Unsigned-contract reminder (org setting, default 7 days) wired into Phase 6 scheduler.
+- [x] Screens: templates editor (with snapshot-rule banner), contract detail (both apps), renter "Accept & sign" flow (document → OTP → optional draw → confirmation), landlord "Ready to countersign" → Activate, signature block + hash in document view.
+- [x] Unsigned-contract reminder (org setting, default 7 days) wired into Phase 6 scheduler.
 
 **Exit:** approval → renter OTP-signs → landlord activates → correct schedule rows; document renders with letterhead + signature block, prints cleanly, `/verify` returns valid; termination flips unit vacant.
 
