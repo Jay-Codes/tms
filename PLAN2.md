@@ -25,11 +25,11 @@ Decisions taken with the client:
 - **Expenses:** property-level ledger (optional unit), receipts, categories; plus an all-properties summary.
 - **Revenue series:** collected (cash basis, non-reversed) vs expected (schedules due) vs expenses → net; period-over-period % change.
 
-Proposed (confirm or change; defaults apply if silent — see Open questions):
-- **Recommended period:** exactly **one** period per org carries the badge (default Monthly); the other three bootstrap periods are "presets" (restorable) without a badge. Landlord can move the badge in Settings → Periods.
-- **Rent in the document:** `{{rent}}` becomes the amount **per payment period** (unit price × payment_period_days ÷ rent_period_days, same rounding as the schedule); new `{{rent_basis}}` variable keeps the unit price ("TZS 100,000 / 30 days") for landlords who want both. Header "Rent" row shows the per-payment-period figure with the basis underneath.
-- **Language:** stored on the user (`users.locale`, `sw|en`), chosen at registration/signup and changeable in Profile/Settings. Renter locale drives every SMS to that renter (including bulk); landlord locale drives the landlord screens. Org `sms_language` remains only as the fallback for renters with no preference (pre-existing users) and for the public QR landing before login.
-- **SMS balance:** prepaid credit per org set by the platform admin (top-ups, not a monthly reset). Every outbound SMS except OTP/security messages debits 1 credit per 160-char segment. At 0 the queue holds messages as `held_no_credit`; landlord sees the balance and a low-credit warning in Notifications.
+Confirmed with the client (5 Sep 2026, second round):
+- **Recommended period:** exactly **one** period per org carries the badge (default Monthly); the other three bootstrap periods are "presets" (restorable) without a badge. Landlord selects which period is recommended in Settings → Periods. **Confirmed.**
+- **Rent in the document:** `{{rent}}` becomes the amount **per payment period** (unit price × payment_period_days ÷ rent_period_days, same rounding as the schedule); new `{{rent_basis}}` variable keeps the unit price ("TZS 100,000 / 30 days") for landlords who want both. Header "Rent" row shows the per-payment-period figure with the basis underneath. **Confirmed: rent scales by payment period.**
+- **Language:** stored on the user (`users.locale`, `sw|en`), chosen at registration/signup and changeable in Profile/Settings. Renter locale drives every SMS to that renter (including bulk); landlord locale drives the landlord screens. Org `sms_language` remains only as the fallback for renters with no preference (pre-existing users). Public QR landing / connect pages before login default to the org language and show a **SW/EN toggle** (confirmed); the choice carries into registration as the initial `locale`.
+- **SMS balance:** prepaid credit per org set by the platform admin (top-ups, **no expiry, no monthly reset — confirmed**). Every outbound SMS except OTP/security messages debits 1 credit per 160-char segment. At 0 the queue holds messages as `held_no_credit`; landlord sees the balance and a low-credit warning in Notifications.
 - **Templates:** platform defaults move from Go constants to a DB table the admin edits (EN + SW per kind, variables validated). Resolution order: org override → admin platform template → built-in code fallback.
 
 ---
@@ -92,7 +92,7 @@ expenses            org_id, property_id, unit_id NULLABLE, category_id, amount (
 - [ ] **Data**: `users.locale TEXT NOT NULL DEFAULT 'sw' CHECK (locale IN ('sw','en'))` (Phase 9 migration). Renter registration (`POST /auth/renter/register`) and landlord signup accept `locale`; `PATCH /me` (renter) and `PATCH /org/members/me` (org user) update it; `GET /me` / `GET /auth/session` return it. Audited.
 - [ ] **SMS resolution**: `notify.LanguageFor(recipientUser, org)` = user locale → org `sms_language` fallback. Every queue writer (link approved/rejected, contract ready/terminated, welcome, thank-you, reminders, overdue, unsigned, OTP) passes the recipient's locale, not the org's. Scheduler groups by recipient locale. Org settings "SMS language" is relabelled "Default language for renters without a preference".
 - [ ] **Bulk SMS (#10)**: `POST /notifications/bulk` accepts `{body_sw?, body_en?, recipients…}` (at least one); each recipient gets the body matching their locale, falling back to the other when only one is given; the compose screen shows two tabs (SW/EN) with a recipient-count per language and a per-recipient preview. Delivery log stores the language used.
-- [ ] **UI i18n**: `packages/ui/i18n` — `en.ts`/`sw.ts` dictionaries, `I18nProvider` + `useT()` with ICU-style plural/number/date helpers (EAT, TZS); every user-facing string in `apps/enduser` and `apps/tenant` moved to keys (admin stays English). Language follows the signed-in user's locale; before sign-in it follows the org default on public pages and a `?lang=` / device-language guess elsewhere; a switcher sits in the renter Profile and landlord Settings → Preferences (also in the auth pages' footer). `<html lang>` updated. Swahili copy reviewed for the ledger vocabulary (Kodi, Risiti, Imelipwa, Imechelewa…).
+- [ ] **UI i18n**: `packages/ui/i18n` — `en.ts`/`sw.ts` dictionaries, `I18nProvider` + `useT()` with ICU-style plural/number/date helpers (EAT, TZS); every user-facing string in `apps/enduser` and `apps/tenant` moved to keys (admin stays English). Language follows the signed-in user's locale; before sign-in public pages default to the org language with a visible SW/EN toggle (persisted in localStorage, prefilled into registration); a switcher sits in the renter Profile and landlord Settings → Preferences (also in the auth pages' footer). `<html lang>` updated. Swahili copy reviewed for the ledger vocabulary (Kodi, Risiti, Imelipwa, Imechelewa…).
 - [ ] Contract templates: default template ships in both languages (`body_html_sw`, `body_html_en`); `POST /contracts` renders the renter's locale (landlord can override per contract); snapshot records `language`. Existing templates untouched.
 - [ ] Tests: language resolution table (user/org combos), bulk fan-out counts per language, dictionary completeness check (`make lint` fails on a key missing in either language), OTP always in recipient locale.
 
@@ -130,15 +130,12 @@ platform_template_versions  kind, version, sw, en, admin_user_id, created_at    
 
 ## Open questions (answer whenever; defaults applied if unanswered)
 
-1. **Recommended period**: one badge per org, default Monthly, landlord can move it — OK? Alternative: drop the badge entirely and just order presets first.
-2. **Rent in document**: show the per-payment-period amount as `{{rent}}` with the unit basis in brackets (default), or keep `{{rent}}` as the unit price and add `{{rent_per_period}}`? Default changes what new contracts print; old contracts are frozen either way.
-3. **SMS credits model**: prepaid top-ups with no expiry (default) vs a monthly allowance that resets. Is 1 credit = 1 segment (default) or 1 credit = 1 message regardless of length? Are OTPs exempt (default yes)?
-4. **Template editing rights**: platform admin edits defaults; landlords keep their per-org overrides (default). Should the admin be able to lock a kind so orgs cannot override it (e.g. OTP)? Default: `otp` locked, everything else overridable.
-5. **Language for the public QR landing** before login: org default (default) or device language?
-6. Expense **approval**: managers can record expenses; should owners approve/void only? Default: owner + manager record and void; audit shows who.
-7. Revenue **basis toggle**: cash (collected) is the default; add an "accrual (expected)" toggle in Reports? Default: both lines always shown, no toggle.
-8. Theme **per app**: one org theme applies to both landlord and renter apps (default).
-9. Receipts as **PDF** allowed? Default: yes (image/jpeg, image/png, application/pdf, ≤5 MiB).
+1. **Template lock**: should the platform admin be able to lock a kind so landlords cannot override it? Default: per-kind `locked` checkbox in the admin template editor, `otp` locked out of the box, all other kinds overridable. Locked kind → landlord sees read-only wording, `PUT` override returns 409 `template_locked`.
+2. **Credit unit**: 1 credit per 160-char GSM segment (default; 70 for UCS-2) vs 1 credit per message regardless of length. OTP/security messages exempt (default yes).
+3. Expense **approval**: managers can record expenses; should owners approve/void only? Default: owner + manager record and void; audit shows who.
+4. Revenue **basis toggle**: cash (collected) is the default; add an "accrual (expected)" toggle in Reports? Default: both lines always shown, no toggle.
+5. Theme **per app**: one org theme applies to both landlord and renter apps (default).
+6. Receipts as **PDF** allowed? Default: yes (image/jpeg, image/png, application/pdf, ≤5 MiB).
 
 ## Risks
 
