@@ -90,7 +90,7 @@ Execution plan for [SPEC.md](SPEC.md) / [FLOWS.md](FLOWS.md). Target: **testing-
 - [x] Scheduler goroutine (5-min tick) derives due sends from Postgres; dedupe_key; Redis queue; worker pool (N=3, atomic claim) → Beem, 3-attempt backoff (§2.2, §6).
 - [x] Kinds: reminder_7d, reminder_due, overdue_daily, unsigned_reminder, thank_you (+next due), otp, custom — all through one `notify.Render`. Templates with variables, SW/EN per org.
 - [x] Org notification settings endpoints; custom bulk SMS (rate-limited, audited); notification log + retry endpoints. *(backend; tenant screens are frontend work)*
-- [ ] Live Beem credentials smoke-tested. **Deferred: no Beem account/creds available.** The transport is implemented and covered by an `httptest` server; dev runs still use the LogProvider (DECISIONS.md).
+- [ ] Live Beem credentials smoke-tested. **Deferred: no Beem creds supplied; transport implemented + httptest-covered; dev uses log provider.** **Deferred: no Beem account/creds available.** The transport is implemented and covered by an `httptest` server; dev runs still use the LogProvider (DECISIONS.md).
 
 **Exit:** timeline of Flow 8 fires against a test contract with real SMS.
 
