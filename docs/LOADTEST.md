@@ -27,6 +27,23 @@ Run of 5 Sep 2026. Apple M4 Pro, macOS 26.4.1, Postgres 17.11 in Docker
 Desktop, API and dev proxy running natively. 20 workers, 20 s, requests picked
 uniformly at random per worker, through the dev proxy on `:8080`.
 
+These are the numbers after the two fixes described under [Slow query
+analysis](#slow-query-analysis) — the batched signature lookup and the larger
+pgx pool.
+
+| Endpoint | reqs | p50 | p95 | p99 | max | rps | errors |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `GET /units?status=vacant` | 12 372 | 3.0 ms | **6.0 ms** | 8.2 ms | 31.4 ms | 619 | 0 |
+| `GET /schedules?status=overdue` | 12 217 | 4.7 ms | **8.1 ms** | 10.6 ms | 32.8 ms | 611 | 0 |
+| `GET /reports/summary` | 12 147 | 9.8 ms | **14.5 ms** | 17.2 ms | 32.1 ms | 607 | 0 |
+| `GET /public/units/{code}` (unauth) | 12 361 | 6.4 ms | **10.0 ms** | 12.4 ms | 27.0 ms | 618 | 0 |
+| `GET /contracts` | 12 194 | 7.1 ms | **11.9 ms** | 15.6 ms | 33.5 ms | 610 | 0 |
+
+Aggregate 61 291 requests, ~3 064 rps, zero errors. **Every endpoint is inside
+the 300 ms budget**, the slowest at a twentieth of it.
+
+The run before those two fixes, same machine and same fixture:
+
 | Endpoint | reqs | p50 | p95 | p99 | max | rps | errors |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | `GET /units?status=vacant` | 5924 | 2.1 ms | **3.6 ms** | 5.1 ms | 31.1 ms | 296 | 0 |
@@ -35,8 +52,11 @@ uniformly at random per worker, through the dev proxy on `:8080`.
 | `GET /public/units/{code}` (unauth) | 5839 | 5.1 ms | **7.2 ms** | 10.0 ms | 32.2 ms | 292 | 0 |
 | `GET /contracts` | 5791 | 45.8 ms | **58.0 ms** | 75.8 ms | 110.5 ms | 289 | 0 |
 
-Aggregate 29 042 requests, ~1 451 rps, zero errors. **Every endpoint is inside
-the 300 ms budget**, with the slowest at roughly a fifth of it.
+Aggregate 29 042 requests, ~1 451 rps. `GET /contracts` p95 fell **58.0 ms →
+11.9 ms** (‑79%) and the whole pass more than doubled its throughput: with the
+N+1 gone, every endpoint gets a fair share of the pool instead of queueing
+behind one greedy handler. The per-endpoint p50s rise slightly because the
+harness is now pushing twice the load through the same laptop.
 
 ### A note on the public endpoint
 
@@ -113,25 +133,36 @@ query itself takes 0.8 ms.
 The gap is `handleListContracts` in
 `backend/internal/httpserver/contract_handlers.go`: after the list query it
 loops over the rows calling `ListContractSignatures` for each one — 1 + N round
-trips per request, 36 for this fixture. The pgx pool is capped at 10
-connections (`backend/internal/db/db.go`, `defaultMaxConns`), so 20 concurrent
-requests queue ~700 sequential round trips behind 10 connections. Latency is
-connection-pool queueing, which no index can fix.
+trips per request, 36 for this fixture. The pgx pool was capped at 10
+connections (`backend/internal/db/db.go`), so 20 concurrent requests queued
+~700 sequential round trips behind 10 connections. Latency was connection-pool
+queueing, which no index can fix.
 
-**Recommended follow-ups** (outside the seeding/UAT lane, so recorded rather
-than done):
+### The fix
 
-- Batch the signature lookup: one `ListContractSignaturesForContracts(org_id,
-  contract_ids[])` and a group-by in Go turns 1 + N queries into 2. This is the
-  fix that matters — it is also the difference between a page that stays fast at
-  500 contracts and one that does not.
-- Raise `defaultMaxConns` from 10 once the N+1 is gone, and size it against the
-  deployment's Postgres `max_connections`.
-- The same 1 + N shape is worth a look on any other list handler that enriches
-  rows in a loop.
+Both follow-ups this analysis recommended are now in:
 
-Neither is a Phase 8 blocker: the endpoint is comfortably inside budget at the
-fixture's size, and both notes are about headroom rather than a defect.
+- **The signature lookup is batched.** `ListContractSignaturesForContracts(org_id,
+  contract_ids[])` (and `…AnyOrg`, for `GET /me/contracts`, which spans every
+  org the renter rents from — the same shape `ListAllocationsForPayments` already
+  used) loads a whole page in one round trip, and `signaturesFor` in
+  `contract_handlers.go` groups the rows by contract id in Go. The list is 2
+  queries per request instead of 1 + N, whatever the page size — which is the
+  difference between a page that stays fast at 500 contracts and one that does
+  not.
+- **The pgx pool is configurable and larger.** `DB_MAX_CONNS` (default 20, was a
+  hard-coded 10) feeds `db.Open`; size it against the deployment's Postgres
+  `max_connections`.
+
+Measured effect: `GET /contracts` p95 58.0 ms → 11.9 ms, and the aggregate rate
+1 451 → 3 064 rps. The single-contract paths (`GET /contracts/{id}`, the
+document and verify endpoints) still use the per-contract
+`ListContractSignatures`, which is one query there and correct.
+
+Still worth a look, and not done: the same 1 + N shape on any other list handler
+that enriches rows in a loop. A sweep of the handlers found no other read path
+issuing a query per row — the remaining in-loop queries are writes inside a
+transaction.
 
 ## Fixture shape (what the numbers were measured against)
 

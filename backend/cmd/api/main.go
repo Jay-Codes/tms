@@ -130,7 +130,7 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 	deps.Email = email
 	logger.Info("sms provider selected", "beem_configured", cfg.BeemAPIKey != "", "provider_type", providerName(deps.SMS))
 
-	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	pool, err := db.Open(ctx, cfg.DatabaseURL, cfg.DBMaxConns)
 	if err != nil {
 		logger.Error("postgres unavailable at startup; serving degraded", "error", err)
 	} else {

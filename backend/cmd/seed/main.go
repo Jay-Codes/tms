@@ -47,7 +47,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	pool, err := db.Open(ctx, cfg.DatabaseURL, cfg.DBMaxConns)
 	if err == nil {
 		err = pool.Ping(ctx)
 	}

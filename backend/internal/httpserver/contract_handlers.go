@@ -406,6 +406,49 @@ func (s *Server) handleListMyContracts(w http.ResponseWriter, r *http.Request) {
 	s.listContracts(w, r, true)
 }
 
+// signaturesFor loads the signature block of a whole page of contracts in one
+// round trip, keyed by contract id. The per-row call it replaces made the list
+// 1 + N queries, which was the whole of the endpoint's latency under
+// concurrency (docs/LOADTEST.md). GET /me/contracts spans every org the renter
+// rents from, so it uses the cross-org variant — safe because the ids it is
+// given came from a renter-scoped query.
+func (s *Server) signaturesFor(
+	ctx context.Context, orgID pgtype.UUID, ids []pgtype.UUID, crossOrg bool,
+) (map[string][]signatureBlock, error) {
+	out := map[string][]signatureBlock{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	byContract := map[string][]sqlc.ListContractSignaturesRow{}
+	collect := func(sg sqlc.ListContractSignaturesRow) {
+		key := db.UUIDString(sg.ContractID)
+		byContract[key] = append(byContract[key], sg)
+	}
+	if crossOrg {
+		found, err := s.q.ListContractSignaturesForContractsAnyOrg(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		for _, sg := range found {
+			collect(sqlc.ListContractSignaturesRow(sg))
+		}
+	} else {
+		found, err := s.q.ListContractSignaturesForContracts(ctx, sqlc.ListContractSignaturesForContractsParams{
+			OrgID: orgID, ContractIds: ids,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, sg := range found {
+			collect(sqlc.ListContractSignaturesRow(sg))
+		}
+	}
+	for id, sigs := range byContract {
+		out[id] = toSignatures(sigs)
+	}
+	return out, nil
+}
+
 func (s *Server) listContracts(w http.ResponseWriter, r *http.Request, renterScope bool) {
 	if s.dbUnavailable(w) {
 		return
@@ -444,17 +487,23 @@ func (s *Server) listContracts(w http.ResponseWriter, r *http.Request, renterSco
 		s.serverError(w, r, "contract.list", err)
 		return
 	}
+	ids := make([]pgtype.UUID, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	orgID := params.OrgID
+	if len(rows) > 0 && !orgID.Valid {
+		orgID = rows[0].OrgID
+	}
+	byContract, err := s.signaturesFor(r.Context(), orgID, ids, renterScope)
+	if err != nil {
+		s.serverError(w, r, "contract.list.signatures", err)
+		return
+	}
 	items := make([]contractResponse, 0, len(rows))
 	for _, row := range rows {
 		c := contractRowOfList(row)
-		sigs, err := s.q.ListContractSignatures(r.Context(), sqlc.ListContractSignaturesParams{
-			OrgID: c.OrgID, ContractID: c.ID,
-		})
-		if err != nil {
-			s.serverError(w, r, "contract.list.signatures", err)
-			return
-		}
-		items = append(items, toContract(c, toSignatures(sigs)))
+		items = append(items, toContract(c, byContract[db.UUIDString(c.ID)]))
 	}
 	var cursor *string
 	if len(rows) > 0 {

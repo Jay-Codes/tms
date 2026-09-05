@@ -23,6 +23,11 @@ const (
 // i.e. the dev Go proxy is the only hop allowed to set forwarded-for headers.
 const DefaultTrustedProxyCIDRs = "127.0.0.0/8,::1/128"
 
+// DefaultDBMaxConns is the DB_MAX_CONNS default: the pgx pool size. Every
+// request holds a connection for the length of its queries, so this caps
+// in-flight database work; size it against Postgres max_connections.
+const DefaultDBMaxConns = 20
+
 // DefaultNotifyWorkers is the NOTIFY_WORKERS default: three SMS workers drain
 // the queue in parallel (API.md Phase 6).
 const DefaultNotifyWorkers = 3
@@ -33,7 +38,9 @@ type Config struct {
 	Port string
 
 	DatabaseURL string
-	RedisURL    string
+	// DBMaxConns is the pgx pool's maximum connection count (DB_MAX_CONNS).
+	DBMaxConns int
+	RedisURL   string
 
 	MinioEndpoint  string
 	MinioAccessKey string
@@ -79,6 +86,7 @@ func Load() Config {
 		Port: getenv("API_PORT", getenv("PORT", "8081")),
 
 		DatabaseURL: getenv("DATABASE_URL", "postgres://tms:tms_dev@localhost:5432/tms?sslmode=disable"),
+		DBMaxConns:  getint("DB_MAX_CONNS", DefaultDBMaxConns),
 		RedisURL:    getenv("REDIS_URL", "redis://localhost:6379/0"),
 
 		MinioEndpoint:  getenv("MINIO_ENDPOINT", "localhost:9000"),
