@@ -21,6 +21,7 @@ import {
   toApiError,
   unwrapRequest,
   unwrapRequestDetail,
+  type Contract,
   type LinkRequest,
   type RenterProfile,
 } from '../../../lib/api';
@@ -102,6 +103,9 @@ function RequestBody({ id }: { id: string }) {
   const [busy, setBusy] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
+  // Phase 4: approving writes the contract in the same transaction and hands it
+  // back, so the landlord can go straight to it instead of hunting the list.
+  const [contract, setContract] = useState<Contract | null>(null);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -125,11 +129,17 @@ function RequestBody({ id }: { id: string }) {
   }, [load]);
 
   /** 409 = someone already decided this request; re-read rather than argue. */
-  const decide = async (run: () => Promise<{ request: LinkRequest } | LinkRequest>, done: string) => {
+  const decide = async (
+    run: () => Promise<{ request: LinkRequest; contract?: Contract } | LinkRequest>,
+    done: string,
+  ) => {
     setBusy(true);
     setActionError(null);
     try {
-      setRequest(unwrapRequest(await run()));
+      const res = await run();
+      setRequest(unwrapRequest(res));
+      const created = (res as { contract?: Contract }).contract;
+      if (created) setContract(created);
       setNote(done);
       setConfirmOpen(false);
       setRejectOpen(false);
@@ -203,6 +213,14 @@ function RequestBody({ id }: { id: string }) {
       <div style={{ display: 'grid', gap: 'var(--sp-3)', marginTop: 'var(--sp-4)' }}>
         {note ? <Note>{note}</Note> : null}
         {actionError ? <ProblemNote error={actionError} /> : null}
+        {contract ? (
+          <p style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
+            <span>Contract created — it is waiting for the renter&apos;s signature.</span>
+            <Link href={`/contracts/${contract.id}`} className="btn btn-secondary">
+              Open contract
+            </Link>
+          </p>
+        ) : null}
       </div>
 
       <Section title="Renter">

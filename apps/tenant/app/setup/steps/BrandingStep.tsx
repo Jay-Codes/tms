@@ -1,17 +1,20 @@
 'use client';
 
-import { StepShell } from './StepShell';
+/**
+ * Wizard step: branding. The same form as `/settings/branding` — one place to
+ * fix a bug, and a landlord who edits it later finds exactly what they saw here.
+ */
+
+import { BrandingForm } from '../../../components/BrandingForm';
 
 export function BrandingStep() {
   return (
-    <StepShell
-      lead="How your business appears to renters, on screen and on printed contracts."
-      collects={[
-        'Display name, e.g. "JJnE Rentals"',
-        'Logo upload (presigned MinIO URL)',
-        'Optional letterhead image and document footer text',
-        'Theme colour and typeface from the whitelist',
-      ]}
-    />
+    <div style={{ display: 'grid', gap: 'var(--sp-4)' }}>
+      <p style={{ maxWidth: 'var(--measure)' }}>
+        How your business appears to renters, on screen and on printed contracts. You can change any of it
+        later under Settings → Branding.
+      </p>
+      <BrandingForm />
+    </div>
   );
 }

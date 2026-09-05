@@ -27,10 +27,10 @@ export interface WizardStep {
 }
 
 export const STEPS: WizardStep[] = [
-  { id: 'branding', label: 'Branding', phase: 8, Body: BrandingStep },
+  { id: 'branding', label: 'Branding', phase: 4, built: true, Body: BrandingStep },
   { id: 'property', label: 'First property', phase: 2, built: true, Body: FirstPropertyStep },
   { id: 'periods', label: 'Payment periods', phase: 2, built: true, Body: PaymentPeriodsStep },
   { id: 'units', label: 'Units', phase: 2, built: true, Body: UnitsStep },
-  { id: 'template', label: 'Contract template', phase: 4, Body: ContractTemplateStep },
+  { id: 'template', label: 'Contract template', phase: 4, built: true, Body: ContractTemplateStep },
   { id: 'notifications', label: 'Notifications', phase: 6, Body: NotificationsStep },
 ];
