@@ -31,6 +31,8 @@ export class ApiError extends Error {
   readonly detail: string;
   readonly errors: Record<string, string>;
   readonly retryAfterSeconds?: number;
+  /** RFC-7807 `type`, verbatim. */
+  readonly type: string;
 
   constructor(status: number, problem: ProblemDetail = {}) {
     const title = problem.title || defaultTitle(status);
@@ -40,8 +42,25 @@ export class ApiError extends Error {
     this.title = title;
     this.detail = problem.detail || '';
     this.errors = problem.errors || {};
+    this.type = problem.type || '';
     this.retryAfterSeconds =
       typeof problem.retry_after_seconds === 'number' ? problem.retry_after_seconds : undefined;
+  }
+
+  /**
+   * Machine-readable problem code — the last segment of `type`
+   * (`.../unit_occupied` → `unit_occupied`). Screens branch on this rather
+   * than on prose, since only the status + code are contract.
+   */
+  get code(): string {
+    if (!this.type) return '';
+    const trimmed = this.type.replace(/\/+$/, '');
+    return trimmed.slice(trimmed.lastIndexOf('/') + 1);
+  }
+
+  /** True when the backend named this exact problem code. */
+  is(code: string): boolean {
+    return this.code === code;
   }
 
   /** Message worth showing a renter: prefer `detail`, fall back to `title`. */
@@ -131,6 +150,8 @@ export const api = {
     request<T>(path, { ...opts, method: 'GET' }),
   post: <T>(path: string, body?: unknown, opts: Omit<RequestOptions, 'method' | 'body'> = {}) =>
     request<T>(path, { ...opts, method: 'POST', body }),
+  put: <T>(path: string, body?: unknown, opts: Omit<RequestOptions, 'method' | 'body'> = {}) =>
+    request<T>(path, { ...opts, method: 'PUT', body }),
   patch: <T>(path: string, body?: unknown, opts: Omit<RequestOptions, 'method' | 'body'> = {}) =>
     request<T>(path, { ...opts, method: 'PATCH', body }),
   del: <T>(path: string, opts: Omit<RequestOptions, 'method' | 'body'> = {}) =>
@@ -215,3 +236,165 @@ export const authApi = {
 
   logout: () => api.post<void>('/auth/logout', undefined, { query: { audience: 'renter' } }),
 };
+
+/* ---------------------------------------------------------------- */
+/* Shapes from API.md — Phase 2 (public) + Phase 3 (renter)           */
+/* ---------------------------------------------------------------- */
+
+/** Org branding as served pre-auth; `theme` feeds `applyOrgTheme()`. */
+export interface PublicBranding {
+  display_name: string;
+  logo_url: string | null;
+  theme: { primary_color: string; font_id: string };
+}
+
+/**
+ * A payment period the landlord offers for this unit. `amount` is the
+ * server's proration of the unit price over `days`; it is `null` when the
+ * unit has no price yet.
+ */
+export interface OfferedPeriod {
+  id: string;
+  label: string;
+  days: number;
+  is_recommended: boolean;
+  amount: number | null;
+}
+
+export interface UnitPrice {
+  amount: number;
+  currency: string;
+  period_days: number;
+}
+
+/** `GET /public/units/{unit_code}` — the QR landing payload. */
+export interface PublicUnit {
+  org: { id: string; name: string; slug: string };
+  branding: PublicBranding;
+  property: { name: string; location_text: string | null };
+  unit: { id: string; name: string; status: string };
+  price: UnitPrice | null;
+  periods: OfferedPeriod[];
+  occupied: boolean;
+}
+
+export type KycStatus = 'none' | 'submitted' | 'verified';
+
+export interface RenterProfile {
+  full_name: string;
+  /** Server-masked (`••••••••1234`); the raw NIDA never leaves the backend. */
+  nida_masked: string | null;
+  next_of_kin_name: string;
+  next_of_kin_phone: string;
+  email: string;
+  kyc_status: KycStatus;
+  kyc_doc_uploaded: boolean;
+  updated_at: string;
+}
+
+export interface ProfileResponse {
+  user: { id: string; phone: string; full_name: string; email: string };
+  profile: RenterProfile;
+}
+
+export interface ProfileInput {
+  full_name: string;
+  /** Omitted or empty keeps the stored number. */
+  nida_number?: string;
+  next_of_kin_name: string;
+  next_of_kin_phone: string;
+  email?: string;
+}
+
+/** Presigned PUT ticket for the optional ID photo. */
+export interface KycUploadTicket {
+  upload_url: string;
+  object_key: string;
+  headers: Record<string, string>;
+}
+
+export type LinkRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+
+/** Server-computed schedule summary — authoritative over any client preview. */
+export interface SchedulePreview {
+  count: number;
+  first_due: string;
+  amount_first: number;
+  amount_last: number;
+  total: number;
+}
+
+export interface LinkRequest {
+  id: string;
+  unit: { id: string; name: string; property_name: string };
+  org: { name: string; slug: string };
+  status: LinkRequestStatus;
+  payment_period: { id: string; label: string; days: number; amount: number };
+  term_days: number;
+  start_date: string;
+  end_date: string;
+  schedule_preview: SchedulePreview;
+  created_at: string;
+  rejection_reason?: string | null;
+}
+
+export interface LinkRequestInput {
+  payment_period_id: string;
+  term_days: number;
+  start_date: string;
+  accepted_terms: true;
+}
+
+export const publicApi = {
+  unit: (unitCode: string, signal?: AbortSignal) =>
+    api.get<PublicUnit>(`/public/units/${encodeURIComponent(unitCode)}`, { signal }),
+};
+
+export const renterApi = {
+  profile: (signal?: AbortSignal) => api.get<ProfileResponse>('/me/profile', { signal }),
+
+  saveProfile: (input: ProfileInput) => api.put<{ profile: RenterProfile }>('/me/profile', input),
+
+  kycUploadTicket: (contentType: string, sizeBytes: number) =>
+    api.post<KycUploadTicket>('/me/profile/kyc-upload', {
+      content_type: contentType,
+      size_bytes: sizeBytes,
+    }),
+
+  kycUploadComplete: (objectKey: string) =>
+    api.post<{ profile: RenterProfile }>('/me/profile/kyc-upload/complete', {
+      object_key: objectKey,
+    }),
+
+  createLinkRequest: (unitCode: string, input: LinkRequestInput) =>
+    api.post<{ request: LinkRequest }>(`/units/${encodeURIComponent(unitCode)}/link`, input),
+
+  linkRequests: (signal?: AbortSignal) =>
+    api.get<{ items: LinkRequest[] }>('/me/link-requests', { signal }),
+
+  cancelLinkRequest: (id: string) => api.del<void>(`/me/link-requests/${encodeURIComponent(id)}`),
+};
+
+/**
+ * Push the chosen ID photo straight at MinIO with the presigned URL the
+ * backend just handed out. Not an API call — hence the raw `fetch` and the
+ * deliberate absence of `credentials` (a signed URL must stay cookie-free).
+ */
+export async function uploadToPresignedUrl(
+  ticket: KycUploadTicket,
+  file: File,
+): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(ticket.upload_url, {
+      method: 'PUT',
+      headers: ticket.headers ?? {},
+      body: file,
+    });
+  } catch {
+    throw new ApiError(0);
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, { title: 'Upload failed', detail: 'The photo could not be uploaded. Please try again.' });
+  }
+}
