@@ -1,5 +1,6 @@
 import { Bricolage_Grotesque, Archivo, Instrument_Sans, Hanken_Grotesk } from 'next/font/google';
 import '@tms/ui/tokens.css';
+import { AuthProvider } from '../lib/auth';
 
 // Landlord portal is org-themed like the enduser app: same whitelisted
 // fonts, org branding applied at runtime via applyOrgTheme().
@@ -20,7 +21,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       lang="en"
       className={`${bricolage.variable} ${archivo.variable} ${instrument.variable} ${hanken.variable}`}
     >
-      <body>{children}</body>
+      <body>
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }

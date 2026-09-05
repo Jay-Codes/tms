@@ -238,7 +238,7 @@ export default function DesignSystem() {
           <div className="field">
             <label htmlFor="phone">Phone number</label>
             <input id="phone" className="input" placeholder="0712 345 678" inputMode="tel" />
-            <span className="hint">We'll text you a code.</span>
+            <span className="hint">We&rsquo;ll text you a code.</span>
           </div>
           <div className="field invalid">
             <label htmlFor="nida">NIDA number</label>

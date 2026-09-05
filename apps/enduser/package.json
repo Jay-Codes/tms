@@ -2,7 +2,9 @@
   "name": "enduser",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3001"
+    "dev": "next dev -p 3001",
+    "build": "next build",
+    "lint": "next lint"
   },
   "dependencies": {
     "@iconify/react": "^6.0.2",
@@ -14,6 +16,8 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "^15.5.2"
   }
 }
