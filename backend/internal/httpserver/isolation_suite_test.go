@@ -262,6 +262,54 @@ var isoRoutes = []isoCase{
 		want: []int{200},
 	},
 
+	// ---------------------------------------------- expenses (Phase 10) --
+	{method: "GET", pattern: "/org/expense-categories", aud: isoOrg, want: []int{200}},
+	{
+		method: "POST", pattern: "/org/expense-categories", aud: isoOrg,
+		body: map[string]any{"name": "Iso Beta Landscaping"}, want: []int{201},
+	},
+	{
+		method: "PATCH", pattern: "/org/expense-categories/{id}", aud: isoOrg,
+		path: "/org/expense-categories/{categoryA}", body: map[string]any{"name": "Hijacked"},
+	},
+	{
+		method: "DELETE", pattern: "/org/expense-categories/{id}", aud: isoOrg,
+		path: "/org/expense-categories/{categoryA}",
+	},
+	{method: "GET", pattern: "/expenses", aud: isoOrg, want: []int{200}},
+	{
+		// Org A's property, named from org B: the ledger must not accept an
+		// expense against a property that is not the caller's.
+		method: "POST", pattern: "/expenses", aud: isoOrg,
+		body: map[string]any{
+			"property_id": "{propertyA}", "amount": 5000, "incurred_on": "{today}",
+		},
+	},
+	{method: "GET", pattern: "/expenses/summary", aud: isoOrg, want: []int{200}},
+	{method: "GET", pattern: "/expenses/{id}", aud: isoOrg, path: "/expenses/{expenseA}"},
+	{
+		method: "PATCH", pattern: "/expenses/{id}", aud: isoOrg,
+		path: "/expenses/{expenseA}", body: map[string]any{"amount": 1},
+	},
+	{
+		method: "POST", pattern: "/expenses/{id}/void", aud: isoOrg,
+		path: "/expenses/{expenseA}/void", body: map[string]any{"reason": "hijack"},
+	},
+	{
+		method: "POST", pattern: "/expenses/{id}/receipt", aud: isoOrg,
+		path: "/expenses/{expenseA}/receipt",
+		body: map[string]any{"content_type": "image/png", "size": 1024},
+	},
+	{
+		// Claiming an object under org A's prefix must be refused before MinIO
+		// is ever asked whether it exists.
+		method: "POST", pattern: "/expenses/{id}/receipt/complete", aud: isoOrg,
+		path: "/expenses/{expenseA}/receipt/complete",
+		body: map[string]any{"object_key": "{orgA}/{expenseA}.png"},
+	},
+	{method: "GET", pattern: "/expenses/{id}/receipt", aud: isoOrg, path: "/expenses/{expenseA}/receipt"},
+	{method: "DELETE", pattern: "/expenses/{id}/receipt", aud: isoOrg, path: "/expenses/{expenseA}/receipt"},
+
 	// ------------------------------------------------------ notifications --
 	{method: "GET", pattern: "/org/notification-settings", aud: isoOrg, want: []int{200}},
 	{
@@ -544,6 +592,7 @@ func (f *isoFixture) substitute(v any) any {
 var isoSecretIDs = []string{
 	"orgA", "propertyA", "unitA", "contractA", "scheduleA", "paymentA",
 	"templateA", "linkRequestA", "memberA", "auditA", "notificationA", "renterUserA",
+	"expenseA", "categoryA",
 }
 
 func (f *isoFixture) secrets() map[string]string {
@@ -610,6 +659,14 @@ func newIsoFixture(t *testing.T, h *harness) *isoFixture {
 	f.ids["linkRequestA"] = base.renter.do(http.MethodPost, "/units/"+base.unitCodes[2]+"/link",
 		linkBody(base.periodID, testTermDays)).
 		mustStatus(t, http.StatusCreated, "org A pending application").str(t, "request", "id")
+
+	// An expense and the category it is filed under (Phase 10).
+	f.ids["categoryA"] = firstID(t, base.owner.do(http.MethodGet, "/org/expense-categories", nil).
+		mustStatus(t, http.StatusOK, "org A expense categories"))
+	f.ids["expenseA"] = base.owner.do(http.MethodPost, "/expenses", map[string]any{
+		"property_id": f.ids["propertyA"], "category_id": f.ids["categoryA"],
+		"amount": 42_000, "incurred_on": f.ids["today"], "vendor": "Alpha Hardware",
+	}).mustStatus(t, http.StatusCreated, "org A expense").str(t, "expense", "id")
 
 	// A staff member to remove.
 	f.ids["memberA"] = base.owner.do(http.MethodPost, "/org/members", map[string]any{

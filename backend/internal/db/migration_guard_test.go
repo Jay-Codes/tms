@@ -18,6 +18,7 @@ import (
 var schemaMigrations = []struct{ up, down string }{
 	{"../../migrations/000002_schema.up.sql", "../../migrations/000002_schema.down.sql"},
 	{"../../migrations/000007_payments.up.sql", "../../migrations/000007_payments.down.sql"},
+	{"../../migrations/000012_part2_foundations.up.sql", "../../migrations/000012_part2_foundations.down.sql"},
 }
 
 // guardExemptTables carry an org_id column but are deliberately absent from
@@ -27,6 +28,15 @@ var schemaMigrations = []struct{ up, down string }{
 //	the principal is scoped to), never a filter on the lookup.
 var guardExemptTables = map[string]string{
 	"sessions": "org_id is session payload, not a query filter",
+	// Part 2 tables whose org_id is the primary key: the row IS the org's
+	// single record, so the PK index is the org_id index and every query is a
+	// single-row lookup by it. They join orgScopedTables the day one of them
+	// grows a second row per org.
+	"org_themes":      "org_id is the primary key: one row per org, looked up by it",
+	"org_sms_credits": "org_id is the primary key: one row per org, looked up by it",
+	// The credit ledger is append-only and read only through the org-scoped
+	// index below; it joins the guard proper in Phase 14, with its queries.
+	"sms_credit_ledger": "Phase 14 table; no queries yet — its reads are added with the endpoints",
 }
 
 var (
@@ -151,7 +161,7 @@ func TestOrgScopedTablesAreIndexedOnOrgID(t *testing.T) {
 	}
 	sql := strings.ToLower(b.String())
 	for _, tbl := range orgScopedTables {
-		idx := regexp.MustCompile(`create (?:unique )?index [a-z0-9_]+ on ` + tbl + ` \(org_id`)
+		idx := regexp.MustCompile(`create (?:unique )?index [a-z0-9_]+\s+on ` + tbl + `\s+\(org_id`)
 		if !idx.MatchString(sql) {
 			t.Errorf("table %q has no index leading with org_id", tbl)
 		}

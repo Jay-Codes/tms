@@ -78,24 +78,26 @@ type ContractTemplate struct {
 }
 
 type Expense struct {
-	ID               pgtype.UUID        `json:"id"`
-	OrgID            pgtype.UUID        `json:"org_id"`
-	PropertyID       pgtype.UUID        `json:"property_id"`
-	UnitID           pgtype.UUID        `json:"unit_id"`
-	CategoryID       pgtype.UUID        `json:"category_id"`
-	Amount           int64              `json:"amount"`
-	IncurredOn       pgtype.Date        `json:"incurred_on"`
-	Vendor           string             `json:"vendor"`
-	Reference        string             `json:"reference"`
-	Note             string             `json:"note"`
-	ReceiptObjectKey *string            `json:"receipt_object_key"`
-	RecordedByUserID pgtype.UUID        `json:"recorded_by_user_id"`
-	Status           string             `json:"status"`
-	VoidedAt         pgtype.Timestamptz `json:"voided_at"`
-	VoidReason       *string            `json:"void_reason"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
+	ID                 pgtype.UUID        `json:"id"`
+	OrgID              pgtype.UUID        `json:"org_id"`
+	PropertyID         pgtype.UUID        `json:"property_id"`
+	UnitID             pgtype.UUID        `json:"unit_id"`
+	CategoryID         pgtype.UUID        `json:"category_id"`
+	Amount             int64              `json:"amount"`
+	IncurredOn         pgtype.Date        `json:"incurred_on"`
+	Vendor             string             `json:"vendor"`
+	Reference          string             `json:"reference"`
+	Note               string             `json:"note"`
+	ReceiptObjectKey   *string            `json:"receipt_object_key"`
+	RecordedByUserID   pgtype.UUID        `json:"recorded_by_user_id"`
+	Status             string             `json:"status"`
+	VoidedAt           pgtype.Timestamptz `json:"voided_at"`
+	VoidReason         *string            `json:"void_reason"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
+	ReceiptContentType *string            `json:"receipt_content_type"`
+	ReceiptSize        *int64             `json:"receipt_size"`
 }
 
 type ExpenseCategory struct {

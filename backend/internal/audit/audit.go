@@ -103,6 +103,23 @@ const (
 	ActionNotificationRetry    = "notification.retry"
 	ActionNotificationRun      = "notification.scheduler_run"
 
+	// Phase 10 — the expense ledger (PLAN2 Phase 10, FLOWS 12).
+	//
+	// `expense.void` is its own action rather than a flag on the update, for
+	// the reason `payment.reverse` is: voiding is the one movement that takes
+	// money back out of every total, so it must be findable by action alone.
+	// `expense.receipt_attach` and `expense.receipt_remove` record the object
+	// key, never the file — the trail says which document was attached, not
+	// what was in it.
+	ActionExpenseCategoryCreate = "expense_category.create"
+	ActionExpenseCategoryUpdate = "expense_category.update"
+	ActionExpenseCategoryDelete = "expense_category.delete"
+	ActionExpenseCreate         = "expense.create"
+	ActionExpenseUpdate         = "expense.update"
+	ActionExpenseVoid           = "expense.void"
+	ActionExpenseReceiptAttach  = "expense.receipt_attach"
+	ActionExpenseReceiptRemove  = "expense.receipt_remove"
+
 	// Phase 7 — platform-admin suspension. Both rows carry the *target* org
 	// as org_id and the admin as actor, so the trail reads the same from the
 	// org's own audit page as from the platform one.
@@ -133,6 +150,9 @@ const (
 	EntityPaymentSchedule = "payment_schedule"
 
 	EntityNotification = "notification"
+
+	EntityExpense         = "expense"
+	EntityExpenseCategory = "expense_category"
 )
 
 type ctxKey int
