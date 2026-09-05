@@ -58,7 +58,24 @@ The schema is designed so gateway payments and complaints bolt on without migrat
 Base design system lives in `packages/ui` (`@tms/ui`), used by all three apps. Previews: `/enduser/design-system` (mobile, renter) and `/tenant/design-system` (desktop, landlord). Concept: **"the stamped ledger"** — a landlord's rent book. Paper background, blue-black ballpoint ink for text, ledger-blue rules, money right-aligned in tabular figures with accountant's double rule under totals, and a rubber **stamp** for what has happened (Paid / Overdue); pending is only pencilled. No card grids or drop shadows except genuinely separate sheets (dialogs). Two layers:
 
 - **Core (fixed platform-wide):** paper/ink/rule palette, stamp colors (never themed), 16px-base type scale with one display size, 4px spacing grid, small stationery radii (3–6px), 52px ledger rows / 44px touch minimum, Solar icon set (Iconify), ink-colored focus ring, reduced-motion respected. Shared classes: `.ledger`, `.stamp`, `.pencil`, `.amount`, `.num`, `.btn-*`, `.field`/`.input`, `.sheet`, `.tabs`/`.tab`, `.bottom-bar`.
-- **Org theme (landlord-configurable, enduser + tenant apps only):** one primary color (pressed/tint/on-primary variants derived automatically, contrast guaranteed) and one font from a whitelist (Bricolage Grotesque default, Archivo, Instrument Sans, Hanken Grotesk — self-hosted via next/font). Applied at runtime by `applyOrgTheme()` from org branding settings; the admin app always uses platform defaults. Identity lives in structure, so a color/font swap cannot break a screen.
+- **Org theme (landlord-configurable, enduser + tenant apps only):** a **preset** plus an optional **advanced token override**, and one font from a whitelist (Bricolage Grotesque default, Archivo, Instrument Sans, Hanken Grotesk — self-hosted via next/font). Applied at runtime by `applyOrgTheme()` from org branding settings; the admin app is **never themed** — it always uses platform defaults. Identity lives in structure, so a color/font swap cannot break a screen.
+
+**Theme model (Part 2).** The themable set is exactly eight tokens:
+
+| Token | Role |
+|-------|------|
+| `paper` | page background |
+| `surface` | sheets, cards, dialogs |
+| `ink` | body text |
+| `ink-muted` | secondary text |
+| `rule` | ledger lines and borders |
+| `primary` | primary action (pressed / tint / on-primary derived automatically) |
+| `accent` | highlights, chips, chart accent |
+| `font` | font id from the whitelist |
+
+Everything else is **fixed platform-wide and never themed**: stamp colors (Paid / Overdue), the focus ring, the 4px spacing grid, the stationery radii (3–6px) and the 16px-base type scale. Eight curated **presets** ship with the platform — Ledger (default), Night ledger, Warm paper, Cool slate, Forest, Ocean, High-contrast, Minimal white — each a complete, AA-validated token set. The advanced panel exposes the individual tokens with live contrast badges.
+
+**Contrast guard.** `validateTheme(tokens)` in `packages/ui/theme` returns the failing pairs (`ink`/`paper`, `ink-muted`/`paper`, `on-primary`/`primary`, `ink`/`surface`) with their ratios; the client warns live and the backend **re-validates on save**, rejecting any body-text pair below **WCAG AA 4.5:1** with `400` and the failing pairs listed. The same resolved token set is served to the renter app, so **one theme covers both the landlord and the renter apps**; an org with no theme resolves to preset `ledger`.
 
 ### 2.1 Multi-tenancy model
 
@@ -87,6 +104,12 @@ Each **unit** gets a permanent QR code encoding `https://{host}/enduser/u/{unit_
 
 Scan flow: resolve `unit_code` → public endpoint returns org branding + unit summary (property name, unit name, price, vacancy status) → renter registers or logs in → system creates a **link request** (`unit_link_requests`) → landlord approves in dashboard (or auto-approve if org setting enabled) → approval creates/activates the contract. QR codes are generated server-side (PNG into MinIO) and printable per-unit or in bulk per-property.
 
+### 3.2 Language (per user)
+
+Every user carries a locale — `users.locale`, `sw` or `en`, default `sw` — **chosen at registration/signup** and changeable afterwards (renter Profile, landlord Settings → Preferences). The locale drives both the screen language and every SMS sent to that person, including bulk sends. `orgs.settings.sms_language` survives only as the **fallback for renters with no preference** (pre-existing users), and is relabelled accordingly in the UI.
+
+Public pages seen before sign-in (QR landing, connect, org login) default to the **org language** and show a visible **SW/EN toggle**; the visitor's choice persists locally and is carried into registration as the initial `locale`. The admin app stays English-only.
+
 ---
 
 ## 4. Data model (PostgreSQL)
@@ -96,13 +119,19 @@ All tables: `id UUID PK`, `created_at`, `updated_at`. Org-scoped tables include 
 ```
 orgs                 name, slug, status, settings JSONB (auto_approve_links, due_day, grace_days, reminder offsets)
 payment_periods      org_id, label ("Monthly", "3 weeks"), days INT >0, is_recommended, sort_order, active
-                     -- landlord-managed list; seeded with recommended presets 30/90/180/365 days,
+                     -- landlord-managed list; seeded with presets 30/90/180/365 days,
                      -- landlord adds any custom value (7, 21, 45 days...) — no upper/lower cap beyond >0
+                     -- partial unique index: at most ONE recommended period per org
+                     --   UNIQUE (org_id) WHERE is_recommended AND deleted_at IS NULL
 org_branding         org_id, display_name, logo_object_key, letterhead_object_key NULLABLE,
                      theme JSONB {primary_color, font_id}, dashboard_prefs JSONB,
                      document_footer_text NULLABLE       -- address/phone/signature line under contracts
                      -- font_id from whitelist (bricolage|archivo|instrument|hanken); see packages/ui
-users                phone, email, password_hash, kind (renter|org_user|platform_admin), status
+org_themes           org_id PK, preset_id NULLABLE, tokens JSONB NULLABLE, font_id
+                     -- preset_id from the 8 shipped presets; tokens = advanced per-token override
+                     -- (paper, surface, ink, ink_muted, rule, primary, accent); NULL both = preset "ledger"
+users                phone, email, password_hash, kind (renter|org_user|platform_admin), status,
+                     locale TEXT NOT NULL DEFAULT 'sw' CHECK (locale IN ('sw','en'))
 org_members          org_id, user_id, role (org_owner|org_manager)
 renter_profiles      user_id, full_name, nida_number, next_of_kin_name, next_of_kin_phone, kyc_status, kyc_doc_object_key
 properties           org_id, name, location_text, lat/lng NULLABLE, notes
@@ -127,8 +156,23 @@ payment_schedules    org_id, contract_id, period_start, period_end, due_date, am
 payments             org_id, contract_id, schedule_id NULLABLE, amount, method
                      (cash|bank_transfer|mobile_money_manual), reference, paid_at,
                      recorded_by_user_id, note, status (recorded|confirmed|reversed)
+expense_categories   org_id, name, is_default, sort_order, active
+                     -- seeded: Repairs & maintenance, Utilities, Security, Cleaning,
+                     --         Taxes & levies, Insurance, Management fees, Other
+expenses             org_id, property_id, unit_id NULLABLE, category_id, amount (TZS), incurred_on (date),
+                     vendor, reference, note, receipt_object_key NULLABLE, recorded_by_user_id,
+                     status (recorded|voided), voided_at, void_reason, deleted_at
 notification_log     org_id, user_id, kind (reminder_7d|reminder_due|overdue_daily|thank_you|otp|custom),
                      channel (sms), dedupe_key UNIQUE, payload, provider_msg_id, status, sent_at
+                     -- status: queued|sending|sent|failed|held_no_credit
+org_sms_credits      org_id PK, balance INT NOT NULL DEFAULT 0, low_watermark INT NOT NULL DEFAULT 50,
+                     updated_at
+sms_credit_ledger    org_id, delta INT, balance_after INT, reason (topup|adjust|debit|refund),
+                     notification_id NULLABLE, admin_user_id NULLABLE, note, created_at
+                     -- append-only (trigger); no expiry, no monthly reset
+platform_templates   kind PK, sw TEXT, en TEXT, variables TEXT[], locked BOOL NOT NULL DEFAULT false,
+                     updated_by_admin_id, updated_at, version INT      -- `otp` seeded locked
+platform_template_versions  kind, version, sw, en, admin_user_id, created_at   -- history, append-only
 audit_log            org_id NULLABLE, actor_user_id, action, entity_type, entity_id,
                      before JSONB, after JSONB, ip, user_agent, at   -- append-only, no UPDATE/DELETE grants
 sessions             token_hash, user_id, org_id NULLABLE, expires_at
@@ -137,7 +181,8 @@ sessions             token_hash, user_id, org_id NULLABLE, expires_at
 Key rules:
 
 - **Contracts snapshot terms and rent** at signing — later template/price edits never mutate active contracts.
-- **Payment periods are landlord-defined, in days, unlimited.** Each org has a `payment_periods` list seeded with recommended presets (30 / 90 / 180 / 365 days, `is_recommended = true`, shown first in UI). Landlord adds/edits/deactivates any custom period (7, 21, 45 days…); only constraint is `days > 0`. Units may restrict to a subset via `allowed_period_ids`.
+- **Payment periods are landlord-defined, in days, unlimited.** Each org has a `payment_periods` list seeded with four presets (30 / 90 / 180 / 365 days, restorable). Landlord adds/edits/deactivates any custom period (7, 21, 45 days…); only constraint is `days > 0`. Units may restrict to a subset via `allowed_period_ids`.
+- **Exactly one recommended period per org.** `is_recommended` is a single badge, not a class of presets: bootstrap sets it on **Monthly (30 days)**, the landlord moves it in Settings → Periods (`POST /org/payment-periods/{id}/recommend`, audited), and a partial unique index enforces the "at most one" rule. The recommended period sorts first wherever periods are offered (renter unit page, connect, contract creation), which is what makes that ordering meaningful.
 - Contract separates **span** (`term_days`) from **cadence** (`payment_period_days`). Creating an `active` contract generates all `payment_schedules` rows up front: one row per cadence interval across the span, last row truncated to `end_date`. Example: 180-day term, 45-day cadence = 4 rows; 100-day term, 30-day cadence = 4 rows (30/30/30/10).
 - Schedule amount = `rent_amount × schedule_days / rent_period_days`, rounded to whole TZS (proration from the unit's price basis). Snapshotted at activation like terms.
 - `due_day` is optional: if set, due dates snap to that day-of-month (monthly-style periods); if NULL, due date = period start (default for custom day-counts).
@@ -156,16 +201,19 @@ POST /auth/register/renter        {phone, ...} → OTP sent
 POST /auth/otp/verify             {phone, code}
 POST /auth/login                  {phone|email, pin|password}
 POST /auth/logout
-GET  /public/units/{unit_code}    branding + unit summary + offered payment periods with prorated
-                                  amounts (pre-auth, rate-limited)
-GET  /public/orgs/{slug}/branding
+GET  /public/units/{unit_code}    branding + resolved theme tokens + unit summary + offered payment
+                                  periods with prorated amounts, recommended first (pre-auth, rate-limited)
+GET  /public/orgs/{slug}/branding branding + resolved theme tokens (preset merged with overrides)
+GET  /themes/presets              the 8 shipped presets with their token sets (public, cacheable)
 ```
 
 ### 5.2 Org & branding (landlord)
 ```
 POST /orgs                        register org (owner signup)
 GET/PATCH /org                    current org profile & settings
-GET/PUT   /org/branding           display name, theme, dashboard prefs
+GET/PUT   /org/branding           display name, theme, dashboard prefs; `theme` is
+                                  {preset_id|null, tokens:{…}|null, font_id} — server re-validates
+                                  contrast and rejects < 4.5:1 body text (400 + failing pairs)
 POST      /org/branding/logo      → presigned MinIO upload URL
 POST      /org/branding/letterhead → presigned upload (PNG/JPG banner shown atop contract documents)
 POST/GET/DELETE /org/members      staff management
@@ -180,7 +228,8 @@ GET  /units?status=vacant         vacancy board
 POST /units/{id}/prices           new price {amount, period_days, effective_from} (pricing management)
 GET  /units/{id}/prices           price history
 CRUD /org/payment-periods         landlord's period list (label, days, is_recommended, sort_order, active);
-                                  seeded on org creation with recommended 30/90/180/365
+                                  seeded on org creation with 30/90/180/365, Monthly recommended
+POST /org/payment-periods/{id}/recommend   moves the single "Recommended" badge to this period (audited)
 PATCH /units/{id}                 also sets allowed_period_ids (restrict offered periods per unit)
 ```
 
@@ -196,8 +245,9 @@ GET  /renters                     landlord's renter directory + KYC view
 ### 5.5 Contract templates & contracts
 ```
 CRUD /contract-templates          terms management (rich-text body, sanitized HTML; variables
-                                  {{renter_name}}, {{unit}}, {{property}}, {{rent}}, {{start_date}},
-                                  {{end_date}}, {{payment_period}}, {{org_name}})
+                                  {{renter_name}}, {{unit}}, {{property}}, {{rent}}, {{rent_basis}},
+                                  {{start_date}}, {{end_date}}, {{payment_period}}, {{org_name}},
+                                  {{term_days}}, {{due_day}})
 POST /contracts                   from link approval or manual: unit + renter + template +
                                   term_days + payment_period_id + start_date (end_date derived) + due_day?
 POST /contracts/{id}/sign/otp     renter: send OTP to registered phone for signing (rate-limited)
@@ -217,6 +267,15 @@ GET  /contracts/{id}/document     app-native document: {letterhead_url, logo_url
                                   print stylesheet. No server-side PDF in MVP.
 GET  /contracts/{id}/verify       recompute hash; returns valid/tampered + signature summary
 ```
+
+**Rent in the document (Part 2 rule).** `{{rent}}` is the amount **per payment period**, not the unit's price basis:
+
+```
+{{rent}}       = round(rent_amount × payment_period_days / rent_period_days)   -- schedule proration rounding
+{{rent_basis}} = the unit price with its own basis, e.g. "TZS 100,000 / 30 days"
+```
+
+So a 100,000-per-30-days unit on a Quarterly (90-day) cadence renders "TZS 300,000 per Quarterly (90 days) (TZS 100,000 / 30 days)". The default template sentence is "rent of **{{rent}}** per {{payment_period}} ({{rent_basis}})", and the document header's Rent row shows the per-payment-period figure with the basis underneath. `GET /contracts/{id}` and the renter's read carry `rent_per_period` alongside `rent_amount` / `rent_period_days` / `payment_period_days`. The **snapshot rule is unchanged**: existing contracts keep the terms HTML they were signed with, so only contracts created after this change render the new figure, and `snapshot_hash` is unaffected (the hash covers the rendered terms).
 
 **Digital signing (MVP):**
 - Terms are snapshotted (variables resolved) and `snapshot_hash` computed when the contract enters `pending_signature`. Nothing about the document can change after that — edits require a new contract.
@@ -246,25 +305,72 @@ POST /webhooks/gateway            provider callback → confirm payment
 
 ### 5.8 Notifications
 ```
-GET  /org/notification-settings   offsets, enable/disable kinds, sender name
-PUT  /org/notification-settings
-POST /notifications/custom        landlord bulk/targeted SMS to renters
+GET  /org/notification-settings   offsets, enable/disable kinds, sender name, default language for
+                                  renters with no preference; templates read-only for locked kinds
+PUT  /org/notification-settings   an override of a locked kind → 409 template_locked
+POST /notifications/custom        landlord bulk/targeted SMS to renters; body given as {body_sw?, body_en?}
+                                  (at least one) and fanned out per recipient locale, falling back to the
+                                  other language when only one is given; the language used is logged.
+                                  Pre-checks credits → 409 insufficient_sms_credits {needed, balance}
 GET  /notifications/log
+GET  /org/sms-credits             {balance, low_watermark, held_count}
 ```
 
 ### 5.9 Reports & audit
 ```
 GET /reports/summary              total assets (property & unit counts), total renters,
-                                  occupancy rate, collected vs expected this period
+                                  occupancy rate, collected vs expected in the resolved window
 GET /reports/payment-status       per renter: paid | pending | overdue (+ CSV export)
-GET /reports/collections?from&to  collections over time
+GET /reports/collections          collections over time
+GET /reports/revenue              expected vs collected vs expenses vs net, bucketed series + trend
+GET /reports/occupancy            units occupied per bucket end
 GET /audit-log?entity=&actor=&from=&to=      (org-scoped; admin sees all)
 ```
+
+**Cadence (Part 2).** `/reports/summary`, `/reports/payment-status`, `/reports/collections`, `/reports/revenue`, `/reports/occupancy` and `/expenses/summary` all accept the same window parameters: `cadence=month|quarter|half_year|year|custom` with `from` / `to` (required for `custom`) and an optional `anchor` date. Windows resolve on the Dar es Salaam wall clock (`internal/period`), and every response **echoes the resolved `{from, to, cadence}` plus the equivalent `previous` window**, so period-over-period comparisons are computed from one place. Series endpoints add `bucket=day|week|month` (auto: `day` for ≤ 62 days, `week` for ≤ 26 weeks, `month` otherwise), zero-filled, capped at 400 buckets, and accept `property_id` / `group_by=property`.
 
 ### 5.10 Platform admin
 ```
 GET /admin/orgs                   list/suspend/activate orgs
 GET /admin/metrics                platform health
+```
+
+### 5.11 Expenses (landlord)
+```
+CRUD /org/expense-categories      category list (name, sort_order, active); seeded with 8 defaults
+POST /expenses                    {property_id, unit_id?, category_id, amount, incurred_on, vendor?,
+                                  reference?, note?} — amount bounds, incurred_on ≤ today+1,
+                                  property in org, unit belongs to the property
+PATCH /expenses/{id}              audited before/after
+POST /expenses/{id}/void          {reason} — append-style correction, like a payment reversal;
+                                  the row stays, status → voided, nothing is restored
+GET  /expenses?property_id=&unit_id=&category_id=&from=&to=&cursor=   (+ format=csv, formula-neutralised)
+POST /expenses/{id}/receipt       presigned upload into bucket `receipts` + complete/view
+GET  /expenses/summary?cadence=&from=&to=&group_by=property|category  → totals per group + grand total
+```
+
+### 5.12 Platform admin: templates & SMS credits
+```
+GET   /admin/templates                     all kinds, both languages, variables, version, last editor
+PUT   /admin/templates/{kind}              {sw, en} — placeholders validated against the kind's
+                                           allowed variables; records a version; audited
+PATCH /admin/templates/{kind}              {locked} — a locked kind refuses org overrides
+POST  /admin/templates/{kind}/preview      {language, sample?} → rendered body
+POST  /admin/templates/{kind}/revert       {version} → restores that version as a new version
+GET   /admin/orgs/{id}/sms                 {balance, low_watermark, used_30d, held_count, ledger:[…]}
+POST  /admin/orgs/{id}/sms/topup           {credits, note}
+POST  /admin/orgs/{id}/sms/adjust          {delta, note}
+PATCH /admin/orgs/{id}/sms                 {low_watermark}
+```
+All four credit routes are audited twice: the platform audit trail and the org's own log (visible to the landlord as "credits added by platform").
+
+### 5.13 Locale
+```
+PATCH /me                         renter: {locale:"sw"|"en"} (audited)
+PATCH /org/members/me             org user: {locale:"sw"|"en"} (audited)
+POST  /auth/register/renter       accepts locale (from the public SW/EN toggle)
+POST  /orgs                       owner signup accepts locale
+GET   /auth/me, GET /me           return `locale` in the session payload
 ```
 
 ---
@@ -282,13 +388,19 @@ Provider: **Beem Africa** HTTP API (api key + secret via env vars). Sender ID pe
 | `otp` | auth | immediate |
 | `custom` | landlord-initiated | immediate |
 
-Mechanics: scheduler derives due sends from Postgres → `dedupe_key` (`{kind}:{schedule_id}:{date}`) prevents duplicates → Redis queue → worker calls Beem with retry/backoff (3 attempts) → result stored in `notification_log`. Templates support variables (`{{name}}, {{amount}}, {{due_date}}, {{property}}, {{unit}}`); org-overridable, Swahili/English per org setting.
+Mechanics: scheduler derives due sends from Postgres → `dedupe_key` (`{kind}:{schedule_id}:{date}`) prevents duplicates → Redis queue → worker calls Beem with retry/backoff (3 attempts) → result stored in `notification_log`. Templates support variables (`{{name}}, {{amount}}, {{due_date}}, {{property}}, {{unit}}, {{org}}, {{next_due_date}}, {{link}}`); org-overridable.
+
+**Language resolution (Part 2).** `notify.LanguageFor(recipientUser, org)` = the **recipient's `users.locale`**, falling back to `orgs.settings.sms_language` when the user has no preference. Every queue writer passes the recipient's locale, not the org's, and the scheduler groups by recipient locale. A bulk send fans out per recipient (`body_sw` / `body_en`).
+
+**Template resolution.** Org override → `platform_templates` row → built-in Go default. The platform defaults are seeded into `platform_templates` by migration, so the table is authoritative from day one; the Go constants remain only as the last-resort fallback. A **locked** kind (per-kind `locked` flag, `otp` locked out of the box) shows the landlord read-only wording and refuses an override on `PUT /org/notification-settings` with **409 `template_locked`**. The rendered-template cache in Redis is invalidated on save.
+
+**SMS credits.** Each org holds a prepaid balance (`org_sms_credits`, topped up by the platform admin — **no expiry, no monthly reset**). Every outbound SMS **except the exempt kinds** (`otp` and other security messages, configurable list) debits **1 credit per 160-character GSM segment** (70 for UCS-2) at **send time**, as one conditional update (`SET balance = balance - n WHERE balance >= n`) with an append-only `sms_credit_ledger` row carrying `balance_after`. Insufficient balance leaves the row **`held_no_credit`** — not `failed`; a top-up releases held rows **in queue order**. A bulk send pre-checks the balance and refuses with **409 `insufficient_sms_credits {needed, balance}`** so the landlord is told before anything is queued. The landlord sees the balance, the held count and a low-watermark warning in Notifications.
 
 ---
 
 ## 7. Object storage (MinIO)
 
-Buckets: `branding` (logos, letterheads), `qrcodes` (unit QR PNGs; S3 requires ≥3-char names), `kyc` (ID document images — private, short-TTL presigned reads only), `signatures` (drawn signature PNGs — private, presigned reads only for contract parties). No `contracts` bucket in MVP — contract documents are app-native (§5.5). All access via backend-issued presigned URLs; uploads via presigned PUT with content-type and size limits enforced on completion callback.
+Buckets: `branding` (logos, letterheads), `qrcodes` (unit QR PNGs; S3 requires ≥3-char names), `kyc` (ID document images — private, short-TTL presigned reads only), `signatures` (drawn signature PNGs — private, presigned reads only for contract parties), `receipts` (expense receipts, key `{org_id}/{expense_id}.{ext}`, ≤ 5 MiB, `image/jpeg` / `image/png` / `application/pdf` — private, presigned reads only for the org). No `contracts` bucket in MVP — contract documents are app-native (§5.5). All access via backend-issued presigned URLs; uploads via presigned PUT with content-type and size limits enforced on completion callback.
 
 ---
 
@@ -325,3 +437,15 @@ Buckets: `branding` (logos, letterheads), `qrcodes` (unit QR PNGs; S3 requires �
 | 6 | Beem notifications end-to-end |
 | 7 | Reports, branding/theming, dashboard prefs, admin app |
 | 8 | Hardening: isolation tests, load pass, UAT — **ready for testing 15 Sep 2026** |
+
+Part 2 (post-MVP iteration, plan in [PLAN2.md](PLAN2.md)):
+
+| Phase | Content |
+|-------|---------|
+| 9 | Foundations + end-to-end fixes: single recommended period, rent per payment period in the document, layout-level nav shell, mobile contract fix, `PeriodPicker`, `internal/period`, Part 2 migrations + `receipts` bucket |
+| 10 | Expenses: categories, ledger with receipts, void semantics, CSV, per-property and all-properties summary |
+| 11 | Reports v2: cadence everywhere, revenue/expenses/net time series with trends, occupancy series, per-property breakdown |
+| 12 | Theming v2: 8 presets + advanced token override with the contrast guard, applied to both landlord and renter apps |
+| 13 | Language: `users.locale` per user, SMS + bulk SMS in the recipient's language, UI i18n (SW/EN) |
+| 14 | Platform admin: prepaid SMS credits per org and DB-backed platform templates with per-kind locking |
+| 15 | Mobile landlord pass, performance and isolation hardening, seed v2, UAT 2 |

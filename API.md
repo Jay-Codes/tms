@@ -308,3 +308,75 @@ Notes fixed in Phase 7:
 
 ### PWA
 Each app: `public/manifest.webmanifest` (name per app, `start_url` = basePath, display standalone, theme_color from core palette, icons 192/512 generated PNG), `<link rel=manifest>` in layout, service worker `public/sw.js` registered client-side: cache-first for app shell (`/_next/static/*`, manifest, icons), network-only for `/api/*` and presigned bucket paths, navigation fallback = cached shell; no offline writes. Registered only in production builds or when `NEXT_PUBLIC_ENABLE_SW=1` (avoid HMR interference in dev).
+
+## Part 2 (Phases 9–15) — planned contract
+
+Everything below is **planned** until its phase ships; a row becomes live when the phase's `PROGRESS.md` entry lands, and the phase heading drops the "planned" marker. Plan and phase order in [PLAN2.md](PLAN2.md); semantics in SPEC §2.0, §3.2, §5.11–5.13, §6, §7.
+
+### Phase 9 — foundations + end-to-end fixes (planned)
+
+| `POST /org/payment-periods/{id}/recommend` | (no body) → `200 {period}` — moves the single "Recommended" badge to this period and clears it from every other one in the org, in one transaction. Audience org (`tms_o`), owner + manager. An inactive or soft-deleted period → 409 `period_inactive`; another org's id → 404. Audited `org.payment_period_recommend` (`before`/`after` name the period that lost and the one that gained the badge). |
+| `GET /org/payment-periods` | unchanged shape, with a new guarantee: **at most one item has `is_recommended: true`** (partial unique index `payment_periods (org_id) WHERE is_recommended AND deleted_at IS NULL`). Ordering stays recommended first, then `sort_order`. `POST /org/payment-periods/restore-recommended` restores the four seeded presets (30/90/180/365) without touching the badge. |
+| `GET /public/units/{unit_code}` | unchanged shape; `periods[]` is ordered recommended-first, and the badge now marks exactly one entry. |
+| `GET /contracts/{id}` and renter `GET /contracts/{id}` | gain `rent_per_period` (int TZS) beside the existing `rent_amount`, `rent_period_days` and `payment_period_days`. `rent_per_period = round(rent_amount × payment_period_days / rent_period_days)` — the schedule's proration rounding, so it equals a full schedule row's amount. |
+| `GET /contracts/{id}/document` | `{{rent}}` in the rendered terms is now the **per-payment-period** amount; new template variable `{{rent_basis}}` renders the unit price with its basis (`"TZS 100,000 / 30 days"`). Contracts signed before this change keep their `terms_snapshot_html` verbatim (snapshot rule) and their `snapshot_hash` is unaffected — the hash covers the rendered terms. |
+| `GET/POST/PATCH /contract-templates` | the variable list returned for the editor gains `rent_basis`; unknown variables are still a 400. |
+
+Phase 9 notes:
+
+- `{{rent}}` and `rent_per_period` come from one helper, `contract.RentPerPeriod(rentAmount, rentPeriodDays, paymentPeriodDays)`, shared with schedule generation, so the document and the schedules can never quote different figures.
+- The **period resolver** (`internal/period`: cadence + anchor → `[from, to)` in EAT, plus bucket sizing) and the **client-IP trust rule** are internals — no endpoint exposes them. They surface only through the resolved `{from, to, cadence}` echoed by the Phase 11 report endpoints and through audit `ip` values.
+- Migration `000012_part2_foundations` adds the partial unique index, `users.locale`, and the (still unused) Part 2 tables; compose init adds the `receipts` bucket.
+
+### Phase 10 — expenses (planned)
+
+| `GET/POST/PATCH/DELETE /org/expense-categories` | `{name(1–60), sort_order?, active?}` → `{category}` / `{items}`; seeded with the eight defaults; a category in use cannot be hard-deleted (deactivate instead). |
+| `POST /expenses` | `{property_id, unit_id?, category_id, amount(int>0), incurred_on(date ≤ today+1), vendor?, reference?, note?}` → `201 {expense}`. Unit must belong to the property (400); cross-org ids → 404. |
+| `PATCH /expenses/{id}` | partial → `200 {expense}`; audited before/after. A voided expense → 409 `expense_voided`. |
+| `POST /expenses/{id}/void` | `{reason}` → `200 {expense}` with `status:"voided"` — append-style correction, nothing is restored or deleted. Already voided → 409 `expense_voided`. |
+| `GET /expenses?property_id=&unit_id=&category_id=&from=&to=&cursor=&limit=` | → `{items:[expense], next_cursor}`; `format=csv` streams the same rows, formula-neutralised. |
+| `POST /expenses/{id}/receipt` / `…/receipt/complete` / `GET …/receipt` | presigned PUT into bucket `receipts`, key `{org_id}/{expense_id}.{ext}`, ≤ 5 MiB, `image/jpeg` `image/png` `application/pdf`; read is a short-TTL presigned URL. |
+| `GET /expenses/summary?cadence=&from=&to=&group_by=property\|category` | → `{from,to,cadence,previous,groups:[{id,name,total}],total}`. |
+
+### Phase 11 — reports v2 (planned)
+
+| `GET /reports/summary\|payment-status\|collections`, `GET /expenses/summary` | all accept `cadence=month\|quarter\|half_year\|year\|custom` with `from`/`to` (required for `custom`) and optional `anchor`; every response echoes `{from,to,cadence}` and a `previous:{from,to}` window. Range beyond 5 years → 400. |
+| `GET /reports/revenue?cadence=&from=&to=&bucket=&property_id=&group_by=property` | → `{from,to,cadence,buckets:[{start,expected,collected,expenses,net}], totals, previous_totals, change_pct:{collected,expenses,net}, trend:{slope_collected_per_bucket}}`. Cash basis (non-reversed payments by `paid_at`), expected = schedules due in the bucket excluding waived, expenses by `incurred_on` excluding voided. Zero-filled; `bucket` auto `day` ≤ 62 days, `week` ≤ 26 weeks, else `month`; > 400 buckets → 400. |
+| `GET /reports/occupancy?cadence=&from=&to=&bucket=&property_id=` | → `{from,to,cadence,buckets:[{start,occupied,total,rate}]}` measured at each bucket end. |
+| `PUT /org/branding {dashboard_prefs}` | card ids gain `revenue`, `expenses`, `net_income`. |
+
+### Phase 12 — theming v2 (planned)
+
+| `GET /themes/presets` | public, cacheable → `{items:[{id,name,dark:bool,tokens:{paper,surface,ink,ink_muted,rule,primary,accent},font_id}]}` — the eight shipped presets. |
+| `GET/PUT /org/branding` | `theme` becomes `{preset_id:string\|null, tokens:{…}\|null, font_id}`. The server re-validates contrast and answers **400** with `errors.theme.contrast` listing the failing pairs and their ratios when a body-text pair is below 4.5:1. Audited `org.branding_update`. |
+| `GET /public/orgs/{slug}/branding`, `GET /public/units/{unit_code}` | `theme` carries the **resolved** token set (preset merged with the org's overrides; preset `ledger` when the org has none) plus `font_id`, so the renter app paints without a second call. |
+
+### Phase 13 — language (planned)
+
+| `POST /auth/register/renter`, `POST /orgs` | accept `locale:"sw"\|"en"` (default `sw`), carried from the public SW/EN toggle. |
+| `GET /auth/me`, `GET /me/profile` | return `locale` on `user`. |
+| `PATCH /me` (renter, `tms_r`) / `PATCH /org/members/me` (org user, `tms_o`) | `{locale:"sw"\|"en"}` → `200 {user}`; audited `user.locale_update`. |
+| `POST /notifications/custom` | body becomes `{body_sw?, body_en?, recipients, renter_user_ids?}` — at least one language required; each recipient gets the body for their locale, falling back to the other when only one is given. `202 {batch_id, queued:{sw,en}, skipped:n}`; the log row records the language used. Insufficient credits → 409 `insufficient_sms_credits {needed, balance}`. |
+| `GET /org/notification-settings` | `language` is relabelled in the UI as the default for renters without a preference; the wire field is unchanged (`orgs.settings.sms_language`). |
+| `POST /contracts` | optional `language` (defaults to the renter's locale); the snapshot records it. |
+
+### Phase 14 — SMS credits & platform templates (planned)
+
+| `GET /org/sms-credits` (audience org) | → `{balance, low_watermark, held_count}`. |
+| `GET /admin/orgs/{id}/sms` | → `{balance, low_watermark, used_30d, held_count, ledger:[{delta,balance_after,reason:"topup"\|"adjust"\|"debit"\|"refund",note,admin_name,created_at}]}`. |
+| `POST /admin/orgs/{id}/sms/topup` | `{credits(int>0), note}` → `200 {balance}`; releases `held_no_credit` rows in queue order. |
+| `POST /admin/orgs/{id}/sms/adjust` | `{delta(int≠0), note}` → `200 {balance}`; balance never goes below 0 (400). |
+| `PATCH /admin/orgs/{id}/sms` | `{low_watermark(int≥0)}` → `200 {low_watermark}`. |
+| `GET /admin/templates` | → `{items:[{kind,sw,en,variables:[…],locked,version,updated_by,updated_at}]}`. |
+| `PUT /admin/templates/{kind}` | `{sw, en}` (both required) → `200 {template}`; unknown variable → 400, > 3 segments → 200 with a `warnings` array; records a version; audited. |
+| `PATCH /admin/templates/{kind}` | `{locked:bool}` → `200 {template}`; `otp` ships locked. |
+| `POST /admin/templates/{kind}/preview` | `{language, sample?}` → `200 {body, segments, encoding:"gsm"\|"ucs2"}`. |
+| `POST /admin/templates/{kind}/revert` | `{version}` → `200 {template}` (restored as a new version). |
+| `PUT /org/notification-settings` | an override of a locked kind → **409 `template_locked`**; the GET marks locked kinds read-only. |
+| `GET /notifications/log` | `status` gains **`held_no_credit`** (`queued\|sending\|sent\|failed\|held_no_credit`); a held row is not `failed` and is not retryable — it leaves on the next top-up. |
+
+Credit rules: 1 credit per 160-character GSM segment (70 for UCS-2), debited **at send time** as one conditional update; `otp` and other security kinds are exempt (configurable list); an append-only `sms_credit_ledger` row records every movement with `balance_after`.
+
+### Phase 15 — hardening (planned)
+
+No new endpoints. Reports v2 routes enter `make loadtest` (p95 < 300 ms on the seed org), the isolation census covers every Part 2 route, and receipt uploads and admin template edits gain rate limits.
