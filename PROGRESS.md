@@ -112,3 +112,13 @@
 **Incident**: `make build` (plain `next build`) overwrote the three dev servers' `.next` → 404 chunks / 500s. Fixed the Makefile and restarted only the Next.js dev servers via the new `make apps-restart` (proxy, ngrok, api untouched). Dev servers' pids in `.dev/*.pid` changed.
 
 **Deferred**: `setup` page lives inside `(portal)`; `design-system` stays outside (unauthenticated reference page). `.stamp` rotation bleeds ~2 px on the renter contract header (cosmetic, packages/ui, Phase 15 pass).
+
+## Phase 10 — Expenses (5 Sep 2026) — branch `phase-10-expenses`
+
+**Shipped**
+- Backend: `internal/expense` (default categories, seeding, group math, `ChangePct`), 18 sqlc queries, handlers for categories CRUD (lazy seeding of 8 defaults for existing orgs, bootstrap + seed for new ones), expenses create/patch/void/list/get, CSV (formula-neutralised, cap 10 000), receipts presign/complete/view/delete in bucket `receipts` (rate-limited 30/h), `GET /expenses/summary` by property/category with previous window + `change_pct`; migration 000013 adds `receipt_content_type`/`receipt_size`. 8 audit actions. Isolation census 125/125; org-scope guard extended to expense tables.
+- Tenant: `/expenses` ledger (PeriodPicker persisted, filters, summary strip with category/property toggle, totals double rule, cursor paging, CSV export), `ExpenseSheet` (record/edit + receipt create→presign→PUT→complete), `/expenses/[id]` (receipt viewer, edit, void with reason, VOIDED stamp), property page Expenses section, `/settings/expense-categories` manager, dashboard "Expenses this month" card (opt-in; card id `expenses` added to the backend allowlist), nav + settings links.
+
+**Verified**: `make build/test/lint` green; browser: record with PNG receipt via proxy, property tab, all-properties summary, void, CSV (`text/csv`, attachment filename), 375/1280 px. API.md "Part 2 — Phase 10 (shipped)" section added.
+
+**Notes**: `receipt/complete` requires `{object_key}` (frontend echoes the ticket's key). Summary `previous` carries `cadence`; `Uncategorised` group appears only when non-empty. Three test expenses remain in JJnE's September ledger (dev data).
