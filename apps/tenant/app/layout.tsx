@@ -1,5 +1,6 @@
 import { Bricolage_Grotesque, Archivo, Instrument_Sans, Hanken_Grotesk } from 'next/font/google';
 import '@tms/ui/tokens.css';
+import { RegisterSW } from '../components/RegisterSW';
 import { AuthProvider } from '../lib/auth';
 
 // Landlord portal is org-themed like the enduser app: same whitelisted
@@ -13,7 +14,23 @@ const archivo = Archivo({ subsets: ['latin'], variable: '--font-archivo', preloa
 const instrument = Instrument_Sans({ subsets: ['latin'], variable: '--font-instrument', preload: false });
 const hanken = Hanken_Grotesk({ subsets: ['latin'], variable: '--font-hanken', preload: false });
 
-export const metadata = { title: 'TMS — Landlord' };
+export const metadata = {
+  title: 'TMS — Landlord',
+  manifest: '/tenant/manifest.webmanifest',
+  appleWebApp: { capable: true, title: 'TMS', statusBarStyle: 'default' as const },
+  icons: {
+    icon: [{ url: '/tenant/icons/icon-192.png', sizes: '192x192', type: 'image/png' }],
+    apple: [{ url: '/tenant/icons/icon-192.png', sizes: '192x192', type: 'image/png' }],
+  },
+};
+
+// Core palette (packages/ui tokens.css): --primary for the chrome, --paper for
+// the ground the app is painted on.
+export const viewport = {
+  themeColor: '#2b4fd0',
+  width: 'device-width',
+  initialScale: 1,
+};
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -23,6 +40,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <body>
         <AuthProvider>{children}</AuthProvider>
+        <RegisterSW />
       </body>
     </html>
   );

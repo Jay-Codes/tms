@@ -1274,3 +1274,149 @@ export function resolveVariables(body: string, values: Record<string, string>): 
     name in values ? values[name] : whole,
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* Shapes — mirror API.md Phase 7 exactly (reports + dashboard prefs). */
+/* ------------------------------------------------------------------ */
+
+export interface ReportAssets {
+  properties: number;
+  units: number;
+  occupied: number;
+  vacant: number;
+  maintenance: number;
+  unlisted: number;
+  /** 0–1; the UI prints it as a percentage. */
+  occupancy_rate: number;
+}
+
+export interface ReportPeriod {
+  from: string;
+  to: string;
+  expected: number;
+  collected: number;
+  outstanding: number;
+  overdue_count: number;
+  overdue_amount: number;
+}
+
+export interface VacantUnitRow {
+  unit_id: string;
+  name: string;
+  property_name: string;
+  days_vacant: number;
+}
+
+export interface ReportSummary {
+  assets: ReportAssets;
+  renters: { active: number };
+  contracts: { active: number; expiring: number; pending_signature: number };
+  period: ReportPeriod;
+  vacant_units: VacantUnitRow[];
+}
+
+/** Worst status across a renter's unsettled schedules (API.md). */
+export type PaymentStatusValue = 'paid' | 'pending' | 'overdue' | 'partial';
+
+export interface PaymentStatusRow {
+  renter_user_id: string;
+  renter_name: string;
+  phone: string | null;
+  unit_name: string;
+  property_name: string;
+  contract_id: string;
+  status: PaymentStatusValue;
+  next_due_date: string | null;
+  next_due_amount: number | null;
+  outstanding: number;
+  overdue_amount: number;
+  last_payment_at: string | null;
+}
+
+export type CollectionsGroup = 'day' | 'week' | 'month';
+
+export interface CollectionsBucket {
+  start: string;
+  expected: number;
+  collected: number;
+}
+
+export interface CollectionsReport {
+  buckets: CollectionsBucket[];
+  totals: { expected: number; collected: number };
+}
+
+/**
+ * The dashboard card ids the backend validates `dashboard_prefs.cards` against
+ * (API.md Phase 7). The order of this array is the default layout for an org
+ * that has never opened the customise sheet.
+ */
+export const DASHBOARD_CARDS = [
+  'assets',
+  'renters',
+  'payment_status',
+  'collections',
+  'link_requests',
+  'overdue',
+] as const;
+
+export type DashboardCard = (typeof DASHBOARD_CARDS)[number];
+
+export interface DashboardPrefs {
+  cards: DashboardCard[];
+  layout: 'grid' | 'list';
+}
+
+const isCard = (v: unknown): v is DashboardCard =>
+  typeof v === 'string' && (DASHBOARD_CARDS as readonly string[]).includes(v);
+
+/**
+ * Read `dashboard_prefs` off the branding record into something the dashboard
+ * can render without further guarding: known ids only, no duplicates, and any
+ * card the org has never seen (a new one shipped since they last saved) is
+ * appended in default order rather than silently dropped.
+ */
+export function readDashboardPrefs(prefs: Record<string, unknown> | undefined | null): DashboardPrefs {
+  const raw = (prefs ?? {}) as { cards?: unknown; layout?: unknown };
+  const listed = Array.isArray(raw.cards) ? raw.cards.filter(isCard) : [];
+  const cards = [...new Set(listed)];
+  return {
+    cards: cards.length ? cards : [...DASHBOARD_CARDS],
+    layout: raw.layout === 'list' ? 'list' : 'grid',
+  };
+}
+
+/** Cards the org has switched off — kept so the sheet can offer them back. */
+export function hiddenDashboardCards(prefs: DashboardPrefs): DashboardCard[] {
+  return DASHBOARD_CARDS.filter((c) => !prefs.cards.includes(c));
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 7 endpoint helpers (audience org)                              */
+/* ------------------------------------------------------------------ */
+
+export const reportsApi = {
+  /** `period` is `month` or `YYYY-MM`; omitted means the current month. */
+  summary: (period?: string, signal?: AbortSignal) =>
+    api.get<ReportSummary>('/reports/summary', { query: { period: period || undefined }, signal }),
+  paymentStatus: (
+    query: { status?: PaymentStatusValue | ''; property_id?: string } = {},
+    signal?: AbortSignal,
+  ) => api.get<{ items: PaymentStatusRow[] }>('/reports/payment-status', { query, signal }),
+  collections: (
+    query: { from: string; to: string; group: CollectionsGroup },
+    signal?: AbortSignal,
+  ) => api.get<CollectionsReport>('/reports/collections', { query, signal }),
+  /**
+   * The CSV is a download, not a fetch: the browser opens it same-origin so the
+   * httpOnly `tms_o` cookie rides along and the attachment lands in Downloads.
+   * Written against API_BASE (absolute path) so the '/tenant' basePath is not
+   * prepended — the same rule the fetch wrapper follows.
+   */
+  paymentStatusCsvUrl: (query: { status?: PaymentStatusValue | ''; property_id?: string } = {}) => {
+    const qs = new URLSearchParams({ format: 'csv' });
+    if (query.status) qs.set('status', query.status);
+    if (query.property_id) qs.set('property_id', query.property_id);
+    return `${API_BASE}/reports/payment-status?${qs.toString()}`;
+  },
+};
