@@ -43,3 +43,74 @@ WHERE org_id = sqlc.arg(org_id) AND contract_id = sqlc.arg(contract_id)
   AND period_start > sqlc.arg(effective_date)
   AND deleted_at IS NULL
 RETURNING id;
+
+-- ------------------------------------------------------ Phase 5: payments --
+
+-- LockSchedulesForContract reads every schedule of a contract inside the
+-- recording transaction and locks the rows, so two landlords recording at the
+-- same moment cannot both allocate against the same outstanding balance.
+-- name: LockSchedulesForContract :many
+SELECT * FROM payment_schedules
+WHERE org_id = sqlc.arg(org_id) AND contract_id = sqlc.arg(contract_id) AND deleted_at IS NULL
+ORDER BY due_date, period_start, id
+FOR UPDATE;
+
+-- ApplyPaymentToSchedule credits one schedule and flips its status the way
+-- API.md describes for a recording: fully covered → `paid`, partly → `partial`.
+-- A row that has been waived is never revived by a payment.
+-- name: ApplyPaymentToSchedule :one
+UPDATE payment_schedules
+SET paid_amount = sqlc.arg(paid_amount),
+    status = CASE
+        WHEN status = 'waived' THEN 'waived'
+        WHEN sqlc.arg(paid_amount)::bigint >= amount THEN 'paid'
+        ELSE 'partial'
+    END
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND deleted_at IS NULL
+RETURNING *;
+
+-- UnapplyPaymentFromSchedule is the reversal half: it debits the schedule and
+-- recomputes the status from scratch, including the overdue check, because
+-- taking money back can push a row past its due date again (API.md Phase 5).
+-- name: UnapplyPaymentFromSchedule :one
+UPDATE payment_schedules
+SET paid_amount = GREATEST(paid_amount - sqlc.arg(delta)::bigint, 0),
+    status = CASE
+        WHEN status = 'waived' THEN 'waived'
+        WHEN GREATEST(paid_amount - sqlc.arg(delta)::bigint, 0) >= amount THEN 'paid'
+        WHEN due_date + sqlc.arg(grace_days)::int < CURRENT_DATE THEN 'overdue'
+        WHEN GREATEST(paid_amount - sqlc.arg(delta)::bigint, 0) > 0 THEN 'partial'
+        ELSE 'pending'
+    END
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND deleted_at IS NULL
+RETURNING *;
+
+-- ListSchedules is the landlord's schedule board: every row of the org with the
+-- contract, unit, property and renter resolved, filtered and cursor-paged by
+-- due date (API.md Phase 5).
+-- name: ListSchedules :many
+SELECT s.*,
+       c.renter_user_id, c.status AS contract_status,
+       u.name AS unit_name, p.name AS property_name,
+       ru.full_name AS renter_name
+FROM payment_schedules s
+JOIN contracts c  ON c.id = s.contract_id AND c.org_id = s.org_id
+JOIN units u      ON u.id = c.unit_id AND u.org_id = c.org_id
+JOIN properties p ON p.id = u.property_id AND p.org_id = c.org_id
+JOIN users ru     ON ru.id = c.renter_user_id
+WHERE s.org_id = sqlc.arg(org_id) AND s.deleted_at IS NULL AND c.deleted_at IS NULL
+  AND (sqlc.narg(status)::text IS NULL OR s.status = sqlc.narg(status)::text)
+  AND (sqlc.narg(contract_id)::uuid IS NULL OR s.contract_id = sqlc.narg(contract_id)::uuid)
+  AND (sqlc.narg(renter_user_id)::uuid IS NULL OR c.renter_user_id = sqlc.narg(renter_user_id)::uuid)
+  AND (sqlc.narg(due_from)::date IS NULL OR s.due_date >= sqlc.narg(due_from)::date)
+  AND (sqlc.narg(due_to)::date IS NULL OR s.due_date <= sqlc.narg(due_to)::date)
+  AND (sqlc.narg(cursor_due)::date IS NULL
+       OR (s.due_date, s.id) > (sqlc.narg(cursor_due)::date, sqlc.narg(cursor_id)::uuid))
+ORDER BY s.due_date, s.id
+LIMIT sqlc.arg(row_limit);
+
+-- GetSchedule resolves one schedule inside its org, used to validate an
+-- explicit `schedule_id` on POST /payments.
+-- name: GetSchedule :one
+SELECT * FROM payment_schedules
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND deleted_at IS NULL;

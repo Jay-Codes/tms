@@ -30,7 +30,8 @@ const DefaultTestDatabaseURL = "postgres://tms:tms_dev@localhost:5433/tms_test?s
 // tablesToTruncate is every table carrying test state. orgs cascades to the
 // org-scoped tables, but listing them keeps truncation explicit and fast.
 var tablesToTruncate = []string{
-	"audit_log", "sessions", "notification_log", "payments", "payment_schedules",
+	"audit_log", "sessions", "notification_log", "payment_allocations", "payments",
+	"payment_schedules",
 	"unit_link_requests", "contract_signatures", "contracts", "contract_templates",
 	"price_plans", "units", "properties", "renter_profiles", "org_members",
 	"org_branding", "payment_periods", "users", "orgs",

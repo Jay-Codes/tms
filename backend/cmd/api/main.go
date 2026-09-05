@@ -24,6 +24,7 @@ import (
 	"tms/backend/internal/db/sqlc"
 	"tms/backend/internal/httpserver"
 	"tms/backend/internal/notify"
+	"tms/backend/internal/payment"
 	"tms/backend/internal/platform"
 	"tms/backend/internal/storage"
 )
@@ -162,6 +163,13 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 	// that; it needs only Postgres, and its statements are idempotent
 	// (internal/contract.RunLifecycle).
 	go contract.RunLifecycleTicker(ctx, deps.Pool, logger)
+
+	// The overdue sweep flips unsettled schedules whose due date (plus the
+	// org's grace period) has passed. Same shape as the lifecycle job: once at
+	// startup, hourly after that, Postgres only, idempotent
+	// (internal/payment.FlipOverdue). The org-scoped reads run it on demand
+	// too, so a landlord never reads a stale `pending`.
+	go payment.RunOverdueTicker(ctx, deps.Pool, logger)
 
 	srv := httpserver.New(cfg, deps, logger)
 	if err := srv.ListenAndServe(ctx); err != nil {

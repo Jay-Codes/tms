@@ -64,13 +64,16 @@ export const NAV: NavItem[] = [
     icon: 'solar:document-text-linear',
     sub: [{ href: '/contracts/templates', label: 'Templates' }],
   },
-  { href: '/payments', label: 'Payments', icon: 'solar:wallet-money-linear', phase: 5 },
+  { href: '/payments', label: 'Payments', icon: 'solar:wallet-money-linear' },
   { href: '/reports', label: 'Reports', icon: 'solar:chart-square-linear', phase: 7 },
   {
     href: '/settings',
     label: 'Settings',
     icon: 'solar:settings-linear',
-    sub: [{ href: '/settings/branding', label: 'Branding' }],
+    sub: [
+      { href: '/settings/branding', label: 'Branding' },
+      { href: '/settings/bank-account', label: 'Bank account' },
+    ],
   },
   { href: '/audit', label: 'Audit', icon: 'solar:history-linear' },
 ];

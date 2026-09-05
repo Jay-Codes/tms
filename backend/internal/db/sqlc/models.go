@@ -146,6 +146,19 @@ type Payment struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
+	ReversedAt       pgtype.Timestamptz `json:"reversed_at"`
+	ReversalReason   *string            `json:"reversal_reason"`
+	ReversedByUserID pgtype.UUID        `json:"reversed_by_user_id"`
+}
+
+type PaymentAllocation struct {
+	ID         pgtype.UUID        `json:"id"`
+	OrgID      pgtype.UUID        `json:"org_id"`
+	PaymentID  pgtype.UUID        `json:"payment_id"`
+	ScheduleID pgtype.UUID        `json:"schedule_id"`
+	Amount     int64              `json:"amount"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
 type PaymentPeriod struct {

@@ -19,6 +19,7 @@ import (
 	"tms/backend/internal/db/sqlc"
 	"tms/backend/internal/httpx"
 	"tms/backend/internal/notify"
+	"tms/backend/internal/payment"
 	"tms/backend/internal/ratelimit"
 	"tms/backend/internal/storage"
 	"tms/backend/internal/validate"
@@ -1191,6 +1192,10 @@ func (s *Server) handleContractSchedules(w http.ResponseWriter, r *http.Request)
 	WriteJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
+// handleMySchedules is the renter's money screen: every instalment they owe,
+// the next one due, what is overdue in total, and the account to pay into
+// (FLOWS 7.1). It sweeps overdue for the orgs the renter rents from first, so
+// a date that passed since the last tick is already reflected.
 func (s *Server) handleMySchedules(w http.ResponseWriter, r *http.Request) {
 	if s.dbUnavailable(w) {
 		return
@@ -1201,8 +1206,22 @@ func (s *Server) handleMySchedules(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "schedules.me", err)
 		return
 	}
+	// A renter may rent from more than one org, and grace periods are per org,
+	// so the on-demand sweep runs once per org before the rows are rendered.
+	if s.flipOverdueForOrgsOf(r.Context(), rows) {
+		if rows, err = s.q.ListSchedulesForRenter(r.Context(), p.UserID); err != nil {
+			s.serverError(w, r, "schedules.me.reload", err)
+			return
+		}
+	}
+
+	today := time.Now().UTC()
 	items := make([]map[string]any, 0, len(rows))
-	var next map[string]any
+	var (
+		next         map[string]any
+		nextOrgID    pgtype.UUID
+		overdueTotal int64
+	)
 	for _, sc := range rows {
 		item := map[string]any{
 			"id":           db.UUIDString(sc.ID),
@@ -1212,6 +1231,7 @@ func (s *Server) handleMySchedules(w http.ResponseWriter, r *http.Request) {
 			"amount":       sc.Amount,
 			"status":       sc.Status,
 			"paid_amount":  sc.PaidAmount,
+			"days_overdue": daysOverdue(sc.Status, sc.DueDate.Time, today),
 			"contract": map[string]any{
 				"id": db.UUIDString(sc.ContractID), "unit_name": sc.UnitName,
 				"property_name": sc.PropertyName, "org_name": sc.OrgName,
@@ -1219,14 +1239,50 @@ func (s *Server) handleMySchedules(w http.ResponseWriter, r *http.Request) {
 			},
 		}
 		items = append(items, item)
+		if sc.Status == "overdue" && sc.Amount > sc.PaidAmount {
+			overdueTotal += sc.Amount - sc.PaidAmount
+		}
 		// The rows come back due-date ascending, so the first unsettled one on
 		// a live contract is the next payment the renter owes.
 		if next == nil && isLiveContract(sc.ContractStatus) &&
 			(sc.Status == "pending" || sc.Status == "partial" || sc.Status == "overdue") {
 			next = item
+			nextOrgID = sc.OrgID
 		}
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_due": next})
+	// The account shown is the one behind the next payment. A renter with no
+	// outstanding instalment is not being asked for money, so none is shown.
+	var bank *BankAccount
+	if nextOrgID.Valid {
+		if org, err := s.q.GetOrg(r.Context(), nextOrgID); err == nil {
+			bank = parseSettings(org.Settings).BankAccount
+		}
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"items": items, "next_due": next,
+		"overdue_total": overdueTotal, "bank_account": bank,
+	})
+}
+
+// flipOverdueForOrgsOf runs the on-demand overdue sweep once per org appearing
+// in the renter's schedules, and reports whether anything changed.
+func (s *Server) flipOverdueForOrgsOf(ctx context.Context, rows []sqlc.ListSchedulesForRenterRow) bool {
+	seen := map[string]bool{}
+	changed := false
+	for _, sc := range rows {
+		key := db.UUIDString(sc.OrgID)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		flipped, err := payment.FlipOverdue(ctx, s.q, sc.OrgID)
+		if err != nil {
+			s.logger.Warn("on-demand overdue sweep failed", "org_id", key, "error", err)
+			continue
+		}
+		changed = changed || flipped > 0
+	}
+	return changed
 }
 
 // ------------------------------------------------------------- helpers --

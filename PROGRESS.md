@@ -53,3 +53,12 @@
 - Verified live: Room 3 contract backfilled → renter signed in UI (OTP from log + drawn PNG) → landlord activated in UI → 4 schedules (250k×3 + 83,333), unit occupied, welcome SMS, `/verify` valid; letterhead + footer render in document; template edit/preview; new contract + terminate frees unit.
 
 **Note:** Opus session limit hit mid-phase (resets 3pm); lanes relaunched and resumed from partial work.
+
+## 2026-09-05 — Phase 5: Offline payments & statuses ✅
+
+**Shipped**
+- Backend: migration `000007_payments` (+ `payment_allocations`); pure allocator (paid/partial/rollover-confirm/exceeds-balance/schedule_paid); `POST /payments`, reverse, lists, `GET /schedules` board, bank account settings, `/me/schedules` (+next_due, overdue_total, bank_account, days_overdue), `/me/payments`; overdue sweep (hourly, on-demand per org before reads, admin job); thank_you SMS (SW/EN, next due). FOR UPDATE locking; concurrency test proves no double-settle.
+- Tenant: Payments page (Overdue / Due soon / Partial / All / History), Record payment sheet with overpay confirm, Reverse sheet, contract + renter payment sections, bank account settings, dashboard cards. Enduser: Payments tab (next due, overdue banner, how-to-pay bank sheet with copy, grouped ledger, history with reversed stamp).
+- Verified live: UI record (Room 3 → PAID, thank-you SMS w/ next due in log), overpay confirm → rollover across two rows, reversal restores, bank account round-trip, renter ledger stamps/pencils.
+
+**Deferred:** overdue red-stamp path not exercised with real aged data in UI (backend tests cover the sweep); Phase 8 seed will backdate rows for UAT.

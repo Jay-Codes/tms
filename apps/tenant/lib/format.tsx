@@ -62,3 +62,45 @@ export function daysSince(since: string | null | undefined): number | null {
   const ms = Date.now() - d.getTime();
   return Math.max(0, Math.floor(ms / 86_400_000));
 }
+
+/** RFC3339 → `5 Sep 2026, 14:30` — payments are recorded to the minute. */
+export function fmtDateTime(value: string | null | undefined): string {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return `${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}, ${d.toLocaleTimeString(
+    'en-GB',
+    { hour: '2-digit', minute: '2-digit' },
+  )}`;
+}
+
+/** `YYYY-MM-DDTHH:mm` in the browser's zone — the default for `paid_at`. */
+export function nowDatetimeLocal(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** `todayISO()` shifted by whole days — used for the "due soon" window. */
+export function isoPlusDays(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** First day of the current month as `YYYY-MM-DD`. */
+export function monthStartISO(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+}
+
+/**
+ * A `datetime-local` value → RFC3339 UTC, which is what the API stores. An
+ * empty box means "let the backend default it to now", so it maps to undefined.
+ */
+export function datetimeLocalToRfc3339(value: string): string | undefined {
+  if (!value) return undefined;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}

@@ -76,6 +76,17 @@ const (
 	ActionBrandingUpdate                   = "org.branding_update"
 	ActionBrandingAsset                    = "org.branding_asset"
 	ActionContractLifecycleRun             = "contract.lifecycle_run"
+
+	// Phase 5 — offline payments, reversals, the overdue sweep and the bank
+	// collection account renters are told to pay into.
+	//
+	// `payment.reverse` is its own action rather than a flag on the record:
+	// a correction is the one movement that takes money back off a schedule
+	// (FLOWS 7.4), so it must be findable by action alone.
+	ActionPaymentRecord     = "payment.record"
+	ActionPaymentReverse    = "payment.reverse"
+	ActionOverdueRun        = "payment.overdue_run"
+	ActionBankAccountUpdate = "org.bank_account_update"
 )
 
 // Entity types.
@@ -96,6 +107,9 @@ const (
 	EntityContractTemplate = "contract_template"
 	EntityContract         = "contract"
 	EntityOrgBranding      = "org_branding"
+
+	EntityPayment         = "payment"
+	EntityPaymentSchedule = "payment_schedule"
 )
 
 type ctxKey int

@@ -74,6 +74,14 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 // NoContent writes a 204 response.
 func NoContent(w http.ResponseWriter) { w.WriteHeader(http.StatusNoContent) }
 
+// EncodeJSON writes v to an already-started response: the caller has set the
+// status and content type itself.
+func EncodeJSON(w http.ResponseWriter, v any) {
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("write json response", "error", err)
+	}
+}
+
 // DecodeJSON reads a JSON request body into dst, rejecting unknown fields and
 // oversized bodies. On failure it writes an RFC 7807 problem and returns false.
 func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {

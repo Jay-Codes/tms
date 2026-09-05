@@ -28,17 +28,24 @@ import {
 } from '../../../components/ContractBits';
 import { DocumentPaper, PrintStyles } from '../../../components/DocumentPaper';
 import { Field, Note, ProblemNote } from '../../../components/FormBits';
+import { DaysOverdue, PaymentsTable, ReverseSheet } from '../../../components/PaymentBits';
+import { RecordPaymentSheet, type RecordPaymentTarget } from '../../../components/RecordPaymentSheet';
 import { PageHead, Shell } from '../../../components/Shell';
 import { Sheet } from '../../../components/Sheet';
 import {
   ApiError,
   contractsApi,
+  isUnsettled,
+  paymentsApi,
+  remainingOn,
   toApiError,
   unwrapContract,
   type Contract,
   type ContractDocument,
   type ContractSignature,
   type ContractVerification,
+  type Payment,
+  type Schedule,
   type ScheduleRow,
 } from '../../../lib/api';
 import { Amount, fmtDate, fmtTZS, todayISO } from '../../../lib/format';
@@ -199,7 +206,13 @@ function ContractBody({ id }: { id: string }) {
   const [contract, setContract] = useState<Contract | null>(null);
   const [doc, setDoc] = useState<ContractDocument | null>(null);
   const [schedules, setSchedules] = useState<ScheduleRow[] | null>(null);
+  const [payments, setPayments] = useState<Payment[] | null>(null);
   const [verification, setVerification] = useState<ContractVerification | null>(null);
+
+  const [recordTarget, setRecordTarget] = useState<RecordPaymentTarget | null>(null);
+  const [reversing, setReversing] = useState<Payment | null>(null);
+  const [reverseBusy, setReverseBusy] = useState(false);
+  const [reverseError, setReverseError] = useState<ApiError | null>(null);
 
   const [error, setError] = useState<ApiError | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
@@ -233,6 +246,15 @@ function ContractBody({ id }: { id: string }) {
       } catch (e) {
         if (!(e instanceof DOMException)) setSchedules([]);
       }
+      // Payment history is a Phase 5 read; a contract written before the
+      // payments API existed must still render, so this failure is swallowed
+      // into an empty ledger like the two above it.
+      try {
+        const res = await paymentsApi.list({ contract_id: id, limit: 200 }, signal);
+        setPayments(res.items ?? []);
+      } catch (e) {
+        if (!(e instanceof DOMException)) setPayments([]);
+      }
     },
     [id],
   );
@@ -256,6 +278,22 @@ function ContractBody({ id }: { id: string }) {
       setActionError(toApiError(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const reverse = async (reason: string) => {
+    if (!reversing) return;
+    setReverseBusy(true);
+    setReverseError(null);
+    try {
+      await paymentsApi.reverse(reversing.id, reason);
+      setReversing(null);
+      setNote('Payment reversed. The schedule it was applied to has gone back to what it owed.');
+      await load();
+    } catch (e) {
+      setReverseError(toApiError(e));
+    } finally {
+      setReverseBusy(false);
     }
   };
 
@@ -300,6 +338,14 @@ function ContractBody({ id }: { id: string }) {
   const canTerminate = ['pending_signature', 'active', 'expiring'].includes(contract.status);
   const rows = schedules ?? [];
   const org = doc?.org;
+  const summary = contract.schedules_summary;
+  /** Money can only be recorded against a live tenancy (API.md Phase 5). */
+  const canRecord = contract.status === 'active' || contract.status === 'expiring';
+  const contractLabel = `${contract.unit?.name ?? ''} · ${contract.unit?.property_name ?? ''} — ${
+    contract.renter?.full_name ?? ''
+  }`;
+  const openRecord = (scheduleId?: string) =>
+    setRecordTarget({ contractId: id, scheduleId, label: contractLabel });
 
   return (
     <>
@@ -329,6 +375,54 @@ function ContractBody({ id }: { id: string }) {
             {contract.terminated_at ? ` · terminated ${fmtDate(contract.terminated_at)}` : ''}
           </span>
         </div>
+
+        {/* The money at a glance (API.md `schedules_summary`), so the state of
+            the tenancy is readable without scrolling to the ledger. */}
+        {summary ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--sp-5)',
+              flexWrap: 'wrap',
+              marginTop: 'var(--sp-4)',
+              paddingTop: 'var(--sp-3)',
+              borderTop: '1px solid var(--rule)',
+              fontSize: 'var(--text-sm)',
+            }}
+          >
+            <span>
+              <span style={{ color: 'var(--ink-soft)' }}>Paid </span>
+              <strong className="num">
+                {summary.paid_count}/{summary.count}
+              </strong>
+            </span>
+            <span>
+              <span style={{ color: 'var(--ink-soft)' }}>Overdue </span>
+              {summary.overdue_count > 0 ? (
+                <strong className="num" style={{ color: 'var(--stamp-overdue)' }}>
+                  {summary.overdue_count}
+                </strong>
+              ) : (
+                <span className="pencil">none</span>
+              )}
+            </span>
+            <span>
+              <span style={{ color: 'var(--ink-soft)' }}>Next due </span>
+              {summary.next_due_date ? (
+                <strong>
+                  {fmtDate(summary.next_due_date)} · {fmtTZS(summary.next_due_amount ?? 0)}
+                </strong>
+              ) : (
+                <span className="pencil">nothing outstanding</span>
+              )}
+            </span>
+            <span>
+              <span style={{ color: 'var(--ink-soft)' }}>Contract total </span>
+              <strong>{fmtTZS(summary.total)}</strong>
+            </span>
+          </div>
+        ) : null}
 
         {contract.termination_reason ? (
           <p style={{ marginTop: 'var(--sp-3)', color: 'var(--ink-soft)' }}>
@@ -424,8 +518,18 @@ function ContractBody({ id }: { id: string }) {
                 Generated across the whole tenancy when the contract is activated.
               </p>
             </div>
-            <button type="button" className="btn btn-secondary" disabled title="Recording payments ships in Phase 5.">
-              Record payment
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={!canRecord || rows.length === 0}
+              title={
+                canRecord
+                  ? 'Applies to the earliest unpaid payment unless you pick another.'
+                  : 'Payments can only be recorded against an active contract.'
+              }
+              onClick={() => openRecord()}
+            >
+              <Icon icon="solar:wallet-money-linear" width={20} /> Record payment
             </button>
           </div>
 
@@ -437,18 +541,19 @@ function ContractBody({ id }: { id: string }) {
                 <th className="num">Amount</th>
                 <th className="num">Paid</th>
                 <th>Status</th>
+                <th />
               </tr>
             </thead>
             <tbody>
               {schedules === null ? (
                 <tr>
-                  <td colSpan={5} style={{ color: 'var(--ink-soft)' }}>
+                  <td colSpan={6} style={{ color: 'var(--ink-soft)' }}>
                     Loading…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={5} style={{ color: 'var(--ink-soft)' }}>
+                  <td colSpan={6} style={{ color: 'var(--ink-soft)' }}>
                     No schedule yet — it is written when the contract is activated.
                   </td>
                 </tr>
@@ -459,11 +564,31 @@ function ContractBody({ id }: { id: string }) {
                       <td style={{ fontSize: 'var(--text-sm)' }}>
                         {fmtDate(s.period_start)} → {fmtDate(s.period_end)}
                       </td>
-                      <td>{fmtDate(s.due_date)}</td>
+                      <td>
+                        {fmtDate(s.due_date)}
+                        <DaysOverdue days={(s as Schedule).days_overdue} />
+                      </td>
                       <td className="num">{fmtTZS(s.amount)}</td>
                       <td className="num">{s.paid_amount ? fmtTZS(s.paid_amount) : <span className="pencil">—</span>}</td>
                       <td>
                         <ScheduleStatusStamp status={s.status} />
+                        {s.status === 'partial' ? (
+                          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
+                            {fmtTZS(remainingOn(s))} still owing
+                          </div>
+                        ) : null}
+                      </td>
+                      <td>
+                        {canRecord && isUnsettled(s) ? (
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ minHeight: 36 }}
+                            onClick={() => openRecord(s.id)}
+                          >
+                            Record payment
+                          </button>
+                        ) : null}
                       </td>
                     </tr>
                   ))}
@@ -471,12 +596,34 @@ function ContractBody({ id }: { id: string }) {
                     <td colSpan={2}>Total</td>
                     <td className="num">{fmtTZS(rows.reduce((t, s) => t + (s.amount ?? 0), 0))}</td>
                     <td className="num">{fmtTZS(rows.reduce((t, s) => t + (s.paid_amount ?? 0), 0))}</td>
-                    <td />
+                    <td colSpan={2} />
                   </tr>
                 </>
               )}
             </tbody>
           </table>
+        </section>
+
+        {/* ------------------------------ payments ------------------------------ */}
+        <section style={{ marginTop: 'var(--sp-6)' }}>
+          <hr className="rule rule-strong" />
+          <div style={{ margin: 'var(--sp-4) 0' }}>
+            <h2 style={{ fontSize: 'var(--text-lg)' }}>Payments received</h2>
+            <p style={{ marginTop: 'var(--sp-2)', color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+              Every payment recorded against this contract. A mistake is reversed with a reason, never
+              deleted — the reversal is written to the audit log.
+            </p>
+          </div>
+          <PaymentsTable
+            items={payments}
+            showRenter={false}
+            showUnit={false}
+            emptyText="No payments recorded against this contract yet."
+            onReverse={(p) => {
+              setReverseError(null);
+              setReversing(p);
+            }}
+          />
         </section>
 
         <hr className="rule rule-strong" style={{ marginTop: 'var(--sp-6)' }} />
@@ -578,6 +725,21 @@ function ContractBody({ id }: { id: string }) {
           The document could not be loaded.
         </p>
       )}
+
+      <RecordPaymentSheet
+        open={recordTarget !== null}
+        target={recordTarget}
+        onClose={() => setRecordTarget(null)}
+        onRecorded={() => void load()}
+      />
+
+      <ReverseSheet
+        payment={reversing}
+        busy={reverseBusy}
+        error={reverseError}
+        onClose={() => setReversing(null)}
+        onSubmit={(reason) => void reverse(reason)}
+      />
 
       <Sheet
         open={behalfOpen}

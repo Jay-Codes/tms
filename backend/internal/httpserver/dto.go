@@ -134,6 +134,10 @@ type OrgSettings struct {
 	ReminderOffsetsDays  []int  `json:"reminder_offsets_days"`
 	UnsignedReminderDays int    `json:"unsigned_reminder_days"`
 	SMSLanguage          string `json:"sms_language"`
+	// BankAccount is the org's collection account (Phase 5). It is absent
+	// until PUT /org/bank-account sets it, and is read through the dedicated
+	// endpoint rather than PATCH /org.
+	BankAccount *BankAccount `json:"bank_account,omitempty"`
 }
 
 // DefaultOrgSettings mirrors the column default in migration 000002.
@@ -141,12 +145,15 @@ func DefaultOrgSettings() OrgSettings {
 	return OrgSettings{
 		AutoApproveLinks:     false,
 		DueDay:               nil,
-		GraceDays:            3,
+		GraceDays: 0,
 		ReminderOffsetsDays:  []int{7, 0},
 		UnsignedReminderDays: 7,
 		SMSLanguage:          "sw",
 	}
 }
+
+// marshalSettings renders org settings back into the JSONB column.
+func marshalSettings(s OrgSettings) ([]byte, error) { return json.Marshal(s) }
 
 func parseSettings(raw []byte) OrgSettings {
 	s := DefaultOrgSettings()

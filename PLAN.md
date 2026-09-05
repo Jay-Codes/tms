@@ -77,10 +77,11 @@ Execution plan for [SPEC.md](SPEC.md) / [FLOWS.md](FLOWS.md). Target: **testing-
 
 ## Phase 5 — Payments (offline) & statuses (Sep 10, 1 day)
 
-- [ ] `POST /payments` record (method, reference, note); full → `paid`, under → `partial`, over → roll to next schedule with confirm prompt (Flow 7).
-- [ ] `POST /payments/{id}/reverse` (audited, schedule reverts).
-- [ ] Overdue job: ticker + on-demand flip past-due `pending` → `overdue`.
-- [ ] Renter dashboard: next due, status chip, history, org bank-account instructions. Landlord: overdue views, record-payment form.
+- [x] `POST /payments` record (method, reference, note); full → `paid`, under → `partial`, over → roll to next schedule with confirm prompt (Flow 7). *(backend; allocation is the pure, table-tested `internal/payment.Allocate`)*
+- [x] `POST /payments/{id}/reverse` (audited, schedule reverts, overdue recomputed). *(backend)*
+- [x] Overdue job: hourly ticker + `POST /admin/jobs/overdue` + on-demand org-scoped flip on every schedule read. *(backend)*
+- [x] `GET /schedules`, `GET /payments`, `GET /payments/{id}`, `GET/PUT /org/bank-account`, renter `GET /me/schedules` (next due, overdue total, bank account) and `GET /me/payments`. *(backend)*
+- [x] Renter dashboard: next due, status chip, history, org bank-account instructions. Landlord: overdue views, record-payment form. *(frontend outstanding)*
 
 **Exit:** Flow 7 complete; statuses correct across paid/partial/overdue/reversed.
 

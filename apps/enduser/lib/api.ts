@@ -376,6 +376,14 @@ export const renterApi = {
     api.get<{ items: LinkRequest[] }>('/me/link-requests', { signal }),
 
   cancelLinkRequest: (id: string) => api.del<void>(`/me/link-requests/${encodeURIComponent(id)}`),
+
+  /* Phase 5 — payments (shapes declared further down; types hoist). */
+
+  /** `GET /me/schedules` — ledger, next due, overdue total, bank account. */
+  schedules: (signal?: AbortSignal) => api.get<MySchedulesResponse>('/me/schedules', { signal }),
+
+  /** `GET /me/payments` — the renter's own receipts, newest first. */
+  payments: (signal?: AbortSignal) => api.get<MyPaymentsResponse>('/me/payments', { signal }),
 };
 
 /**
@@ -524,12 +532,24 @@ export interface PaymentSchedule {
 
 /** `GET /me/schedules` rows carry the contract they belong to. */
 export interface MySchedule extends PaymentSchedule {
-  contract: { id: string; unit_name: string };
+  contract: {
+    id: string;
+    unit_name: string;
+    property_name?: string | null;
+    org_name?: string | null;
+    status?: ContractStatus | string;
+  };
+  /** Days past `due_date`; only meaningful while `status === 'overdue'`. */
+  days_overdue?: number;
 }
 
 export interface MySchedulesResponse {
   items: MySchedule[];
   next_due: MySchedule | null;
+  /** Phase 5: sum of what is owed on overdue rows. Absent before Phase 5. */
+  overdue_total?: number;
+  /** Phase 5: where to send the money (API.md `GET /org/bank-account`). */
+  bank_account?: BankAccount | null;
 }
 
 export interface SignInput {
@@ -567,9 +587,6 @@ export const contractApi = {
 
   sign: (id: string, input: SignInput) =>
     api.post<{ contract: Contract }>(`/contracts/${encodeURIComponent(id)}/sign`, input),
-
-  mySchedules: (signal?: AbortSignal) =>
-    api.get<MySchedulesResponse>('/me/schedules', { signal }),
 };
 
 /** True once the renter's own signature row exists on this contract. */
@@ -585,4 +602,79 @@ export function hasLandlordSignature(c: Pick<Contract, 'signatures'>): boolean {
 /** Contracts the renter still has to sign — the home screen's nudge. */
 export function needsRenterSignature(c: Contract): boolean {
   return c.status === 'pending_signature' && !hasRenterSignature(c);
+}
+
+/* ---------------------------------------------------------------- */
+/* Shapes from API.md — Phase 5 (offline payments & statuses)         */
+/* ---------------------------------------------------------------- */
+
+/**
+ * The org's collection account, as shown to a renter on the payment screen
+ * (FLOWS 7 step 2). Read-only here: only the landlord can edit it.
+ */
+export interface BankAccount {
+  bank_name: string;
+  account_name: string;
+  account_number: string;
+  instructions: string;
+}
+
+/** How the money actually moved. The renter never picks this — the landlord does. */
+export type PaymentMethod = 'cash' | 'bank_transfer' | 'mobile_money_manual';
+
+export type PaymentStatus = 'recorded' | 'reversed';
+
+/** One schedule row a payment was applied to (API.md `applied[]`). */
+export interface PaymentApplication {
+  schedule_id: string;
+  amount: number;
+}
+
+/**
+ * `GET /me/payments` — a receipt in the renter's own rent book. Landlords
+ * record these; the renter only ever reads them, reversals included, because
+ * a reversed row that vanished would be a worse surprise than a stamped one.
+ */
+export interface MyPayment {
+  id: string;
+  contract_id: string;
+  schedule_id?: string | null;
+  amount: number;
+  method: PaymentMethod | string;
+  reference?: string | null;
+  paid_at: string;
+  note?: string | null;
+  status: PaymentStatus;
+  recorded_by?: { name: string } | null;
+  reversed_at?: string | null;
+  reversal_reason?: string | null;
+  applied?: PaymentApplication[];
+  created_at?: string;
+  /** Denormalized on the wire so a receipt names its unit without a join. */
+  unit_name?: string | null;
+  property_name?: string | null;
+}
+
+export interface MyPaymentsResponse {
+  items: MyPayment[];
+  next_cursor?: string | null;
+}
+
+/** Human wording for `payment.method`. */
+export function paymentMethodLabel(method: string): string {
+  switch (method) {
+    case 'cash':
+      return 'Cash';
+    case 'bank_transfer':
+      return 'Bank transfer';
+    case 'mobile_money_manual':
+      return 'Mobile money';
+    default:
+      return method.replace(/_/g, ' ');
+  }
+}
+
+/** What is still owed on a schedule row. Never negative. */
+export function scheduleOutstanding(s: Pick<PaymentSchedule, 'amount' | 'paid_amount'>): number {
+  return Math.max(0, s.amount - (s.paid_amount ?? 0));
 }
