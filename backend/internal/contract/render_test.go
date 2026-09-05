@@ -124,28 +124,33 @@ func TestDefaultTemplateUsesEveryVariable(t *testing.T) {
 	}
 }
 
-// TestDefaultTemplateBodyMatchesMigration: migration 000005 seeds the same body
-// for orgs that already existed when Phase 4 landed, and org creation seeds
-// this constant. If the two drift, old and new orgs issue different terms.
+// TestDefaultTemplateBodyMatchesMigration: migration 000005 seeds this body for
+// orgs that already existed when Phase 4 landed, 000006 re-words the ones that
+// still carry the pre-DueDayPhrase text, and org creation seeds the constant.
+// If any of them drift, old and new orgs issue different terms.
 func TestDefaultTemplateBodyMatchesMigration(t *testing.T) {
-	raw, err := os.ReadFile("../../migrations/000005_contracts.up.sql")
-	if err != nil {
-		t.Fatalf("read migration: %v", err)
-	}
-	const marker = "$tpl$"
-	sql := string(raw)
-	start := strings.Index(sql, marker)
-	if start < 0 {
-		t.Fatal("migration 000005 carries no $tpl$-quoted template body")
-	}
-	rest := sql[start+len(marker):]
-	end := strings.Index(rest, marker)
-	if end < 0 {
-		t.Fatal("migration 000005's template body is not closed")
-	}
-	if got := rest[:end]; got != contract.DefaultTemplateBody {
-		t.Errorf("the migration's seeded body and contract.DefaultTemplateBody have drifted\n--- migration ---\n%s\n--- constant ---\n%s",
-			got, contract.DefaultTemplateBody)
+	for _, name := range []string{"000005_contracts.up.sql", "000006_signatures_append_only.up.sql"} {
+		t.Run(name, func(t *testing.T) {
+			raw, err := os.ReadFile("../../migrations/" + name)
+			if err != nil {
+				t.Fatalf("read migration: %v", err)
+			}
+			const marker = "$tpl$"
+			sql := string(raw)
+			start := strings.Index(sql, marker)
+			if start < 0 {
+				t.Fatalf("migration %s carries no $tpl$-quoted template body", name)
+			}
+			rest := sql[start+len(marker):]
+			end := strings.Index(rest, marker)
+			if end < 0 {
+				t.Fatalf("migration %s's template body is not closed", name)
+			}
+			if got := rest[:end]; got != contract.DefaultTemplateBody {
+				t.Errorf("the migration's body and contract.DefaultTemplateBody have drifted\n--- migration ---\n%s\n--- constant ---\n%s",
+					got, contract.DefaultTemplateBody)
+			}
+		})
 	}
 }
 

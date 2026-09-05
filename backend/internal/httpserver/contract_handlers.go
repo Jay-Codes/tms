@@ -169,8 +169,10 @@ func (s *Server) createContractTx(
 		return zero, "", errPeriodNotOffered
 	}
 
-	tpl, err := q.GetContractTemplate(ctx, sqlc.GetContractTemplateParams{OrgID: in.OrgID, ID: in.TemplateID})
-	if !in.TemplateID.Valid {
+	var tpl sqlc.ContractTemplate
+	if in.TemplateID.Valid {
+		tpl, err = q.GetContractTemplate(ctx, sqlc.GetContractTemplateParams{OrgID: in.OrgID, ID: in.TemplateID})
+	} else {
 		tpl, err = q.GetDefaultContractTemplate(ctx, in.OrgID)
 	}
 	if isNoRows(err) {

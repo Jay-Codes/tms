@@ -110,6 +110,41 @@ func TestAuditLogIsAppendOnly(t *testing.T) {
 	}
 }
 
+// TestContractSignaturesAreAppendOnly: a signature is the record that a party
+// accepted one specific snapshot hash. Migration 000006 makes the table
+// append-only so neither side can edit or drop that record afterwards.
+func TestContractSignaturesAreAppendOnly(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newContractFixture(t, "Sigappend", "0714000900", "+255714000901")
+	h.signAsRenter(t, fix.renter, fix.contractID, fix.renterPhone)
+
+	ctx := context.Background()
+	var id, hash string
+	if err := h.pool.QueryRow(ctx,
+		`SELECT id, snapshot_hash FROM contract_signatures WHERE contract_id = $1`,
+		fix.contractID).Scan(&id, &hash); err != nil {
+		t.Fatalf("no signature row to test against: %v", err)
+	}
+
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE contract_signatures SET ip = 'x' WHERE id = $1`, id); err == nil {
+		t.Error("UPDATE on contract_signatures succeeded — the append-only trigger is not enforcing")
+	}
+	if _, err := h.pool.Exec(ctx,
+		`DELETE FROM contract_signatures WHERE id = $1`, id); err == nil {
+		t.Error("DELETE on contract_signatures succeeded — the append-only trigger is not enforcing")
+	}
+
+	var got string
+	if err := h.pool.QueryRow(ctx,
+		`SELECT snapshot_hash FROM contract_signatures WHERE id = $1`, id).Scan(&got); err != nil {
+		t.Fatalf("signature row disappeared: %v", err)
+	}
+	if got != hash {
+		t.Fatal("signature row was mutated despite the trigger")
+	}
+}
+
 // TestRemovedMemberLosesSessionImmediately covers the window between a staff
 // removal and the session's natural expiry: the removed member's cookie must
 // stop working at once, in both the Redis cache and the Postgres fallback.

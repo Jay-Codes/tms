@@ -201,14 +201,22 @@ func (s *Server) handlePatchTemplate(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		before := map[string]any{"name": existing.Name, "is_default": existing.IsDefault}
+		after := map[string]any{"name": updated.Name, "is_default": updated.IsDefault}
+		// The body itself is too large for the audit row, but its size makes a
+		// rewrite visible: an edit that changed nothing else still shows here.
+		if updated.BodyHtml != existing.BodyHtml {
+			before["body_bytes"] = len(existing.BodyHtml)
+			after["body_bytes"] = len(updated.BodyHtml)
+		}
 		return audit.Record(r.Context(), q, audit.Entry{
 			OrgID:       p.OrgIDString(),
 			ActorUserID: p.UserIDString(),
 			Action:      audit.ActionTemplateUpdate,
 			EntityType:  audit.EntityContractTemplate,
 			EntityID:    db.UUIDString(updated.ID),
-			Before:      map[string]any{"name": existing.Name, "is_default": existing.IsDefault},
-			After:       map[string]any{"name": updated.Name, "is_default": updated.IsDefault},
+			Before:      before,
+			After:       after,
 		})
 	}); err != nil {
 		s.serverError(w, r, "template.update.tx", err)
