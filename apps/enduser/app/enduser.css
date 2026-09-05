@@ -72,3 +72,21 @@
 main > * {
   min-width: 0;
 }
+
+/* ============================================================
+   Dark themes (Phase 12). `data-theme="dark"` is set on <html> by
+   lib/theme.ts whenever the org's resolved theme is a dark preset
+   (Night ledger). Everything that reads a token follows on its own;
+   what needs a rule here is the handful of places where an asset —
+   not a token — carries its own light background.
+   ============================================================ */
+
+/* A renter's signature and a landlord's letterhead are images of ink on
+   paper: dark strokes on a transparent PNG. On dark paper they vanish, so
+   they keep their own sheet of white under them. */
+[data-theme='dark'] .doc-sig-image,
+[data-theme='dark'] .doc-letterhead {
+  background: #ffffff;
+  padding: var(--sp-2);
+  border-radius: var(--radius-sm);
+}

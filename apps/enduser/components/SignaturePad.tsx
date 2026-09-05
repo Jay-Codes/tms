@@ -138,8 +138,13 @@ export const SignaturePad = forwardRef<SignaturePadHandle, { onChange?: (empty: 
           style={{
             width: '100%',
             height: HEIGHT,
-            background: 'var(--sheet)',
-            border: '1px solid var(--ink-faint)',
+            // A signature is dark ink on paper wherever it is later shown
+            // (the contract sheet, a print-out), and the exported PNG is
+            // transparent — so the signing surface stays light even under a
+            // dark theme, or the strokes would be invisible while drawing.
+            background: '#ffffff',
+            colorScheme: 'light',
+            border: '1px solid var(--rule)',
             borderRadius: 'var(--radius-sm)',
             // The page must not pan while a finger is drawing on it.
             touchAction: 'none',

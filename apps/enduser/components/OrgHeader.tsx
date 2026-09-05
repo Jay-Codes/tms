@@ -1,28 +1,48 @@
 'use client';
 
-import { useEffect } from 'react';
-import { applyOrgTheme, DEFAULT_THEME, FONT_IDS, type FontId } from '@tms/ui';
+import { useEffect, useMemo } from 'react';
 import type { PublicBranding } from '../lib/api';
-
-/** Narrow the branding endpoint's free-form `font_id` to the whitelist. */
-function toFontId(raw: string | undefined): FontId {
-  return (FONT_IDS as readonly string[]).includes(raw ?? '')
-    ? (raw as FontId)
-    : DEFAULT_THEME.font;
-}
+import {
+  applyTheme,
+  readCachedTheme,
+  toResolvedTheme,
+  writeCachedTheme,
+  type ResolvedTheme,
+} from '../lib/theme';
 
 /**
  * Paint the org's theme on <html>. Branding arrives with the public unit
- * payload, so a renter who scans a QR sees their landlord's colour and font
- * before they have any account at all (SPEC §2.0, §2.1).
+ * payload, so a renter who scans a QR sees their landlord's paper, ink and
+ * font before they have any account at all (SPEC §2.0, §2.1).
+ *
+ * Phase 12: the whole resolved token set is applied, not just the primary
+ * colour, and the result is cached under the org slug so the signed-in
+ * screens (and the next visit) open on the same paper — see OrgThemeSync.
+ *
+ * Until the branding lands, a cached theme is painted rather than the
+ * platform default: a renter re-scanning their own landlord's QR should not
+ * watch the app flash white first.
  */
-export function useOrgTheme(branding: PublicBranding | null | undefined): void {
-  const color = branding?.theme?.primary_color;
-  const font = branding?.theme?.font_id;
+export function useOrgTheme(
+  branding: PublicBranding | null | undefined,
+  slug?: string | null,
+): void {
+  const theme: ResolvedTheme | null = useMemo(
+    () => (branding?.theme ? toResolvedTheme(branding.theme) : null),
+    [branding?.theme],
+  );
+
   useEffect(() => {
-    if (!color) return;
-    applyOrgTheme({ primaryColor: color, font: toFontId(font) });
-  }, [color, font]);
+    if (theme) return; // the real thing is below
+    const cached = readCachedTheme();
+    if (cached) applyTheme(cached.theme);
+  }, [theme]);
+
+  useEffect(() => {
+    if (!theme) return;
+    applyTheme(theme);
+    if (slug) writeCachedTheme(slug, theme);
+  }, [theme, slug]);
 }
 
 /** Landlord's mark at the top of the scan screens: logo (if any) + name. */

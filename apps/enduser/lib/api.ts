@@ -241,11 +241,34 @@ export const authApi = {
 /* Shapes from API.md — Phase 2 (public) + Phase 3 (renter)           */
 /* ---------------------------------------------------------------- */
 
-/** Org branding as served pre-auth; `theme` feeds `applyOrgTheme()`. */
+/**
+ * Org branding as served pre-auth; `theme` feeds `toResolvedTheme()`
+ * (lib/theme.ts). Phase 12 adds the resolved token set — `preset_id`,
+ * `tokens` and `dark` — alongside the v1 `primary_color`, which older
+ * clients still read. Every field is optional here because the shape is
+ * whatever the deployed backend serves; the adapter fills the gaps.
+ */
+export interface PublicBrandingTheme {
+  preset_id?: string | null;
+  tokens?: {
+    paper?: string;
+    surface?: string;
+    ink?: string;
+    ink_muted?: string;
+    rule?: string;
+    primary?: string;
+    accent?: string;
+  } | null;
+  font_id?: string | null;
+  dark?: boolean | null;
+  /** v1 field, kept by the API for compatibility. */
+  primary_color?: string | null;
+}
+
 export interface PublicBranding {
   display_name: string;
   logo_url: string | null;
-  theme: { primary_color: string; font_id: string };
+  theme: PublicBrandingTheme;
 }
 
 /**
