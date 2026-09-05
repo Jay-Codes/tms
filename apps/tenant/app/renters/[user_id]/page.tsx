@@ -11,6 +11,7 @@ import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { ContractsTable } from '../../../components/ContractBits';
 import { ProblemNote } from '../../../components/FormBits';
+import { NotificationLogTable } from '../../../components/NotificationBits';
 import { PaymentsTable } from '../../../components/PaymentBits';
 import { Facts, KycStamp, LinkStatusStamp, ViewIdDocButton } from '../../../components/RenterBits';
 import { PageHead, Shell } from '../../../components/Shell';
@@ -18,10 +19,12 @@ import {
   ApiError,
   contractsApi,
   hasKycDoc,
+  notificationsApi,
   paymentsApi,
   rentersApi,
   toApiError,
   type Contract,
+  type NotificationLogEntry,
   type Payment,
   type RenterDetail,
 } from '../../../lib/api';
@@ -41,7 +44,21 @@ function RenterBody({ userId }: { userId: string }) {
   const [data, setData] = useState<RenterDetail | null>(null);
   const [contractRows, setContractRows] = useState<Contract[] | null>(null);
   const [payments, setPayments] = useState<Payment[] | null>(null);
+  const [messages, setMessages] = useState<NotificationLogEntry[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
+
+  // Last twenty SMS to this renter (API.md Phase 6). Its own read, so a
+  // notification outage cannot take the KYC record down with it.
+  useEffect(() => {
+    const ac = new AbortController();
+    notificationsApi
+      .log({ user_id: userId, limit: 20 }, ac.signal)
+      .then((r) => setMessages(r.items ?? []))
+      .catch((e) => {
+        if (!(e instanceof DOMException)) setMessages([]);
+      });
+    return () => ac.abort();
+  }, [userId]);
 
   // Payment history across every contract this renter has with the org. It is
   // a read on its own so a Phase 5 outage cannot take the KYC record down.
@@ -247,6 +264,23 @@ function RenterBody({ userId }: { userId: string }) {
           showRenter={false}
           emptyText="No payments recorded from this renter yet."
         />
+      </Section>
+
+      <Section title="Messages">
+        <div style={{ display: 'grid', gap: 'var(--sp-3)' }}>
+          <NotificationLogTable
+            items={messages}
+            showRenter={false}
+            emptyText="No SMS has been sent to this renter yet."
+          />
+          <p style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-faint)' }}>
+            The twenty most recent messages.{' '}
+            <Link href="/notifications" style={{ color: 'var(--primary)' }}>
+              See the full log
+            </Link>
+            .
+          </p>
+        </div>
       </Section>
     </>
   );

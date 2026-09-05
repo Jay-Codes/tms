@@ -1091,3 +1091,186 @@ export function isUnsettled(s: Pick<Schedule, 'status'>): boolean {
 export function remainingOn(s: Pick<Schedule, 'amount' | 'paid_amount'>): number {
   return Math.max(0, (s.amount ?? 0) - (s.paid_amount ?? 0));
 }
+
+/* ------------------------------------------------------------------ */
+/* Shapes — mirror API.md Phase 6 exactly.                             */
+/* ------------------------------------------------------------------ */
+
+/** Kinds the org settings screen can switch on and template. */
+export const SCHEDULED_KINDS = [
+  'reminder_7d',
+  'reminder_due',
+  'overdue_daily',
+  'thank_you',
+  'unsigned_reminder',
+] as const;
+
+export type ScheduledKind = (typeof SCHEDULED_KINDS)[number];
+
+/** Every kind that can appear in the log — the scheduled five plus the rest. */
+export type NotificationKind = ScheduledKind | 'otp' | 'custom' | 'link_approved' | 'link_rejected' | string;
+
+export type NotificationStatus = 'queued' | 'sending' | 'sent' | 'failed' | string;
+
+/** What each kind is for, and the SMS language, in the landlord's words. */
+export const KIND_LABELS: Record<string, string> = {
+  reminder_7d: 'Reminder before due',
+  reminder_due: 'Reminder on the due date',
+  overdue_daily: 'Daily overdue reminder',
+  thank_you: 'Thank you for payment',
+  unsigned_reminder: 'Unsigned contract reminder',
+  otp: 'One-time code',
+  custom: 'Custom message',
+  link_approved: 'Link approved',
+  link_rejected: 'Link rejected',
+};
+
+export function kindLabel(kind: string | null | undefined): string {
+  if (!kind) return '—';
+  return KIND_LABELS[kind] ?? String(kind).replace(/_/g, ' ');
+}
+
+/** Variables a template body may carry (API.md Phase 6). */
+export const SMS_VARIABLES = [
+  'name',
+  'amount',
+  'due_date',
+  'property',
+  'unit',
+  'org',
+  'next_due_date',
+  'link',
+] as const;
+
+/** The subset a custom bulk message can resolve — there is no schedule behind it. */
+export const CUSTOM_SMS_VARIABLES = ['name', 'unit', 'property', 'org'] as const;
+
+/** One SMS is 320 characters at most; the backend rejects longer (API.md). */
+export const SMS_MAX_CHARS = 320;
+
+export interface NotificationKindConfig {
+  enabled: boolean;
+  /** `reminder_7d` only: how many days before the due date to send. */
+  offset_days?: number;
+  /** `unsigned_reminder` only: days to wait after the contract was created. */
+  after_days?: number;
+}
+
+export interface NotificationTemplate {
+  sw: string;
+  en: string;
+}
+
+export interface NotificationSettings {
+  /** ≤11 chars; null means the platform sender ID is used. */
+  sender_name: string | null;
+  language: 'sw' | 'en';
+  send_hour_local: number;
+  kinds: Partial<Record<ScheduledKind, NotificationKindConfig>>;
+  /** null for a kind = platform default copy. */
+  templates: Partial<Record<ScheduledKind, NotificationTemplate | null>>;
+}
+
+export interface NotificationLogEntry {
+  id: string;
+  kind: NotificationKind;
+  to_phone: string | null;
+  renter_name: string | null;
+  /** Some payloads name the renter id; the renter page filters by it. */
+  user_id?: string | null;
+  body: string;
+  status: NotificationStatus;
+  provider_msg_id: string | null;
+  error: string | null;
+  attempts: number;
+  /** Set on rows from a custom broadcast; groups one batch together. */
+  batch_id?: string | null;
+  created_at: string;
+  sent_at: string | null;
+}
+
+/** `202 {batch_id, queued, skipped}` from a custom bulk send. */
+export interface CustomSendResult {
+  batch_id?: string;
+  queued: number;
+  skipped: number;
+}
+
+export interface CustomSendInput {
+  recipients: 'all_active' | 'selected';
+  renter_user_ids?: string[];
+  body: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 6 endpoint helpers (audience org)                              */
+/* ------------------------------------------------------------------ */
+
+export const notificationsApi = {
+  settings: (signal?: AbortSignal) =>
+    api.get<{ settings: NotificationSettings } | NotificationSettings>('/org/notification-settings', {
+      signal,
+    }),
+  /** Partial merge — send only what the form changed (API.md). */
+  saveSettings: (body: Partial<NotificationSettings>) =>
+    api.put<{ settings: NotificationSettings } | NotificationSettings>(
+      '/org/notification-settings',
+      body,
+    ),
+  log: (
+    query: {
+      kind?: string;
+      status?: string;
+      user_id?: string;
+      from?: string;
+      to?: string;
+      cursor?: string;
+      limit?: number;
+    } = {},
+    signal?: AbortSignal,
+  ) =>
+    api.get<{ items: NotificationLogEntry[]; next_cursor?: string | null }>('/notifications/log', {
+      query,
+      signal,
+    }),
+  retry: (id: string) => api.post<{ entry?: NotificationLogEntry } | void>(`/notifications/log/${id}/retry`),
+  sendCustom: (body: CustomSendInput) => api.post<CustomSendResult>('/notifications/custom', body),
+};
+
+/** `GET/PUT /org/notification-settings` may answer `{settings}` or a bare object. */
+export function unwrapNotificationSettings(
+  res: { settings: NotificationSettings } | NotificationSettings,
+): NotificationSettings {
+  return 'settings' in res && res.settings ? res.settings : (res as NotificationSettings);
+}
+
+/**
+ * Fill in what a partial payload left out so the form always has something to
+ * bind to. Display only — every value shown is still the backend's.
+ */
+export function withSettingsDefaults(s: Partial<NotificationSettings> | null): NotificationSettings {
+  const kinds = (s?.kinds ?? {}) as NotificationSettings['kinds'];
+  return {
+    sender_name: s?.sender_name ?? null,
+    language: s?.language === 'en' ? 'en' : 'sw',
+    send_hour_local: typeof s?.send_hour_local === 'number' ? s.send_hour_local : 9,
+    kinds: {
+      reminder_7d: { enabled: false, offset_days: 7, ...(kinds.reminder_7d ?? {}) },
+      reminder_due: { enabled: false, ...(kinds.reminder_due ?? {}) },
+      overdue_daily: { enabled: false, ...(kinds.overdue_daily ?? {}) },
+      thank_you: { enabled: false, ...(kinds.thank_you ?? {}) },
+      unsigned_reminder: { enabled: false, after_days: 7, ...(kinds.unsigned_reminder ?? {}) },
+    },
+    templates: s?.templates ?? {},
+  };
+}
+
+/**
+ * Resolve `{{var}}` placeholders for the send-message preview. Display only —
+ * the backend renders what is actually sent, from its own row.
+ */
+export function resolveVariables(body: string, values: Record<string, string>): string {
+  return body.replace(/\{\{\s*([a-z_]+)\s*\}\}/g, (whole, name: string) =>
+    name in values ? values[name] : whole,
+  );
+}
