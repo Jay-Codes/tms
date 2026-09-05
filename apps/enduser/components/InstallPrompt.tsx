@@ -16,6 +16,7 @@
 
 import { useEffect, useState } from 'react';
 import { Icon } from '@iconify/react';
+import { useT } from '@tms/ui';
 
 const DISMISSED_KEY = 'tms.enduser.install-hint-dismissed';
 
@@ -42,6 +43,7 @@ function remember(): void {
 }
 
 export function InstallPrompt() {
+  const t = useT();
   const [event, setEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -98,9 +100,7 @@ export function InstallPrompt() {
       }}
     >
       <Icon icon="solar:smartphone-linear" width={22} aria-hidden />
-      <p style={{ margin: 0, flex: 1, fontSize: 'var(--text-sm)' }}>
-        Add Rent Book to your home screen.
-      </p>
+      <p style={{ margin: 0, flex: 1, fontSize: 'var(--text-sm)' }}>{t('install.text')}</p>
       <button
         type="button"
         className="btn btn-secondary"
@@ -108,12 +108,12 @@ export function InstallPrompt() {
         onClick={() => void install()}
         style={{ width: 'auto', height: 'var(--touch-min)', paddingInline: 'var(--sp-3)' }}
       >
-        Add
+        {t('install.add')}
       </button>
       <button
         type="button"
         className="btn btn-quiet"
-        aria-label="Dismiss"
+        aria-label={t('install.dismiss')}
         onClick={() => {
           remember();
           setEvent(null);

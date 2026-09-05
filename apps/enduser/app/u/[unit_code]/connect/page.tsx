@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { Icon } from '@iconify/react';
+import { useLocale, useT, type Locale, type Translator } from '@tms/ui';
 import {
   ApiError,
   publicApi,
@@ -41,8 +42,6 @@ import { OrgHeader, useOrgTheme } from '../../../../components/OrgHeader';
 import { Notice, Screen } from '../../../../components/Screen';
 import { KycForm } from '../../../profile/KycForm';
 
-const TERMS_PLACEHOLDER = 'You will review and sign the full contract after approval.';
-
 /** Recommended periods first, then the landlord's custom ones. */
 function sortPeriods(periods: OfferedPeriod[]): OfferedPeriod[] {
   return [...periods].sort((a, b) => {
@@ -52,6 +51,8 @@ function sortPeriods(periods: OfferedPeriod[]): OfferedPeriod[] {
 }
 
 function ConnectContent() {
+  const t = useT();
+  const locale = useLocale();
   const params = useParams<{ unit_code: string }>();
   const unitCode = typeof params?.unit_code === 'string' ? params.unit_code : '';
   const { user } = useMe();
@@ -121,7 +122,7 @@ function ConnectContent() {
         setLoadError(null);
       } catch (err) {
         if (!live || (err instanceof DOMException && err.name === 'AbortError')) return;
-        setLoadError(errorMessage(err));
+        setLoadError(errorMessage(t, err));
       } finally {
         if (live) setLoading(false);
       }
@@ -130,7 +131,7 @@ function ConnectContent() {
       live = false;
       ac.abort();
     };
-  }, [unitCode]);
+  }, [unitCode, t]);
 
   const choosePeriod = useCallback(
     (p: OfferedPeriod) => {
@@ -160,15 +161,15 @@ function ConnectContent() {
     e.preventDefault();
     setError(null);
     if (!period) {
-      setError('Choose how you want to pay.');
+      setError(t('connect.error.period'));
       return;
     }
     if (termDays < period.days) {
-      setError(`A tenancy is at least one payment period — ${dayLabel(period.days)}.`);
+      setError(t('connect.error.term', { days: dayLabel(t, period.days) }));
       return;
     }
     if (!accepted) {
-      setError('Tick the box to confirm you accept the terms.');
+      setError(t('connect.error.terms'));
       return;
     }
 
@@ -185,7 +186,7 @@ function ConnectContent() {
     } catch (err) {
       if (err instanceof ApiError && err.status === 412) {
         setNeedsKyc(true);
-        setError('We need your details before sending this to the landlord.');
+        setError(t('connect.error.kyc'));
       } else if (err instanceof ApiError && err.status === 409 && err.is('unit_occupied')) {
         setOccupied(true);
       } else if (err instanceof ApiError && err.status === 409) {
@@ -195,9 +196,9 @@ function ConnectContent() {
           (r) => r.unit.id === unit?.unit.id && (r.status === 'pending' || r.status === 'approved'),
         );
         if (open) setExisting(open);
-        else setError(errorMessage(err));
+        else setError(errorMessage(t, err));
       } else {
-        setError(errorMessage(err));
+        setError(errorMessage(t, err));
       }
     } finally {
       setBusy(false);
@@ -207,7 +208,7 @@ function ConnectContent() {
   if (loading) {
     return (
       <Screen bottomBar>
-        <p className="pencil">Loading…</p>
+        <p className="pencil">{t('common.loading')}</p>
       </Screen>
     );
   }
@@ -215,9 +216,9 @@ function ConnectContent() {
   if (loadError || !unit) {
     return (
       <Screen bottomBar>
-        <Notice tone="error">{loadError ?? 'This unit could not be loaded.'}</Notice>
+        <Notice tone="error">{loadError ?? t('unit.loadFailed')}</Notice>
         <Link className="btn btn-secondary" href="/">
-          Go to my rent book
+          {t('common.goToRentBook')}
         </Link>
       </Screen>
     );
@@ -232,9 +233,9 @@ function ConnectContent() {
       <Screen bottomBar>
         <OrgHeader branding={unit.branding} />
         <h1 style={{ fontSize: 'var(--text-xl)' }}>{unit.unit.name}</h1>
-        <Notice tone="error">Unit occupied — contact landlord.</Notice>
+        <Notice tone="error">{t('unit.occupied')}</Notice>
         <Link className="btn btn-secondary" href="/">
-          Go to my rent book
+          {t('common.goToRentBook')}
         </Link>
       </Screen>
     );
@@ -248,24 +249,23 @@ function ConnectContent() {
 
         <header style={{ display: 'grid', gap: 'var(--sp-2)' }}>
           <span className={approved ? 'stamp stamp-paid' : 'pencil'} style={{ justifySelf: 'start' }}>
-            {approved ? 'Approved' : 'Sent'}
+            {approved ? t('home.request.approved') : t('connect.sent.stamp')}
           </span>
           <h1 style={{ fontSize: 'var(--text-xl)' }}>
-            {approved
-              ? 'Approved — your contract will be ready to sign soon'
-              : 'Waiting for landlord approval'}
+            {approved ? t('connect.sent.titleApproved') : t('connect.sent.titleWaiting')}
           </h1>
           <p style={{ color: 'var(--ink-soft)' }}>
-            {approved
-              ? `${request.org.name} approved your request for ${request.unit.name}. We will text you when the contract is ready.`
-              : `${request.org.name} has your request for ${request.unit.name}. We will text you as soon as they decide.`}
+            {t(approved ? 'connect.sent.leadApproved' : 'connect.sent.leadWaiting', {
+              org: request.org.name,
+              unit: request.unit.name,
+            })}
           </p>
         </header>
 
         <RequestLedger request={request} />
 
         <Link className="btn btn-primary" href="/">
-          Go to my rent book
+          {t('common.goToRentBook')}
         </Link>
       </Screen>
     );
@@ -281,7 +281,9 @@ function ConnectContent() {
         <p style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)', margin: 0 }}>
           {unit.property.name}
         </p>
-        <h1 style={{ fontSize: 'var(--text-xl)' }}>Connect to {unit.unit.name}</h1>
+        <h1 style={{ fontSize: 'var(--text-xl)' }}>
+          {t('connect.title', { unit: unit.unit.name })}
+        </h1>
       </header>
 
       {needsKyc && (
@@ -289,9 +291,9 @@ function ConnectContent() {
           initialProfile={profile}
           fallbackName={user?.full_name}
           onSaved={onKycSaved}
-          submitLabel="Save and continue"
-          heading="First, your details"
-          lead="Your landlord needs these before they can approve a tenancy."
+          submitLabel={t('kyc.connect.submit')}
+          heading={t('kyc.connect.heading')}
+          lead={t('kyc.connect.lead')}
         />
       )}
 
@@ -301,7 +303,7 @@ function ConnectContent() {
 
           <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 'var(--sp-3)' }}>
             <legend style={{ fontSize: 'var(--text-lg)', fontWeight: 600, padding: 0 }}>
-              How do you want to pay?
+              {t('connect.howPay')}
             </legend>
             <div style={{ display: 'grid', gap: 'var(--sp-2)' }}>
               {periods.map((p) => (
@@ -339,12 +341,12 @@ function ConnectContent() {
                           color: 'var(--ink-soft)',
                         }}
                       >
-                        Recommended
+                        {t('unit.recommended')}
                       </span>
                     )}
                     <br />
                     <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-                      every {p.days} days
+                      {t('unit.everyDays', { days: p.days })}
                     </span>
                   </span>
                   <span className="num">
@@ -357,7 +359,7 @@ function ConnectContent() {
 
           <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 'var(--sp-3)' }}>
             <legend style={{ fontSize: 'var(--text-lg)', fontWeight: 600, padding: 0 }}>
-              How long do you want to stay?
+              {t('connect.howLong')}
             </legend>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
               {period &&
@@ -369,12 +371,12 @@ function ConnectContent() {
                     style={{ width: 'auto', flex: '1 1 42%' }}
                     onClick={() => setTermDays(d)}
                   >
-                    {dayLabel(d)}
+                    {dayLabel(t, d)}
                   </button>
                 ))}
             </div>
             <div className="field">
-              <label htmlFor="term">Or set the number of days</label>
+              <label htmlFor="term">{t('connect.termDays')}</label>
               <input
                 id="term"
                 className="input"
@@ -386,13 +388,15 @@ function ConnectContent() {
                 onChange={(e) => setTermDays(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
               />
               {period && (
-                <span className="hint">At least one payment period — {dayLabel(period.days)}.</span>
+                <span className="hint">
+                  {t('connect.termHint', { days: dayLabel(t, period.days) })}
+                </span>
               )}
             </div>
           </fieldset>
 
           <div className="field">
-            <label htmlFor="start">Start date</label>
+            <label htmlFor="start">{t('connect.startDate')}</label>
             <input
               id="start"
               className="input"
@@ -403,31 +407,35 @@ function ConnectContent() {
               onChange={(e) => setStartDate(e.target.value || todayIso())}
             />
             <span className="hint">
-              {endDate ? `Ends ${formatDate(endDate)}.` : 'Pick the day you move in.'}
+              {endDate
+                ? t('connect.endsOn', { date: formatDate(locale, endDate) })
+                : t('connect.pickMoveIn')}
             </span>
           </div>
 
           {preview && (
             <section style={{ display: 'grid', gap: 'var(--sp-2)' }}>
               <h2 style={{ fontSize: 'var(--text-lg)' }}>
-                {preview.count} payment{preview.count === 1 ? '' : 's'}
+                {t.n('connect.payments', preview.count)}
               </h2>
               <table className="ledger">
                 <thead>
                   <tr>
-                    <th>Due</th>
-                    <th className="num">Amount</th>
+                    <th>{t('common.due')}</th>
+                    <th className="num">{t('common.amount')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {preview.rows.map((row) => (
                     <tr key={row.n}>
                       <td>
-                        {formatDate(row.due)}
+                        {formatDate(locale, row.due)}
                         {row.partial && (
                           <>
                             <br />
-                            <span className="pencil">covers {dayLabel(row.daysCovered)}</span>
+                            <span className="pencil">
+                              {t('connect.covers', { days: dayLabel(t, row.daysCovered) })}
+                            </span>
                           </>
                         )}
                       </td>
@@ -435,20 +443,19 @@ function ConnectContent() {
                     </tr>
                   ))}
                   <tr className="total">
-                    <td>Total</td>
+                    <td>{t('common.total')}</td>
                     <td className="num">{money(preview.total)}</td>
                   </tr>
                 </tbody>
               </table>
               <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-xs)', margin: 0 }}>
-                An estimate. {unit.branding.display_name} confirms the final schedule when they
-                approve.
+                {t('connect.estimate', { org: unit.branding.display_name })}
               </p>
             </section>
           )}
 
           <section style={{ display: 'grid', gap: 'var(--sp-3)' }}>
-            <h2 style={{ fontSize: 'var(--text-lg)' }}>Terms</h2>
+            <h2 style={{ fontSize: 'var(--text-lg)' }}>{t('doc.terms')}</h2>
             <p
               style={{
                 display: 'flex',
@@ -460,7 +467,7 @@ function ConnectContent() {
               }}
             >
               <Icon icon="solar:document-text-linear" width={18} aria-hidden />
-              {TERMS_PLACEHOLDER}
+              {t('unit.signAfterApproval')}
             </p>
             <label
               style={{
@@ -478,13 +485,16 @@ function ConnectContent() {
                 style={{ marginTop: '0.35em' }}
               />
               <span>
-                I accept {unit.branding.display_name}&rsquo;s terms for {unit.unit.name}.
+                {t('connect.accept', {
+                  org: unit.branding.display_name,
+                  unit: unit.unit.name,
+                })}
               </span>
             </label>
           </section>
 
           <button className="btn btn-primary" type="submit" disabled={busy || !accepted}>
-            {busy ? 'Sending…' : 'Send request to landlord'}
+            {busy ? t('common.sending') : t('connect.submit')}
           </button>
         </form>
       )}
@@ -494,43 +504,48 @@ function ConnectContent() {
 
 /** The server's own numbers, once a request exists. */
 function RequestLedger({ request }: { request: LinkRequest }) {
+  const t = useT();
+  const locale = useLocale();
   const p = request.schedule_preview;
   return (
     <table className="ledger ledger-kv">
       <tbody>
         <tr>
-          <td style={{ color: 'var(--ink-soft)' }}>Unit</td>
+          <td style={{ color: 'var(--ink-soft)' }}>{t('common.unit')}</td>
           <td className="num">
             {request.unit.name} · {request.unit.property_name}
           </td>
         </tr>
         <tr>
-          <td style={{ color: 'var(--ink-soft)' }}>Paying</td>
+          <td style={{ color: 'var(--ink-soft)' }}>{t('connect.ledger.paying')}</td>
           <td className="num">
             {request.payment_period.label} · {money(request.payment_period.amount)}
           </td>
         </tr>
         <tr>
-          <td style={{ color: 'var(--ink-soft)' }}>Tenancy</td>
-          <td className="num">{dayLabel(request.term_days)}</td>
+          <td style={{ color: 'var(--ink-soft)' }}>{t('connect.ledger.tenancy')}</td>
+          <td className="num">{dayLabel(t, request.term_days)}</td>
         </tr>
         <tr>
-          <td style={{ color: 'var(--ink-soft)' }}>Dates</td>
+          <td style={{ color: 'var(--ink-soft)' }}>{t('connect.ledger.dates')}</td>
           <td className="num">
-            <span className="nowrap">{formatDate(request.start_date)}</span> –{' '}
-            <span className="nowrap">{formatDate(request.end_date)}</span>
+            <span className="nowrap">{formatDate(locale, request.start_date)}</span> –{' '}
+            <span className="nowrap">{formatDate(locale, request.end_date)}</span>
           </td>
         </tr>
         {p && (
           <>
             <tr>
-              <td style={{ color: 'var(--ink-soft)' }}>Payments</td>
+              <td style={{ color: 'var(--ink-soft)' }}>{t('connect.ledger.payments')}</td>
               <td className="num">
-                {p.count} · first {formatDate(p.first_due)}
+                {t('connect.ledger.firstDue', {
+                  count: p.count,
+                  date: formatDate(locale, p.first_due),
+                })}
               </td>
             </tr>
             <tr className="total">
-              <td>Total</td>
+              <td>{t('common.total')}</td>
               <td className="num">{money(p.total)}</td>
             </tr>
           </>

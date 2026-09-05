@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo } from 'react';
 import type { PublicBranding } from '../lib/api';
+import { rememberOrgLocale } from '../lib/locale';
 import {
   applyTheme,
   readCachedTheme,
@@ -43,6 +44,12 @@ export function useOrgTheme(
     applyTheme(theme);
     if (slug) writeCachedTheme(slug, theme);
   }, [theme, slug]);
+
+  /* Phase 13: the same payload says which language this landlord's renters
+     read by default — remembered for the pre-auth screens (lib/locale.tsx). */
+  useEffect(() => {
+    rememberOrgLocale(branding);
+  }, [branding]);
 }
 
 /** Landlord's mark at the top of the scan screens: logo (if any) + name. */

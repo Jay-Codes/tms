@@ -16,6 +16,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@iconify/react';
+import { useT } from '@tms/ui';
 import {
   ApiError,
   renterApi,
@@ -32,21 +33,22 @@ const PHOTO_TYPES = ['image/jpeg', 'image/png'];
 const NIDA_DIGITS = 20;
 
 export function KycStatusStamp({ status }: { status: KycStatus }) {
+  const t = useT();
   if (status === 'verified') {
     return (
-      <span className="stamp stamp-paid" aria-label="KYC verified">
-        Verified
+      <span className="stamp stamp-paid" aria-label={t('kyc.status.verifiedAria')}>
+        {t('kyc.status.verified')}
       </span>
     );
   }
   if (status === 'submitted') {
     return (
-      <span className="stamp" aria-label="KYC submitted">
-        Submitted
+      <span className="stamp" aria-label={t('kyc.status.submittedAria')}>
+        {t('kyc.status.submitted')}
       </span>
     );
   }
-  return <span className="pencil">Not submitted</span>;
+  return <span className="pencil">{t('kyc.status.none')}</span>;
 }
 
 export interface KycFormProps {
@@ -59,6 +61,7 @@ export interface KycFormProps {
   /** Prefilled from the session when the profile has no name yet. */
   fallbackName?: string;
   onSaved?: (profile: RenterProfile) => void;
+  /** Defaults to "Save details" / "Hifadhi taarifa" in the reader's language. */
   submitLabel?: string;
   heading?: string;
   lead?: string;
@@ -68,10 +71,11 @@ export function KycForm({
   initialProfile,
   fallbackName,
   onSaved,
-  submitLabel = 'Save details',
-  heading = 'Your details',
+  submitLabel,
+  heading,
   lead,
 }: KycFormProps) {
+  const t = useT();
   const [profile, setProfile] = useState<RenterProfile | null>(initialProfile ?? null);
   const [loading, setLoading] = useState(initialProfile === undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -121,7 +125,7 @@ export function KycForm({
         setLoadError(null);
       } catch (err) {
         if (!live || (err instanceof DOMException && err.name === 'AbortError')) return;
-        setLoadError(errorMessage(err));
+        setLoadError(errorMessage(t, err));
       } finally {
         if (live) setLoading(false);
       }
@@ -130,14 +134,14 @@ export function KycForm({
       live = false;
       ac.abort();
     };
-  }, [initialProfile, fallbackName, adopt]);
+  }, [initialProfile, fallbackName, adopt, t]);
 
   const status: KycStatus = profile?.kyc_status ?? 'none';
 
   const nidaHint = useMemo(() => {
-    if (profile?.nida_masked) return `On file: ${profile.nida_masked}. Leave blank to keep it.`;
-    return `${NIDA_DIGITS} digits, from your national ID card.`;
-  }, [profile?.nida_masked]);
+    if (profile?.nida_masked) return t('kyc.nidaOnFile', { masked: profile.nida_masked });
+    return t('kyc.nidaHint', { digits: NIDA_DIGITS });
+  }, [profile?.nida_masked, t]);
 
   function pickFile(chosen: File | null) {
     setFileError(null);
@@ -147,12 +151,12 @@ export function KycForm({
     }
     if (!PHOTO_TYPES.includes(chosen.type)) {
       setFile(null);
-      setFileError('Choose a JPEG or PNG photo.');
+      setFileError(t('kyc.error.photoType'));
       return;
     }
     if (chosen.size > MAX_PHOTO_BYTES) {
       setFile(null);
-      setFileError('That photo is larger than 5 MB. Choose a smaller one.');
+      setFileError(t('kyc.error.photoSize'));
       return;
     }
     setFile(chosen);
@@ -161,17 +165,17 @@ export function KycForm({
   /** UX-side checks only — the API validates all of this again. */
   function validate(): Record<string, string> {
     const errs: Record<string, string> = {};
-    if (fullName.trim().length < 2) errs.full_name = 'Enter your full name.';
+    if (fullName.trim().length < 2) errs.full_name = t('error.nameRequired');
     if (nida && !new RegExp(`^\\d{${NIDA_DIGITS}}$`).test(nida)) {
-      errs.nida_number = `A NIDA number is ${NIDA_DIGITS} digits.`;
+      errs.nida_number = t('kyc.error.nidaDigits', { digits: NIDA_DIGITS });
     }
-    if (!nida && !profile?.nida_masked) errs.nida_number = 'Enter your NIDA number.';
-    if (kinName.trim().length < 2) errs.next_of_kin_name = "Enter your next of kin's name.";
+    if (!nida && !profile?.nida_masked) errs.nida_number = t('kyc.error.nidaRequired');
+    if (kinName.trim().length < 2) errs.next_of_kin_name = t('kyc.error.kinName');
     if (!isValidPhone(kinPhone)) {
-      errs.next_of_kin_phone = 'Enter a Tanzanian mobile number, e.g. 0712 345 678.';
+      errs.next_of_kin_phone = t('error.phone');
     }
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      errs.email = 'Check the email address.';
+      errs.email = t('kyc.error.email');
     }
     return errs;
   }
@@ -186,7 +190,7 @@ export function KycForm({
 
     setBusy(true);
     try {
-      setStep('Saving your details…');
+      setStep(t('kyc.savingDetails'));
       const res = await renterApi.saveProfile({
         full_name: fullName.trim(),
         ...(nida ? { nida_number: nida } : {}),
@@ -197,7 +201,7 @@ export function KycForm({
       let latest = res.profile;
 
       if (file) {
-        setStep('Uploading your ID photo…');
+        setStep(t('kyc.uploadingPhoto'));
         const ticket = await renterApi.kycUploadTicket(file.type, file.size);
         await uploadToPresignedUrl(ticket, file);
         const done = await renterApi.kycUploadComplete(ticket.object_key);
@@ -213,7 +217,7 @@ export function KycForm({
       if (err instanceof ApiError && Object.keys(err.errors).length > 0) {
         setFieldErrors(err.errors);
       }
-      setError(errorMessage(err));
+      setError(errorMessage(t, err));
     } finally {
       setBusy(false);
       setStep(null);
@@ -223,7 +227,7 @@ export function KycForm({
   if (loading) {
     return (
       <section className="sheet" style={{ padding: 'var(--sp-4)' }}>
-        <p className="pencil">Loading your details…</p>
+        <p className="pencil">{t('profile.loading')}</p>
       </section>
     );
   }
@@ -243,7 +247,7 @@ export function KycForm({
         }}
       >
         <h2 id="kyc-heading" style={{ fontSize: 'var(--text-lg)' }}>
-          {heading}
+          {heading ?? t('kyc.heading')}
         </h2>
         <KycStatusStamp status={status} />
       </header>
@@ -254,11 +258,11 @@ export function KycForm({
 
       {loadError && <Notice tone="error">{loadError}</Notice>}
       {error && <Notice tone="error">{error}</Notice>}
-      {saved && !error && <Notice>Details saved.</Notice>}
+      {saved && !error && <Notice>{t('kyc.saved')}</Notice>}
 
       <form onSubmit={submit} style={{ display: 'grid', gap: 'var(--sp-4)' }} noValidate>
         <div className={`field${fieldErrors.full_name ? ' invalid' : ''}`}>
-          <label htmlFor="kyc-name">Full name</label>
+          <label htmlFor="kyc-name">{t('field.fullName')}</label>
           <input
             id="kyc-name"
             className="input"
@@ -270,7 +274,7 @@ export function KycForm({
         </div>
 
         <div className={`field${fieldErrors.nida_number ? ' invalid' : ''}`}>
-          <label htmlFor="kyc-nida">NIDA number</label>
+          <label htmlFor="kyc-nida">{t('kyc.nida')}</label>
           <input
             id="kyc-nida"
             className="input"
@@ -287,7 +291,7 @@ export function KycForm({
         </div>
 
         <div className={`field${fieldErrors.next_of_kin_name ? ' invalid' : ''}`}>
-          <label htmlFor="kyc-kin">Next of kin</label>
+          <label htmlFor="kyc-kin">{t('profile.nextOfKin')}</label>
           <input
             id="kyc-kin"
             className="input"
@@ -300,13 +304,13 @@ export function KycForm({
         </div>
 
         <div className={`field${fieldErrors.next_of_kin_phone ? ' invalid' : ''}`}>
-          <label htmlFor="kyc-kin-phone">Next of kin phone</label>
+          <label htmlFor="kyc-kin-phone">{t('kyc.kinPhone')}</label>
           <input
             id="kyc-kin-phone"
             className="input"
             type="tel"
             inputMode="tel"
-            placeholder="0712 345 678"
+            placeholder={t('field.phonePlaceholder')}
             value={kinPhone}
             onChange={(e) => setKinPhone(e.target.value)}
           />
@@ -316,7 +320,7 @@ export function KycForm({
         </div>
 
         <div className={`field${fieldErrors.email ? ' invalid' : ''}`}>
-          <label htmlFor="kyc-email">Email (optional)</label>
+          <label htmlFor="kyc-email">{t('kyc.email')}</label>
           <input
             id="kyc-email"
             className="input"
@@ -330,7 +334,7 @@ export function KycForm({
         </div>
 
         <div className={`field${fileError ? ' invalid' : ''}`}>
-          <label htmlFor="kyc-photo">ID photo (optional)</label>
+          <label htmlFor="kyc-photo">{t('kyc.photo')}</label>
           <input
             id="kyc-photo"
             ref={fileInput}
@@ -340,15 +344,13 @@ export function KycForm({
             onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
           />
           <span className="hint">
-            {profile?.kyc_doc_uploaded && !file
-              ? 'A photo is already on file. Choosing another replaces it.'
-              : 'A clear photo of your national ID. JPEG or PNG, up to 5 MB.'}
+            {profile?.kyc_doc_uploaded && !file ? t('kyc.photoOnFile') : t('kyc.photoHint')}
           </span>
           {fileError && <span className="error">{fileError}</span>}
         </div>
 
         <button className="btn btn-primary" type="submit" disabled={busy}>
-          {busy ? (step ?? 'Saving…') : submitLabel}
+          {busy ? (step ?? t('common.saving')) : (submitLabel ?? t('kyc.save'))}
         </button>
 
         <p
@@ -362,8 +364,7 @@ export function KycForm({
           }}
         >
           <Icon icon="solar:lock-keyhole-minimalistic-linear" width={16} aria-hidden />
-          Your NIDA number is stored encrypted and only ever shown to you and your landlord in
-          masked form.
+          {t('kyc.privacy')}
         </p>
       </form>
     </section>

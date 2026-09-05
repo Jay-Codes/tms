@@ -26,6 +26,7 @@ import {
   type LinkRequest,
   type MySchedule,
 } from '../lib/api';
+import { useLocale, useT, type Translator } from '@tms/ui';
 import { useMe } from '../lib/auth';
 import { errorMessage, formatDate, money } from '../lib/format';
 import { forgetScannedUnit, readScannedUnit } from '../lib/scan';
@@ -36,19 +37,19 @@ import { NextDueChip } from '../components/PaymentStatus';
 import { Notice, Screen, ScreenHeader } from '../components/Screen';
 
 function firstName(fullName: string): string {
-  return fullName.trim().split(/\s+/)[0] || 'there';
+  return fullName.trim().split(/\s+/)[0] || '';
 }
 
-function statusMark(request: LinkRequest) {
+function statusMark(t: Translator, request: LinkRequest) {
   switch (request.status) {
     case 'approved':
-      return <span className="stamp stamp-paid">Approved</span>;
+      return <span className="stamp stamp-paid">{t('home.request.approved')}</span>;
     case 'rejected':
-      return <span className="stamp stamp-overdue">Rejected</span>;
+      return <span className="stamp stamp-overdue">{t('home.request.rejected')}</span>;
     case 'cancelled':
-      return <span className="pencil">Cancelled</span>;
+      return <span className="pencil">{t('home.request.cancelled')}</span>;
     default:
-      return <span className="pencil">Waiting for approval</span>;
+      return <span className="pencil">{t('home.request.pending')}</span>;
   }
 }
 
@@ -61,6 +62,8 @@ function RequestRow({
   onCancel: (id: string) => void;
   busy: boolean;
 }) {
+  const t = useT();
+  const locale = useLocale();
   return (
     <tr>
       <td>
@@ -69,13 +72,16 @@ function RequestRow({
         </span>
         <br />
         <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-          {request.payment_period.label} · from {formatDate(request.start_date)}
+          {t('home.request.from', {
+            label: request.payment_period.label,
+            date: formatDate(locale, request.start_date),
+          })}
         </span>
         {request.status === 'rejected' && request.rejection_reason && (
           <>
             <br />
             <span style={{ color: 'var(--stamp-overdue)', fontSize: 'var(--text-sm)' }}>
-              Reason: {request.rejection_reason}
+              {t('home.request.reason', { reason: request.rejection_reason })}
             </span>
           </>
         )}
@@ -89,13 +95,13 @@ function RequestRow({
               disabled={busy}
               onClick={() => onCancel(request.id)}
             >
-              {busy ? 'Cancelling…' : 'Cancel request'}
+              {busy ? t('home.request.cancelling') : t('home.request.cancel')}
             </button>
           </>
         )}
       </td>
       <td className="num">
-        {statusMark(request)}
+        {statusMark(t, request)}
         <br />
         <span style={{ fontSize: 'var(--text-sm)' }}>{money(request.payment_period.amount)}</span>
       </td>
@@ -105,6 +111,8 @@ function RequestRow({
 
 function HomeContent() {
   const { user } = useMe();
+  const t = useT();
+  const locale = useLocale();
 
   const [requests, setRequests] = useState<LinkRequest[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
@@ -142,11 +150,11 @@ function HomeContent() {
       // A 404 here means the renter simply has nothing on file yet as far as
       // this screen is concerned — no reason to alarm them.
       if (err instanceof ApiError && err.status === 404) setRequests([]);
-      else setError(errorMessage(err));
+      else setError(errorMessage(t, err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     const ac = new AbortController();
@@ -162,7 +170,7 @@ function HomeContent() {
       await renterApi.cancelLinkRequest(id);
       await load();
     } catch (err) {
-      setError(errorMessage(err));
+      setError(errorMessage(t, err));
     } finally {
       setCancelling(null);
     }
@@ -177,8 +185,10 @@ function HomeContent() {
   return (
     <Screen bottomBar>
       <ScreenHeader
-        eyebrow="Your rent book"
-        title={`Habari, ${user ? firstName(user.full_name) : 'there'}.`}
+        eyebrow={t('home.eyebrow')}
+        title={t('home.greeting', {
+          name: (user && firstName(user.full_name)) || t('home.greetingFallback'),
+        })}
       />
 
       <InstallPrompt />
@@ -205,7 +215,7 @@ function HomeContent() {
                       }}
                     >
                       <span>
-                        Contract ready to sign
+                        {t('home.sign.ready')}
                         <br />
                         <span
                           style={{
@@ -229,9 +239,9 @@ function HomeContent() {
 
       {(loading || open.length > 0) && (
         <section style={{ display: 'grid', gap: 'var(--sp-3)' }}>
-          <h2 style={{ fontSize: 'var(--text-lg)' }}>Your requests</h2>
+          <h2 style={{ fontSize: 'var(--text-lg)' }}>{t('home.requests.title')}</h2>
           {loading ? (
-            <p className="pencil">Loading…</p>
+            <p className="pencil">{t('common.loading')}</p>
           ) : (
             <table className="ledger">
               <tbody>
@@ -252,10 +262,10 @@ function HomeContent() {
       {!loading && scanned && !open.some((r) => r.status === 'pending' || r.status === 'approved') && (
         <section style={{ display: 'grid', gap: 'var(--sp-2)' }}>
           <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)', margin: 0 }}>
-            You scanned a unit but didn&rsquo;t finish.
+            {t('home.scan.unfinished')}
           </p>
           <Link className="btn btn-secondary" href={`/u/${encodeURIComponent(scanned)}`}>
-            Continue where you left off
+            {t('home.scan.continue')}
           </Link>
           <button
             type="button"
@@ -265,7 +275,7 @@ function HomeContent() {
               setScanned(null);
             }}
           >
-            Dismiss
+            {t('home.scan.dismiss')}
           </button>
         </section>
       )}
@@ -279,12 +289,12 @@ function HomeContent() {
             gap: 'var(--sp-3)',
           }}
         >
-          <h2 style={{ fontSize: 'var(--text-lg)' }}>Next payment</h2>
+          <h2 style={{ fontSize: 'var(--text-lg)' }}>{t('payment.next.title')}</h2>
           <Link
             href="/payments"
             style={{ color: 'var(--primary)', fontSize: 'var(--text-sm)', fontWeight: 600 }}
           >
-            How to pay →
+            {t('payment.next.howToPay')}
           </Link>
         </div>
 
@@ -298,7 +308,7 @@ function HomeContent() {
               fontWeight: 600,
             }}
           >
-            {money(overdueTotal)} overdue.
+            {t('payment.overdueShort', { amount: money(overdueTotal) })}
           </p>
         )}
 
@@ -307,10 +317,10 @@ function HomeContent() {
             {nextDue ? (
               <tr>
                 <td>
-                  {formatDate(nextDue.due_date)}
+                  {formatDate(locale, nextDue.due_date)}
                   <br />
                   <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-                    {nextDue.contract?.unit_name ?? 'Your unit'}
+                    {nextDue.contract?.unit_name ?? t('common.yourUnit')}
                   </span>
                 </td>
                 <td className="num">
@@ -321,7 +331,7 @@ function HomeContent() {
               </tr>
             ) : (
               <tr>
-                <td style={{ color: 'var(--ink-soft)' }}>Nothing to pay yet</td>
+                <td style={{ color: 'var(--ink-soft)' }}>{t('common.nothingToPayYet')}</td>
                 <td className="num">
                   <span className="pencil">—</span>
                 </td>
@@ -333,14 +343,14 @@ function HomeContent() {
         <div style={{ display: 'grid', gap: 'var(--sp-3)', paddingTop: 'var(--sp-4)' }}>
           <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
             {nextDue
-              ? 'Pay your landlord directly, then they record it here.'
+              ? t('home.hint.pay')
               : toSign.length > 0
-                ? 'Sign your contract and payments will appear here.'
+                ? t('home.hint.sign')
                 : signedWaiting
-                  ? 'You have signed — payments start once your landlord countersigns.'
+                  ? t('home.hint.signedWaiting')
                   : open.some((r) => r.status === 'approved')
-                    ? 'Payments start once your contract is signed and activated.'
-                    : 'No tenancy yet — scan your unit’s QR code.'}
+                    ? t('home.hint.approved')
+                    : t('home.hint.none')}
           </p>
           <p
             style={{
@@ -352,7 +362,7 @@ function HomeContent() {
             }}
           >
             <Icon icon="solar:qr-code-linear" width={20} aria-hidden />
-            The sticker on your door opens this app with the unit already filled in.
+            {t('home.hint.qr')}
           </p>
         </div>
       </section>

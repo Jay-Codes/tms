@@ -1,7 +1,9 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import { useT } from '@tms/ui';
 import { useRequireAuth } from '../lib/auth';
+import { errorMessage } from '../lib/format';
 import { BottomBar } from './BottomBar';
 import { OrgThemeSync } from './OrgThemeSync';
 import { Notice, Screen } from './Screen';
@@ -11,12 +13,13 @@ import { Notice, Screen } from './Screen';
  * answered, bounces 401s to `/login?next=…`, and paints the tab bar.
  */
 export function Protected({ children }: { children: ReactNode }) {
-  const { status, error, refresh } = useRequireAuth();
+  const { status, failure, refresh } = useRequireAuth();
+  const t = useT();
 
   if (status === 'loading') {
     return (
       <Screen bottomBar>
-        <p className="pencil">Loading…</p>
+        <p className="pencil">{t('common.loading')}</p>
       </Screen>
     );
   }
@@ -25,15 +28,15 @@ export function Protected({ children }: { children: ReactNode }) {
     // Either redirecting to login, or the API is unreachable.
     return (
       <Screen>
-        {error ? (
+        {failure ? (
           <>
-            <Notice tone="error">{error}</Notice>
+            <Notice tone="error">{errorMessage(t, failure)}</Notice>
             <button className="btn btn-secondary" onClick={() => void refresh()}>
-              Try again
+              {t('common.tryAgain')}
             </button>
           </>
         ) : (
-          <p className="pencil">Taking you to sign in…</p>
+          <p className="pencil">{t('auth.redirecting')}</p>
         )}
       </Screen>
     );

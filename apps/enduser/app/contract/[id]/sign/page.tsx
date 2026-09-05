@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { Icon } from '@iconify/react';
+import { useLocale, useT } from '@tms/ui';
 import {
   ApiError,
   contractApi,
@@ -45,6 +46,8 @@ type Step = 'summary' | 'code' | 'draw' | 'done';
 const MAX_SIGNATURE_BYTES = 512 * 1024;
 
 function SignContent() {
+  const t = useT();
+  const locale = useLocale();
   const params = useParams<{ id: string }>();
   const id = typeof params?.id === 'string' ? params.id : '';
   const router = useRouter();
@@ -87,8 +90,8 @@ function SignContent() {
         if (!live || (err instanceof DOMException && err.name === 'AbortError')) return;
         setLoadError(
           err instanceof ApiError && err.status === 404
-            ? 'This agreement is not available on your account.'
-            : errorMessage(err),
+            ? t('doc.notAvailable')
+            : errorMessage(t, err),
         );
       } finally {
         if (live) setLoading(false);
@@ -98,7 +101,7 @@ function SignContent() {
       live = false;
       ac.abort();
     };
-  }, [id]);
+  }, [id, t]);
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -117,22 +120,20 @@ function SignContent() {
       if (err instanceof ApiError && err.status === 409) {
         setAlreadySigned(true);
       } else {
-        setError(errorMessage(err, 5));
+        setError(errorMessage(t, err, 5));
       }
     } finally {
       setBusy(false);
     }
-  }, [id]);
+  }, [id, t]);
 
   /** Upload the drawn PNG, if there is one, and return its object key. */
   const uploadSignature = useCallback(async (): Promise<string | undefined> => {
     const blob = await padRef.current?.toBlob();
     if (!blob) return undefined;
     if (blob.size > MAX_SIGNATURE_BYTES) {
-      throw new ApiError(400, {
-        title: 'Signature too large',
-        detail: 'That signature is too big to upload. Clear it and try a simpler one.',
-      });
+      // No prose here: the screen translates the code (lib/format).
+      throw new ApiError(400, { type: 'client/signature_too_large' });
     }
     const ticket = await contractApi.signatureUploadTicket(id, blob.size);
     await uploadToPresignedUrl(ticket, blob);
@@ -142,7 +143,7 @@ function SignContent() {
   const submit = useCallback(
     async (withDrawing: boolean) => {
       if (!/^\d{6}$/.test(code)) {
-        setError('Enter the 6-digit code from the SMS.');
+        setError(t('error.code'));
         setStep('code');
         return;
       }
@@ -158,34 +159,31 @@ function SignContent() {
         setStep('done');
       } catch (err) {
         if (err instanceof ApiError && err.status === 400) {
-          setError(
-            err.fieldError('otp_code') ??
-              (err.detail || 'That code is not right. Check the SMS and try again.'),
-          );
+          setError(err.fieldError('otp_code') ?? (err.detail || t('sign.badCode')));
           setStep('code');
           setCode('');
         } else if (err instanceof ApiError && err.status === 409) {
           setAlreadySigned(true);
         } else if (err instanceof ApiError && err.status === 429) {
-          setError(errorMessage(err, 5));
+          setError(errorMessage(t, err, 5));
           setStep('code');
         } else {
-          setError(errorMessage(err));
+          setError(errorMessage(t, err));
         }
       } finally {
         setBusy(false);
       }
     },
-    [code, id, uploadSignature],
+    [code, id, t, uploadSignature],
   );
 
   const docHref = `/contract/${encodeURIComponent(id)}`;
-  const orgName = doc?.org.display_name ?? 'your landlord';
+  const orgName = doc?.org.display_name ?? t('sign.yourLandlord');
 
   if (loading) {
     return (
       <Screen bottomBar>
-        <p className="pencil">Loading…</p>
+        <p className="pencil">{t('common.loading')}</p>
       </Screen>
     );
   }
@@ -195,7 +193,7 @@ function SignContent() {
       <Screen bottomBar>
         <Notice tone="error">{loadError}</Notice>
         <Link className="btn btn-secondary" href="/contract">
-          Back to your contracts
+          {t('doc.backToContracts')}
         </Link>
       </Screen>
     );
@@ -205,12 +203,12 @@ function SignContent() {
     return (
       <Screen bottomBar>
         <ScreenHeader
-          eyebrow="Already signed"
-          title="Nothing left to sign"
-          lead={`This agreement no longer needs your signature. ${orgName} countersigns next.`}
+          eyebrow={t('sign.already.eyebrow')}
+          title={t('sign.already.title')}
+          lead={t('sign.already.lead', { org: orgName })}
         />
         <Link className="btn btn-primary" href={docHref}>
-          Open the agreement
+          {t('sign.open')}
         </Link>
       </Screen>
     );
@@ -220,9 +218,9 @@ function SignContent() {
     return (
       <Screen bottomBar>
         <ScreenHeader
-          eyebrow="Signed"
-          title="Signed."
-          lead={`Waiting for ${orgName} to countersign. You will get an SMS when your tenancy starts.`}
+          eyebrow={t('sign.done.eyebrow')}
+          title={t('sign.done.title')}
+          lead={t('sign.done.lead', { org: orgName })}
         />
         <hr className="rule rule-strong" />
         <p
@@ -235,10 +233,10 @@ function SignContent() {
           }}
         >
           <Icon icon="solar:check-circle-linear" width={20} aria-hidden />
-          Your signature is on the document, with the date and your phone number.
+          {t('sign.done.note')}
         </p>
         <Link className="btn btn-primary" href={docHref}>
-          Back to the agreement
+          {t('sign.backToAgreement')}
         </Link>
       </Screen>
     );
@@ -254,14 +252,14 @@ function SignContent() {
           onClick={() => (step === 'summary' ? router.push(docHref) : setStep('summary'))}
         >
           <Icon icon="solar:alt-arrow-left-linear" width={18} aria-hidden />
-          {step === 'summary' ? 'Back to the agreement' : 'Back'}
+          {step === 'summary' ? t('sign.backToAgreement') : t('common.back')}
         </button>
         <h1 style={{ fontSize: 'var(--text-xl)' }}>
           {step === 'summary'
-            ? 'Accept & sign'
+            ? t('doc.acceptSign')
             : step === 'code'
-              ? 'Enter the code'
-              : 'Draw your signature'}
+              ? t('otp.title')
+              : t('sign.title.draw')}
         </h1>
       </header>
 
@@ -271,39 +269,40 @@ function SignContent() {
       {step === 'summary' && (
         <>
           <p style={{ color: 'var(--ink-soft)' }}>
-            Signing means you accept the agreement as it is written. We will send a one-time code
-            to {user ? displayPhone(user.phone) : 'your phone'}.
+            {t('sign.intro', {
+              phone: user ? displayPhone(user.phone) : t('sign.yourPhone'),
+            })}
           </p>
           {contract && (
             <table className="ledger ledger-kv">
               <tbody>
                 <tr>
-                  <td>Unit</td>
+                  <td>{t('common.unit')}</td>
                   <td className="num">
                     {contract.unit.name} · {contract.unit.property_name}
                   </td>
                 </tr>
                 <tr>
-                  <td>Rent</td>
+                  <td>{t('common.rent')}</td>
                   <td className="num">
                     <RentValue contract={contract} />
                   </td>
                 </tr>
                 <tr>
-                  <td>Paid</td>
+                  <td>{t('sign.row.paid')}</td>
                   <td className="num">{contract.payment_period.label}</td>
                 </tr>
                 <tr>
-                  <td>Starts</td>
-                  <td className="num">{formatDate(contract.start_date)}</td>
+                  <td>{t('sign.row.starts')}</td>
+                  <td className="num">{formatDate(locale, contract.start_date)}</td>
                 </tr>
                 <tr>
-                  <td>Ends</td>
-                  <td className="num">{formatDate(contract.end_date)}</td>
+                  <td>{t('sign.row.ends')}</td>
+                  <td className="num">{formatDate(locale, contract.end_date)}</td>
                 </tr>
                 {contract.schedules_summary && (
                   <tr className="total">
-                    <td>Total over the term</td>
+                    <td>{t('doc.totalOverTerm')}</td>
                     <td className="num amount">{money(contract.schedules_summary.total)}</td>
                   </tr>
                 )}
@@ -317,10 +316,10 @@ function SignContent() {
               disabled={busy}
               onClick={() => void sendOtp()}
             >
-              {busy ? 'Sending…' : 'Send me the code'}
+              {busy ? t('common.sending') : t('sign.sendCode')}
             </button>
             <Link className="btn btn-quiet" href={docHref}>
-              Read the agreement again
+              {t('sign.readAgain')}
             </Link>
           </div>
         </>
@@ -332,7 +331,7 @@ function SignContent() {
           onSubmit={(e) => {
             e.preventDefault();
             if (!/^\d{6}$/.test(code)) {
-              setError('Enter the 6-digit code from the SMS.');
+              setError(t('error.code'));
               return;
             }
             setError(null);
@@ -342,10 +341,10 @@ function SignContent() {
           noValidate
         >
           <p style={{ color: 'var(--ink-soft)' }}>
-            Sent to {user ? displayPhone(user.phone) : 'your phone'}.
+            {t('otp.sentTo', { phone: user ? displayPhone(user.phone) : t('sign.yourPhone') })}
           </p>
           <div className="field">
-            <label htmlFor="sign-code">6-digit code</label>
+            <label htmlFor="sign-code">{t('field.code')}</label>
             <input
               id="sign-code"
               className="input"
@@ -365,7 +364,7 @@ function SignContent() {
             />
           </div>
           <button className="btn btn-primary" type="submit" disabled={busy || code.length < 6}>
-            Continue
+            {t('common.continue')}
           </button>
           <button
             type="button"
@@ -373,7 +372,7 @@ function SignContent() {
             disabled={busy || cooldown > 0}
             onClick={() => void sendOtp()}
           >
-            {cooldown > 0 ? `Resend code in ${countdown(cooldown)}` : 'Resend code'}
+            {cooldown > 0 ? t('otp.resendIn', { time: countdown(cooldown) }) : t('otp.resend')}
           </button>
         </form>
       )}
@@ -381,10 +380,7 @@ function SignContent() {
       {/* ---- step 3: optional drawn signature ---- */}
       {step === 'draw' && (
         <>
-          <p style={{ color: 'var(--ink-soft)' }}>
-            Add a handwritten signature if you want one on the document. It is optional — the code
-            you entered is already your signature.
-          </p>
+          <p style={{ color: 'var(--ink-soft)' }}>{t('sign.drawLead')}</p>
           <SignaturePad ref={padRef} onChange={setPadEmpty} />
           <div style={{ display: 'grid', gap: 'var(--sp-3)' }}>
             <button
@@ -393,7 +389,7 @@ function SignContent() {
               disabled={busy || padEmpty}
               onClick={() => void submit(true)}
             >
-              {busy ? 'Signing…' : 'Sign with this signature'}
+              {busy ? t('sign.signing') : t('sign.withDrawing')}
             </button>
             <button
               type="button"
@@ -401,7 +397,7 @@ function SignContent() {
               disabled={busy}
               onClick={() => void submit(false)}
             >
-              {busy ? 'Signing…' : 'Skip — sign with the code only'}
+              {busy ? t('sign.signing') : t('sign.skipDrawing')}
             </button>
           </div>
         </>

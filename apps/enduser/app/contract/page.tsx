@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Icon } from '@iconify/react';
+import { useLocale, useT } from '@tms/ui';
 import { ApiError, contractApi, needsRenterSignature, type Contract } from '../../lib/api';
 import { errorMessage, formatDate, money, priceLine } from '../../lib/format';
 import { Protected } from '../../components/Protected';
@@ -18,6 +19,8 @@ import { ContractStatusMark } from '../../components/ContractStatus';
 import { Notice, Screen, ScreenHeader } from '../../components/Screen';
 
 function ContractRow({ contract }: { contract: Contract }) {
+  const t = useT();
+  const locale = useLocale();
   const sign = needsRenterSignature(contract);
   return (
     <tr>
@@ -31,18 +34,18 @@ function ContractRow({ contract }: { contract: Contract }) {
           </span>
           <br />
           <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-            {priceLine(contract.rent_amount, contract.rent_period_days)}
+            {priceLine(t, contract.rent_amount, contract.rent_period_days)}
           </span>
           <br />
           <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-            {formatDate(contract.start_date)} – {formatDate(contract.end_date)}
+            {formatDate(locale, contract.start_date)} – {formatDate(locale, contract.end_date)}
           </span>
         </Link>
       </td>
       <td className="num">
         <Link
           href={`/contract/${encodeURIComponent(contract.id)}`}
-          aria-label={`Open the agreement for ${contract.unit.name}`}
+          aria-label={t('contract.list.open', { unit: contract.unit.name })}
           style={{ color: 'inherit', textDecoration: 'none', display: 'block' }}
         >
           <ContractStatusMark contract={contract} />
@@ -59,7 +62,7 @@ function ContractRow({ contract }: { contract: Contract }) {
                   whiteSpace: 'nowrap',
                 }}
               >
-                Sign now →
+                {t('contract.list.signNow')}
               </span>
             </>
           )}
@@ -70,6 +73,8 @@ function ContractRow({ contract }: { contract: Contract }) {
 }
 
 function ContractListContent() {
+  const t = useT();
+  const locale = useLocale();
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -83,11 +88,11 @@ function ContractListContent() {
       if (err instanceof DOMException && err.name === 'AbortError') return;
       // Nothing on file reads as an empty ledger, not as a failure.
       if (err instanceof ApiError && err.status === 404) setContracts([]);
-      else setError(errorMessage(err));
+      else setError(errorMessage(t, err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     const ac = new AbortController();
@@ -100,27 +105,25 @@ function ContractListContent() {
   return (
     <Screen bottomBar>
       <ScreenHeader
-        eyebrow="Your agreements"
-        title="Contracts"
-        lead="Read, sign and print your tenancy agreement."
+        eyebrow={t('contract.list.eyebrow')}
+        title={t('contract.list.title')}
+        lead={t('contract.list.lead')}
       />
 
       {error && <Notice tone="error">{error}</Notice>}
 
       {toSign.length > 0 && (
         <Notice>
-          {toSign.length === 1
-            ? 'One contract is ready for your signature.'
-            : `${toSign.length} contracts are ready for your signature.`}
+          {t.n('contract.list.ready', toSign.length)}
         </Notice>
       )}
 
       {loading ? (
-        <p className="pencil">Loading…</p>
+        <p className="pencil">{t('common.loading')}</p>
       ) : contracts.length === 0 ? (
         <section style={{ display: 'grid', gap: 'var(--sp-3)' }}>
           <hr className="rule rule-strong" />
-          <p className="pencil">No agreement yet.</p>
+          <p className="pencil">{t('contract.list.empty')}</p>
           <p
             style={{
               display: 'flex',
@@ -131,10 +134,10 @@ function ContractListContent() {
             }}
           >
             <Icon icon="solar:document-text-linear" width={20} aria-hidden />
-            Once a landlord approves your unit, the contract appears here to sign.
+            {t('contract.list.emptyHint')}
           </p>
           <Link className="btn btn-secondary" href="/">
-            Back to your rent book
+            {t('common.backToRentBook')}
           </Link>
         </section>
       ) : (
@@ -149,17 +152,15 @@ function ContractListContent() {
 
       {!loading && contracts.some((c) => c.schedules_summary?.next_due_date) && (
         <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-          Next payment{' '}
-          {formatDate(
-            contracts.find((c) => c.schedules_summary?.next_due_date)?.schedules_summary
-              ?.next_due_date,
-          )}
           {(() => {
-            const amount = contracts.find((c) => c.schedules_summary?.next_due_date)
-              ?.schedules_summary?.next_due_amount;
-            return typeof amount === 'number' ? ` · ${money(amount)}` : '';
+            const summary = contracts.find((c) => c.schedules_summary?.next_due_date)
+              ?.schedules_summary;
+            const date = formatDate(locale, summary?.next_due_date);
+            const amount = summary?.next_due_amount;
+            return typeof amount === 'number'
+              ? t('contract.list.nextWithAmount', { date, amount: money(amount) })
+              : t('contract.list.next', { date });
           })()}
-          .
         </p>
       )}
     </Screen>

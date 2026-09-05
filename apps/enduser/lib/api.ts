@@ -12,6 +12,8 @@
  * No business logic lives here — this is transport only.
  */
 
+import type { Translator } from '@tms/ui';
+
 export const API_BASE = '/api/v1';
 
 export interface ProblemDetail {
@@ -33,6 +35,12 @@ export class ApiError extends Error {
   readonly retryAfterSeconds?: number;
   /** RFC-7807 `type`, verbatim. */
   readonly type: string;
+  /**
+   * The `title` the backend actually sent, empty when it sent none. Screens
+   * show server prose verbatim (it is already in the reader's language) and
+   * translate their own fallback for everything else — see `errorMessage()`.
+   */
+  readonly serverTitle: string;
 
   constructor(status: number, problem: ProblemDetail = {}) {
     const title = problem.title || defaultTitle(status);
@@ -41,6 +49,7 @@ export class ApiError extends Error {
     this.status = status;
     this.title = title;
     this.detail = problem.detail || '';
+    this.serverTitle = problem.title || '';
     this.errors = problem.errors || {};
     this.type = problem.type || '';
     this.retryAfterSeconds =
@@ -164,12 +173,16 @@ export const api = {
 
 export type UserKind = 'renter' | 'org_user' | 'platform_admin';
 
+export type UserLocale = 'sw' | 'en';
+
 export interface User {
   id: string;
   kind: UserKind;
   phone: string;
   email: string;
   full_name: string;
+  /** Phase 13: the renter's chosen UI/SMS language. Absent on older APIs. */
+  locale?: UserLocale;
   email_verified: boolean;
   status: string;
   created_at: string;
@@ -229,6 +242,8 @@ export const authApi = {
     otp_token: string;
     pin: string;
     full_name: string;
+    /** Phase 13 — the language the renter picked before registering. */
+    locale?: UserLocale;
   }) => api.post<SessionResponse>('/auth/register/renter', input),
 
   loginWithPin: (phone: string, pin: string) =>
@@ -269,6 +284,13 @@ export interface PublicBranding {
   display_name: string;
   logo_url: string | null;
   theme: PublicBrandingTheme;
+  /**
+   * Phase 13: the org's default language for renters who have not chosen one
+   * (`sms_language` is the older name for the same setting). Optional — an
+   * API without it simply leaves the app on its own default.
+   */
+  language?: string | null;
+  sms_language?: string | null;
 }
 
 /**
@@ -387,6 +409,9 @@ export const publicApi = {
 export const renterApi = {
   profile: (signal?: AbortSignal) => api.get<ProfileResponse>('/me/profile', { signal }),
 
+  /** `PATCH /me` — Phase 13; the only field the renter app sends is `locale`. */
+  updateLocale: (locale: UserLocale) => api.patch<{ user?: User }>('/me', { locale }),
+
   saveProfile: (input: ProfileInput) => api.put<{ profile: RenterProfile }>('/me/profile', input),
 
   kycUploadTicket: (contentType: string, sizeBytes: number) =>
@@ -437,10 +462,8 @@ export async function uploadToPresignedUrl(
     throw new ApiError(0);
   }
   if (!res.ok) {
-    throw new ApiError(res.status, {
-      title: 'Upload failed',
-      detail: 'That file could not be uploaded. Please try again.',
-    });
+    // No prose: the code is what the screen translates (lib/format).
+    throw new ApiError(res.status, { type: 'client/upload_failed' });
   }
 }
 
@@ -698,18 +721,12 @@ export interface MyPaymentsResponse {
   next_cursor?: string | null;
 }
 
-/** Human wording for `payment.method`. */
-export function paymentMethodLabel(method: string): string {
-  switch (method) {
-    case 'cash':
-      return 'Cash';
-    case 'bank_transfer':
-      return 'Bank transfer';
-    case 'mobile_money_manual':
-      return 'Mobile money';
-    default:
-      return method.replace(/_/g, ' ');
+/** Human wording for `payment.method`, in the reader's language. */
+export function paymentMethodLabel(t: Translator, method: string): string {
+  if (method === 'cash' || method === 'bank_transfer' || method === 'mobile_money_manual') {
+    return t(`payments.method.${method}`);
   }
+  return method.replace(/_/g, ' ');
 }
 
 /** What is still owed on a schedule row. Never negative. */

@@ -14,15 +14,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useLocale, useT } from '@tms/ui';
 import { ApiError, authApi } from '../../lib/api';
 import { readNextParam, useMe, useNextParam } from '../../lib/auth';
 import { countdown, displayPhone, errorMessage, isValidPhone, isValidPin, normalizePhone } from '../../lib/format';
 import { Notice, Screen, ScreenHeader } from '../../components/Screen';
 import { PlatformTheme } from '../../components/OrgThemeSync';
+import { LanguageToggle } from '../../components/LanguageToggle';
 
 type Step = 'phone' | 'otp' | 'pin';
 
 export default function RegisterPage() {
+  const t = useT();
+  /* Whatever the renter (or their landlord's page) chose is what the account
+     is created with — `POST /auth/register/renter {locale}`. */
+  const locale = useLocale();
   const router = useRouter();
   const { setSession } = useMe();
   const nextPath = useNextParam();
@@ -65,19 +71,19 @@ export default function RegisterPage() {
         setStep('otp');
       } catch (err) {
         if (err instanceof ApiError && err.status === 409) setPhoneTaken(true);
-        setError(errorMessage(err));
+        setError(errorMessage(t, err));
       } finally {
         setBusy(false);
       }
     },
-    [],
+    [t],
   );
 
   function submitPhone(e: React.FormEvent) {
     e.preventDefault();
     const e164 = normalizePhone(phoneInput);
     if (!e164) {
-      setError('Enter a Tanzanian mobile number, e.g. 0712 345 678.');
+      setError(t('error.phone'));
       return;
     }
     void sendOtp(e164);
@@ -86,7 +92,7 @@ export default function RegisterPage() {
   async function submitOtp(e: React.FormEvent) {
     e.preventDefault();
     if (!/^\d{6}$/.test(code)) {
-      setError('Enter the 6-digit code from the SMS.');
+      setError(t('error.code'));
       return;
     }
     setBusy(true);
@@ -96,7 +102,7 @@ export default function RegisterPage() {
       setOtpToken(res.otp_token);
       setStep('pin');
     } catch (err) {
-      setError(errorMessage(err, 5));
+      setError(errorMessage(t, err, 5));
     } finally {
       setBusy(false);
     }
@@ -105,15 +111,15 @@ export default function RegisterPage() {
   async function submitPin(e: React.FormEvent) {
     e.preventDefault();
     if (!fullName.trim()) {
-      setError('Enter your full name.');
+      setError(t('error.nameRequired'));
       return;
     }
     if (!isValidPin(pin)) {
-      setError('Your PIN must be 4 to 6 digits.');
+      setError(t('error.pinLength'));
       return;
     }
     if (pin !== pinConfirm) {
-      setError('The two PINs do not match.');
+      setError(t('error.pinMismatch'));
       return;
     }
     setBusy(true);
@@ -124,6 +130,7 @@ export default function RegisterPage() {
         otp_token: otpToken,
         pin,
         full_name: fullName.trim(),
+        locale,
       });
       setSession(res.user, res.org ?? null);
       router.replace(readNextParam() ?? '/');
@@ -134,7 +141,7 @@ export default function RegisterPage() {
         setStep('otp');
         setCode('');
       }
-      setError(errorMessage(err));
+      setError(errorMessage(t, err));
     } finally {
       setBusy(false);
     }
@@ -146,20 +153,20 @@ export default function RegisterPage() {
     <Screen>
       <PlatformTheme />
       <ScreenHeader
-        eyebrow={`Step ${step === 'phone' ? 1 : step === 'otp' ? 2 : 3} of 3`}
+        eyebrow={t('register.step', { n: step === 'phone' ? 1 : step === 'otp' ? 2 : 3 })}
         title={
           step === 'phone'
-            ? 'Create your account'
+            ? t('register.title.phone')
             : step === 'otp'
-              ? 'Enter the code'
-              : 'Your name and PIN'
+              ? t('otp.title')
+              : t('register.title.pin')
         }
         lead={
           step === 'phone'
-            ? 'We send a one-time code to your phone. No app store, no email needed.'
+            ? t('register.lead.phone')
             : step === 'otp'
-              ? `Sent to ${displayPhone(phone)}.`
-              : 'The PIN is how you sign in from now on.'
+              ? t('otp.sentTo', { phone: displayPhone(phone) })
+              : t('register.lead.pin')
         }
       />
 
@@ -168,7 +175,7 @@ export default function RegisterPage() {
       {phoneTaken && (
         <p style={{ margin: 0 }}>
           <Link className="btn btn-secondary" href={loginHref}>
-            Log in instead
+            {t('register.loginInstead')}
           </Link>
         </p>
       )}
@@ -176,7 +183,7 @@ export default function RegisterPage() {
       {step === 'phone' && (
         <form onSubmit={submitPhone} style={{ display: 'grid', gap: 'var(--sp-4)' }} noValidate>
           <div className={`field${phoneInput && !isValidPhone(phoneInput) ? ' invalid' : ''}`}>
-            <label htmlFor="phone">Phone number</label>
+            <label htmlFor="phone">{t('field.phone')}</label>
             <input
               id="phone"
               className="input"
@@ -184,17 +191,17 @@ export default function RegisterPage() {
               inputMode="tel"
               autoComplete="tel"
               autoFocus
-              placeholder="0712 345 678"
+              placeholder={t('field.phonePlaceholder')}
               value={phoneInput}
               onChange={(e) => setPhoneInput(e.target.value)}
             />
-            <span className="hint">07…, 255… or +255… all work.</span>
+            <span className="hint">{t('field.phoneFormats')}</span>
           </div>
           <button className="btn btn-primary" type="submit" disabled={busy}>
-            {busy ? 'Sending…' : 'Send code'}
+            {busy ? t('common.sending') : t('login.sendCode')}
           </button>
           <Link className="btn btn-quiet" href={loginHref}>
-            I already have an account
+            {t('register.haveAccount')}
           </Link>
         </form>
       )}
@@ -202,7 +209,7 @@ export default function RegisterPage() {
       {step === 'otp' && (
         <form onSubmit={submitOtp} style={{ display: 'grid', gap: 'var(--sp-4)' }} noValidate>
           <div className="field">
-            <label htmlFor="code">6-digit code</label>
+            <label htmlFor="code">{t('field.code')}</label>
             <input
               id="code"
               ref={otpRef}
@@ -222,7 +229,7 @@ export default function RegisterPage() {
             />
           </div>
           <button className="btn btn-primary" type="submit" disabled={busy || code.length < 6}>
-            {busy ? 'Checking…' : 'Verify'}
+            {busy ? t('common.checking') : t('register.verify')}
           </button>
           <button
             className="btn btn-quiet"
@@ -230,7 +237,7 @@ export default function RegisterPage() {
             disabled={busy || cooldown > 0}
             onClick={() => void sendOtp(phone)}
           >
-            {cooldown > 0 ? `Resend code in ${countdown(cooldown)}` : 'Resend code'}
+            {cooldown > 0 ? t('otp.resendIn', { time: countdown(cooldown) }) : t('otp.resend')}
           </button>
           <button
             className="btn btn-quiet"
@@ -241,7 +248,7 @@ export default function RegisterPage() {
               setError(null);
             }}
           >
-            Change number
+            {t('register.changeNumber')}
           </button>
         </form>
       )}
@@ -249,20 +256,20 @@ export default function RegisterPage() {
       {step === 'pin' && (
         <form onSubmit={submitPin} style={{ display: 'grid', gap: 'var(--sp-4)' }} noValidate>
           <div className="field">
-            <label htmlFor="full_name">Full name</label>
+            <label htmlFor="full_name">{t('field.fullName')}</label>
             <input
               id="full_name"
               className="input"
               type="text"
               autoComplete="name"
               autoFocus
-              placeholder="Asha Mwakalinga"
+              placeholder={t('field.namePlaceholder')}
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
             />
           </div>
           <div className={`field${pin && !isValidPin(pin) ? ' invalid' : ''}`}>
-            <label htmlFor="pin">Choose a PIN</label>
+            <label htmlFor="pin">{t('field.choosePin')}</label>
             <input
               id="pin"
               className="input"
@@ -273,10 +280,10 @@ export default function RegisterPage() {
               value={pin}
               onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
             />
-            <span className="hint">4 to 6 digits.</span>
+            <span className="hint">{t('field.pinHint')}</span>
           </div>
           <div className={`field${pinConfirm && pin !== pinConfirm ? ' invalid' : ''}`}>
-            <label htmlFor="pin_confirm">Confirm PIN</label>
+            <label htmlFor="pin_confirm">{t('field.confirmPin')}</label>
             <input
               id="pin_confirm"
               className="input"
@@ -289,10 +296,14 @@ export default function RegisterPage() {
             />
           </div>
           <button className="btn btn-primary" type="submit" disabled={busy}>
-            {busy ? 'Creating account…' : 'Create account'}
+            {busy ? t('register.submitting') : t('register.submit')}
           </button>
         </form>
       )}
+
+      <footer style={{ marginTop: 'auto', paddingTop: 'var(--sp-5)' }}>
+        <LanguageToggle />
+      </footer>
     </Screen>
   );
 }

@@ -14,6 +14,7 @@
  * never drift apart.
  */
 
+import { useT, type Translator } from '@tms/ui';
 import type { MySchedule, PaymentSchedule } from '../lib/api';
 import { money } from '../lib/format';
 
@@ -21,45 +22,49 @@ type ScheduleLike = Pick<PaymentSchedule, 'status' | 'amount' | 'paid_amount'> &
   days_overdue?: number;
 };
 
-export function scheduleStatusText(schedule: ScheduleLike): string {
+export function scheduleStatusText(t: Translator, schedule: ScheduleLike): string {
   switch (schedule.status) {
     case 'paid':
-      return 'Paid';
+      return t('schedule.paid');
     case 'overdue':
-      return 'Overdue';
+      return t('schedule.overdue');
     case 'partial':
-      return `${money(schedule.paid_amount ?? 0)} of ${money(schedule.amount)}`;
+      return t('schedule.partial', {
+        paid: money(schedule.paid_amount ?? 0),
+        total: money(schedule.amount),
+      });
     case 'waived':
-      return 'Waived';
+      return t('schedule.waived');
     default:
-      return 'Due';
+      return t('schedule.due');
   }
 }
 
 export function ScheduleMark({ schedule }: { schedule: ScheduleLike }) {
-  const text = scheduleStatusText(schedule);
+  const t = useT();
+  const text = scheduleStatusText(t, schedule);
 
   if (schedule.status === 'paid') {
-    return <span className="stamp stamp-paid">Paid</span>;
+    return <span className="stamp stamp-paid">{t('schedule.paid')}</span>;
   }
 
   if (schedule.status === 'overdue') {
     const late = schedule.days_overdue;
     return (
       <>
-        <span className="stamp stamp-overdue">Overdue</span>
+        <span className="stamp stamp-overdue">{t('schedule.overdue')}</span>
         {typeof late === 'number' && late > 0 && (
           <>
             <br />
-            <span className="pencil">
-              {late} day{late === 1 ? '' : 's'} late
-            </span>
+            <span className="pencil">{t.n('schedule.daysLate', late)}</span>
           </>
         )}
         {(schedule.paid_amount ?? 0) > 0 && (
           <>
             <br />
-            <span className="pencil">{money(schedule.paid_amount)} paid</span>
+            <span className="pencil">
+              {t('schedule.paidAmount', { amount: money(schedule.paid_amount) })}
+            </span>
           </>
         )}
       </>
@@ -75,10 +80,14 @@ export function ScheduleMark({ schedule }: { schedule: ScheduleLike }) {
  * has landed — that is the number a renter is about to act on.
  */
 export function NextDueChip({ schedule }: { schedule: MySchedule }) {
+  const t = useT();
   if (schedule.status === 'partial') {
     return (
       <span className="pencil">
-        {money(schedule.paid_amount ?? 0)} of {money(schedule.amount)} paid
+        {t('schedule.partialPaid', {
+          paid: money(schedule.paid_amount ?? 0),
+          total: money(schedule.amount),
+        })}
       </span>
     );
   }

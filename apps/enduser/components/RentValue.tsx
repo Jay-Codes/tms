@@ -14,11 +14,13 @@
  * so only one is drawn.
  */
 
+import { useT } from '@tms/ui';
 import { days, money, priceLine } from '../lib/format';
 import type { Contract } from '../lib/api';
 
 export function RentValue({ contract }: { contract: Contract }) {
-  const basis = priceLine(contract.rent_amount, contract.rent_period_days);
+  const t = useT();
+  const basis = priceLine(t, contract.rent_amount, contract.rent_period_days);
   const perPeriod = contract.rent_per_period;
   const period = contract.payment_period;
 
@@ -33,7 +35,7 @@ export function RentValue({ contract }: { contract: Contract }) {
     <>
       <span className="nowrap">{money(perPeriod)}</span>{' '}
       <span className="nowrap">
-        / {period.label ? `${period.label} (${days(period.days)})` : days(period.days)}
+        / {period.label ? `${period.label} (${days(t, period.days)})` : days(t, period.days)}
       </span>
       <span className="sub">{basis}</span>
     </>

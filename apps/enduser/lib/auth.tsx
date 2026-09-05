@@ -20,8 +20,13 @@ export interface AuthState {
   status: AuthStatus;
   user: User | null;
   org: Org | null;
-  /** Non-auth failure (server down, network) — distinct from "not signed in". */
-  error: string | null;
+  /**
+   * Non-auth failure (server down, network) — distinct from "not signed in".
+   * The thrown error itself, so the screen can put it into words in the
+   * renter's own language (`errorMessage(t, failure)`); this provider sits
+   * above the i18n provider and has no translator of its own.
+   */
+  failure: unknown;
   /** Re-ask the API who the caller is. */
   refresh: () => Promise<void>;
   /** Adopt a session just created by register/login without a second round-trip. */
@@ -36,7 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading');
   const [user, setUser] = useState<User | null>(null);
   const [org, setOrg] = useState<Org | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<unknown>(null);
   const mounted = useRef(true);
 
   const load = useCallback(async () => {
@@ -45,17 +50,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!mounted.current) return;
       setUser(me.user);
       setOrg(me.org ?? null);
-      setError(null);
+      setFailure(null);
       setStatus('authenticated');
     } catch (err) {
       if (!mounted.current) return;
       setUser(null);
       setOrg(null);
-      if (err instanceof ApiError && err.status === 401) {
-        setError(null);
-      } else {
-        setError(err instanceof ApiError ? err.userMessage : 'Cannot reach the server.');
-      }
+      // 401 is the normal "not signed in", not something to report.
+      setFailure(err instanceof ApiError && err.status === 401 ? null : err);
       setStatus('anonymous');
     }
   }, []);
@@ -73,22 +75,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       status,
       user,
       org,
-      error,
+      failure,
       refresh: load,
       setSession: (u: User, o: Org | null = null) => {
         setUser(u);
         setOrg(o);
-        setError(null);
+        setFailure(null);
         setStatus('authenticated');
       },
       clearSession: () => {
         setUser(null);
         setOrg(null);
-        setError(null);
+        setFailure(null);
         setStatus('anonymous');
       },
     }),
-    [status, user, org, error, load],
+    [status, user, org, failure, load],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -162,10 +164,10 @@ export function useRequireAuth(): AuthState {
     // A server/network failure is not a 401 — keep the renter here and let the
     // screen show the error rather than bouncing them to a login they also
     // cannot complete.
-    if (auth.status === 'anonymous' && !auth.error) {
+    if (auth.status === 'anonymous' && !auth.failure) {
       router.replace(`/login?next=${encodeURIComponent(currentPath())}`);
     }
-  }, [auth.status, auth.error, router]);
+  }, [auth.status, auth.failure, router]);
 
   return auth;
 }

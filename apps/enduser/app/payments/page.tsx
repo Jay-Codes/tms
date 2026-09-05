@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Icon } from '@iconify/react';
+import { useLocale, useT } from '@tms/ui';
 import {
   ApiError,
   paymentMethodLabel,
@@ -46,7 +47,7 @@ interface ContractGroup {
 }
 
 /** One ledger per tenancy, rows in due-date order, groups in first-seen order. */
-function groupByContract(items: MySchedule[]): ContractGroup[] {
+function groupByContract(items: MySchedule[], unitFallback: string): ContractGroup[] {
   const groups = new Map<string, ContractGroup>();
   for (const s of items) {
     const id = s.contract?.id ?? 'unknown';
@@ -54,7 +55,7 @@ function groupByContract(items: MySchedule[]): ContractGroup[] {
     if (!g) {
       g = {
         id,
-        unitName: s.contract?.unit_name ?? 'Your unit',
+        unitName: s.contract?.unit_name ?? unitFallback,
         propertyName: s.contract?.property_name ?? null,
         rows: [],
       };
@@ -73,6 +74,7 @@ function groupByContract(items: MySchedule[]): ContractGroup[] {
 /* ------------------------------------------------------------------ */
 
 function CopyButton({ value, label }: { value: string; label: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -92,11 +94,11 @@ function CopyButton({ value, label }: { value: string; label: string }) {
       type="button"
       className="btn btn-quiet"
       onClick={() => void copy()}
-      aria-label={copied ? `${label} copied` : `Copy ${label}`}
+      aria-label={copied ? t('common.copiedValue', { label }) : t('common.copyValue', { label })}
       style={{ width: 'auto', paddingInline: 'var(--sp-2)', gap: 'var(--sp-2)' }}
     >
       <Icon icon={copied ? 'solar:check-read-linear' : 'solar:copy-linear'} width={18} aria-hidden />
-      {copied ? 'Copied' : 'Copy'}
+      {copied ? t('common.copied') : t('common.copy')}
     </button>
   );
 }
@@ -120,14 +122,15 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 }
 
 function HowToPay({ account, reference }: { account: BankAccount | null; reference: string }) {
+  const t = useT();
   return (
     <section id="how-to-pay" className="sheet" style={{ padding: 'var(--sp-4)' }}>
-      <h2 style={{ fontSize: 'var(--text-lg)' }}>How to pay</h2>
+      <h2 style={{ fontSize: 'var(--text-lg)' }}>{t('payments.howToPay')}</h2>
 
       {account ? (
         <div style={{ display: 'grid', gap: 'var(--sp-1)', paddingTop: 'var(--sp-3)' }}>
-          <DetailRow label="Bank" value={account.bank_name} />
-          <DetailRow label="Account name" value={account.account_name} />
+          <DetailRow label={t('payments.bank')} value={account.bank_name} />
+          <DetailRow label={t('payments.accountName')} value={account.account_name} />
 
           <div
             style={{
@@ -140,13 +143,16 @@ function HowToPay({ account, reference }: { account: BankAccount | null; referen
             }}
           >
             <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-              Account number
+              {t('payments.accountNumber')}
             </span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
               <span className="num" style={{ fontWeight: 600, letterSpacing: '0.03em' }}>
                 {account.account_number}
               </span>
-              <CopyButton value={account.account_number} label="account number" />
+              <CopyButton
+                value={account.account_number}
+                label={t('payments.accountNumberLabel')}
+              />
             </span>
           </div>
 
@@ -176,7 +182,8 @@ function HowToPay({ account, reference }: { account: BankAccount | null; referen
           >
             <Icon icon="solar:info-circle-linear" width={18} aria-hidden />
             <span>
-              Use your name and unit as reference{reference ? ' — ' : ''}
+              {t('payments.reference')}
+              {reference ? ' — ' : ''}
               {reference && <strong>{reference}</strong>}.
             </span>
           </p>
@@ -189,13 +196,12 @@ function HowToPay({ account, reference }: { account: BankAccount | null; referen
               fontSize: 'var(--text-sm)',
             }}
           >
-            Pay cash, by bank transfer or by mobile money. Your landlord records the payment
-            here and it is stamped on the row above.
+            {t('payments.howMoney')}
           </p>
         </div>
       ) : (
         <p className="pencil" style={{ paddingTop: 'var(--sp-3)' }}>
-          Your landlord has not published payment details yet. Ask them where to send the rent.
+          {t('payments.noAccount')}
         </p>
       )}
     </section>
@@ -207,17 +213,19 @@ function HowToPay({ account, reference }: { account: BankAccount | null; referen
 /* ------------------------------------------------------------------ */
 
 function PaymentRow({ payment }: { payment: MyPayment }) {
+  const t = useT();
+  const locale = useLocale();
   const reversed = payment.status === 'reversed';
   return (
     <tr>
       <td>
         <span style={{ textDecoration: reversed ? 'line-through' : 'none' }}>
-          {formatDate(payment.paid_at)}
+          {formatDate(locale, payment.paid_at)}
         </span>
         <br />
         <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
           {payment.unit_name ? `${payment.unit_name} · ` : ''}
-          {paymentMethodLabel(payment.method)}
+          {paymentMethodLabel(t, payment.method)}
           {payment.reference ? ` · ${payment.reference}` : ''}
         </span>
         {reversed && payment.reversal_reason && (
@@ -233,9 +241,9 @@ function PaymentRow({ payment }: { payment: MyPayment }) {
         <Money amount={payment.amount} struck={reversed} />
         <br />
         {reversed ? (
-          <span className="stamp stamp-overdue">Reversed</span>
+          <span className="stamp stamp-overdue">{t('payments.reversed')}</span>
         ) : (
-          <span className="stamp stamp-paid">Received</span>
+          <span className="stamp stamp-paid">{t('payments.received')}</span>
         )}
       </td>
     </tr>
@@ -247,6 +255,8 @@ function PaymentRow({ payment }: { payment: MyPayment }) {
 /* ------------------------------------------------------------------ */
 
 function PaymentsContent() {
+  const t = useT();
+  const locale = useLocale();
   const [schedules, setSchedules] = useState<MySchedule[]>([]);
   const [nextDue, setNextDue] = useState<MySchedule | null>(null);
   const [overdueTotal, setOverdueTotal] = useState(0);
@@ -272,11 +282,11 @@ function PaymentsContent() {
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
       if (err instanceof ApiError && err.status === 404) setSchedules([]);
-      else setError(errorMessage(err));
+      else setError(errorMessage(t, err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     const ac = new AbortController();
@@ -284,39 +294,42 @@ function PaymentsContent() {
     return () => ac.abort();
   }, [load]);
 
-  const groups = useMemo(() => groupByContract(schedules), [schedules]);
+  const unitFallback = t('common.yourUnit');
+  const groups = useMemo(
+    () => groupByContract(schedules, unitFallback),
+    [schedules, unitFallback],
+  );
   const reference = nextDue?.contract?.unit_name ?? groups[0]?.unitName ?? '';
 
   return (
     <Screen bottomBar>
-      <ScreenHeader eyebrow="Your rent book" title="Payments" />
+      <ScreenHeader eyebrow={t('home.eyebrow')} title={t('payments.title')} />
 
       {error && <Notice tone="error">{error}</Notice>}
 
       {overdueTotal > 0 && (
         <Notice tone="error">
-          {money(overdueTotal)} is overdue. Pay as soon as you can — your landlord records it
-          here once it lands.
+          {t('payments.overdue', { amount: money(overdueTotal) })}
         </Notice>
       )}
 
       <section className="sheet" style={{ padding: 'var(--sp-4)' }}>
-        <h2 style={{ fontSize: 'var(--text-lg)' }}>Next payment</h2>
+        <h2 style={{ fontSize: 'var(--text-lg)' }}>{t('payment.next.title')}</h2>
         <table className="ledger" style={{ marginTop: 'var(--sp-3)' }}>
           <tbody>
             {loading ? (
               <tr>
                 <td colSpan={2} className="pencil">
-                  Loading…
+                  {t('common.loading')}
                 </td>
               </tr>
             ) : nextDue ? (
               <tr>
                 <td>
-                  {formatDate(nextDue.due_date)}
+                  {formatDate(locale, nextDue.due_date)}
                   <br />
                   <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-                    {nextDue.contract?.unit_name ?? 'Your unit'}
+                    {nextDue.contract?.unit_name ?? unitFallback}
                     {nextDue.contract?.property_name
                       ? ` · ${nextDue.contract.property_name}`
                       : ''}
@@ -330,7 +343,7 @@ function PaymentsContent() {
               </tr>
             ) : (
               <tr>
-                <td style={{ color: 'var(--ink-soft)' }}>Nothing to pay yet</td>
+                <td style={{ color: 'var(--ink-soft)' }}>{t('common.nothingToPayYet')}</td>
                 <td className="num">
                   <span className="pencil">—</span>
                 </td>
@@ -364,9 +377,9 @@ function PaymentsContent() {
           <table className="ledger">
             <thead>
               <tr>
-                <th scope="col">Due</th>
+                <th scope="col">{t('common.due')}</th>
                 <th scope="col" className="num">
-                  Amount
+                  {t('common.amount')}
                 </th>
               </tr>
             </thead>
@@ -374,10 +387,11 @@ function PaymentsContent() {
               {group.rows.map((row) => (
                 <tr key={row.id}>
                   <td>
-                    {formatDate(row.due_date)}
+                    {formatDate(locale, row.due_date)}
                     <br />
                     <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-                      {formatDate(row.period_start)} – {formatDate(row.period_end)}
+                      {formatDate(locale, row.period_start)} –{' '}
+                      {formatDate(locale, row.period_end)}
                     </span>
                   </td>
                   <td className="num">
@@ -393,15 +407,13 @@ function PaymentsContent() {
       ))}
 
       {!loading && groups.length === 0 && (
-        <p className="pencil">
-          No payment schedule yet. It appears here once your contract is active.
-        </p>
+        <p className="pencil">{t('payments.noSchedule')}</p>
       )}
 
       <section style={{ display: 'grid', gap: 'var(--sp-2)' }}>
-        <h2 style={{ fontSize: 'var(--text-lg)' }}>History</h2>
+        <h2 style={{ fontSize: 'var(--text-lg)' }}>{t('payments.history')}</h2>
         {payments.length === 0 ? (
-          <p className="pencil">Nothing received yet.</p>
+          <p className="pencil">{t('payments.noHistory')}</p>
         ) : (
           <table className="ledger">
             <tbody>
@@ -414,7 +426,7 @@ function PaymentsContent() {
       </section>
 
       <Link className="btn btn-quiet" href="/">
-        Back to your rent book
+        {t('common.backToRentBook')}
       </Link>
     </Screen>
   );

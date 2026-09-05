@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { Icon } from '@iconify/react';
+import { useLocale, useT, type Locale, type Translator } from '@tms/ui';
 import {
   ApiError,
   contractApi,
@@ -34,13 +35,11 @@ import { RentValue } from '../../../components/RentValue';
 import { Notice, Screen } from '../../../components/Screen';
 import './document.css';
 
-const PARTY_LABEL: Record<string, string> = { landlord: 'Landlord', renter: 'Renter' };
-
 /** "Signed by {name} on {date} via phone •••1234" (SPEC §5.5). */
-function signatureLine(sig: DocumentSignature): string {
+function signatureLine(t: Translator, locale: Locale, sig: DocumentSignature): string {
   const last4 = phoneLast4(sig.phone_masked);
-  const via = last4 ? ` via phone •••${last4}` : '';
-  return `Signed by ${sig.name} on ${formatDate(sig.signed_at)}${via}`;
+  const vars = { name: sig.name, date: formatDate(locale, sig.signed_at), last4 };
+  return last4 ? t('doc.signedByVia', vars) : t('doc.signedBy', vars);
 }
 
 function SignatureSlot({
@@ -52,9 +51,13 @@ function SignatureSlot({
   signature: DocumentSignature | undefined;
   fallbackName: string;
 }) {
+  const t = useT();
+  const locale = useLocale();
   return (
     <div className="doc-sig">
-      <p style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>{PARTY_LABEL[party]}</p>
+      <p style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>
+        {t(party === 'landlord' ? 'doc.party.landlord' : 'doc.party.renter')}
+      </p>
       {signature ? (
         <>
           {signature.signature_image_url && (
@@ -64,20 +67,18 @@ function SignatureSlot({
             <img
               className="doc-sig-image"
               src={signature.signature_image_url}
-              alt={`${signature.name}'s signature`}
+              alt={t('doc.signatureAlt', { name: signature.name })}
             />
           )}
-          <p style={{ fontWeight: 600 }}>{signatureLine(signature)}</p>
+          <p style={{ fontWeight: 600 }}>{signatureLine(t, locale, signature)}</p>
           <p style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>
-            {signature.method === 'drawn' ? 'Drawn signature + one-time code' : 'One-time code'}
+            {t(signature.method === 'drawn' ? 'doc.method.drawn' : 'doc.method.otp')}
           </p>
         </>
       ) : (
         <>
           <div className="doc-sig-slot" aria-hidden />
-          <p className="pencil">
-            {fallbackName} — not signed yet
-          </p>
+          <p className="pencil">{t('doc.notSigned', { name: fallbackName })}</p>
         </>
       )}
     </div>
@@ -85,6 +86,8 @@ function SignatureSlot({
 }
 
 function DocumentContent() {
+  const t = useT();
+  const locale = useLocale();
   const params = useParams<{ id: string }>();
   const id = typeof params?.id === 'string' ? params.id : '';
 
@@ -117,8 +120,8 @@ function DocumentContent() {
         if (!live || (err instanceof DOMException && err.name === 'AbortError')) return;
         setError(
           err instanceof ApiError && err.status === 404
-            ? 'This agreement is not available on your account.'
-            : errorMessage(err),
+            ? t('doc.notAvailable')
+            : errorMessage(t, err),
         );
       } finally {
         if (live) setLoading(false);
@@ -128,7 +131,7 @@ function DocumentContent() {
       live = false;
       ac.abort();
     };
-  }, [id]);
+  }, [id, t]);
 
   const runVerify = useCallback(async () => {
     setVerifying(true);
@@ -136,16 +139,16 @@ function DocumentContent() {
     try {
       setVerify(await contractApi.verify(id));
     } catch (err) {
-      setVerifyError(errorMessage(err));
+      setVerifyError(errorMessage(t, err));
     } finally {
       setVerifying(false);
     }
-  }, [id]);
+  }, [id, t]);
 
   if (loading) {
     return (
       <Screen bottomBar>
-        <p className="pencil">Loading your agreement…</p>
+        <p className="pencil">{t('doc.loading')}</p>
       </Screen>
     );
   }
@@ -153,9 +156,9 @@ function DocumentContent() {
   if (error || !doc) {
     return (
       <Screen bottomBar>
-        <Notice tone="error">{error ?? 'This agreement could not be loaded.'}</Notice>
+        <Notice tone="error">{error ?? t('doc.loadFailed')}</Notice>
         <Link className="btn btn-secondary" href="/contract">
-          Back to your contracts
+          {t('doc.backToContracts')}
         </Link>
       </Screen>
     );
@@ -175,23 +178,21 @@ function DocumentContent() {
           style={{ justifySelf: 'start', paddingInline: 0 }}
         >
           <Icon icon="solar:alt-arrow-left-linear" width={18} aria-hidden />
-          All contracts
+          {t('doc.back')}
         </Link>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--sp-3)' }}>
           <h1 style={{ fontSize: 'var(--text-xl)' }}>
-            {contract ? `${contract.unit.name} · ${contract.unit.property_name}` : 'Your agreement'}
+            {contract ? `${contract.unit.name} · ${contract.unit.property_name}` : t('doc.title')}
           </h1>
           <ContractStamp status={doc.status} renterSigned={renterSigned} />
         </div>
       </header>
 
       {needsSignature && (
-        <Notice>Read the agreement, then accept and sign at the bottom of this page.</Notice>
+        <Notice>{t('doc.readThenSign')}</Notice>
       )}
       {doc.status === 'pending_signature' && renterSigned && !landlordSigned && (
-        <Notice>
-          You have signed. Waiting for {doc.org.display_name} to countersign — you will get an SMS.
-        </Notice>
+        <Notice>{t('doc.signedWaiting', { org: doc.org.display_name })}</Notice>
       )}
 
       <article className="doc">
@@ -201,7 +202,7 @@ function DocumentContent() {
           <img
             className="doc-letterhead"
             src={doc.org.letterhead_url}
-            alt={`${doc.org.display_name} letterhead`}
+            alt={t('doc.letterheadAlt', { org: doc.org.display_name })}
           />
         ) : (
           <header
@@ -231,15 +232,15 @@ function DocumentContent() {
 
         {/* ---- parties ---- */}
         <section className="doc-block">
-          <h2>Parties</h2>
+          <h2>{t('doc.parties')}</h2>
           <table className="ledger ledger-kv">
             <tbody>
               <tr>
-                <td>Landlord</td>
+                <td>{t('doc.party.landlord')}</td>
                 <td className="num">{doc.parties.landlord.name}</td>
               </tr>
               <tr>
-                <td>Renter</td>
+                <td>{t('doc.party.renter')}</td>
                 <td className="num">
                   {doc.parties.renter.name}
                   {doc.parties.renter.phone_masked && (
@@ -250,24 +251,24 @@ function DocumentContent() {
               {contract && (
                 <>
                   <tr>
-                    <td>Unit</td>
+                    <td>{t('common.unit')}</td>
                     <td className="num">
                       {contract.unit.name} · {contract.unit.property_name}
                     </td>
                   </tr>
                   <tr>
-                    <td>Rent</td>
+                    <td>{t('common.rent')}</td>
                     <td className="num">
                       <RentValue contract={contract} />
                     </td>
                   </tr>
                   <tr>
-                    <td>Term</td>
+                    <td>{t('doc.term')}</td>
                     {/* Each date holds together; the range breaks at the
                         en dash when the pair will not fit. */}
                     <td className="num">
-                      <span className="nowrap">{formatDate(contract.start_date)}</span> –{' '}
-                      <span className="nowrap">{formatDate(contract.end_date)}</span>
+                      <span className="nowrap">{formatDate(locale, contract.start_date)}</span> –{' '}
+                      <span className="nowrap">{formatDate(locale, contract.end_date)}</span>
                     </td>
                   </tr>
                 </>
@@ -278,7 +279,7 @@ function DocumentContent() {
 
         {/* ---- terms (server-sanitized snapshot) ---- */}
         <section className="doc-block">
-          <h2>Terms</h2>
+          <h2>{t('doc.terms')}</h2>
           <div className="doc-scroll-x">
             <div
               className="doc-terms"
@@ -294,28 +295,29 @@ function DocumentContent() {
         {/* ---- payment schedule ---- */}
         {doc.schedule.length > 0 && (
           <section className="doc-block">
-            <h2>Payment schedule</h2>
+            <h2>{t('doc.schedule')}</h2>
             <div className="doc-scroll-x">
               <table className="ledger">
                 <thead>
                   <tr>
-                    <th>Due</th>
-                    <th>Period</th>
-                    <th className="num">Amount</th>
+                    <th>{t('common.due')}</th>
+                    <th>{t('common.period')}</th>
+                    <th className="num">{t('common.amount')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {doc.schedule.map((row) => (
                     <tr key={`${row.due_date}-${row.period_start}`}>
-                      <td>{formatDate(row.due_date)}</td>
+                      <td>{formatDate(locale, row.due_date)}</td>
                       <td style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-                        {formatDate(row.period_start)} – {formatDate(row.period_end)}
+                        {formatDate(locale, row.period_start)} –{' '}
+                        {formatDate(locale, row.period_end)}
                       </td>
                       <td className="num amount">{money(row.amount)}</td>
                     </tr>
                   ))}
                   <tr className="total">
-                    <td colSpan={2}>Total over the term</td>
+                    <td colSpan={2}>{t('doc.totalOverTerm')}</td>
                     <td className="num amount">{money(scheduleTotal)}</td>
                   </tr>
                 </tbody>
@@ -326,7 +328,7 @@ function DocumentContent() {
 
         {/* ---- signatures ---- */}
         <section className="doc-block">
-          <h2>Signatures</h2>
+          <h2>{t('doc.signatures')}</h2>
           <SignatureSlot
             party="renter"
             signature={doc.signatures.find((s) => s.party === 'renter')}
@@ -347,10 +349,10 @@ function DocumentContent() {
         )}
 
         <section className="doc-block">
-          <h2>Verification</h2>
+          <h2>{t('doc.verification')}</h2>
           <p className="doc-hash">{doc.snapshot_hash}</p>
           <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-xs)' }}>
-            Document fingerprint · generated {formatDate(doc.generated_at)}
+            {t('doc.fingerprint', { date: formatDate(locale, doc.generated_at) })}
           </p>
           <div
             className="no-print"
@@ -363,18 +365,18 @@ function DocumentContent() {
               disabled={verifying}
               style={{ width: 'auto' }}
             >
-              {verifying ? 'Checking…' : 'Verify'}
+              {verifying ? t('common.checking') : t('doc.verify')}
             </button>
             {verify &&
               (verify.valid ? (
-                <span className="stamp stamp-paid">Valid</span>
+                <span className="stamp stamp-paid">{t('doc.valid')}</span>
               ) : (
-                <span className="stamp stamp-overdue">Tampered</span>
+                <span className="stamp stamp-overdue">{t('doc.tampered')}</span>
               ))}
           </div>
           {verify && !verify.valid && (
             <p style={{ color: 'var(--stamp-overdue)', fontSize: 'var(--text-sm)' }}>
-              This document does not match its fingerprint. Contact {doc.org.display_name}.
+              {t('doc.mismatch', { org: doc.org.display_name })}
             </p>
           )}
           {verifyError && <Notice tone="error">{verifyError}</Notice>}
@@ -384,14 +386,14 @@ function DocumentContent() {
       <div className="no-print" style={{ display: 'grid', gap: 'var(--sp-3)' }}>
         <button type="button" className="btn btn-secondary" onClick={() => window.print()}>
           <Icon icon="solar:printer-minimalistic-linear" width={20} aria-hidden />
-          Print / Save as PDF
+          {t('doc.print')}
         </button>
       </div>
 
       {needsSignature && (
         <div className="doc-cta">
           <Link className="btn btn-primary" href={`/contract/${encodeURIComponent(id)}/sign`}>
-            Accept &amp; sign
+            {t('doc.acceptSign')}
           </Link>
         </div>
       )}

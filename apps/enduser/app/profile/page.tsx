@@ -2,14 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useT } from '@tms/ui';
 import { authApi, renterApi, type RenterProfile } from '../../lib/api';
 import { useMe } from '../../lib/auth';
 import { displayPhone, errorMessage } from '../../lib/format';
 import { Protected } from '../../components/Protected';
 import { Notice, Screen, ScreenHeader } from '../../components/Screen';
+import { LanguageToggle } from '../../components/LanguageToggle';
 import { KycForm } from './KycForm';
 
 function ProfileContent() {
+  const t = useT();
   const { user, clearSession } = useMe();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -37,7 +40,7 @@ function ProfileContent() {
         setLoadError(null);
       } catch (err) {
         if (!live || (err instanceof DOMException && err.name === 'AbortError')) return;
-        setLoadError(errorMessage(err));
+        setLoadError(errorMessage(t, err));
       } finally {
         if (live) setLoading(false);
       }
@@ -46,7 +49,7 @@ function ProfileContent() {
       live = false;
       ac.abort();
     };
-  }, [attempt]);
+  }, [attempt, t]);
 
   async function logout() {
     setBusy(true);
@@ -56,14 +59,14 @@ function ProfileContent() {
       clearSession();
       router.replace('/login');
     } catch (err) {
-      setError(errorMessage(err));
+      setError(errorMessage(t, err));
       setBusy(false);
     }
   }
 
   return (
     <Screen bottomBar>
-      <ScreenHeader eyebrow="Profile" title={profile?.full_name || user?.full_name || ''} />
+      <ScreenHeader eyebrow={t('profile.eyebrow')} title={profile?.full_name || user?.full_name || ''} />
 
       {error && <Notice tone="error">{error}</Notice>}
       {loadError && (
@@ -74,7 +77,7 @@ function ProfileContent() {
             onClick={() => setAttempt((n) => n + 1)}
             disabled={loading}
           >
-            Try again
+            {t('common.tryAgain')}
           </button>
         </>
       )}
@@ -82,27 +85,36 @@ function ProfileContent() {
       <table className="ledger ledger-kv">
         <tbody>
           <tr>
-            <td style={{ color: 'var(--ink-soft)' }}>Name</td>
+            <td style={{ color: 'var(--ink-soft)' }}>{t('profile.name')}</td>
             <td className="num">{profile?.full_name || user?.full_name}</td>
           </tr>
           <tr>
-            <td style={{ color: 'var(--ink-soft)' }}>Phone</td>
+            <td style={{ color: 'var(--ink-soft)' }}>{t('profile.phone')}</td>
             <td className="num">{user ? displayPhone(user.phone) : ''}</td>
           </tr>
           <tr>
-            <td style={{ color: 'var(--ink-soft)' }}>NIDA</td>
+            <td style={{ color: 'var(--ink-soft)' }}>{t('profile.nida')}</td>
             <td className="num">
-              {profile?.nida_masked ?? <span className="pencil">Not given</span>}
+              {profile?.nida_masked ?? <span className="pencil">{t('profile.notGiven')}</span>}
             </td>
           </tr>
           <tr>
-            <td style={{ color: 'var(--ink-soft)' }}>Next of kin</td>
+            <td style={{ color: 'var(--ink-soft)' }}>{t('profile.nextOfKin')}</td>
             <td className="num">
               {profile?.next_of_kin_name ? (
                 `${profile.next_of_kin_name} · ${displayPhone(profile.next_of_kin_phone)}`
               ) : (
-                <span className="pencil">Not given</span>
+                <span className="pencil">{t('profile.notGiven')}</span>
               )}
+            </td>
+          </tr>
+          {/* Phase 13: switching here also saves the choice on the account
+              (`PATCH /me {locale}`), so the SMS a renter gets follows the
+              language they read the app in. */}
+          <tr>
+            <td style={{ color: 'var(--ink-soft)' }}>{t('lang.label')}</td>
+            <td className="num">
+              <LanguageToggle align="end" />
             </td>
           </tr>
         </tbody>
@@ -113,13 +125,13 @@ function ProfileContent() {
           initialProfile={profile}
           fallbackName={user?.full_name}
           onSaved={setProfile}
-          lead="Your landlord sees these when you ask to connect to a unit."
+          lead={t('profile.kycLead')}
         />
       )}
-      {loading && <p className="pencil">Loading your details…</p>}
+      {loading && <p className="pencil">{t('profile.loading')}</p>}
 
       <button className="btn btn-danger" onClick={() => void logout()} disabled={busy}>
-        {busy ? 'Signing out…' : 'Log out'}
+        {busy ? t('profile.loggingOut') : t('profile.logout')}
       </button>
     </Screen>
   );
