@@ -81,7 +81,7 @@ Execution plan for [SPEC.md](SPEC.md) / [FLOWS.md](FLOWS.md). Target: **testing-
 - [x] `POST /payments/{id}/reverse` (audited, schedule reverts, overdue recomputed). *(backend)*
 - [x] Overdue job: hourly ticker + `POST /admin/jobs/overdue` + on-demand org-scoped flip on every schedule read. *(backend)*
 - [x] `GET /schedules`, `GET /payments`, `GET /payments/{id}`, `GET/PUT /org/bank-account`, renter `GET /me/schedules` (next due, overdue total, bank account) and `GET /me/payments`. *(backend)*
-- [ ] Renter dashboard: next due, status chip, history, org bank-account instructions. Landlord: overdue views, record-payment form. *(frontend outstanding)*
+- [x] Renter dashboard: next due, status chip, history, org bank-account instructions. Landlord: overdue views, record-payment form. *(frontend outstanding)*
 
 **Exit:** Flow 7 complete; statuses correct across paid/partial/overdue/reversed.
 
