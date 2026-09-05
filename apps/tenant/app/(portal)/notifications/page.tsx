@@ -14,16 +14,16 @@ import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { ProblemNote } from '../../components/FormBits';
-import { NotificationLogTable, SendMessageForm } from '../../components/NotificationBits';
-import { PageHead, Shell } from '../../components/Shell';
+import { ProblemNote } from '../../../components/FormBits';
+import { NotificationLogTable, SendMessageForm } from '../../../components/NotificationBits';
+import { PageHead } from '../../../components/PageHead';
 import {
   ApiError,
   KIND_LABELS,
   notificationsApi,
   toApiError,
   type NotificationLogEntry,
-} from '../../lib/api';
+} from '../../../lib/api';
 
 type TabId = 'log' | 'send';
 
@@ -201,10 +201,10 @@ function NotificationsBody() {
 
 export default function NotificationsPage() {
   return (
-    <Shell>
+    <>
       <Suspense fallback={<p style={{ color: 'var(--ink-soft)' }}>Loading…</p>}>
         <NotificationsBody />
       </Suspense>
-    </Shell>
+    </>
   );
 }

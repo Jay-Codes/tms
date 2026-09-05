@@ -12,10 +12,11 @@
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { useReadyToCountersign } from '../components/ContractBits';
-import { CARD_LABELS, DashboardCustomize } from '../components/DashboardCustomize';
-import { StatTile, TileRow } from '../components/ReportBits';
-import { PageHead, Shell, pendingLabel, usePendingLinkRequests } from '../components/Shell';
+import { useReadyToCountersign } from '../../components/ContractBits';
+import { CARD_LABELS, DashboardCustomize } from '../../components/DashboardCustomize';
+import { StatTile, TileRow } from '../../components/ReportBits';
+import { PageHead } from '../../components/PageHead';
+import { pendingLabel, usePendingLinkRequests } from '../../components/NavBadges';
 import {
   brandingApi,
   propertiesApi,
@@ -27,9 +28,9 @@ import {
   type PaymentStatusRow,
   type Property,
   type ReportSummary,
-} from '../lib/api';
-import { useMe } from '../lib/auth';
-import { fmtTZS } from '../lib/format';
+} from '../../lib/api';
+import { useMe } from '../../lib/auth';
+import { fmtTZS } from '../../lib/format';
 
 function EmptyCard({
   icon,
@@ -405,8 +406,8 @@ function DashboardBody() {
 
 export default function DashboardPage() {
   return (
-    <Shell>
+    <>
       <DashboardBody />
-    </Shell>
+    </>
   );
 }

@@ -8,10 +8,10 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { ProblemNote } from '../components/FormBits';
-import { PageHead, Shell } from '../components/Shell';
-import { ApiError, adminApi, toApiError, type AdminMetrics } from '../lib/api';
-import { fmtNum, fmtTZS } from '../lib/format';
+import { ProblemNote } from '../../components/FormBits';
+import { PageHead } from '../../components/PageHead';
+import { ApiError, adminApi, toApiError, type AdminMetrics } from '../../lib/api';
+import { fmtNum, fmtTZS } from '../../lib/format';
 
 function Stat({
   label,
@@ -189,8 +189,8 @@ function DashboardBody() {
 
 export default function DashboardPage() {
   return (
-    <Shell>
+    <>
       <DashboardBody />
-    </Shell>
+    </>
   );
 }

@@ -9,18 +9,18 @@ import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { Field, ProblemNote } from '../../../components/FormBits';
-import { PageHead, Shell } from '../../../components/Shell';
-import { Sheet } from '../../../components/Sheet';
-import { SNAPSHOT_BANNER } from '../../../components/TemplateEditor';
+import { Field, ProblemNote } from '../../../../components/FormBits';
+import { PageHead } from '../../../../components/PageHead';
+import { Sheet } from '../../../../components/Sheet';
+import { SNAPSHOT_BANNER } from '../../../../components/TemplateEditor';
 import {
   ApiError,
   templatesApi,
   toApiError,
   unwrapTemplate,
   type ContractTemplateSummary,
-} from '../../../lib/api';
-import { fmtDate } from '../../../lib/format';
+} from '../../../../lib/api';
+import { fmtDate } from '../../../../lib/format';
 
 /** Opening draft for a new template — the landlord edits from here. */
 const STARTER_BODY =
@@ -186,8 +186,8 @@ function TemplatesBody() {
 
 export default function TemplatesPage() {
   return (
-    <Shell>
+    <>
       <TemplatesBody />
-    </Shell>
+    </>
   );
 }

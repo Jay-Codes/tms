@@ -13,8 +13,8 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { Field, Note, ProblemNote } from '../../../components/FormBits';
-import { TemplateEditor } from '../../../components/TemplateEditor';
+import { Field, Note, ProblemNote } from '../../../../components/FormBits';
+import { TemplateEditor } from '../../../../components/TemplateEditor';
 import {
   ApiError,
   orgApi,
@@ -23,7 +23,7 @@ import {
   unwrapOrg,
   type ContractTemplateSummary,
   type Org,
-} from '../../../lib/api';
+} from '../../../../lib/api';
 
 function DueDayForm() {
   const [org, setOrg] = useState<Org | null>(null);

@@ -16,7 +16,7 @@
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { Field, ProblemNote } from '../../components/FormBits';
+import { Field, ProblemNote } from '../../../components/FormBits';
 import {
   CollectionsChart,
   PaymentStatusStampCell,
@@ -26,8 +26,8 @@ import {
   TileRow,
   bucketLabel,
   type TabDef,
-} from '../../components/ReportBits';
-import { PageHead, Shell } from '../../components/Shell';
+} from '../../../components/ReportBits';
+import { PageHead } from '../../../components/PageHead';
 import {
   ApiError,
   propertiesApi,
@@ -38,8 +38,8 @@ import {
   type PaymentStatusValue,
   type Property,
   type ReportSummary,
-} from '../../lib/api';
-import { fmtDate, fmtDateTime, fmtTZS, monthStartISO, todayISO } from '../../lib/format';
+} from '../../../lib/api';
+import { fmtDate, fmtDateTime, fmtTZS, monthStartISO, todayISO } from '../../../lib/format';
 
 type TabId = 'overview' | 'payment_status' | 'collections';
 
@@ -608,8 +608,8 @@ function ReportsBody() {
 
 export default function ReportsPage() {
   return (
-    <Shell>
+    <>
       <ReportsBody />
-    </Shell>
+    </>
   );
 }

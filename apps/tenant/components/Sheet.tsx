@@ -37,6 +37,7 @@ export function Sheet({
 
   return (
     <div
+      className="sheet-backdrop"
       role="presentation"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -58,7 +59,7 @@ export function Sheet({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="sheet sheet-raised"
+        className="sheet sheet-raised sheet-dialog"
         style={{ width: '100%', maxWidth: width, padding: 'var(--sp-5)', marginTop: 'var(--sp-6)' }}
       >
         <div

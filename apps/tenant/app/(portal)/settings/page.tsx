@@ -3,8 +3,8 @@
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { Field, Note, ProblemNote } from '../../components/FormBits';
-import { PageHead, Shell } from '../../components/Shell';
+import { Field, Note, ProblemNote } from '../../../components/FormBits';
+import { PageHead } from '../../../components/PageHead';
 import {
   ApiError,
   orgApi,
@@ -13,8 +13,8 @@ import {
   type Org,
   type OrgRole,
   type OrgSettings,
-} from '../../lib/api';
-import { useMe } from '../../lib/auth';
+} from '../../../lib/api';
+import { useMe } from '../../../lib/auth';
 
 /* ------------------------------ org profile ------------------------------ */
 
@@ -436,8 +436,8 @@ function SettingsBody() {
 
 export default function SettingsPage() {
   return (
-    <Shell>
+    <>
       <SettingsBody />
-    </Shell>
+    </>
   );
 }

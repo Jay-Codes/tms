@@ -8,5 +8,8 @@
   },
   "peerDependencies": {
     "react": "^19.0.0"
+  },
+  "scripts": {
+    "test": "node --test src/*.test.mts"
   }
 }

@@ -11,10 +11,10 @@
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useState } from 'react';
-import { ProblemNote, StatusStamp } from '../../components/FormBits';
-import { PageHead, Shell } from '../../components/Shell';
-import { ApiError, adminApi, toApiError, type AdminOrgSummary } from '../../lib/api';
-import { fmtDate, fmtNum } from '../../lib/format';
+import { ProblemNote, StatusStamp } from '../../../components/FormBits';
+import { PageHead } from '../../../components/PageHead';
+import { ApiError, adminApi, toApiError, type AdminOrgSummary } from '../../../lib/api';
+import { fmtDate, fmtNum } from '../../../lib/format';
 
 const PAGE_SIZE = 50;
 
@@ -218,11 +218,11 @@ function OrgsBody() {
 
 export default function OrgsPage() {
   return (
-    <Shell>
+    <>
       {/* useSearchParams needs a boundary; the list is client-rendered anyway. */}
       <Suspense fallback={<p style={{ color: 'var(--ink-soft)' }}>Loading…</p>}>
         <OrgsBody />
       </Suspense>
-    </Shell>
+    </>
   );
 }

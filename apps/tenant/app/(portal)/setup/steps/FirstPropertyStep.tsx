@@ -4,9 +4,9 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { ProblemNote } from '../../../components/FormBits';
-import { PropertyForm } from '../../../components/PropertyForm';
-import { ApiError, propertiesApi, toApiError, type Property } from '../../../lib/api';
+import { ProblemNote } from '../../../../components/FormBits';
+import { PropertyForm } from '../../../../components/PropertyForm';
+import { ApiError, propertiesApi, toApiError, type Property } from '../../../../lib/api';
 
 export function FirstPropertyStep() {
   const [items, setItems] = useState<Property[] | null>(null);

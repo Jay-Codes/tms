@@ -14,15 +14,15 @@
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { Field, Note, ProblemNote } from '../../../components/FormBits';
-import { PageHead, Shell } from '../../../components/Shell';
+import { Field, Note, ProblemNote } from '../../../../components/FormBits';
+import { PageHead } from '../../../../components/PageHead';
 import {
   ApiError,
   bankAccountApi,
   toApiError,
   unwrapBankAccount,
   type BankAccount,
-} from '../../../lib/api';
+} from '../../../../lib/api';
 
 const EMPTY: BankAccount = { bank_name: '', account_name: '', account_number: '', instructions: '' };
 
@@ -203,8 +203,8 @@ function BankAccountBody() {
 
 export default function BankAccountPage() {
   return (
-    <Shell>
+    <>
       <BankAccountBody />
-    </Shell>
+    </>
   );
 }

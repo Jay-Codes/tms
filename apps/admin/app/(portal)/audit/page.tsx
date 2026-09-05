@@ -10,16 +10,16 @@
 
 import { useSearchParams } from 'next/navigation';
 import { Fragment, Suspense, useCallback, useEffect, useState } from 'react';
-import { Field, ProblemNote } from '../../components/FormBits';
-import { PageHead, Shell } from '../../components/Shell';
+import { Field, ProblemNote } from '../../../components/FormBits';
+import { PageHead } from '../../../components/PageHead';
 import {
   ApiError,
   adminApi,
   toApiError,
   type AdminAuditEntry,
   type AdminOrgSummary,
-} from '../../lib/api';
-import { fmtDateTime, fmtJson } from '../../lib/format';
+} from '../../../lib/api';
+import { fmtDateTime, fmtJson } from '../../../lib/format';
 
 const PAGE_SIZE = 50;
 
@@ -362,10 +362,10 @@ function AuditBody() {
 
 export default function AuditPage() {
   return (
-    <Shell>
+    <>
       <Suspense fallback={<p style={{ color: 'var(--ink-soft)' }}>Loading…</p>}>
         <AuditBody />
       </Suspense>
-    </Shell>
+    </>
   );
 }

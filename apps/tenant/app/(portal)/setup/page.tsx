@@ -3,7 +3,7 @@
 import { Icon } from '@iconify/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { PageHead, Shell } from '../../components/Shell';
+import { PageHead } from '../../../components/PageHead';
 import { STEPS } from './steps';
 
 /**
@@ -148,8 +148,8 @@ function SetupBody() {
 
 export default function SetupPage() {
   return (
-    <Shell>
+    <>
       <SetupBody />
-    </Shell>
+    </>
   );
 }

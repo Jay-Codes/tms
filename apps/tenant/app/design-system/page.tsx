@@ -1,8 +1,8 @@
 'use client';
 
 import { Icon } from '@iconify/react';
-import { ThemeSwitcher } from '@tms/ui';
-import type { ReactNode } from 'react';
+import { PeriodPicker, resolvePeriod, TableScroll, ThemeSwitcher, type PeriodValue } from '@tms/ui';
+import { useState, type ReactNode } from 'react';
 
 /* ------------------------------------------------------------------ */
 /* Design-system preview, landlord side (desktop).                     */
@@ -27,6 +27,32 @@ function StatusCell({ s }: { s: Status }) {
   if (s === 'paid') return <span className="stamp stamp-paid">Paid</span>;
   if (s === 'overdue') return <span className="stamp stamp-overdue">Overdue</span>;
   return <span className="pencil">due {s.due}</span>;
+}
+
+/* PeriodPicker with a live readout of the value it emits: the half-open
+   window [from, to) the reports API takes. */
+function PeriodPickerDemo() {
+  const [value, setValue] = useState<PeriodValue>(() => resolvePeriod('month', '2026-09-05'));
+
+  return (
+    <div style={{ display: 'grid', gap: 'var(--sp-4)', maxWidth: 'var(--measure)' }}>
+      <PeriodPicker value={value} onChange={setValue} minDate="2020-01-01" maxDate="2030-12-31" />
+      <pre
+        className="num"
+        style={{
+          margin: 0,
+          padding: 'var(--sp-3)',
+          background: 'var(--sheet-tint)',
+          border: '1px solid var(--rule)',
+          borderRadius: 'var(--radius-sm)',
+          fontSize: 'var(--text-sm)',
+          overflowX: 'auto',
+        }}
+      >
+        {JSON.stringify(value, null, 2)}
+      </pre>
+    </div>
+  );
 }
 
 function Dashboard() {
@@ -182,6 +208,7 @@ export default function DesignSystem() {
               <span className="currency">TZS</span>3,150,000
             </span>
           </div>
+          <TableScroll label="Ledger sample">
           <table className="ledger">
             <tbody>
               <tr>
@@ -198,7 +225,15 @@ export default function DesignSystem() {
               </tr>
             </tbody>
           </table>
+          </TableScroll>
         </div>
+      </Section>
+
+      <Section
+        title="Period picker"
+        lead="One control for every report: cadence, prev/next, and the window it emits — [from, to) with the end exclusive, exactly what the API takes. Custom swaps the label for two dates. Under 400px the cadence buttons fall into two rows."
+      >
+        <PeriodPickerDemo />
       </Section>
 
       <Section title="Paper and ink" lead="Text is blue-black ballpoint, rules are ledger blue, paper is barely warm. The brand colour touches the primary button and the current tab only.">

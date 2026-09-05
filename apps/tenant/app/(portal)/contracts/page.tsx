@@ -13,12 +13,12 @@ import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { ContractsTable, isReadyToCountersign } from '../../components/ContractBits';
-import { ProblemNote } from '../../components/FormBits';
-import { NewContractForm } from '../../components/NewContractForm';
-import { PageHead, Shell } from '../../components/Shell';
-import { Sheet } from '../../components/Sheet';
-import { ApiError, contractsApi, toApiError, type Contract, type ContractStatus } from '../../lib/api';
+import { ContractsTable, isReadyToCountersign } from '../../../components/ContractBits';
+import { ProblemNote } from '../../../components/FormBits';
+import { NewContractForm } from '../../../components/NewContractForm';
+import { PageHead } from '../../../components/PageHead';
+import { Sheet } from '../../../components/Sheet';
+import { ApiError, contractsApi, toApiError, type Contract, type ContractStatus } from '../../../lib/api';
 
 type TabValue = '' | ContractStatus | 'ready';
 
@@ -136,8 +136,8 @@ function ContractsBody() {
 
 export default function ContractsPage() {
   return (
-    <Shell>
+    <>
       <ContractsBody />
-    </Shell>
+    </>
   );
 }

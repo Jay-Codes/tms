@@ -9,8 +9,8 @@
  */
 
 import Link from 'next/link';
-import { BrandingForm } from '../../../components/BrandingForm';
-import { PageHead, Shell } from '../../../components/Shell';
+import { BrandingForm } from '../../../../components/BrandingForm';
+import { PageHead } from '../../../../components/PageHead';
 
 function BrandingBody() {
   return (
@@ -34,8 +34,8 @@ function BrandingBody() {
 
 export default function BrandingPage() {
   return (
-    <Shell>
+    <>
       <BrandingBody />
-    </Shell>
+    </>
   );
 }

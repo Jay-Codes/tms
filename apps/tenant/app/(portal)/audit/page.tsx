@@ -16,9 +16,10 @@
 
 import { Icon } from '@iconify/react';
 import { Fragment, useCallback, useEffect, useState } from 'react';
-import { Field, ProblemNote } from '../../components/FormBits';
-import { PageHead, Shell } from '../../components/Shell';
-import { ApiError, orgApi, type AuditEntry, type Member } from '../../lib/api';
+import { Field, ProblemNote } from '../../../components/FormBits';
+import { PageHead } from '../../../components/PageHead';
+import { ApiError, orgApi, type AuditEntry, type Member } from '../../../lib/api';
+import { TableScroll } from '@tms/ui';
 
 const PAGE_SIZE = 50;
 
@@ -290,6 +291,7 @@ function AuditBody() {
 
       <ProblemNote error={error} />
 
+      <TableScroll label="Audit trail">
       <table className="ledger" style={{ marginTop: 'var(--sp-4)' }}>
         <thead>
           <tr>
@@ -349,6 +351,7 @@ function AuditBody() {
           ) : null}
         </tbody>
       </table>
+      </TableScroll>
 
       {cursor ? (
         <div style={{ marginTop: 'var(--sp-4)' }}>
@@ -363,8 +366,8 @@ function AuditBody() {
 
 export default function AuditPage() {
   return (
-    <Shell>
+    <>
       <AuditBody />
-    </Shell>
+    </>
   );
 }

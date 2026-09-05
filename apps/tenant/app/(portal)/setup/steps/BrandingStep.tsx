@@ -5,7 +5,7 @@
  * fix a bug, and a landlord who edits it later finds exactly what they saw here.
  */
 
-import { BrandingForm } from '../../../components/BrandingForm';
+import { BrandingForm } from '../../../../components/BrandingForm';
 
 export function BrandingStep() {
   return (

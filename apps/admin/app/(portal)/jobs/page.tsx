@@ -15,10 +15,10 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { ProblemNote } from '../../components/FormBits';
-import { PageHead, Shell } from '../../components/Shell';
-import { ApiError, adminApi, jobKey, toApiError, type AdminJob } from '../../lib/api';
-import { fmtDateTime, fmtJson } from '../../lib/format';
+import { ProblemNote } from '../../../components/FormBits';
+import { PageHead } from '../../../components/PageHead';
+import { ApiError, adminApi, jobKey, toApiError, type AdminJob } from '../../../lib/api';
+import { fmtDateTime, fmtJson } from '../../../lib/format';
 
 type RunKey = 'contract-lifecycle' | 'overdue' | 'notifications';
 
@@ -236,8 +236,8 @@ function JobsBody() {
 
 export default function JobsPage() {
   return (
-    <Shell>
+    <>
       <JobsBody />
-    </Shell>
+    </>
   );
 }

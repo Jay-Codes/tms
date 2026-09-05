@@ -8,17 +8,18 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { ProblemNote } from '../../components/FormBits';
-import { FilterTabs, KycStamp, LinkStatusStamp } from '../../components/RenterBits';
-import { PageHead, Shell } from '../../components/Shell';
+import { ProblemNote } from '../../../components/FormBits';
+import { FilterTabs, KycStamp, LinkStatusStamp } from '../../../components/RenterBits';
+import { PageHead } from '../../../components/PageHead';
 import {
   ApiError,
   linkRequestsApi,
   toApiError,
   type LinkRequest,
   type LinkRequestStatus,
-} from '../../lib/api';
-import { Amount, fmtDate } from '../../lib/format';
+} from '../../../lib/api';
+import { Amount, fmtDate } from '../../../lib/format';
+import { TableScroll } from '@tms/ui';
 
 const TABS: { value: LinkRequestStatus; label: string }[] = [
   { value: 'pending', label: 'Pending' },
@@ -70,6 +71,7 @@ function InboxBody() {
       <div style={{ paddingTop: 'var(--sp-4)', display: 'grid', gap: 'var(--sp-4)' }}>
         <ProblemNote error={error} />
 
+        <TableScroll label="Link requests">
         <table className="ledger">
           <thead>
             <tr>
@@ -139,6 +141,7 @@ function InboxBody() {
             )}
           </tbody>
         </table>
+        </TableScroll>
       </div>
     </>
   );
@@ -146,8 +149,8 @@ function InboxBody() {
 
 export default function LinkRequestsPage() {
   return (
-    <Shell>
+    <>
       <InboxBody />
-    </Shell>
+    </>
   );
 }

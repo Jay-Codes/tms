@@ -12,8 +12,8 @@ import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { ProblemNote } from '../../../../components/FormBits';
-import { PageHead, Shell } from '../../../../components/Shell';
+import { ProblemNote } from '../../../../../components/FormBits';
+import { PageHead } from '../../../../../components/PageHead';
 import {
   ApiError,
   propertiesApi,
@@ -21,8 +21,8 @@ import {
   unwrapProperty,
   type Property,
   type QrSheetItem,
-} from '../../../../lib/api';
-import { useMe } from '../../../../lib/auth';
+} from '../../../../../lib/api';
+import { useMe } from '../../../../../lib/auth';
 
 const PRINT_CSS = `
 .qr-grid {
@@ -155,8 +155,8 @@ export default function PropertyQrPage() {
   const params = useParams<{ id: string }>();
   const id = typeof params?.id === 'string' ? params.id : '';
   return (
-    <Shell>
+    <>
       <QrBody id={id} />
-    </Shell>
+    </>
   );
 }

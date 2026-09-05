@@ -9,12 +9,12 @@ import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { ContractsTable } from '../../../components/ContractBits';
-import { ProblemNote } from '../../../components/FormBits';
-import { NotificationLogTable } from '../../../components/NotificationBits';
-import { PaymentsTable } from '../../../components/PaymentBits';
-import { Facts, KycStamp, LinkStatusStamp, ViewIdDocButton } from '../../../components/RenterBits';
-import { PageHead, Shell } from '../../../components/Shell';
+import { ContractsTable } from '../../../../components/ContractBits';
+import { ProblemNote } from '../../../../components/FormBits';
+import { NotificationLogTable } from '../../../../components/NotificationBits';
+import { PaymentsTable } from '../../../../components/PaymentBits';
+import { Facts, KycStamp, LinkStatusStamp, ViewIdDocButton } from '../../../../components/RenterBits';
+import { PageHead } from '../../../../components/PageHead';
 import {
   ApiError,
   contractsApi,
@@ -27,8 +27,8 @@ import {
   type NotificationLogEntry,
   type Payment,
   type RenterDetail,
-} from '../../../lib/api';
-import { Amount, fmtDate } from '../../../lib/format';
+} from '../../../../lib/api';
+import { Amount, fmtDate } from '../../../../lib/format';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -290,8 +290,8 @@ export default function RenterPage() {
   const params = useParams<{ user_id: string }>();
   const userId = String(params?.user_id ?? '');
   return (
-    <Shell>
+    <>
       <RenterBody userId={userId} />
-    </Shell>
+    </>
   );
 }

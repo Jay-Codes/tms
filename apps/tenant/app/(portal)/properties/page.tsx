@@ -10,11 +10,12 @@ import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { ProblemNote } from '../../components/FormBits';
-import { PropertyForm } from '../../components/PropertyForm';
-import { PageHead, Shell } from '../../components/Shell';
-import { Sheet } from '../../components/Sheet';
-import { ApiError, propertiesApi, toApiError, type Property } from '../../lib/api';
+import { ProblemNote } from '../../../components/FormBits';
+import { PropertyForm } from '../../../components/PropertyForm';
+import { PageHead } from '../../../components/PageHead';
+import { Sheet } from '../../../components/Sheet';
+import { ApiError, propertiesApi, toApiError, type Property } from '../../../lib/api';
+import { TableScroll } from '@tms/ui';
 
 function CountChip({ label, n, tone }: { label: string; n: number; tone?: 'ink' | 'faint' }) {
   if (!n) return null;
@@ -81,6 +82,7 @@ function PropertiesBody() {
       <div style={{ paddingTop: 'var(--sp-5)', display: 'grid', gap: 'var(--sp-4)' }}>
         <ProblemNote error={error} />
 
+        <TableScroll label="Properties">
         <table className="ledger">
           <thead>
             <tr>
@@ -138,6 +140,7 @@ function PropertiesBody() {
             )}
           </tbody>
         </table>
+        </TableScroll>
       </div>
 
       <Sheet open={adding} title="Add property" onClose={() => setAdding(false)}>
@@ -155,8 +158,8 @@ function PropertiesBody() {
 
 export default function PropertiesPage() {
   return (
-    <Shell>
+    <>
       <PropertiesBody />
-    </Shell>
+    </>
   );
 }

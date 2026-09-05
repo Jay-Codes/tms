@@ -7,9 +7,9 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { ProblemNote } from '../../../components/FormBits';
-import { StatusMark } from '../../../components/UnitStatus';
-import { AddManyUnitsForm, AddUnitForm } from '../../../components/UnitForms';
+import { ProblemNote } from '../../../../components/FormBits';
+import { StatusMark } from '../../../../components/UnitStatus';
+import { AddManyUnitsForm, AddUnitForm } from '../../../../components/UnitForms';
 import {
   ApiError,
   periodsApi,
@@ -18,8 +18,8 @@ import {
   type PaymentPeriod,
   type Property,
   type Unit,
-} from '../../../lib/api';
-import { Amount } from '../../../lib/format';
+} from '../../../../lib/api';
+import { Amount } from '../../../../lib/format';
 
 export function UnitsStep() {
   const [property, setProperty] = useState<Property | null>(null);

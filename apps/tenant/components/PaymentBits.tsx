@@ -25,6 +25,7 @@ import {
   remainingOn,
 } from '../lib/api';
 import { fmtDate, fmtDateTime, fmtTZS } from '../lib/format';
+import { TableScroll } from '@tms/ui';
 
 /** A reversed payment is struck through in the ledger and stamped. */
 export function PaymentStatusStamp({ status }: { status: string }) {
@@ -72,6 +73,7 @@ export function SchedulesTable({
   const cols = 7;
   const rows = items ?? [];
   return (
+    <TableScroll label="Schedules">
     <table className="ledger">
       <thead>
         <tr>
@@ -154,6 +156,7 @@ export function SchedulesTable({
         )}
       </tbody>
     </table>
+    </TableScroll>
   );
 }
 
@@ -245,6 +248,7 @@ export function PaymentsTable({
   const cols = 6 + (showRenter ? 1 : 0) + (showUnit ? 1 : 0);
   const rows = items ?? [];
   return (
+    <TableScroll label="Payments">
     <table className="ledger">
       <thead>
         <tr>
@@ -340,6 +344,7 @@ export function PaymentsTable({
         )}
       </tbody>
     </table>
+    </TableScroll>
   );
 }
 

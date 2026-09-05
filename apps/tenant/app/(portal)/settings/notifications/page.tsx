@@ -10,8 +10,8 @@
 
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
-import { NotificationSettingsForm } from '../../../components/NotificationSettingsForm';
-import { PageHead, Shell } from '../../../components/Shell';
+import { NotificationSettingsForm } from '../../../../components/NotificationSettingsForm';
+import { PageHead } from '../../../../components/PageHead';
 
 function NotificationSettingsBody() {
   return (
@@ -40,8 +40,8 @@ function NotificationSettingsBody() {
 
 export default function NotificationSettingsPage() {
   return (
-    <Shell>
+    <>
       <NotificationSettingsBody />
-    </Shell>
+    </>
   );
 }

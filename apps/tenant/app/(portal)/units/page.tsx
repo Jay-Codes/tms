@@ -9,10 +9,10 @@
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Field, Note, ProblemNote } from '../../components/FormBits';
-import { PageHead, Shell } from '../../components/Shell';
-import { Sheet } from '../../components/Sheet';
-import { StatusMark } from '../../components/UnitStatus';
+import { Field, Note, ProblemNote } from '../../../components/FormBits';
+import { PageHead } from '../../../components/PageHead';
+import { Sheet } from '../../../components/Sheet';
+import { StatusMark } from '../../../components/UnitStatus';
 import {
   ApiError,
   propertiesApi,
@@ -21,8 +21,9 @@ import {
   type Property,
   type Unit,
   type UnitStatus,
-} from '../../lib/api';
-import { Amount, daysSince, fmtTZS, todayISO } from '../../lib/format';
+} from '../../../lib/api';
+import { Amount, daysSince, fmtTZS, todayISO } from '../../../lib/format';
+import { TableScroll } from '@tms/ui';
 
 const TABS: { value: '' | UnitStatus; label: string }[] = [
   { value: '', label: 'All' },
@@ -303,6 +304,7 @@ function UnitsBody() {
         <ProblemNote error={error} />
         {note ? <Note>{note}</Note> : null}
 
+        <TableScroll label="Units">
         <table className="ledger">
           <thead>
             <tr>
@@ -378,6 +380,7 @@ function UnitsBody() {
             )}
           </tbody>
         </table>
+        </TableScroll>
       </div>
 
       <Sheet open={bulkOpen} title="Bulk price change" onClose={() => setBulkOpen(false)}>
@@ -398,8 +401,8 @@ function UnitsBody() {
 
 export default function UnitsPage() {
   return (
-    <Shell>
+    <>
       <UnitsBody />
-    </Shell>
+    </>
   );
 }

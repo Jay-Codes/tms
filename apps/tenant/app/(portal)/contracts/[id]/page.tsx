@@ -25,13 +25,13 @@ import {
   ScheduleStatusStamp,
   landlordSignature,
   renterSignature,
-} from '../../../components/ContractBits';
-import { DocumentPaper, PrintStyles } from '../../../components/DocumentPaper';
-import { Field, Note, ProblemNote } from '../../../components/FormBits';
-import { DaysOverdue, PaymentsTable, ReverseSheet } from '../../../components/PaymentBits';
-import { RecordPaymentSheet, type RecordPaymentTarget } from '../../../components/RecordPaymentSheet';
-import { PageHead, Shell } from '../../../components/Shell';
-import { Sheet } from '../../../components/Sheet';
+} from '../../../../components/ContractBits';
+import { DocumentPaper, PrintStyles } from '../../../../components/DocumentPaper';
+import { Field, Note, ProblemNote } from '../../../../components/FormBits';
+import { DaysOverdue, PaymentsTable, ReverseSheet } from '../../../../components/PaymentBits';
+import { RecordPaymentSheet, type RecordPaymentTarget } from '../../../../components/RecordPaymentSheet';
+import { PageHead } from '../../../../components/PageHead';
+import { Sheet } from '../../../../components/Sheet';
 import {
   ApiError,
   contractsApi,
@@ -47,8 +47,8 @@ import {
   type Payment,
   type Schedule,
   type ScheduleRow,
-} from '../../../lib/api';
-import { Amount, fmtDate, fmtTZS, todayISO } from '../../../lib/format';
+} from '../../../../lib/api';
+import { Amount, fmtDate, fmtTZS, todayISO } from '../../../../lib/format';
 
 /* ----------------------------- signature block ---------------------------- */
 
@@ -782,8 +782,8 @@ export default function ContractPage() {
   const params = useParams<{ id: string }>();
   const id = String(params?.id ?? '');
   return (
-    <Shell>
+    <>
       <ContractBody id={id} />
-    </Shell>
+    </>
   );
 }

@@ -10,10 +10,10 @@ import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { Field, Note, ProblemNote } from '../../../components/FormBits';
-import { Facts, KycStamp, LinkStatusStamp, ViewIdDocButton } from '../../../components/RenterBits';
-import { PageHead, Shell } from '../../../components/Shell';
-import { Sheet } from '../../../components/Sheet';
+import { Field, Note, ProblemNote } from '../../../../components/FormBits';
+import { Facts, KycStamp, LinkStatusStamp, ViewIdDocButton } from '../../../../components/RenterBits';
+import { PageHead } from '../../../../components/PageHead';
+import { Sheet } from '../../../../components/Sheet';
 import {
   ApiError,
   hasKycDoc,
@@ -24,8 +24,8 @@ import {
   type Contract,
   type LinkRequest,
   type RenterProfile,
-} from '../../../lib/api';
-import { Amount, fmtDate, fmtTZS } from '../../../lib/format';
+} from '../../../../lib/api';
+import { Amount, fmtDate, fmtTZS } from '../../../../lib/format';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -374,8 +374,8 @@ export default function LinkRequestPage() {
   const params = useParams<{ id: string }>();
   const id = String(params?.id ?? '');
   return (
-    <Shell>
+    <>
       <RequestBody id={id} />
-    </Shell>
+    </>
   );
 }

@@ -12,10 +12,10 @@ import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { Field, Note, ProblemNote } from '../../../components/FormBits';
-import { PeriodPicker } from '../../../components/PeriodPicker';
-import { PageHead, Shell } from '../../../components/Shell';
-import { StatusMark } from '../../../components/UnitStatus';
+import { Field, Note, ProblemNote } from '../../../../components/FormBits';
+import { PeriodPicker } from '../../../../components/PeriodPicker';
+import { PageHead } from '../../../../components/PageHead';
+import { StatusMark } from '../../../../components/UnitStatus';
 import {
   ApiError,
   periodsApi,
@@ -27,8 +27,8 @@ import {
   type Unit,
   type UnitQr,
   type UnitStatusOverride,
-} from '../../../lib/api';
-import { Amount, fmtDate, fmtPrice, todayISO } from '../../../lib/format';
+} from '../../../../lib/api';
+import { Amount, fmtDate, fmtPrice, todayISO } from '../../../../lib/format';
 
 const OVERRIDES: { value: UnitStatusOverride; label: string; hint: string }[] = [
   { value: 'vacant', label: 'Vacant', hint: 'Available. Shows on the vacancy board and to anyone who scans.' },
@@ -497,8 +497,8 @@ export default function UnitPage() {
   const params = useParams<{ id: string }>();
   const id = typeof params?.id === 'string' ? params.id : '';
   return (
-    <Shell>
+    <>
       <UnitBody id={id} />
-    </Shell>
+    </>
   );
 }

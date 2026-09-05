@@ -11,9 +11,9 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { Field, Note, ProblemNote, StatusStamp } from '../../../components/FormBits';
-import { Sheet } from '../../../components/Sheet';
-import { PageHead, Shell } from '../../../components/Shell';
+import { Field, Note, ProblemNote, StatusStamp } from '../../../../components/FormBits';
+import { Sheet } from '../../../../components/Sheet';
+import { PageHead } from '../../../../components/PageHead';
 import {
   ApiError,
   adminApi,
@@ -21,8 +21,8 @@ import {
   unwrapAdminOrg,
   unwrapOrgDetail,
   type AdminOrgDetail,
-} from '../../../lib/api';
-import { fmtDate, fmtDateTime, fmtNum } from '../../../lib/format';
+} from '../../../../lib/api';
+import { fmtDate, fmtDateTime, fmtNum } from '../../../../lib/format';
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -311,8 +311,8 @@ export default function OrgDetailPage() {
   const params = useParams<{ id: string }>();
   const id = String(params?.id ?? '');
   return (
-    <Shell>
+    <>
       <OrgDetailBody id={id} />
-    </Shell>
+    </>
   );
 }

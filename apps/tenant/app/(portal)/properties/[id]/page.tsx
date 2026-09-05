@@ -9,12 +9,12 @@ import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { ProblemNote } from '../../../components/FormBits';
-import { PropertyForm } from '../../../components/PropertyForm';
-import { PageHead, Shell } from '../../../components/Shell';
-import { Sheet } from '../../../components/Sheet';
-import { StatusMark } from '../../../components/UnitStatus';
-import { AddManyUnitsForm, AddUnitForm } from '../../../components/UnitForms';
+import { ProblemNote } from '../../../../components/FormBits';
+import { PropertyForm } from '../../../../components/PropertyForm';
+import { PageHead } from '../../../../components/PageHead';
+import { Sheet } from '../../../../components/Sheet';
+import { StatusMark } from '../../../../components/UnitStatus';
+import { AddManyUnitsForm, AddUnitForm } from '../../../../components/UnitForms';
 import {
   ApiError,
   periodsApi,
@@ -24,8 +24,8 @@ import {
   type PaymentPeriod,
   type Property,
   type Unit,
-} from '../../../lib/api';
-import { Amount } from '../../../lib/format';
+} from '../../../../lib/api';
+import { Amount } from '../../../../lib/format';
 
 function PropertyBody({ id }: { id: string }) {
   const router = useRouter();
@@ -240,8 +240,8 @@ export default function PropertyPage() {
   const params = useParams<{ id: string }>();
   const id = typeof params?.id === 'string' ? params.id : '';
   return (
-    <Shell>
+    <>
       <PropertyBody id={id} />
-    </Shell>
+    </>
   );
 }

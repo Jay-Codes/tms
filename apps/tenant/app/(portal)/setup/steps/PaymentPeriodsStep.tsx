@@ -2,7 +2,7 @@
 
 /** Wizard step 3 (FLOWS flow 1 step 3.3) — the same editor as Settings. */
 
-import { PeriodsManager } from '../../../components/PeriodsManager';
+import { PeriodsManager } from '../../../../components/PeriodsManager';
 
 export function PaymentPeriodsStep() {
   return (

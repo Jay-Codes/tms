@@ -1,46 +1,24 @@
 'use client';
 
 /**
- * Authenticated portal chrome: org header, left tab rail, verification banner.
- * Wrap every protected page body in <Shell>.
+ * Authenticated portal chrome: org header, left tab rail (desktop), drawer +
+ * bottom bar (mobile), verification banner.
+ *
+ * Mounted ONCE by `app/(portal)/layout.tsx`. Pages must never render it
+ * themselves — that is what made the nav reload on every route change
+ * (PLAN2 #7), and `.eslintrc.json` fails the build if a page imports it.
  */
 
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
-import { ApiError, authApi, linkRequestsApi } from '../lib/api';
+import { ApiError, authApi } from '../lib/api';
 import { RequireAuth, useMe } from '../lib/auth';
 import { loadAndApplyOrgTheme } from '../lib/branding';
-import { useReadyToCountersign } from './ContractBits';
+import { pendingLabel, useNavBadges, type Badges } from './NavBadges';
 
-/** How many pending requests the badge will count before it gives up and says "50+". */
-const PENDING_BADGE_CAP = 50;
-
-/**
- * Pending link-request count for the nav badge (FLOWS flow 3 step 1). The list
- * endpoint has no count, so we ask for one page and read its length; a full
- * page means "at least this many". Errors are silent — a badge must never
- * break the chrome.
- */
-export function usePendingLinkRequests(): number | null {
-  const [count, setCount] = useState<number | null>(null);
-
-  useEffect(() => {
-    const ac = new AbortController();
-    linkRequestsApi
-      .list({ status: 'pending', limit: PENDING_BADGE_CAP }, ac.signal)
-      .then((r) => setCount(typeof r.total === 'number' ? r.total : (r.items ?? []).length))
-      .catch(() => setCount(null));
-    return () => ac.abort();
-  }, []);
-
-  return count;
-}
-
-export function pendingLabel(count: number): string {
-  return count >= PENDING_BADGE_CAP ? `${PENDING_BADGE_CAP}+` : String(count);
-}
+export { pendingLabel, usePendingLinkRequests } from './NavBadges';
 
 export interface NavItem {
   href: string;
@@ -79,6 +57,39 @@ export const NAV: NavItem[] = [
   },
   { href: '/audit', label: 'Audit', icon: 'solar:history-linear' },
 ];
+
+/** The five sections the bottom bar carries under 768px; "More" opens the drawer. */
+const BOTTOM: Array<{ href: string; label: string; icon: string }> = [
+  { href: '/', label: 'Dashboard', icon: 'solar:home-2-linear' },
+  { href: '/properties', label: 'Properties', icon: 'solar:buildings-2-linear' },
+  { href: '/payments', label: 'Payments', icon: 'solar:wallet-money-linear' },
+  { href: '/contracts', label: 'Contracts', icon: 'solar:document-text-linear' },
+];
+
+function isCurrent(pathname: string, href: string): boolean {
+  return pathname === href || (href !== '/' && pathname.startsWith(href));
+}
+
+function Badge({ count, label }: { count: number; label: string }) {
+  return (
+    <span
+      aria-label={label}
+      style={{
+        minWidth: 20,
+        padding: '0 6px',
+        borderRadius: 999,
+        background: 'var(--primary)',
+        color: 'var(--on-primary)',
+        fontSize: 'var(--text-xs)',
+        fontWeight: 600,
+        textAlign: 'center',
+        lineHeight: '18px',
+      }}
+    >
+      {count}
+    </span>
+  );
+}
 
 function VerifyBanner() {
   const { user } = useMe();
@@ -129,112 +140,83 @@ function VerifyBanner() {
   );
 }
 
-function Rail() {
-  const pathname = usePathname();
+function OrgMark() {
   const { org } = useMe();
-  const pending = usePendingLinkRequests();
-  const countersign = useReadyToCountersign();
-
   return (
-    <aside
-      className="shell-rail"
-      style={{
-        background: 'var(--paper)',
-        borderRight: '1px solid var(--rule)',
-        padding: 'var(--sp-5) 0',
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--sp-3)',
-          padding: '0 var(--sp-4)',
-          marginBottom: 'var(--sp-6)',
-        }}
-      >
-        <span
-          aria-hidden
-          style={{ width: 28, height: 28, borderRadius: 'var(--radius-sm)', background: 'var(--primary)', flexShrink: 0 }}
-        />
-        <div style={{ lineHeight: 1.15, minWidth: 0 }}>
-          <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {org?.name ?? '—'}
-          </div>
-          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
-            {org?.role === 'org_owner' ? 'Owner' : org?.role === 'org_manager' ? 'Manager' : ''}
-          </div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', minWidth: 0 }}>
+      <span
+        aria-hidden
+        style={{ width: 28, height: 28, borderRadius: 'var(--radius-sm)', background: 'var(--primary)', flexShrink: 0 }}
+      />
+      <div style={{ lineHeight: 1.15, minWidth: 0 }}>
+        <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{org?.name ?? '—'}</div>
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
+          {org?.role === 'org_owner' ? 'Owner' : org?.role === 'org_manager' ? 'Manager' : ''}
         </div>
       </div>
+    </div>
+  );
+}
 
-      <nav className="tabs" aria-label="Sections">
-        {NAV.map((item) => {
-          const current = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
-          // A sub-link owns `aria-current` when the reader is on it, so the
-          // section and its child never both claim to be the current page.
-          const onSub = (item.sub ?? []).some((s) => pathname.startsWith(s.href));
-          return (
-            <div key={item.href} style={{ display: 'contents' }}>
-              <Link href={item.href} className="tab" aria-current={current && !onSub ? 'page' : undefined}>
-                <Icon icon={item.icon} width={20} />
-                <span style={{ flex: 1 }}>{item.label}</span>
-                {item.href === '/contracts' && countersign ? (
-                  <span
-                    aria-label={`${countersign} ready to countersign`}
-                    style={{
-                      minWidth: 20,
-                      padding: '0 6px',
-                      borderRadius: 999,
-                      background: 'var(--primary)',
-                      color: 'var(--on-primary)',
-                      fontSize: 'var(--text-xs)',
-                      fontWeight: 600,
-                      textAlign: 'center',
-                      lineHeight: '18px',
-                    }}
+/** The nav list itself, shared by the desktop rail and the mobile drawer. */
+function NavList({ badges, onNavigate }: { badges: Badges; onNavigate?: () => void }) {
+  const pathname = usePathname();
+
+  return (
+    <nav className="tabs" aria-label="Sections">
+      {NAV.map((item) => {
+        const current = isCurrent(pathname, item.href);
+        // A sub-link owns `aria-current` when the reader is on it, so the
+        // section and its child never both claim to be the current page.
+        const onSub = (item.sub ?? []).some((s) => pathname.startsWith(s.href));
+        return (
+          <div key={item.href} style={{ display: 'contents' }}>
+            <Link
+              href={item.href}
+              className="tab"
+              aria-current={current && !onSub ? 'page' : undefined}
+              onClick={onNavigate}
+            >
+              <Icon icon={item.icon} width={20} />
+              <span style={{ flex: 1 }}>{item.label}</span>
+              {item.href === '/contracts' && badges.countersign ? (
+                <Badge count={badges.countersign} label={`${badges.countersign} ready to countersign`} />
+              ) : null}
+              {item.href === '/link-requests' && badges.pending ? (
+                <Badge count={badges.pending} label={`${pendingLabel(badges.pending)} pending`} />
+              ) : null}
+              {item.phase ? (
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-faint)' }}>P{item.phase}</span>
+              ) : null}
+            </Link>
+            {current && item.sub
+              ? item.sub.map((s) => (
+                  <Link
+                    key={s.href}
+                    href={s.href}
+                    className="tab"
+                    aria-current={pathname.startsWith(s.href) ? 'page' : undefined}
+                    onClick={onNavigate}
+                    style={{ paddingLeft: 'calc(var(--sp-4) + 28px)', fontSize: 'var(--text-sm)', fontWeight: 400 }}
                   >
-                    {countersign}
-                  </span>
-                ) : null}
-                {item.href === '/link-requests' && pending ? (
-                  <span
-                    aria-label={`${pendingLabel(pending)} pending`}
-                    style={{
-                      minWidth: 20,
-                      padding: '0 6px',
-                      borderRadius: 999,
-                      background: 'var(--primary)',
-                      color: 'var(--on-primary)',
-                      fontSize: 'var(--text-xs)',
-                      fontWeight: 600,
-                      textAlign: 'center',
-                      lineHeight: '18px',
-                    }}
-                  >
-                    {pendingLabel(pending)}
-                  </span>
-                ) : null}
-                {item.phase ? (
-                  <span style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-faint)' }}>P{item.phase}</span>
-                ) : null}
-              </Link>
-              {current && item.sub
-                ? item.sub.map((s) => (
-                    <Link
-                      key={s.href}
-                      href={s.href}
-                      className="tab"
-                      aria-current={pathname.startsWith(s.href) ? 'page' : undefined}
-                      style={{ paddingLeft: 'calc(var(--sp-4) + 28px)', fontSize: 'var(--text-sm)', fontWeight: 400 }}
-                    >
-                      {s.label}
-                    </Link>
-                  ))
-                : null}
-            </div>
-          );
-        })}
-      </nav>
+                    {s.label}
+                  </Link>
+                ))
+              : null}
+          </div>
+        );
+      })}
+    </nav>
+  );
+}
+
+function Rail({ badges }: { badges: Badges }) {
+  return (
+    <aside className="shell-rail">
+      <div style={{ padding: '0 var(--sp-4)', marginBottom: 'var(--sp-6)' }}>
+        <OrgMark />
+      </div>
+      <NavList badges={badges} />
     </aside>
   );
 }
@@ -242,17 +224,7 @@ function Rail() {
 function TopBar() {
   const { user, logout } = useMe();
   return (
-    <header
-      className="shell-topbar"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 'var(--sp-4)',
-        padding: 'var(--sp-3) var(--sp-6)',
-        borderBottom: '1px solid var(--rule)',
-      }}
-    >
+    <header className="shell-topbar">
       <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>
         {user?.full_name}
         {user?.email ? ` · ${user.email}` : ''}
@@ -264,11 +236,124 @@ function TopBar() {
   );
 }
 
+/** Mobile header: org identity plus the drawer trigger. Hidden from 768px up. */
+function MobileBar({ onOpen }: { onOpen: () => void }) {
+  return (
+    <header className="shell-mobilebar">
+      <OrgMark />
+      <button
+        type="button"
+        className="btn btn-quiet"
+        aria-label="Open menu"
+        aria-haspopup="dialog"
+        onClick={onOpen}
+        style={{ minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)', justifyContent: 'center' }}
+      >
+        <Icon icon="solar:hamburger-menu-linear" width={24} />
+      </button>
+    </header>
+  );
+}
+
+function Drawer({ open, onClose, badges }: { open: boolean; onClose: () => void; badges: Badges }) {
+  const { user, logout } = useMe();
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="shell-drawer-backdrop"
+      role="presentation"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="shell-drawer" role="dialog" aria-modal="true" aria-label="Menu">
+        <div className="shell-drawer-head">
+          <OrgMark />
+          <button
+            type="button"
+            className="btn btn-quiet"
+            aria-label="Close menu"
+            onClick={onClose}
+            style={{ minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)', justifyContent: 'center' }}
+          >
+            <Icon icon="solar:close-circle-linear" width={24} />
+          </button>
+        </div>
+        <div className="shell-drawer-body">
+          <NavList badges={badges} onNavigate={onClose} />
+        </div>
+        <div className="shell-drawer-foot">
+          <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {user?.full_name}
+          </span>
+          <button type="button" className="btn btn-quiet" onClick={() => void logout()} style={{ minHeight: 40 }}>
+            <Icon icon="solar:logout-2-linear" width={18} /> Sign out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BottomBar({ badges, onMore }: { badges: Badges; onMore: () => void }) {
+  const pathname = usePathname();
+  const onMain = BOTTOM.some((b) => isCurrent(pathname, b.href));
+
+  return (
+    <nav className="bottom-bar shell-bottom" aria-label="Main sections">
+      {BOTTOM.map((b) => (
+        <Link key={b.href} href={b.href} className="tab" aria-current={isCurrent(pathname, b.href) ? 'page' : undefined}>
+          <span style={{ position: 'relative', display: 'inline-flex' }}>
+            <Icon icon={b.icon} width={22} />
+            {b.href === '/contracts' && badges.countersign ? <span className="shell-dot" aria-hidden /> : null}
+          </span>
+          {b.label}
+        </Link>
+      ))}
+      <button
+        type="button"
+        className="tab"
+        onClick={onMore}
+        aria-haspopup="dialog"
+        aria-current={onMain ? undefined : 'page'}
+        style={{ background: 'transparent', border: 0, borderTop: '3px solid transparent', font: 'inherit', fontSize: 'var(--text-xs)' }}
+      >
+        <span style={{ position: 'relative', display: 'inline-flex' }}>
+          <Icon icon="solar:menu-dots-linear" width={22} />
+          {badges.pending ? <span className="shell-dot" aria-hidden /> : null}
+        </span>
+        More
+      </button>
+    </nav>
+  );
+}
+
 export function Shell({ children }: { children: ReactNode }) {
+  const [drawer, setDrawer] = useState(false);
+  const badges = useNavBadges();
+
   // The org's colour and typeface are applied as soon as the chrome mounts, so
   // a landlord's own branding is on screen before the page body loads. Failure
-  // is silent — the platform default is a working theme.
+  // is silent — the platform default is a working theme. This runs once for
+  // the whole session: the chrome lives in the (portal) layout.
   useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      // Fires once per session. A second line means a page is rendering <Shell>
+      // itself again and the nav is remounting (PLAN2 #7).
+      // eslint-disable-next-line no-console
+      console.debug('shell mount');
+    }
     const ac = new AbortController();
     void loadAndApplyOrgTheme(ac.signal);
     return () => ac.abort();
@@ -276,35 +361,19 @@ export function Shell({ children }: { children: ReactNode }) {
 
   return (
     <RequireAuth>
-      <div className="shell-grid" style={{ display: 'grid', gridTemplateColumns: '220px 1fr', minHeight: '100vh' }}>
-        <Rail />
-        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <div className="shell-grid">
+        <Rail badges={badges} />
+        <div className="shell-main">
+          <MobileBar onOpen={() => setDrawer(true)} />
           <TopBar />
           <VerifyBanner />
-          <div className="shell-body" style={{ padding: 'var(--sp-6)', flex: 1 }}>{children}</div>
+          <div className="shell-body">{children}</div>
         </div>
+        <BottomBar badges={badges} onMore={() => setDrawer(true)} />
+        <Drawer open={drawer} onClose={() => setDrawer(false)} badges={badges} />
       </div>
     </RequireAuth>
   );
 }
 
-/** Page header used inside <Shell>. */
-export function PageHead({ title, lead, actions }: { title: string; lead?: string; actions?: ReactNode }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'flex-end',
-        justifyContent: 'space-between',
-        gap: 'var(--sp-4)',
-        marginBottom: 'var(--sp-5)',
-      }}
-    >
-      <div>
-        <h1 style={{ fontSize: 'var(--text-2xl)' }}>{title}</h1>
-        {lead ? <p style={{ marginTop: 'var(--sp-2)', color: 'var(--ink-soft)' }}>{lead}</p> : null}
-      </div>
-      {actions ? <div style={{ display: 'flex', gap: 'var(--sp-2)', flexShrink: 0 }}>{actions}</div> : null}
-    </div>
-  );
-}
+export { PageHead } from './PageHead';

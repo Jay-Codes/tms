@@ -7,17 +7,18 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { Field, ProblemNote } from '../../components/FormBits';
-import { FilterTabs, KycStamp } from '../../components/RenterBits';
-import { PageHead, Shell } from '../../components/Shell';
+import { Field, ProblemNote } from '../../../components/FormBits';
+import { FilterTabs, KycStamp } from '../../../components/RenterBits';
+import { PageHead } from '../../../components/PageHead';
 import {
   ApiError,
   rentersApi,
   toApiError,
   type KycStatus,
   type RenterSummary,
-} from '../../lib/api';
-import { fmtDate } from '../../lib/format';
+} from '../../../lib/api';
+import { fmtDate } from '../../../lib/format';
+import { TableScroll } from '@tms/ui';
 
 const KYC_TABS: { value: KycStatus | ''; label: string }[] = [
   { value: '', label: 'All' },
@@ -94,6 +95,7 @@ function DirectoryBody() {
       <div style={{ paddingTop: 'var(--sp-4)', display: 'grid', gap: 'var(--sp-4)' }}>
         <ProblemNote error={error} />
 
+        <TableScroll label="Renters">
         <table className="ledger">
           <thead>
             <tr>
@@ -159,6 +161,7 @@ function DirectoryBody() {
             )}
           </tbody>
         </table>
+        </TableScroll>
       </div>
     </>
   );
@@ -166,8 +169,8 @@ function DirectoryBody() {
 
 export default function RentersPage() {
   return (
-    <Shell>
+    <>
       <DirectoryBody />
-    </Shell>
+    </>
   );
 }

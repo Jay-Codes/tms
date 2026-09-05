@@ -16,10 +16,10 @@
 import { Icon } from '@iconify/react';
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { ProblemNote } from '../../components/FormBits';
-import { PaymentsTable, ReverseSheet, SchedulesTable } from '../../components/PaymentBits';
-import { RecordPaymentSheet, type RecordPaymentTarget } from '../../components/RecordPaymentSheet';
-import { PageHead, Shell } from '../../components/Shell';
+import { ProblemNote } from '../../../components/FormBits';
+import { PaymentsTable, ReverseSheet, SchedulesTable } from '../../../components/PaymentBits';
+import { RecordPaymentSheet, type RecordPaymentTarget } from '../../../components/RecordPaymentSheet';
+import { PageHead } from '../../../components/PageHead';
 import {
   ApiError,
   paymentsApi,
@@ -27,8 +27,8 @@ import {
   toApiError,
   type Payment,
   type Schedule,
-} from '../../lib/api';
-import { fmtTZS, isoPlusDays, todayISO } from '../../lib/format';
+} from '../../../lib/api';
+import { fmtTZS, isoPlusDays, todayISO } from '../../../lib/format';
 
 type TabId = 'overdue' | 'due_soon' | 'partial' | 'all' | 'history';
 
@@ -217,10 +217,10 @@ function PaymentsBody() {
 
 export default function PaymentsPage() {
   return (
-    <Shell>
+    <>
       <Suspense fallback={null}>
         <PaymentsBody />
       </Suspense>
-    </Shell>
+    </>
   );
 }

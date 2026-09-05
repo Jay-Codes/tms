@@ -1,3 +1,32 @@
 {
-  "extends": "next/core-web-vitals"
+  "extends": "next/core-web-vitals",
+  "overrides": [
+    {
+      "files": [
+        "app/**/page.tsx",
+        "app/**/layout.tsx",
+        "app/**/template.tsx"
+      ],
+      "excludedFiles": [
+        "app/(portal)/layout.tsx"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/components/Shell",
+                  "**/components/Shell.tsx",
+                  "@/components/Shell"
+                ],
+                "message": "Do not import Shell from a page \u2014 it is mounted once in app/(portal)/layout.tsx (PLAN2 #7). Import PageHead from components/PageHead instead."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
 }

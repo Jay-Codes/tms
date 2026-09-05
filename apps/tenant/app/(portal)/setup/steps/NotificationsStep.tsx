@@ -6,7 +6,7 @@
  * decided when renters hear from them, so nothing else has to chase this later.
  */
 
-import { NotificationSettingsForm } from '../../../components/NotificationSettingsForm';
+import { NotificationSettingsForm } from '../../../../components/NotificationSettingsForm';
 
 export function NotificationsStep() {
   return (
