@@ -3,6 +3,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/url"
@@ -49,6 +50,29 @@ func (c *Client) Ping(ctx context.Context) error {
 		return fmt.Errorf("storage: ping: %w", err)
 	}
 	return nil
+}
+
+// PutBytes uploads an in-memory object (QR PNGs are rendered, never written to
+// local disk — TECHSTACK: no files on disk for persistence).
+func (c *Client) PutBytes(ctx context.Context, bucket, object string, data []byte, contentType string) error {
+	if c == nil || c.Client == nil {
+		return fmt.Errorf("storage: no client")
+	}
+	_, err := c.Client.PutObject(ctx, bucket, object, bytes.NewReader(data), int64(len(data)),
+		minio.PutObjectOptions{ContentType: contentType})
+	if err != nil {
+		return fmt.Errorf("storage: put %s/%s: %w", bucket, object, err)
+	}
+	return nil
+}
+
+// Exists reports whether an object is present in a bucket.
+func (c *Client) Exists(ctx context.Context, bucket, object string) bool {
+	if c == nil || c.Client == nil {
+		return false
+	}
+	_, err := c.Client.StatObject(ctx, bucket, object, minio.StatObjectOptions{})
+	return err == nil
 }
 
 // PresignGet returns a time-limited download URL for an object.

@@ -11,6 +11,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countActivePaymentPeriods = `-- name: CountActivePaymentPeriods :one
+SELECT count(*) FROM payment_periods
+WHERE org_id = $1 AND deleted_at IS NULL AND active
+`
+
+func (q *Queries) CountActivePaymentPeriods(ctx context.Context, orgID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countActivePaymentPeriods, orgID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createPaymentPeriod = `-- name: CreatePaymentPeriod :one
 INSERT INTO payment_periods (org_id, label, days, is_recommended, sort_order)
 VALUES (
@@ -55,14 +67,72 @@ func (q *Queries) CreatePaymentPeriod(ctx context.Context, arg CreatePaymentPeri
 	return i, err
 }
 
-const listPaymentPeriods = `-- name: ListPaymentPeriods :many
+const getPaymentPeriod = `-- name: GetPaymentPeriod :one
 SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at FROM payment_periods
-WHERE org_id = $1 AND deleted_at IS NULL
+WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
+`
+
+type GetPaymentPeriodParams struct {
+	OrgID pgtype.UUID `json:"org_id"`
+	ID    pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) GetPaymentPeriod(ctx context.Context, arg GetPaymentPeriodParams) (PaymentPeriod, error) {
+	row := q.db.QueryRow(ctx, getPaymentPeriod, arg.OrgID, arg.ID)
+	var i PaymentPeriod
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Label,
+		&i.Days,
+		&i.IsRecommended,
+		&i.SortOrder,
+		&i.Active,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const getRecommendedPaymentPeriodByDays = `-- name: GetRecommendedPaymentPeriodByDays :one
+SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at FROM payment_periods
+WHERE org_id = $1 AND days = $2
+  AND is_recommended AND deleted_at IS NULL
+LIMIT 1
+`
+
+type GetRecommendedPaymentPeriodByDaysParams struct {
+	OrgID pgtype.UUID `json:"org_id"`
+	Days  int32       `json:"days"`
+}
+
+func (q *Queries) GetRecommendedPaymentPeriodByDays(ctx context.Context, arg GetRecommendedPaymentPeriodByDaysParams) (PaymentPeriod, error) {
+	row := q.db.QueryRow(ctx, getRecommendedPaymentPeriodByDays, arg.OrgID, arg.Days)
+	var i PaymentPeriod
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Label,
+		&i.Days,
+		&i.IsRecommended,
+		&i.SortOrder,
+		&i.Active,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const listActivePaymentPeriods = `-- name: ListActivePaymentPeriods :many
+SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at FROM payment_periods
+WHERE org_id = $1 AND deleted_at IS NULL AND active
 ORDER BY sort_order ASC, days ASC
 `
 
-func (q *Queries) ListPaymentPeriods(ctx context.Context, orgID pgtype.UUID) ([]PaymentPeriod, error) {
-	rows, err := q.db.Query(ctx, listPaymentPeriods, orgID)
+func (q *Queries) ListActivePaymentPeriods(ctx context.Context, orgID pgtype.UUID) ([]PaymentPeriod, error) {
+	rows, err := q.db.Query(ctx, listActivePaymentPeriods, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -90,4 +160,181 @@ func (q *Queries) ListPaymentPeriods(ctx context.Context, orgID pgtype.UUID) ([]
 		return nil, err
 	}
 	return items, nil
+}
+
+const listPaymentPeriods = `-- name: ListPaymentPeriods :many
+SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at FROM payment_periods
+WHERE org_id = $1 AND deleted_at IS NULL
+  AND ($2::boolean OR active)
+ORDER BY sort_order ASC, days ASC
+`
+
+type ListPaymentPeriodsParams struct {
+	OrgID           pgtype.UUID `json:"org_id"`
+	IncludeInactive bool        `json:"include_inactive"`
+}
+
+func (q *Queries) ListPaymentPeriods(ctx context.Context, arg ListPaymentPeriodsParams) ([]PaymentPeriod, error) {
+	rows, err := q.db.Query(ctx, listPaymentPeriods, arg.OrgID, arg.IncludeInactive)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PaymentPeriod{}
+	for rows.Next() {
+		var i PaymentPeriod
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Label,
+			&i.Days,
+			&i.IsRecommended,
+			&i.SortOrder,
+			&i.Active,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPaymentPeriodsByIDs = `-- name: ListPaymentPeriodsByIDs :many
+SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at FROM payment_periods
+WHERE org_id = $1 AND id = ANY ($2::uuid[]) AND deleted_at IS NULL
+`
+
+type ListPaymentPeriodsByIDsParams struct {
+	OrgID pgtype.UUID   `json:"org_id"`
+	Ids   []pgtype.UUID `json:"ids"`
+}
+
+func (q *Queries) ListPaymentPeriodsByIDs(ctx context.Context, arg ListPaymentPeriodsByIDsParams) ([]PaymentPeriod, error) {
+	rows, err := q.db.Query(ctx, listPaymentPeriodsByIDs, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PaymentPeriod{}
+	for rows.Next() {
+		var i PaymentPeriod
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Label,
+			&i.Days,
+			&i.IsRecommended,
+			&i.SortOrder,
+			&i.Active,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const maxPaymentPeriodSortOrder = `-- name: MaxPaymentPeriodSortOrder :one
+SELECT COALESCE(max(sort_order), 0)::int FROM payment_periods
+WHERE org_id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) MaxPaymentPeriodSortOrder(ctx context.Context, orgID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, maxPaymentPeriodSortOrder, orgID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const reactivatePaymentPeriod = `-- name: ReactivatePaymentPeriod :one
+UPDATE payment_periods
+SET active = true, label = $1, sort_order = $2
+WHERE org_id = $3 AND id = $4 AND deleted_at IS NULL
+RETURNING id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at
+`
+
+type ReactivatePaymentPeriodParams struct {
+	Label     string      `json:"label"`
+	SortOrder int32       `json:"sort_order"`
+	OrgID     pgtype.UUID `json:"org_id"`
+	ID        pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) ReactivatePaymentPeriod(ctx context.Context, arg ReactivatePaymentPeriodParams) (PaymentPeriod, error) {
+	row := q.db.QueryRow(ctx, reactivatePaymentPeriod,
+		arg.Label,
+		arg.SortOrder,
+		arg.OrgID,
+		arg.ID,
+	)
+	var i PaymentPeriod
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Label,
+		&i.Days,
+		&i.IsRecommended,
+		&i.SortOrder,
+		&i.Active,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const updatePaymentPeriod = `-- name: UpdatePaymentPeriod :one
+UPDATE payment_periods
+SET label      = COALESCE($1, label),
+    days       = COALESCE($2, days),
+    sort_order = COALESCE($3, sort_order),
+    active     = COALESCE($4, active)
+WHERE org_id = $5 AND id = $6 AND deleted_at IS NULL
+RETURNING id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at
+`
+
+type UpdatePaymentPeriodParams struct {
+	Label     *string     `json:"label"`
+	Days      *int32      `json:"days"`
+	SortOrder *int32      `json:"sort_order"`
+	Active    *bool       `json:"active"`
+	OrgID     pgtype.UUID `json:"org_id"`
+	ID        pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) UpdatePaymentPeriod(ctx context.Context, arg UpdatePaymentPeriodParams) (PaymentPeriod, error) {
+	row := q.db.QueryRow(ctx, updatePaymentPeriod,
+		arg.Label,
+		arg.Days,
+		arg.SortOrder,
+		arg.Active,
+		arg.OrgID,
+		arg.ID,
+	)
+	var i PaymentPeriod
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Label,
+		&i.Days,
+		&i.IsRecommended,
+		&i.SortOrder,
+		&i.Active,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
 }

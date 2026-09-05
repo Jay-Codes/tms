@@ -29,6 +29,21 @@ const (
 	ActionOrgUpdate      = "org.update"
 	ActionMemberInvite   = "org.member_invite"
 	ActionMemberRemove   = "org.member_remove"
+
+	// Phase 2 — properties, units, pricing, payment periods.
+	ActionPropertyCreate  = "property.create"
+	ActionPropertyUpdate  = "property.update"
+	ActionPropertyDelete  = "property.delete"
+	ActionUnitCreate      = "unit.create"
+	ActionUnitUpdate      = "unit.update"
+	ActionUnitDelete      = "unit.delete"
+	ActionUnitQRGenerate  = "unit.qr_generate"
+	ActionPriceCreate     = "price.create"
+	ActionPriceBulkUpdate = "price.bulk_update"
+	ActionPeriodCreate    = "payment_period.create"
+	ActionPeriodUpdate    = "payment_period.update"
+	ActionPeriodDelete    = "payment_period.delete"
+	ActionPeriodRestore   = "payment_period.restore_recommended"
 )
 
 // Entity types.
@@ -37,6 +52,11 @@ const (
 	EntityOrg       = "org"
 	EntityOrgMember = "org_member"
 	EntitySession   = "session"
+
+	EntityProperty      = "property"
+	EntityUnit          = "unit"
+	EntityPricePlan     = "price_plan"
+	EntityPaymentPeriod = "payment_period"
 )
 
 type ctxKey int

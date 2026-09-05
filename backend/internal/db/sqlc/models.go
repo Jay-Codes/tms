@@ -167,16 +167,17 @@ type PaymentSchedule struct {
 }
 
 type PricePlan struct {
-	ID            pgtype.UUID        `json:"id"`
-	OrgID         pgtype.UUID        `json:"org_id"`
-	UnitID        pgtype.UUID        `json:"unit_id"`
-	Amount        int64              `json:"amount"`
-	Currency      string             `json:"currency"`
-	PeriodDays    int32              `json:"period_days"`
-	EffectiveFrom pgtype.Date        `json:"effective_from"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt     pgtype.Timestamptz `json:"deleted_at"`
+	ID              pgtype.UUID        `json:"id"`
+	OrgID           pgtype.UUID        `json:"org_id"`
+	UnitID          pgtype.UUID        `json:"unit_id"`
+	Amount          int64              `json:"amount"`
+	Currency        string             `json:"currency"`
+	PeriodDays      int32              `json:"period_days"`
+	EffectiveFrom   pgtype.Date        `json:"effective_from"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
 }
 
 type Property struct {
@@ -232,6 +233,7 @@ type Unit struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
+	StatusOverride   bool               `json:"status_override"`
 }
 
 type UnitLinkRequest struct {

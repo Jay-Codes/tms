@@ -137,6 +137,7 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 			logger.Warn("minio ping failed; running degraded", "error", pingErr)
 		}
 		deps.Minio = minioClient
+		deps.Storage = minioClient
 	}
 
 	srv := httpserver.New(cfg, deps, logger)
