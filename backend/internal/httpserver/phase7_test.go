@@ -797,7 +797,7 @@ func TestSuspendedOrgMessagesAreNotClaimed(t *testing.T) {
 	h := newHarness(t)
 	fix := h.newPaymentFixture(t, "Quiet", "0716001100", "+255716001101")
 	h.parkSchedules(t, fix.contractID)
-	h.setDueDate(t, fix.scheduleIDs[0], time.Now().UTC(), "pending")
+	h.setDueDate(t, fix.scheduleIDs[0], schedulerToday(), "pending")
 	h.runScheduler(t, notify.Options{ForceHour: true})
 
 	var id, status string

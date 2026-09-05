@@ -7,39 +7,56 @@
 
 import { Icon } from '@iconify/react';
 import { useState } from 'react';
+import { LOCALE_LABELS, useT, type Locale, type Translator } from '@tms/ui';
 import { ApiError, rentersApi, toApiError, type KycStatus, type LinkRequestStatus } from '../lib/api';
 
+/** The four decision states the server writes on a link request. */
+const LINK_STATUSES = new Set(['pending', 'approved', 'rejected', 'cancelled']);
+
+/** Translated name of a link-request status; unknown values print as they came. */
+export function linkStatusLabel(t: Translator, status: string | null | undefined): string {
+  if (!status) return '—';
+  return LINK_STATUSES.has(status) ? t(`linkreq.status.${status}`) : status;
+}
+
+/** The renter's own language, or the "not known" note when the API omits it. */
+export function localeLabel(t: Translator, locale: Locale | null | undefined): string {
+  return locale && LOCALE_LABELS[locale] ? LOCALE_LABELS[locale] : t('renters.locale.unknown');
+}
+
 export function KycStamp({ status }: { status: KycStatus | null | undefined }) {
+  const t = useT();
   if (status === 'verified') {
     return (
-      <span className="stamp stamp-paid" title="Identity verified">
-        Verified
+      <span className="stamp stamp-paid" title={t('renters.kyc.verified_title')}>
+        {t('renters.kyc.verified')}
       </span>
     );
   }
   if (status === 'submitted') {
-    return <span className="pencil">submitted</span>;
+    return <span className="pencil">{t('renters.kyc.submitted')}</span>;
   }
   return (
-    <span style={{ color: 'var(--ink-faint)', fontSize: 'var(--text-sm)' }} title="No KYC on file">
-      no KYC
+    <span style={{ color: 'var(--ink-faint)', fontSize: 'var(--text-sm)' }} title={t('renters.kyc.none_title')}>
+      {t('renters.kyc.none')}
     </span>
   );
 }
 
 export function LinkStatusStamp({ status }: { status: LinkRequestStatus | string | null | undefined }) {
+  const t = useT();
   if (status === 'approved') {
-    return <span className="stamp stamp-paid">Approved</span>;
+    return <span className="stamp stamp-paid">{t('linkreq.status.approved')}</span>;
   }
   if (status === 'rejected') {
-    return <span className="stamp stamp-overdue">Rejected</span>;
+    return <span className="stamp stamp-overdue">{t('linkreq.status.rejected')}</span>;
   }
   if (status === 'pending') {
-    return <span className="pencil">pending</span>;
+    return <span className="pencil">{t('linkreq.status.pending')}</span>;
   }
   return (
-    <span style={{ color: 'var(--ink-faint)', fontSize: 'var(--text-sm)', textTransform: 'capitalize' }}>
-      {status ?? '—'}
+    <span style={{ color: 'var(--ink-faint)', fontSize: 'var(--text-sm)' }}>
+      {linkStatusLabel(t, status)}
     </span>
   );
 }
@@ -57,6 +74,7 @@ export function ViewIdDocButton({
   disabled?: boolean;
   disabledReason?: string;
 }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
 
@@ -66,7 +84,7 @@ export function ViewIdDocButton({
     try {
       const { url } = await rentersApi.kycDoc(userId);
       if (url) window.open(url, '_blank', 'noopener,noreferrer');
-      else setError(new ApiError(0, { detail: 'The server returned no document link.' }));
+      else setError(new ApiError(0, { detail: t('renters.kyc.doc_no_link') }));
     } catch (e) {
       setError(toApiError(e));
     } finally {
@@ -84,7 +102,8 @@ export function ViewIdDocButton({
           disabled={busy || disabled}
           title={disabled ? disabledReason : undefined}
         >
-          <Icon icon="solar:document-linear" width={20} /> {busy ? 'Opening…' : 'View ID document'}
+          <Icon icon="solar:document-linear" width={20} />{' '}
+          {busy ? t('renters.kyc.doc_opening') : t('renters.kyc.doc_view')}
         </button>
       </div>
       {disabled && disabledReason ? (

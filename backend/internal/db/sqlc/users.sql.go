@@ -24,7 +24,7 @@ func (q *Queries) CountPlatformAdmins(ctx context.Context) (int64, error) {
 
 const createUser = `-- name: CreateUser :one
 
-INSERT INTO users (kind, phone, email, full_name, pin_hash, password_hash, email_verified_at)
+INSERT INTO users (kind, phone, email, full_name, pin_hash, password_hash, email_verified_at, locale)
 VALUES (
     $1,
     $2,
@@ -32,7 +32,8 @@ VALUES (
     $4,
     $5,
     $6,
-    $7
+    $7,
+    COALESCE($8::text, 'sw')
 )
 RETURNING id, kind, phone, email, full_name, pin_hash, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, locale
 `
@@ -45,10 +46,14 @@ type CreateUserParams struct {
 	PinHash         *string            `json:"pin_hash"`
 	PasswordHash    *string            `json:"password_hash"`
 	EmailVerifiedAt pgtype.Timestamptz `json:"email_verified_at"`
+	Locale          *string            `json:"locale"`
 }
 
 // users is a platform-global table (a person may be a renter in one org and
 // staff in another), so no org_id scoping applies here.
+// CreateUser takes the locale the signup chose (SPEC §3.2). The column
+// defaults to 'sw'; the handlers pass it explicitly so a renter who picked
+// English on the public SW/EN toggle is English from their first SMS.
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
 	row := q.db.QueryRow(ctx, createUser,
 		arg.Kind,
@@ -58,6 +63,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		arg.PinHash,
 		arg.PasswordHash,
 		arg.EmailVerifiedAt,
+		arg.Locale,
 	)
 	var i User
 	err := row.Scan(
@@ -153,6 +159,21 @@ func (q *Queries) GetUserByPhone(ctx context.Context, phone *string) (User, erro
 	return i, err
 }
 
+const getUserLocale = `-- name: GetUserLocale :one
+SELECT locale FROM users WHERE id = $1 AND deleted_at IS NULL
+`
+
+// GetUserLocale is the one-column read every queue writer makes before it
+// renders: the recipient's language, or nothing when the row is gone. It is
+// deliberately not GetUserByID — a send path should not pull password hashes
+// across the wire to learn one word.
+func (q *Queries) GetUserLocale(ctx context.Context, id pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, getUserLocale, id)
+	var locale string
+	err := row.Scan(&locale)
+	return locale, err
+}
+
 const markEmailVerified = `-- name: MarkEmailVerified :one
 UPDATE users SET email_verified_at = COALESCE(email_verified_at, now())
 WHERE id = $1 AND deleted_at IS NULL
@@ -231,6 +252,40 @@ type SetUserFullNameParams struct {
 // so leaving the two apart shows the same person under two names.
 func (q *Queries) SetUserFullName(ctx context.Context, arg SetUserFullNameParams) (User, error) {
 	row := q.db.QueryRow(ctx, setUserFullName, arg.FullName, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.Phone,
+		&i.Email,
+		&i.FullName,
+		&i.PinHash,
+		&i.PasswordHash,
+		&i.EmailVerifiedAt,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.Locale,
+	)
+	return i, err
+}
+
+const setUserLocale = `-- name: SetUserLocale :one
+UPDATE users SET locale = $1
+WHERE id = $2 AND deleted_at IS NULL
+RETURNING id, kind, phone, email, full_name, pin_hash, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, locale
+`
+
+type SetUserLocaleParams struct {
+	Locale string      `json:"locale"`
+	ID     pgtype.UUID `json:"id"`
+}
+
+// SetUserLocale backs PATCH /me (renter) and PATCH /org/members/me (org user):
+// the language this person reads their screens and their SMS in.
+func (q *Queries) SetUserLocale(ctx context.Context, arg SetUserLocaleParams) (User, error) {
+	row := q.db.QueryRow(ctx, setUserLocale, arg.Locale, arg.ID)
 	var i User
 	err := row.Scan(
 		&i.ID,

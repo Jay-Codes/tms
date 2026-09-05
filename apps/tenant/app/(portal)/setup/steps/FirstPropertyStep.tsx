@@ -3,12 +3,14 @@
 /** Wizard step 2 (FLOWS flow 1 step 3.2): the first property. */
 
 import Link from 'next/link';
+import { useT } from '@tms/ui';
 import { useEffect, useState } from 'react';
 import { ProblemNote } from '../../../../components/FormBits';
 import { PropertyForm } from '../../../../components/PropertyForm';
 import { ApiError, propertiesApi, toApiError, type Property } from '../../../../lib/api';
 
 export function FirstPropertyStep() {
+  const t = useT();
   const [items, setItems] = useState<Property[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [adding, setAdding] = useState(false);
@@ -30,19 +32,19 @@ export function FirstPropertyStep() {
 
   return (
     <div style={{ display: 'grid', gap: 'var(--sp-4)', maxWidth: 'var(--measure)' }}>
-      <p>One property to start with. You can add more from the Properties page later.</p>
+      <p>{t('setup.property.lead')}</p>
       <ProblemNote error={error} />
 
       {items === null ? (
-        <p style={{ color: 'var(--ink-soft)' }}>Loading…</p>
+        <p style={{ color: 'var(--ink-soft)' }}>{t('common.loading')}</p>
       ) : has && !adding ? (
         <>
           <table className="ledger">
             <thead>
               <tr>
-                <th>Property</th>
-                <th>Location</th>
-                <th className="num">Units</th>
+                <th>{t('common.property')}</th>
+                <th>{t('setup.property.col.location')}</th>
+                <th className="num">{t('nav.units')}</th>
               </tr>
             </thead>
             <tbody>
@@ -59,12 +61,10 @@ export function FirstPropertyStep() {
               ))}
             </tbody>
           </table>
-          <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-            This step is done — you already have a property. Add another if you want to.
-          </p>
+          <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{t('setup.property.done')}</p>
           <div>
             <button type="button" className="btn btn-secondary" onClick={() => setAdding(true)}>
-              Add another property
+              {t('setup.property.add_another')}
             </button>
           </div>
         </>

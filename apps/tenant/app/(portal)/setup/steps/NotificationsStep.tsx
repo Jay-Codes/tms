@@ -6,16 +6,15 @@
  * decided when renters hear from them, so nothing else has to chase this later.
  */
 
+import { useT } from '@tms/ui';
 import { NotificationSettingsForm } from '../../../../components/NotificationSettingsForm';
 
 export function NotificationsStep() {
+  const t = useT();
   return (
     <div style={{ display: 'grid', gap: 'var(--sp-4)' }}>
-      <p style={{ maxWidth: 'var(--measure)' }}>
-        Rent reminders go out on their own. Choose which ones, at what hour, and in which language — you can change
-        any of it later under Settings → Notifications.
-      </p>
-      <NotificationSettingsForm compact saveLabel="Save notification settings" />
+      <p style={{ maxWidth: 'var(--measure)' }}>{t('setup.notifications.lead')}</p>
+      <NotificationSettingsForm compact saveLabel={t('notifysettings.save')} />
     </div>
   );
 }

@@ -3,20 +3,22 @@
 /** Create or edit a property. Validation is server-side; this is UX only. */
 
 import { useState } from 'react';
+import { useT } from '@tms/ui';
 import { ApiError, propertiesApi, toApiError, unwrapProperty, type Property } from '../lib/api';
 import { Field, ProblemNote } from './FormBits';
 
 export function PropertyForm({
   initial,
-  submitLabel = 'Add property',
+  submitLabelKey = 'properties.add',
   onSaved,
   onCancel,
 }: {
   initial?: Property;
-  submitLabel?: string;
+  submitLabelKey?: string;
   onSaved: (p: Property) => void;
   onCancel?: () => void;
 }) {
+  const t = useT();
   const [name, setName] = useState(initial?.name ?? '');
   const [location, setLocation] = useState(initial?.location_text ?? '');
   const [notes, setNotes] = useState(initial?.notes ?? '');
@@ -49,8 +51,8 @@ export function PropertyForm({
       <ProblemNote error={error} />
       <Field
         id="prop_name"
-        label="Property name"
-        hint='Your own name for it, e.g. "Mbezi Beach Block A".'
+        label={t('properties.form.name')}
+        hint={t('properties.form.name_hint')}
         error={error?.errors.name}
       >
         <input
@@ -59,19 +61,24 @@ export function PropertyForm({
           value={name}
           maxLength={120}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Mbezi Beach Block A"
+          placeholder={t('properties.form.name_ph')}
         />
       </Field>
-      <Field id="prop_loc" label="Location" hint="Street, ward or landmark." error={error?.errors.location_text}>
+      <Field
+        id="prop_loc"
+        label={t('properties.form.location')}
+        hint={t('properties.form.location_hint')}
+        error={error?.errors.location_text}
+      >
         <input
           id="prop_loc"
           className="input"
           value={location}
           onChange={(e) => setLocation(e.target.value)}
-          placeholder="Mbezi Beach, Kinondoni"
+          placeholder={t('properties.form.location_ph')}
         />
       </Field>
-      <Field id="prop_notes" label="Notes" hint="Optional. Anything you want to remember about this property.">
+      <Field id="prop_notes" label={t('common.notes')} hint={t('properties.form.notes_hint')}>
         <textarea
           id="prop_notes"
           className="input"
@@ -83,11 +90,11 @@ export function PropertyForm({
       </Field>
       <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
         <button type="submit" className="btn btn-primary" disabled={busy || !name.trim()}>
-          {busy ? 'Saving…' : submitLabel}
+          {busy ? t('common.saving') : t(submitLabelKey)}
         </button>
         {onCancel ? (
           <button type="button" className="btn btn-quiet" onClick={onCancel}>
-            Cancel
+            {t('common.cancel')}
           </button>
         ) : null}
       </div>

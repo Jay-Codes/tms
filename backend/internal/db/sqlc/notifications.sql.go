@@ -104,7 +104,7 @@ func (q *Queries) GetNotificationForSend(ctx context.Context, id pgtype.UUID) (G
 
 const getOrgNotification = `-- name: GetOrgNotification :one
 SELECT n.id, n.user_id, n.kind, n.dedupe_key, n.to_phone, n.body, n.status,
-       n.provider_msg_id, n.error, n.attempts, n.batch_id, n.sent_at, n.created_at,
+       n.provider_msg_id, n.error, n.attempts, n.batch_id, n.language, n.sent_at, n.created_at,
        COALESCE(ru.full_name, '')::text AS renter_name
 FROM notification_log n
 LEFT JOIN users ru ON ru.id = n.user_id
@@ -128,6 +128,7 @@ type GetOrgNotificationRow struct {
 	Error         *string            `json:"error"`
 	Attempts      int32              `json:"attempts"`
 	BatchID       pgtype.UUID        `json:"batch_id"`
+	Language      string             `json:"language"`
 	SentAt        pgtype.Timestamptz `json:"sent_at"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	RenterName    string             `json:"renter_name"`
@@ -150,6 +151,7 @@ func (q *Queries) GetOrgNotification(ctx context.Context, arg GetOrgNotification
 		&i.Error,
 		&i.Attempts,
 		&i.BatchID,
+		&i.Language,
 		&i.SentAt,
 		&i.CreatedAt,
 		&i.RenterName,
@@ -158,14 +160,14 @@ func (q *Queries) GetOrgNotification(ctx context.Context, arg GetOrgNotification
 }
 
 const insertBatchNotification = `-- name: InsertBatchNotification :one
-INSERT INTO notification_log (org_id, user_id, kind, channel, dedupe_key, payload, to_phone, body, batch_id)
+INSERT INTO notification_log (org_id, user_id, kind, channel, dedupe_key, payload, to_phone, body, batch_id, language)
 VALUES (
     $1, $2, $3, 'sms',
     $4, $5, $6, $7,
-    $8
+    $8, $9
 )
 ON CONFLICT (dedupe_key) DO NOTHING
-RETURNING id, org_id, user_id, kind, channel, dedupe_key, payload, provider_msg_id, status, sent_at, created_at, updated_at, to_phone, body, error, attempts, batch_id
+RETURNING id, org_id, user_id, kind, channel, dedupe_key, payload, provider_msg_id, status, sent_at, created_at, updated_at, to_phone, body, error, attempts, batch_id, language
 `
 
 type InsertBatchNotificationParams struct {
@@ -177,6 +179,7 @@ type InsertBatchNotificationParams struct {
 	ToPhone   string      `json:"to_phone"`
 	Body      string      `json:"body"`
 	BatchID   pgtype.UUID `json:"batch_id"`
+	Language  string      `json:"language"`
 }
 
 // InsertBatchNotification is Queue's bulk twin: it carries the batch a custom
@@ -191,6 +194,7 @@ func (q *Queries) InsertBatchNotification(ctx context.Context, arg InsertBatchNo
 		arg.ToPhone,
 		arg.Body,
 		arg.BatchID,
+		arg.Language,
 	)
 	var i NotificationLog
 	err := row.Scan(
@@ -211,19 +215,21 @@ func (q *Queries) InsertBatchNotification(ctx context.Context, arg InsertBatchNo
 		&i.Error,
 		&i.Attempts,
 		&i.BatchID,
+		&i.Language,
 	)
 	return i, err
 }
 
 const insertNotification = `-- name: InsertNotification :one
 
-INSERT INTO notification_log (org_id, user_id, kind, channel, dedupe_key, payload, to_phone, body)
+INSERT INTO notification_log (org_id, user_id, kind, channel, dedupe_key, payload, to_phone, body, language)
 VALUES (
     $1, $2, $3, 'sms',
-    $4, $5, $6, $7
+    $4, $5, $6, $7,
+    $8
 )
 ON CONFLICT (dedupe_key) DO NOTHING
-RETURNING id, org_id, user_id, kind, channel, dedupe_key, payload, provider_msg_id, status, sent_at, created_at, updated_at, to_phone, body, error, attempts, batch_id
+RETURNING id, org_id, user_id, kind, channel, dedupe_key, payload, provider_msg_id, status, sent_at, created_at, updated_at, to_phone, body, error, attempts, batch_id, language
 `
 
 type InsertNotificationParams struct {
@@ -234,6 +240,7 @@ type InsertNotificationParams struct {
 	Payload   []byte      `json:"payload"`
 	ToPhone   string      `json:"to_phone"`
 	Body      string      `json:"body"`
+	Language  string      `json:"language"`
 }
 
 // notification_log is the durable side of SMS delivery: Postgres is the truth,
@@ -251,6 +258,7 @@ func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotification
 		arg.Payload,
 		arg.ToPhone,
 		arg.Body,
+		arg.Language,
 	)
 	var i NotificationLog
 	err := row.Scan(
@@ -271,6 +279,7 @@ func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotification
 		&i.Error,
 		&i.Attempts,
 		&i.BatchID,
+		&i.Language,
 	)
 	return i, err
 }
@@ -324,6 +333,7 @@ const listActiveRenterRecipients = `-- name: ListActiveRenterRecipients :many
 
 SELECT DISTINCT ON (c.renter_user_id)
        c.renter_user_id, ru.full_name AS renter_name, ru.phone AS renter_phone,
+       ru.locale AS renter_locale,
        u.name AS unit_name, p.name AS property_name
 FROM contracts c
 JOIN units u      ON u.id = c.unit_id AND u.org_id = c.org_id
@@ -338,6 +348,7 @@ type ListActiveRenterRecipientsRow struct {
 	RenterUserID pgtype.UUID `json:"renter_user_id"`
 	RenterName   string      `json:"renter_name"`
 	RenterPhone  *string     `json:"renter_phone"`
+	RenterLocale string      `json:"renter_locale"`
 	UnitName     string      `json:"unit_name"`
 	PropertyName string      `json:"property_name"`
 }
@@ -360,6 +371,7 @@ func (q *Queries) ListActiveRenterRecipients(ctx context.Context, orgID pgtype.U
 			&i.RenterUserID,
 			&i.RenterName,
 			&i.RenterPhone,
+			&i.RenterLocale,
 			&i.UnitName,
 			&i.PropertyName,
 		); err != nil {
@@ -376,7 +388,7 @@ func (q *Queries) ListActiveRenterRecipients(ctx context.Context, orgID pgtype.U
 const listOrgNotifications = `-- name: ListOrgNotifications :many
 
 SELECT n.id, n.user_id, n.kind, n.dedupe_key, n.to_phone, n.body, n.status,
-       n.provider_msg_id, n.error, n.attempts, n.batch_id, n.sent_at, n.created_at,
+       n.provider_msg_id, n.error, n.attempts, n.batch_id, n.language, n.sent_at, n.created_at,
        COALESCE(ru.full_name, '')::text AS renter_name
 FROM notification_log n
 LEFT JOIN users ru ON ru.id = n.user_id
@@ -416,6 +428,7 @@ type ListOrgNotificationsRow struct {
 	Error         *string            `json:"error"`
 	Attempts      int32              `json:"attempts"`
 	BatchID       pgtype.UUID        `json:"batch_id"`
+	Language      string             `json:"language"`
 	SentAt        pgtype.Timestamptz `json:"sent_at"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	RenterName    string             `json:"renter_name"`
@@ -456,6 +469,7 @@ func (q *Queries) ListOrgNotifications(ctx context.Context, arg ListOrgNotificat
 			&i.Error,
 			&i.Attempts,
 			&i.BatchID,
+			&i.Language,
 			&i.SentAt,
 			&i.CreatedAt,
 			&i.RenterName,
@@ -474,7 +488,7 @@ const listScheduleReminderTargets = `-- name: ListScheduleReminderTargets :many
 SELECT s.id, s.contract_id, s.due_date, s.amount, s.paid_amount, s.status,
        c.renter_user_id,
        u.name AS unit_name, p.name AS property_name,
-       ru.full_name AS renter_name, ru.phone AS renter_phone,
+       ru.full_name AS renter_name, ru.phone AS renter_phone, ru.locale AS renter_locale,
        nd.due_date AS next_due_date
 FROM payment_schedules s
 JOIN contracts c  ON c.id = s.contract_id AND c.org_id = s.org_id AND c.deleted_at IS NULL
@@ -514,6 +528,7 @@ type ListScheduleReminderTargetsRow struct {
 	PropertyName string      `json:"property_name"`
 	RenterName   string      `json:"renter_name"`
 	RenterPhone  *string     `json:"renter_phone"`
+	RenterLocale string      `json:"renter_locale"`
 	NextDueDate  pgtype.Date `json:"next_due_date"`
 }
 
@@ -550,6 +565,7 @@ func (q *Queries) ListScheduleReminderTargets(ctx context.Context, arg ListSched
 			&i.PropertyName,
 			&i.RenterName,
 			&i.RenterPhone,
+			&i.RenterLocale,
 			&i.NextDueDate,
 		); err != nil {
 			return nil, err
@@ -565,6 +581,7 @@ func (q *Queries) ListScheduleReminderTargets(ctx context.Context, arg ListSched
 const listSelectedRenterRecipients = `-- name: ListSelectedRenterRecipients :many
 SELECT DISTINCT ON (ru.id)
        ru.id AS renter_user_id, ru.full_name AS renter_name, ru.phone AS renter_phone,
+       ru.locale AS renter_locale,
        COALESCE(u.name, '')::text AS unit_name,
        COALESCE(p.name, '')::text AS property_name
 FROM users ru
@@ -592,6 +609,7 @@ type ListSelectedRenterRecipientsRow struct {
 	RenterUserID pgtype.UUID `json:"renter_user_id"`
 	RenterName   string      `json:"renter_name"`
 	RenterPhone  *string     `json:"renter_phone"`
+	RenterLocale string      `json:"renter_locale"`
 	UnitName     string      `json:"unit_name"`
 	PropertyName string      `json:"property_name"`
 }
@@ -613,6 +631,7 @@ func (q *Queries) ListSelectedRenterRecipients(ctx context.Context, arg ListSele
 			&i.RenterUserID,
 			&i.RenterName,
 			&i.RenterPhone,
+			&i.RenterLocale,
 			&i.UnitName,
 			&i.PropertyName,
 		); err != nil {
@@ -700,7 +719,7 @@ func (q *Queries) ListStaleSendingNotifications(ctx context.Context, arg ListSta
 const listUnsignedContractsForOrg = `-- name: ListUnsignedContractsForOrg :many
 SELECT c.id, c.created_at, c.renter_user_id, c.rent_amount,
        u.name AS unit_name, p.name AS property_name,
-       ru.full_name AS renter_name, ru.phone AS renter_phone
+       ru.full_name AS renter_name, ru.phone AS renter_phone, ru.locale AS renter_locale
 FROM contracts c
 JOIN units u      ON u.id = c.unit_id AND u.org_id = c.org_id
 JOIN properties p ON p.id = u.property_id AND p.org_id = c.org_id
@@ -729,6 +748,7 @@ type ListUnsignedContractsForOrgRow struct {
 	PropertyName string             `json:"property_name"`
 	RenterName   string             `json:"renter_name"`
 	RenterPhone  *string            `json:"renter_phone"`
+	RenterLocale string             `json:"renter_locale"`
 }
 
 // ListUnsignedContractsForOrg finds contracts still waiting on the renter's
@@ -754,6 +774,7 @@ func (q *Queries) ListUnsignedContractsForOrg(ctx context.Context, arg ListUnsig
 			&i.PropertyName,
 			&i.RenterName,
 			&i.RenterPhone,
+			&i.RenterLocale,
 		); err != nil {
 			return nil, err
 		}

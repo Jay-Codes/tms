@@ -93,6 +93,19 @@ func DueDayPhrase(dueDay *int) string {
 	return "day " + strconv.Itoa(*dueDay)
 }
 
+// DueDayPhraseFor is DueDayPhrase in the language the contract is rendered in
+// (Phase 13). A Swahili document that says "on or before day 5" is a Swahili
+// document with an English sentence in the middle of it.
+func DueDayPhraseFor(lang string, dueDay *int) string {
+	if lang != LangSwahili {
+		return DueDayPhrase(dueDay)
+	}
+	if dueDay == nil {
+		return "siku ya kwanza"
+	}
+	return "siku ya " + strconv.Itoa(*dueDay)
+}
+
 // RentBasisPhrase renders `{{rent_basis}}`: the unit's own price and the span
 // it covers, as "TZS 100,000 / 30 days".
 //
@@ -101,6 +114,36 @@ func DueDayPhrase(dueDay *int) string {
 // the same wherever it is built.
 func RentBasisPhrase(formattedAmount string, rentPeriodDays int) string {
 	return formattedAmount + " / " + strconv.Itoa(rentPeriodDays) + " days"
+}
+
+// RentBasisPhraseFor is RentBasisPhrase in the contract's language.
+func RentBasisPhraseFor(lang, formattedAmount string, rentPeriodDays int) string {
+	if lang != LangSwahili {
+		return RentBasisPhrase(formattedAmount, rentPeriodDays)
+	}
+	return formattedAmount + " / siku " + strconv.Itoa(rentPeriodDays)
+}
+
+// Languages a contract may be rendered in (SPEC §3.2). They mirror
+// notify.LangSwahili / notify.LangEnglish; this package does not import notify
+// (the dependency runs the other way), so the two constants are stated here.
+const (
+	LangSwahili = "sw"
+	LangEnglish = "en"
+)
+
+// BodyFor picks the body a contract is rendered from: the Swahili one when the
+// contract is Swahili and the org has written one, else the English body.
+//
+// An org that has never touched its templates has both (the bootstrap seeds
+// them); an org that added a template of its own may have only `body_html`,
+// and a renter who prefers Swahili should still get the document rather than a
+// blank page.
+func BodyFor(lang, bodyHTML, bodyHTMLSW string) (body, resolvedLang string) {
+	if lang == LangSwahili && strings.TrimSpace(bodyHTMLSW) != "" {
+		return bodyHTMLSW, LangSwahili
+	}
+	return bodyHTML, LangEnglish
 }
 
 // SampleVars are the placeholder values POST /contract-templates/{id}/preview

@@ -6,10 +6,11 @@
 -- off a Redis list and has no org context — so they are guard-exempt.
 
 -- name: InsertNotification :one
-INSERT INTO notification_log (org_id, user_id, kind, channel, dedupe_key, payload, to_phone, body)
+INSERT INTO notification_log (org_id, user_id, kind, channel, dedupe_key, payload, to_phone, body, language)
 VALUES (
     sqlc.arg(org_id), sqlc.narg(user_id), sqlc.arg(kind), 'sms',
-    sqlc.arg(dedupe_key), sqlc.arg(payload), sqlc.arg(to_phone), sqlc.arg(body)
+    sqlc.arg(dedupe_key), sqlc.arg(payload), sqlc.arg(to_phone), sqlc.arg(body),
+    sqlc.arg(language)
 )
 ON CONFLICT (dedupe_key) DO NOTHING
 RETURNING *;
@@ -114,7 +115,7 @@ ORDER BY o.created_at, o.id;
 SELECT s.id, s.contract_id, s.due_date, s.amount, s.paid_amount, s.status,
        c.renter_user_id,
        u.name AS unit_name, p.name AS property_name,
-       ru.full_name AS renter_name, ru.phone AS renter_phone,
+       ru.full_name AS renter_name, ru.phone AS renter_phone, ru.locale AS renter_locale,
        nd.due_date AS next_due_date
 FROM payment_schedules s
 JOIN contracts c  ON c.id = s.contract_id AND c.org_id = s.org_id AND c.deleted_at IS NULL
@@ -142,7 +143,7 @@ ORDER BY s.due_date, s.id;
 -- name: ListUnsignedContractsForOrg :many
 SELECT c.id, c.created_at, c.renter_user_id, c.rent_amount,
        u.name AS unit_name, p.name AS property_name,
-       ru.full_name AS renter_name, ru.phone AS renter_phone
+       ru.full_name AS renter_name, ru.phone AS renter_phone, ru.locale AS renter_locale
 FROM contracts c
 JOIN units u      ON u.id = c.unit_id AND u.org_id = c.org_id
 JOIN properties p ON p.id = u.property_id AND p.org_id = c.org_id
@@ -165,6 +166,7 @@ ORDER BY c.created_at, c.id;
 -- name: ListActiveRenterRecipients :many
 SELECT DISTINCT ON (c.renter_user_id)
        c.renter_user_id, ru.full_name AS renter_name, ru.phone AS renter_phone,
+       ru.locale AS renter_locale,
        u.name AS unit_name, p.name AS property_name
 FROM contracts c
 JOIN units u      ON u.id = c.unit_id AND u.org_id = c.org_id
@@ -181,6 +183,7 @@ ORDER BY c.renter_user_id, c.created_at DESC;
 -- name: ListSelectedRenterRecipients :many
 SELECT DISTINCT ON (ru.id)
        ru.id AS renter_user_id, ru.full_name AS renter_name, ru.phone AS renter_phone,
+       ru.locale AS renter_locale,
        COALESCE(u.name, '')::text AS unit_name,
        COALESCE(p.name, '')::text AS property_name
 FROM users ru
@@ -201,11 +204,11 @@ ORDER BY ru.id;
 -- InsertBatchNotification is Queue's bulk twin: it carries the batch a custom
 -- send belongs to, so the log can group and count one broadcast.
 -- name: InsertBatchNotification :one
-INSERT INTO notification_log (org_id, user_id, kind, channel, dedupe_key, payload, to_phone, body, batch_id)
+INSERT INTO notification_log (org_id, user_id, kind, channel, dedupe_key, payload, to_phone, body, batch_id, language)
 VALUES (
     sqlc.arg(org_id), sqlc.narg(user_id), sqlc.arg(kind), 'sms',
     sqlc.arg(dedupe_key), sqlc.arg(payload), sqlc.arg(to_phone), sqlc.arg(body),
-    sqlc.narg(batch_id)
+    sqlc.narg(batch_id), sqlc.arg(language)
 )
 ON CONFLICT (dedupe_key) DO NOTHING
 RETURNING *;
@@ -217,7 +220,7 @@ RETURNING *;
 -- resolved here so the landlord's log reads as people rather than user ids.
 -- name: ListOrgNotifications :many
 SELECT n.id, n.user_id, n.kind, n.dedupe_key, n.to_phone, n.body, n.status,
-       n.provider_msg_id, n.error, n.attempts, n.batch_id, n.sent_at, n.created_at,
+       n.provider_msg_id, n.error, n.attempts, n.batch_id, n.language, n.sent_at, n.created_at,
        COALESCE(ru.full_name, '')::text AS renter_name
 FROM notification_log n
 LEFT JOIN users ru ON ru.id = n.user_id
@@ -236,7 +239,7 @@ LIMIT sqlc.arg(row_limit);
 -- notification is a 404 rather than something a landlord can read or retry.
 -- name: GetOrgNotification :one
 SELECT n.id, n.user_id, n.kind, n.dedupe_key, n.to_phone, n.body, n.status,
-       n.provider_msg_id, n.error, n.attempts, n.batch_id, n.sent_at, n.created_at,
+       n.provider_msg_id, n.error, n.attempts, n.batch_id, n.language, n.sent_at, n.created_at,
        COALESCE(ru.full_name, '')::text AS renter_name
 FROM notification_log n
 LEFT JOIN users ru ON ru.id = n.user_id

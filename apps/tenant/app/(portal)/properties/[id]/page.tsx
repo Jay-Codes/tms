@@ -27,9 +27,10 @@ import {
   type Unit,
 } from '../../../../lib/api';
 import { Amount } from '../../../../lib/format';
-import { TableScroll } from '@tms/ui';
+import { TableScroll, useT } from '@tms/ui';
 
 function PropertyBody({ id }: { id: string }) {
+  const t = useT();
   const router = useRouter();
   const [property, setProperty] = useState<Property | null>(null);
   const [units, setUnits] = useState<Unit[] | null>(null);
@@ -79,9 +80,7 @@ function PropertyBody({ id }: { id: string }) {
   const remove = async () => {
     if (!property) return;
     if (
-      !window.confirm(
-        `Delete "${property.name}"? Its units and their QR codes go with it. This cannot be undone.`,
-      )
+      !window.confirm(t('properties.delete_confirm', { name: property.name }))
     )
       return;
     setActionError(null);
@@ -96,13 +95,13 @@ function PropertyBody({ id }: { id: string }) {
   if (error) {
     return (
       <>
-        <PageHead title="Property" />
+        <PageHead title={t('common.property')} />
         <hr className="rule rule-strong" />
         <div style={{ paddingTop: 'var(--sp-5)', display: 'grid', gap: 'var(--sp-4)', maxWidth: 640 }}>
           <ProblemNote error={error} />
           <div>
             <Link href="/properties" className="btn btn-secondary">
-              Back to properties
+              {t('properties.back')}
             </Link>
           </div>
         </div>
@@ -113,18 +112,18 @@ function PropertyBody({ id }: { id: string }) {
   return (
     <>
       <PageHead
-        title={property?.name ?? 'Loading…'}
+        title={property?.name ?? t('common.loading')}
         lead={property?.location_text || undefined}
         actions={
           <>
             <Link href={`/properties/${id}/qr`} className="btn btn-secondary">
-              <Icon icon="solar:printer-linear" width={20} /> Print QR sheet
+              <Icon icon="solar:printer-linear" width={20} /> {t('qr.print_sheet')}
             </Link>
             <button type="button" className="btn btn-quiet" onClick={() => setSheet('edit')} disabled={!property}>
-              <Icon icon="solar:pen-linear" width={18} /> Edit
+              <Icon icon="solar:pen-linear" width={18} /> {t('common.edit')}
             </button>
             <button type="button" className="btn btn-danger" onClick={() => void remove()} disabled={!property}>
-              Delete
+              {t('common.delete')}
             </button>
           </>
         }
@@ -140,39 +139,39 @@ function PropertyBody({ id }: { id: string }) {
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-4)' }}>
           <h2 style={{ fontSize: 'var(--text-lg)' }}>
-            Units {units ? <span className="num">({units.length})</span> : null}
+            {t('nav.units')} {units ? <span className="num">({units.length})</span> : null}
           </h2>
           <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
             <button type="button" className="btn btn-secondary" onClick={() => setSheet('many')}>
-              Add many
+              {t('properties.add_many')}
             </button>
             <button type="button" className="btn btn-primary" onClick={() => setSheet('unit')}>
-              <Icon icon="solar:add-circle-linear" width={20} /> Add unit
+              <Icon icon="solar:add-circle-linear" width={20} /> {t('units.add')}
             </button>
           </div>
         </div>
 
-        <TableScroll label="Units">
+        <TableScroll label={t('nav.units')}>
         <table className="ledger">
           <thead>
             <tr>
-              <th>Unit</th>
-              <th>Status</th>
-              <th className="num">Current price</th>
-              <th>Scan code</th>
+              <th>{t('common.unit')}</th>
+              <th>{t('common.status')}</th>
+              <th className="num">{t('units.th.current_price')}</th>
+              <th>{t('units.th.scan_code')}</th>
             </tr>
           </thead>
           <tbody>
             {units === null ? (
               <tr>
                 <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
-                  Loading…
+                  {t('common.loading')}
                 </td>
               </tr>
             ) : units.length === 0 ? (
               <tr>
                 <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
-                  No units yet. Add the rooms, houses or shops in this property.
+                  {t('properties.units_empty')}
                 </td>
               </tr>
             ) : (
@@ -207,11 +206,11 @@ function PropertyBody({ id }: { id: string }) {
         </div>
       </section>
 
-      <Sheet open={sheet === 'edit'} title="Edit property" onClose={() => setSheet('none')}>
+      <Sheet open={sheet === 'edit'} title={t('properties.edit_title')} onClose={() => setSheet('none')}>
         {property ? (
           <PropertyForm
             initial={property}
-            submitLabel="Save property"
+            submitLabelKey="properties.form.submit_save"
             onSaved={(p) => {
               setProperty(p);
               setSheet('none');
@@ -221,7 +220,7 @@ function PropertyBody({ id }: { id: string }) {
         ) : null}
       </Sheet>
 
-      <Sheet open={sheet === 'unit'} title="Add unit" onClose={() => setSheet('none')}>
+      <Sheet open={sheet === 'unit'} title={t('units.add')} onClose={() => setSheet('none')}>
         <AddUnitForm
           propertyId={id}
           periods={periods}
@@ -233,7 +232,7 @@ function PropertyBody({ id }: { id: string }) {
         />
       </Sheet>
 
-      <Sheet open={sheet === 'many'} title="Add many units" onClose={() => setSheet('none')}>
+      <Sheet open={sheet === 'many'} title={t('properties.sheet.add_many')} onClose={() => setSheet('none')}>
         <AddManyUnitsForm
           propertyId={id}
           onAdded={() => {

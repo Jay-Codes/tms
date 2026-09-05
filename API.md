@@ -707,3 +707,178 @@ Phase 12 notes:
 - **`org_themes` has no separate `org_id` index**: `org_id` is its primary key,
   and a second index on the same column would be dead weight. The migration
   guard was widened to accept that shape.
+
+## Part 2 — Phase 13 (shipped)
+
+Swahili/English per user (SPEC §3.2/§5.13/§6, PLAN2 Phase 13). The rule the
+whole phase turns on: **the language of a message is a fact about the person
+receiving it.** `users.locale` decides; `orgs.settings.sms_language` survives
+only as the default for a renter who has never expressed a preference. A
+landlord who reads English no longer sends English to a renter who does not.
+
+`locale` is a closed set of two: `"sw" | "en"`. Anything else is a **400**
+validation error (`errors.locale = "must be one of: sw, en"`), like every other
+`OneOf` field on the platform. New accounts default to `sw`.
+
+### Locale on the account
+
+| route | change |
+| --- | --- |
+| `POST /auth/register/renter` | accepts optional `locale` — the value of the public SW/EN toggle at registration. Absent → `sw`. Recorded on the `auth.register_renter` audit row. |
+| `POST /orgs` | accepts optional `locale` for the owner being created. Recorded on `org.create`. |
+| `POST /org/members` | accepts optional `locale`; the invited member's screens open in it. The `member` in the response carries `locale`. |
+| `POST /auth/otp/send` | accepts optional `locale`. It is a **hint, not a preference**: it decides the language of this one code and only for a phone number that has no account yet. A number that resolves to a user is sent the code in that user's own locale. Nothing is written to `users`. |
+| `GET /auth/me`, `POST /auth/login`, every `{user}` payload | `user.locale` is returned, so the apps paint without a second round trip. |
+| `GET /me/profile` | `user.locale` is returned alongside the account fields. |
+| `GET /org/members` | each `member` carries `locale`. |
+
+### `PATCH /me` (renter, `tms_r`) and `PATCH /org/members/me` (org user, `tms_o`)
+
+The language switch, one endpoint per audience. Both take exactly
+`{"locale": "sw"|"en"}` and answer `200 {user}` with the full user shape:
+
+```json
+{"user":{"id":"…","kind":"renter","phone":"+255755000111","email":null,
+         "full_name":"Asha Mwakalinga","email_verified":false,
+         "status":"active","locale":"en","created_at":"…"}}
+```
+
+`locale` is **required** on these two routes (a PATCH that exists to set it):
+omitting it is `400 {"errors":{"locale":"locale is required"}}`. Both are
+audited `user.locale_update` with `before`/`after` = `{"locale":"…"}`.
+
+Neither route names a user id — **a member can only ever move their own**.
+`PATCH /org/members/me` lives under `/org/members` because it is the member's
+own row, not because it can reach another's.
+
+### Language on every renter-directed SMS
+
+Resolution is one total function, `notify.LanguageFor(userLocale, orgLanguage)`:
+the recipient's own locale, then the org's default, then `sw`. It never fails —
+a user row that predates `users.locale` and an org whose settings blob was
+never written both still get a language.
+
+Every renter-directed enqueue now resolves it against the recipient rather than
+the org: link approved/rejected, contract ready/terminated, welcome, thank you,
+the `reminder_7d` / `reminder_due` / `overdue_daily` sweep, the unsigned-contract
+nudge, and the login/sign OTP. The scheduler joins `users` for `locale`, so an
+English-speaking landlord's Swahili renter still gets Swahili.
+
+`notification_log.language` records what each message **was actually written
+in**, and is returned on every `GET /notifications/log` item as `language`. The
+delivery log can answer "which language did this renter get?" as data rather
+than by reading the prose.
+
+The OTP body moved out of the auth handler into the platform template
+catalogue as kind `otp` with a `{{code}}` variable. It is **not** in
+`TemplateKinds()` and cannot be overridden per org: nobody should be able to
+re-word the message that lets a person into their own account.
+
+### `POST /notifications/custom` — bilingual bulk send
+
+```json
+{"recipients":"all_active"|"selected", "renter_user_ids":["…"],
+ "body_sw":"Habari {{name}}, maji yatakatika kesho.",
+ "body_en":"Hello {{name}}, the water will be off tomorrow."}
+```
+
+At least one of `body_sw` / `body_en` is required. Each recipient gets the body
+for their resolved language; **when only one body is given, everybody gets
+it** — silence is not the safer failure for "the water is off tomorrow", and
+the response says which language each message actually went out in.
+
+`body` (Phase 6, single-language) still works and stands for both languages, so
+an existing caller keeps working unchanged. It is ignored when either of the
+new fields is present.
+
+Each body is validated **separately**, under its own field name, so the error
+names the tab the landlord typed in — `errors.body_sw`, `errors.body_en`, or
+`errors.body` for the legacy field. Same rules as Phase 6: ≤ 320 characters, no
+control characters, only `{{name}} {{unit}} {{property}} {{org}}`. No body at
+all → `400 {"errors":{"body_sw":"provide body_sw, body_en, or both"}}`.
+
+Response is **202**, with the Phase 6 fields plus `by_language`:
+
+```json
+{"batch_id":"e644a40e-fcd3-423b-b7e0-7c75f4573689",
+ "queued":4, "skipped":0,
+ "by_language":{"sw":3, "en":1}}
+```
+
+> Note: the planned contract above wrote this as `queued:{sw,en}`. It shipped
+> as a scalar `queued` plus a separate `by_language` map, so the Phase 6
+> `{queued, skipped}` shape is unchanged and the per-language counts are
+> additive rather than a breaking re-type of an existing field.
+
+Audited `notification.custom` with `body_sw`, `body_en` and `by_language`.
+
+### `GET /notifications/custom/recipients-preview` (audience org)
+
+The compose screen's question, asked before anything is sent. Takes the same
+filters as the send, as query parameters:
+`?recipients=all_active` or `?recipients=selected&renter_user_ids=<uuid>,<uuid>`
+(comma-separated), and resolves them through the same helper, so the counts it
+shows are the counts the send will produce.
+
+```json
+{"count":4, "skipped":0, "by_language":{"sw":3, "en":1}}
+```
+
+`skipped` counts renters with no phone number on file. Ids belonging to another
+org are skipped, never a 404 — the request was well formed, and the count is
+the honest answer. Unknown `recipients` → 400.
+
+### Bilingual contract templates
+
+`contract_templates` gains **`body_html_sw`**, the Swahili twin of `body_html`
+(which stays the English body). Empty means "this org has no Swahili terms".
+
+| route | change |
+| --- | --- |
+| `GET /contract-templates/{id}` | returns `body_html_sw` alongside `body_html` (both omitted when empty). |
+| `POST /contract-templates` | accepts `body_html_sw`. Optional — `body_html` remains required. |
+| `PATCH /contract-templates/{id}` | accepts `body_html_sw`; an explicit `""` **clears** it (an org that decides it does not want one), rather than being a validation failure. |
+| `POST /contract-templates/{id}/preview` | accepts `{language?:"sw"\|"en"}` and returns `language` — the body actually previewed. Asking for Swahili from a template that has none previews the English one rather than a blank page. `{{due_day}}` renders in the previewed language. |
+
+Both bodies go through the same sanitizer on write **and** on render, so a body
+stored before a policy change can never escape the current allowlist. Both
+carry exactly the same `{{variables}}`; a test pins that they cannot drift.
+
+`contract.DefaultTemplateBodySW` is the Swahili default, in the register a
+Tanzanian tenancy agreement is actually written in ("Mkataba wa Upangaji",
+"Mwenye Nyumba", "Mpangaji", "Kodi"). It is seeded on org bootstrap and by the
+seeder; migration 000015 seeds the byte-identical body for the orgs that
+already existed — but **only where the English body is still the platform
+wording verbatim**. A body the landlord has since edited is left alone: its
+Swahili counterpart is theirs to write, and guessing at one would put words the
+landlord never approved into a contract.
+
+### `POST /contracts {language?}`
+
+Optional `language`. Absent means **the renter's own locale** — the document a
+person signs should be in the language they read. The landlord may override it
+for one contract.
+
+The Swahili body is used when the org has written one; an org that has not
+keeps issuing the English document rather than a blank one, and `language`
+records which of the two the renter actually received. `{{due_day}}` and
+`{{rent_basis}}` render in the contract's language, so a Swahili document has
+no English clause in the middle of it.
+
+`contracts.language` is stored beside the terms it snapshots and returned on
+every `contract` DTO. **Contracts issued before Part 2 read `"en"`** — the sole
+template body was the English one, which is what they were rendered from.
+
+The snapshot flow is untouched: `snapshot_hash` still covers the rendered HTML,
+so a contract issued in Swahili verifies exactly as an English one does.
+
+### Migration `000015_language`
+
+Adds `notification_log.language` (`NOT NULL DEFAULT 'sw'`, checked `IN
+('sw','en')`), `contract_templates.body_html_sw` (`NOT NULL DEFAULT ''`, seeded
+as described above) and `contracts.language` (`NOT NULL DEFAULT 'en'`, checked
+`IN ('sw','en')`). `users.locale` already existed from 000012.
+
+### Audit actions
+
+`user.locale_update` joins the Part 2 action list.

@@ -13,10 +13,10 @@ import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useReadyToCountersign } from '../../components/ContractBits';
-import { CARD_LABELS, DashboardCustomize } from '../../components/DashboardCustomize';
+import { CARD_LABEL_KEYS, DashboardCustomize } from '../../components/DashboardCustomize';
 import { ChangeMark } from '../../components/ExpenseBits';
 import { StatTile, TileRow } from '../../components/ReportBits';
-import { CHART_ROLES, ChangeMark as DeltaMark, Sparkline } from '@tms/ui';
+import { CHART_ROLES, ChangeMark as DeltaMark, Sparkline, formatDateIntl, useLocale, useT } from '@tms/ui';
 import { PageHead } from '../../components/PageHead';
 import { pendingLabel, usePendingLinkRequests } from '../../components/NavBadges';
 import {
@@ -165,6 +165,8 @@ function useDashboardData() {
 }
 
 function DashboardBody() {
+  const t = useT();
+  const locale = useLocale();
   const { user, org } = useMe();
   const [firstProperty, setFirstProperty] = useState<Property | null>(null);
   const [prefs, setPrefs] = useState<DashboardPrefs>(() => readDashboardPrefs(null));
@@ -186,7 +188,7 @@ function DashboardBody() {
     return () => ac.abort();
   }, []);
 
-  const today = new Date().toLocaleDateString(undefined, {
+  const today = formatDateIntl(locale, new Date().toISOString(), {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
@@ -202,86 +204,133 @@ function DashboardBody() {
       switch (card) {
         case 'assets':
           return (
-            <DashCard key={card} icon="solar:buildings-2-linear" label={CARD_LABELS.assets} href="/properties" cta="Properties">
+            <DashCard
+              key={card}
+              icon="solar:buildings-2-linear"
+              label={t(CARD_LABEL_KEYS.assets)}
+              href="/properties"
+              cta={t('nav.properties')}
+            >
               <Figure
                 value={a ? `${a.properties} · ${a.units}` : '—'}
                 sub={
                   a
-                    ? `${a.properties} propert${a.properties === 1 ? 'y' : 'ies'}, ${a.units} unit${
-                        a.units === 1 ? '' : 's'
-                      } · ${Math.round((a.occupancy_rate ?? 0) * 100)}% occupied`
-                    : 'Waiting for figures.'
+                    ? t('dash.assets.sub', {
+                        properties: t.n('properties.count', a.properties),
+                        units: t.n('units.count', a.units),
+                        pct: Math.round((a.occupancy_rate ?? 0) * 100),
+                      })
+                    : t('dash.waiting')
                 }
               />
             </DashCard>
           );
         case 'renters':
           return (
-            <DashCard key={card} icon="solar:users-group-rounded-linear" label={CARD_LABELS.renters} href="/renters" cta="Open renters">
+            <DashCard
+              key={card}
+              icon="solar:users-group-rounded-linear"
+              label={t(CARD_LABEL_KEYS.renters)}
+              href="/renters"
+              cta={t('dash.cta.open_renters')}
+            >
               <Figure
                 value={summary ? summary.renters.active : '—'}
                 sub={
-                  summary
-                    ? `${summary.contracts.active} active contract${summary.contracts.active === 1 ? '' : 's'}`
-                    : 'Waiting for figures.'
+                  summary ? t.n('dash.active_contracts', summary.contracts.active) : t('dash.waiting')
                 }
               />
             </DashCard>
           );
         case 'payment_status':
           return (
-            <DashCard key={card} icon="solar:clipboard-check-linear" label={CARD_LABELS.payment_status} href="/reports" cta="Full report">
+            <DashCard
+              key={card}
+              icon="solar:clipboard-check-linear"
+              label={t(CARD_LABEL_KEYS.payment_status)}
+              href="/reports"
+              cta={t('dash.cta.full_report')}
+            >
               <Figure
                 value={
                   statuses === null ? (
                     '—'
                   ) : (
                     <span style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'baseline', flexWrap: 'wrap' }}>
-                      <span style={{ color: 'var(--stamp-paid)' }}>{count('paid')} paid</span>
-                      <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-lg)' }}>
-                        {count('pending') + count('partial')} pending
+                      <span style={{ color: 'var(--stamp-paid)' }}>
+                        {t('dash.status.paid', { count: count('paid') })}
                       </span>
-                      <span style={{ color: 'var(--stamp-overdue)' }}>{count('overdue')} overdue</span>
+                      <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-lg)' }}>
+                        {t('dash.status.pending', { count: count('pending') + count('partial') })}
+                      </span>
+                      <span style={{ color: 'var(--stamp-overdue)' }}>
+                        {t('dash.status.overdue', { count: count('overdue') })}
+                      </span>
                     </span>
                   )
                 }
-                sub={statuses ? `${statuses.length} renter${statuses.length === 1 ? '' : 's'} on a live contract` : undefined}
+                sub={statuses ? t.n('dash.renters_live', statuses.length) : undefined}
               />
             </DashCard>
           );
         case 'collections':
           return (
-            <DashCard key={card} icon="solar:wallet-money-linear" label={CARD_LABELS.collections} href="/payments?tab=history" cta="Payment history">
+            <DashCard
+              key={card}
+              icon="solar:wallet-money-linear"
+              label={t(CARD_LABEL_KEYS.collections)}
+              href="/payments?tab=history"
+              cta={t('dash.cta.payment_history')}
+            >
               <Figure
                 value={p ? fmtTZS(p.collected) : '—'}
-                sub={p ? `of ${fmtTZS(p.expected)} expected · ${fmtTZS(p.outstanding)} outstanding` : 'Waiting for figures.'}
+                sub={
+                  p
+                    ? t('dash.collections.sub', {
+                        expected: fmtTZS(p.expected),
+                        outstanding: fmtTZS(p.outstanding),
+                      })
+                    : t('dash.waiting')
+                }
               />
             </DashCard>
           );
         case 'link_requests':
           return (
-            <DashCard key={card} icon="solar:inbox-in-linear" label={CARD_LABELS.link_requests} href="/link-requests" cta={pending ? 'Review requests' : 'Open the inbox'}>
+            <DashCard
+              key={card}
+              icon="solar:inbox-in-linear"
+              label={t(CARD_LABEL_KEYS.link_requests)}
+              href="/link-requests"
+              cta={pending ? t('dash.cta.review_requests') : t('dash.cta.open_inbox')}
+            >
               <Figure
-                value={pending === null ? '—' : pending === 0 ? 'None waiting' : pendingLabel(pending)}
+                value={pending === null ? '—' : pending === 0 ? t('dash.link_requests.none') : pendingLabel(pending)}
                 sub={
                   pending
-                    ? 'A renter scanned a QR code and is waiting to be linked.'
-                    : 'Scanned requests land here for approval.'
+                    ? t('dash.link_requests.sub_waiting')
+                    : t('dash.link_requests.sub_idle')
                 }
               />
             </DashCard>
           );
         case 'overdue':
           return (
-            <DashCard key={card} icon="solar:bell-bing-linear" label={CARD_LABELS.overdue} href="/payments?tab=overdue" cta={p && p.overdue_count > 0 ? 'Chase them' : 'Open payments'}>
+            <DashCard
+              key={card}
+              icon="solar:bell-bing-linear"
+              label={t(CARD_LABEL_KEYS.overdue)}
+              href="/payments?tab=overdue"
+              cta={p && p.overdue_count > 0 ? t('dash.cta.chase') : t('dash.cta.open_payments')}
+            >
               <Figure
                 tone={p && p.overdue_count > 0 ? 'overdue' : undefined}
-                value={!p ? '—' : p.overdue_count === 0 ? 'Nothing overdue' : fmtTZS(p.overdue_amount)}
+                value={!p ? '—' : p.overdue_count === 0 ? t('dash.overdue.none') : fmtTZS(p.overdue_amount)}
                 sub={
                   p
                     ? p.overdue_count === 0
-                      ? 'Every payment that has fallen due has been settled.'
-                      : `${p.overdue_count} payment${p.overdue_count === 1 ? '' : 's'} past their due date.`
+                      ? t('dash.overdue.settled')
+                      : t.n('dash.overdue.count', p.overdue_count)
                     : undefined
                 }
               />
@@ -289,7 +338,13 @@ function DashboardBody() {
           );
         case 'expenses':
           return (
-            <DashCard key={card} icon="solar:bill-list-linear" label={CARD_LABELS.expenses} href="/expenses" cta="Open expenses">
+            <DashCard
+              key={card}
+              icon="solar:bill-list-linear"
+              label={t(CARD_LABEL_KEYS.expenses)}
+              href="/expenses"
+              cta={t('dash.cta.open_expenses')}
+            >
               <Figure
                 value={expenses ? fmtTZS(expenses.total.amount) : '—'}
                 sub={
@@ -297,12 +352,14 @@ function DashboardBody() {
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
                       <ChangeMark pct={expenses.change_pct} />
                       <span>
-                        vs {fmtTZS(expenses.previous_total?.amount ?? 0)} last month ·{' '}
-                        {expenses.total.count} expense{expenses.total.count === 1 ? '' : 's'}
+                        {t('dash.expenses.sub', {
+                          amount: fmtTZS(expenses.previous_total?.amount ?? 0),
+                          expenses: t.n('dash.expense_count', expenses.total.count),
+                        })}
                       </span>
                     </span>
                   ) : (
-                    'Waiting for figures.'
+                    t('dash.waiting')
                   )
                 }
               />
@@ -310,17 +367,25 @@ function DashboardBody() {
           );
         case 'revenue':
           return (
-            <DashCard key={card} icon="solar:chart-square-linear" label={CARD_LABELS.revenue} href="/reports" cta="Revenue report">
+            <DashCard
+              key={card}
+              icon="solar:chart-square-linear"
+              label={t(CARD_LABEL_KEYS.revenue)}
+              href="/reports"
+              cta={t('dash.cta.revenue_report')}
+            >
               <Figure
                 value={revenue ? fmtTZS(revenue.totals.collected) : '—'}
                 sub={
                   revenue ? (
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
                       <DeltaMark change={revenue.change_pct?.collected ?? null} goodDirection="up" />
-                      <span>vs {fmtTZS(revenue.previous_totals?.collected ?? 0)} last month</span>
+                      <span>
+                        {t('dash.revenue.sub', { amount: fmtTZS(revenue.previous_totals?.collected ?? 0) })}
+                      </span>
                     </span>
                   ) : (
-                    'Waiting for figures.'
+                    t('dash.waiting')
                   )
                 }
               />
@@ -329,14 +394,20 @@ function DashboardBody() {
                   values={revenue.buckets.map((b) => b.collected)}
                   color={CHART_ROLES.collected}
                   width={180}
-                  ariaLabel={`Collected each day this month, ${revenue.buckets.length} days`}
+                  ariaLabel={t('dash.revenue.spark_aria', { count: revenue.buckets.length })}
                 />
               ) : null}
             </DashCard>
           );
         case 'net_income':
           return (
-            <DashCard key={card} icon="solar:banknote-2-linear" label={CARD_LABELS.net_income} href="/reports" cta="Revenue report">
+            <DashCard
+              key={card}
+              icon="solar:banknote-2-linear"
+              label={t(CARD_LABEL_KEYS.net_income)}
+              href="/reports"
+              cta={t('dash.cta.revenue_report')}
+            >
               <Figure
                 tone={revenue && revenue.totals.net < 0 ? 'overdue' : undefined}
                 value={revenue ? fmtTZS(revenue.totals.net) : '—'}
@@ -345,11 +416,14 @@ function DashboardBody() {
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
                       <DeltaMark change={revenue.change_pct?.net ?? null} goodDirection="up" />
                       <span>
-                        collected {fmtTZS(revenue.totals.collected)} less expenses {fmtTZS(revenue.totals.expenses)}
+                        {t('dash.net.sub', {
+                          collected: fmtTZS(revenue.totals.collected),
+                          expenses: fmtTZS(revenue.totals.expenses),
+                        })}
                       </span>
                     </span>
                   ) : (
-                    'Waiting for figures.'
+                    t('dash.waiting')
                   )
                 }
               />
@@ -359,21 +433,21 @@ function DashboardBody() {
           return null;
       }
     },
-    [summary, statuses, pending, expenses, revenue],
+    [summary, statuses, pending, expenses, revenue, t],
   );
 
   return (
     <>
       <PageHead
-        title={org?.name ?? 'Dashboard'}
-        lead={`${today} · signed in as ${user?.full_name ?? ''}`}
+        title={org?.name ?? t('nav.dashboard')}
+        lead={t('dash.lead', { date: today, name: user?.full_name ?? '' })}
         actions={
           <>
             <button type="button" className="btn btn-quiet" onClick={() => setCustomizing(true)}>
-              <Icon icon="solar:widget-add-linear" width={20} /> Customize
+              <Icon icon="solar:widget-add-linear" width={20} /> {t('dash.customize')}
             </button>
             <Link href="/reports" className="btn btn-secondary">
-              <Icon icon="solar:chart-square-linear" width={20} /> Reports
+              <Icon icon="solar:chart-square-linear" width={20} /> {t('nav.reports')}
             </Link>
           </>
         }
@@ -383,7 +457,9 @@ function DashboardBody() {
 
       {prefs.cards.length === 0 ? (
         <p style={{ marginTop: 'var(--sp-5)', color: 'var(--ink-soft)' }}>
-          Every card is switched off. Use <strong>Customize</strong> to bring some back.
+          {t('dash.all_off').split('{action}')[0]}
+          <strong>{t('dash.customize')}</strong>
+          {t('dash.all_off').split('{action}')[1] ?? ''}
         </p>
       ) : (
         <div
@@ -403,12 +479,16 @@ function DashboardBody() {
         <div style={{ marginTop: 'var(--sp-6)' }}>
           <TileRow min={220}>
             <StatTile
-              label="Contracts awaiting signature"
+              label={t('dash.tile.pending_signature')}
               value={summary.contracts.pending_signature}
-              sub={<Link href="/contracts">Open contracts</Link>}
+              sub={<Link href="/contracts">{t('dash.open_contracts')}</Link>}
             />
             {summary.contracts.expiring > 0 ? (
-              <StatTile label="Contracts expiring" value={summary.contracts.expiring} sub="Ending within 30 days" />
+              <StatTile
+                label={t('dash.tile.expiring')}
+                value={summary.contracts.expiring}
+                sub={t('dash.tile.expiring_sub')}
+              />
             ) : null}
           </TileRow>
         </div>
@@ -416,12 +496,11 @@ function DashboardBody() {
 
       {firstProperty === null ? (
         <p style={{ marginTop: 'var(--sp-6)' }}>
-          Nothing has been recorded yet. Add your first property and units, then print the QR stickers so renters
-          can connect themselves.
+          {t('dash.empty_org')}
         </p>
       ) : null}
 
-      <h2 style={{ fontSize: 'var(--text-lg)', marginTop: 'var(--sp-7)' }}>Next steps</h2>
+      <h2 style={{ fontSize: 'var(--text-lg)', marginTop: 'var(--sp-7)' }}>{t('dash.next_steps')}</h2>
 
       <div
         style={{
@@ -434,48 +513,44 @@ function DashboardBody() {
         {/* FLOWS flow 3 step 5 — the landlord's turn, once the renter has signed. */}
         <EmptyCard
           icon="solar:document-text-linear"
-          title={countersign ? `Ready to countersign: ${countersign}` : 'Contracts'}
-          body={
-            countersign
-              ? 'A renter has signed. Activating countersigns the contract, writes the payment schedule and marks the unit occupied.'
-              : 'Contracts you have issued, what each is waiting for, and the terms they are written from.'
-          }
+          title={countersign ? t('dash.next.contracts_ready', { count: countersign }) : t('nav.contracts')}
+          body={countersign ? t('dash.next.contracts_ready_body') : t('dash.next.contracts_body')}
           action={
             <Link href="/contracts" className={countersign ? 'btn btn-primary' : 'btn btn-secondary'}>
-              {countersign ? 'Countersign now' : 'Open contracts'}
+              {countersign ? t('dash.next.countersign_now') : t('dash.open_contracts')}
             </Link>
           }
         />
         <EmptyCard
           icon="solar:qr-code-linear"
-          title="Print QR codes"
-          body="Each unit gets a permanent sticker. A renter scans it and starts their own registration."
+          title={t('dash.next.qr_title')}
+          body={t('dash.next.qr_body')}
           action={
             <Link
               href={firstProperty ? `/properties/${firstProperty.id}/qr` : '/properties'}
               className="btn btn-secondary"
             >
-              {firstProperty ? 'Print QR sheet' : 'Set up units'}
+              {firstProperty ? t('qr.print_sheet') : t('dash.next.qr_setup')}
             </Link>
           }
         />
         <EmptyCard
           icon="solar:users-group-rounded-linear"
-          title="Invite staff"
-          body="Give a manager access to record payments and approve renters, without sharing your password."
+          title={t('dash.next.staff_title')}
+          body={t('dash.next.staff_body')}
           action={
             <Link href="/settings" className="btn btn-secondary">
-              Invite a manager
+              {t('dash.next.staff_action')}
             </Link>
           }
         />
         <EmptyCard
           icon="solar:checklist-minimalistic-linear"
-          title="Finish setup"
-          body="Branding, first property, payment periods, units, contract template and reminders."
+          title={t('dash.next.setup_title')}
+          body={t('dash.next.setup_body')}
           action={
             <Link href="/setup" className="btn btn-secondary">
-              Open the wizard
+              {t('dash.next.setup_action')}
             </Link>
           }
         />

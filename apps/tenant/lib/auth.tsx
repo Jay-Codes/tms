@@ -11,6 +11,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useT } from '@tms/ui';
 import { ApiError, authApi, type OrgRef, type Session, type User } from './api';
 
 export interface AuthState {
@@ -103,6 +104,7 @@ export function useMe(): AuthState {
 export function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading, error, unauthenticated } = useMe();
   const router = useRouter();
+  const t = useT();
 
   useEffect(() => {
     if (unauthenticated) router.replace('/login');
@@ -111,7 +113,7 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   if (loading) {
     return (
       <main style={{ padding: 'var(--sp-7)' }}>
-        <p style={{ color: 'var(--ink-soft)' }}>Loading…</p>
+        <p style={{ color: 'var(--ink-soft)' }}>{t('common.loading')}</p>
       </main>
     );
   }
@@ -119,7 +121,7 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   if (error) {
     return (
       <main style={{ padding: 'var(--sp-7)', maxWidth: 640 }}>
-        <h1 style={{ fontSize: 'var(--text-xl)' }}>The server is not answering</h1>
+        <h1 style={{ fontSize: 'var(--text-xl)' }}>{t('common.server_silent')}</h1>
         <p style={{ marginTop: 'var(--sp-3)', color: 'var(--ink-soft)' }}>{error.detail}</p>
       </main>
     );
@@ -128,7 +130,7 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   if (!user) {
     return (
       <main style={{ padding: 'var(--sp-7)' }}>
-        <p style={{ color: 'var(--ink-soft)' }}>Redirecting to sign in…</p>
+        <p style={{ color: 'var(--ink-soft)' }}>{t('common.redirecting_signin')}</p>
       </main>
     );
   }

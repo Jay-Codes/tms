@@ -181,3 +181,95 @@ func TestDueDayPhraseReadsWithoutADueDay(t *testing.T) {
 		}
 	}
 }
+
+// TestDefaultTemplateBodySWMatchesMigration is the Swahili twin of
+// TestDefaultTemplateBodyMatchesMigration (Phase 13). Migration 000015 seeds
+// `body_html_sw` for the orgs that already existed and org creation seeds this
+// constant for new ones; if the two drift, two orgs on the same platform issue
+// different Swahili terms.
+func TestDefaultTemplateBodySWMatchesMigration(t *testing.T) {
+	raw, err := os.ReadFile("../../migrations/000015_language.up.sql")
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	const marker = "$tplsw$"
+	sql := string(raw)
+	start := strings.Index(sql, marker)
+	if start < 0 {
+		t.Fatalf("migration carries no %s-quoted Swahili template body", marker)
+	}
+	rest := sql[start+len(marker):]
+	end := strings.Index(rest, marker)
+	if end < 0 {
+		t.Fatalf("the migration's Swahili template body is not closed")
+	}
+	if got := rest[:end]; got != contract.DefaultTemplateBodySW {
+		t.Errorf("the migration's body and contract.DefaultTemplateBodySW have drifted\n--- migration ---\n%s\n--- constant ---\n%s",
+			got, contract.DefaultTemplateBodySW)
+	}
+}
+
+// TestDefaultTemplateBodiesCarryTheSameVariables: a contract renders from
+// whichever body its language names, so a placeholder present in one and
+// missing from the other would make the same tenancy read differently
+// depending on the renter's language.
+func TestDefaultTemplateBodiesCarryTheSameVariables(t *testing.T) {
+	for _, v := range contract.Variables {
+		ph := "{{" + v + "}}"
+		inEN := strings.Contains(contract.DefaultTemplateBody, ph)
+		inSW := strings.Contains(contract.DefaultTemplateBodySW, ph)
+		if inEN != inSW {
+			t.Errorf("%s: english=%v swahili=%v — the two bodies disagree", ph, inEN, inSW)
+		}
+	}
+	// And the Swahili body survives the sanitizer whole, like the English one.
+	if clean := contract.SanitizeHTML(contract.DefaultTemplateBodySW); !strings.Contains(clean, "Mkataba wa Upangaji") {
+		t.Errorf("the sanitizer gutted the Swahili default body: %q", clean)
+	}
+}
+
+// TestBodyForPicksTheLanguageThatExists: Swahili when the org has written it,
+// English otherwise — and the resolved language is the one actually used, so a
+// contract never records a language its terms are not in.
+func TestBodyForPicksTheLanguageThatExists(t *testing.T) {
+	const en, sw = "<p>English</p>", "<p>Kiswahili</p>"
+	cases := []struct {
+		name, want, wantLang, lang, sw string
+	}{
+		{"swahili wanted and written", sw, contract.LangSwahili, "sw", sw},
+		{"swahili wanted, none written", en, contract.LangEnglish, "sw", ""},
+		{"swahili wanted, only blanks written", en, contract.LangEnglish, "sw", "   "},
+		{"english wanted", en, contract.LangEnglish, "en", sw},
+		{"nothing wanted", en, contract.LangEnglish, "", sw},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			body, lang := contract.BodyFor(c.lang, en, c.sw)
+			if body != c.want || lang != c.wantLang {
+				t.Errorf("BodyFor(%q, en, %q) = (%q, %q), want (%q, %q)",
+					c.lang, c.sw, body, lang, c.want, c.wantLang)
+			}
+		})
+	}
+}
+
+// TestDueDayPhraseForSpeaksTheContractLanguage: a Swahili document with an
+// English clause in the middle of it is not a Swahili document.
+func TestDueDayPhraseForSpeaksTheContractLanguage(t *testing.T) {
+	five := 5
+	if got := contract.DueDayPhraseFor(contract.LangSwahili, &five); got != "siku ya 5" {
+		t.Errorf("sw/5 = %q", got)
+	}
+	if got := contract.DueDayPhraseFor(contract.LangSwahili, nil); got != "siku ya kwanza" {
+		t.Errorf("sw/nil = %q", got)
+	}
+	if got := contract.DueDayPhraseFor(contract.LangEnglish, &five); got != contract.DueDayPhrase(&five) {
+		t.Errorf("en/5 = %q, want the English phrase", got)
+	}
+	if got := contract.RentBasisPhraseFor(contract.LangSwahili, "TZS 100,000", 30); got != "TZS 100,000 / siku 30" {
+		t.Errorf("sw rent basis = %q", got)
+	}
+	if got := contract.RentBasisPhraseFor(contract.LangEnglish, "TZS 100,000", 30); got != "TZS 100,000 / 30 days" {
+		t.Errorf("en rent basis = %q", got)
+	}
+}

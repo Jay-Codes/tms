@@ -23,6 +23,7 @@
 import { useEffect } from 'react';
 import { publicApi, renterApi, type PublicBranding } from '../lib/api';
 import { applyTheme, readCachedTheme, resetTheme, toResolvedTheme, writeCachedTheme } from '../lib/theme';
+import { rememberOrgLocale } from '../lib/locale';
 
 const SYNCED_KEY = 'tms.enduser.org-theme-synced';
 
@@ -54,6 +55,7 @@ export function OrgThemeSync() {
         if (!slug) return;
 
         const branding: PublicBranding = await publicApi.branding(slug, ac.signal);
+        rememberOrgLocale(branding);
         if (!branding?.theme) return;
         const theme = toResolvedTheme(branding.theme);
         applyTheme(theme);

@@ -7,27 +7,29 @@
  * happened — active, ended, terminated. Anything still open is pencilled.
  */
 
+import { useT, type Translator } from '@tms/ui';
 import { hasRenterSignature, type Contract, type ContractStatus } from '../lib/api';
 
 export function contractStatusLabel(
+  t: Translator,
   status: ContractStatus,
   renterSigned: boolean,
 ): { text: string; stamped: boolean; tone: 'paid' | 'overdue' | 'plain' } {
   switch (status) {
     case 'pending_signature':
       return renterSigned
-        ? { text: 'Waiting for landlord to countersign', stamped: false, tone: 'plain' }
-        : { text: 'Awaiting your signature', stamped: false, tone: 'plain' };
+        ? { text: t('contract.status.awaitingLandlord'), stamped: false, tone: 'plain' }
+        : { text: t('contract.status.awaitingYou'), stamped: false, tone: 'plain' };
     case 'active':
-      return { text: 'Active', stamped: true, tone: 'paid' };
+      return { text: t('contract.status.active'), stamped: true, tone: 'paid' };
     case 'expiring':
-      return { text: 'Ending soon', stamped: false, tone: 'plain' };
+      return { text: t('contract.status.expiring'), stamped: false, tone: 'plain' };
     case 'ended':
-      return { text: 'Ended', stamped: true, tone: 'plain' };
+      return { text: t('contract.status.ended'), stamped: true, tone: 'plain' };
     case 'terminated':
-      return { text: 'Terminated', stamped: true, tone: 'overdue' };
+      return { text: t('contract.status.terminated'), stamped: true, tone: 'overdue' };
     default:
-      return { text: 'Draft', stamped: false, tone: 'plain' };
+      return { text: t('contract.status.draft'), stamped: false, tone: 'plain' };
   }
 }
 
@@ -38,7 +40,8 @@ export function ContractStamp({
   status: ContractStatus;
   renterSigned: boolean;
 }) {
-  const mark = contractStatusLabel(status, renterSigned);
+  const t = useT();
+  const mark = contractStatusLabel(t, status, renterSigned);
   if (!mark.stamped) return <span className="pencil">{mark.text}</span>;
   const cls =
     mark.tone === 'paid' ? 'stamp stamp-paid' : mark.tone === 'overdue' ? 'stamp stamp-overdue' : 'stamp';

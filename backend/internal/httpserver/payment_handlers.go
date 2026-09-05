@@ -738,6 +738,8 @@ type paymentMessage struct {
 	OrgID     string
 	UserID    string
 	PaymentID string
+	// Lang is the org's default for renters without a preference; the
+	// recipient's own `users.locale` wins over it (Phase 13).
 	Lang      string
 	Phone     string
 	Vars      notify.Vars
@@ -760,10 +762,12 @@ func (s *Server) queuePaymentSMS(ctx context.Context, q *sqlc.Queries, m payment
 			"payment_id", m.PaymentID)
 		return "", nil
 	}
+	lang := s.recipientLang(ctx, q, m.UserID, m.Lang)
 	id, err := notify.Queue(ctx, q, notify.Msg{
 		OrgID: m.OrgID, UserID: m.UserID, Kind: notify.KindThankYou,
 		DedupeKey: notify.KindThankYou + ":" + m.PaymentID, Phone: m.Phone,
-		Body: notify.Render(notify.KindThankYou, m.Lang, m.Vars, m.Overrides),
+		Body:     notify.Render(notify.KindThankYou, lang, m.Vars, m.Overrides),
+		Language: lang,
 	})
 	if errors.Is(err, notify.ErrDuplicate) {
 		return "", nil

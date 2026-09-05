@@ -10,22 +10,24 @@
 
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
+import { useT } from '@tms/ui';
 import { NotificationSettingsForm } from '../../../../components/NotificationSettingsForm';
 import { PageHead } from '../../../../components/PageHead';
 
 function NotificationSettingsBody() {
+  const t = useT();
   return (
     <>
       <PageHead
-        title="Notifications"
-        lead="Rent reminders go out automatically. This is where you decide which ones, when, and how they read."
+        title={t('notifysettings.title')}
+        lead={t('notifysettings.lead')}
         actions={
           <>
             <Link href="/notifications" className="btn btn-secondary">
-              <Icon icon="solar:chat-round-line-linear" width={20} /> Messages
+              <Icon icon="solar:chat-round-line-linear" width={20} /> {t('nav.messages')}
             </Link>
             <Link href="/settings" className="btn btn-quiet">
-              <Icon icon="solar:arrow-left-linear" width={20} /> Settings
+              <Icon icon="solar:arrow-left-linear" width={20} /> {t('nav.settings')}
             </Link>
           </>
         }

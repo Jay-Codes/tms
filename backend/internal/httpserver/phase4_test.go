@@ -739,7 +739,9 @@ func TestContractDocumentServesBothParties(t *testing.T) {
 			t.Errorf("%s: contract_id = %q", name, got)
 		}
 		terms := doc.str(t, "terms_html")
-		if !strings.Contains(terms, "Tenancy Agreement") {
+		// The fixture's renter has the default locale, `sw`, so the document
+		// is rendered from the seeded Swahili body (Phase 13).
+		if !strings.Contains(terms, "Mkataba wa Upangaji") {
 			t.Errorf("%s: the document carries no rendered terms: %q", name, terms)
 		}
 		if strings.Contains(terms, "{{") {
@@ -1099,7 +1101,8 @@ func TestRenterCannotCallOrgWrites(t *testing.T) {
 
 // TestTermsReadWithoutADueDay: most contracts have no due day (the rows fall
 // due on the day their period starts), and the seeded template still has to
-// read as English for them.
+// read as a sentence for them — here in Swahili, the fixture renter's locale
+// (the English phrasing is covered in internal/contract).
 func TestTermsReadWithoutADueDay(t *testing.T) {
 	h := newHarness(t)
 	fix := h.newContractFixture(t, "DueWords", "0714000310", "+255714000311")
@@ -1107,10 +1110,10 @@ func TestTermsReadWithoutADueDay(t *testing.T) {
 	doc := fix.renter.do(http.MethodGet, "/contracts/"+fix.contractID+"/document", nil).
 		mustStatus(t, http.StatusOK, "document")
 	terms := doc.str(t, "terms_html")
-	if !strings.Contains(terms, "on or before the first day of each payment period") {
+	if !strings.Contains(terms, "kabla au ifikapo siku ya kwanza ya kila kipindi cha malipo") {
 		t.Errorf("the rent clause does not read without a due day: %s", terms)
 	}
-	if strings.Contains(terms, "before  of") || strings.Contains(terms, "day  of") {
+	if strings.Contains(terms, "ifikapo  ya") || strings.Contains(terms, "siku ya  ya") {
 		t.Errorf("the rent clause has a hole where the due day would be: %s", terms)
 	}
 }

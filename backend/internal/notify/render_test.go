@@ -198,3 +198,54 @@ func TestHasControlChars(t *testing.T) {
 		}
 	}
 }
+
+// TestLanguageFor is the whole of Phase 13's resolution rule in one table: the
+// recipient's own locale decides, the org's setting is only the fallback for
+// somebody who has never said, and Swahili is what is left when neither is
+// usable. It is total — a user row that predates `users.locale` and an org
+// whose settings blob was never written both still get a language.
+func TestLanguageFor(t *testing.T) {
+	cases := []struct{ name, user, org, want string }{
+		{"the renter's own locale wins", "en", "sw", notify.LangEnglish},
+		{"and wins the other way too", "sw", "en", notify.LangSwahili},
+		{"no preference falls to the org", "", "en", notify.LangEnglish},
+		{"no preference, swahili org", "", "sw", notify.LangSwahili},
+		{"neither set is swahili", "", "", notify.LangSwahili},
+		{"nonsense user locale falls through", "fr", "en", notify.LangEnglish},
+		{"nonsense on both is swahili", "fr", "de", notify.LangSwahili},
+		{"a nonsense org cannot override a good user locale", "en", "de", notify.LangEnglish},
+		{"case is not normalised — 'EN' is not a locale", "EN", "", notify.LangSwahili},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := notify.LanguageFor(c.user, c.org); got != c.want {
+				t.Errorf("LanguageFor(%q, %q) = %q, want %q", c.user, c.org, got, c.want)
+			}
+		})
+	}
+}
+
+// TestOTPRendersInBothLanguages: the verification code is renter-facing
+// platform text, so it lives in the catalogue and carries `{{code}}` — but it
+// is not a kind an org may re-word, since nobody should be able to edit the
+// message that lets a person into their own account.
+func TestOTPRendersInBothLanguages(t *testing.T) {
+	for _, lang := range []string{notify.LangSwahili, notify.LangEnglish} {
+		body := notify.Render(notify.KindOTP, lang, notify.Vars{Code: "123456"}, nil)
+		if !strings.Contains(body, "123456") {
+			t.Errorf("%s OTP body does not carry the code: %q", lang, body)
+		}
+		if strings.Contains(body, "{{") {
+			t.Errorf("%s OTP body left a placeholder behind: %q", lang, body)
+		}
+	}
+	if notify.Render(notify.KindOTP, notify.LangSwahili, notify.Vars{Code: "1"}, nil) ==
+		notify.Render(notify.KindOTP, notify.LangEnglish, notify.Vars{Code: "1"}, nil) {
+		t.Error("the two OTP wordings are identical")
+	}
+	for _, k := range notify.TemplateKinds() {
+		if k == notify.KindOTP {
+			t.Error("otp is offered as an org-overridable template kind; it must not be")
+		}
+	}
+}

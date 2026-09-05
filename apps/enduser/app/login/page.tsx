@@ -9,15 +9,18 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useT } from '@tms/ui';
 import { authApi } from '../../lib/api';
 import { readNextParam, useMe, useNextParam } from '../../lib/auth';
 import { countdown, displayPhone, errorMessage, isValidPhone, normalizePhone } from '../../lib/format';
 import { Notice, Screen, ScreenHeader } from '../../components/Screen';
 import { PlatformTheme } from '../../components/OrgThemeSync';
+import { LanguageToggle } from '../../components/LanguageToggle';
 
 type Mode = 'pin' | 'otp-send' | 'otp-verify';
 
 export default function LoginPage() {
+  const t = useT();
   const router = useRouter();
   const { setSession } = useMe();
   const nextPath = useNextParam();
@@ -49,11 +52,11 @@ export default function LoginPage() {
     e.preventDefault();
     const e164 = normalizePhone(phoneInput);
     if (!e164) {
-      setError('Enter a Tanzanian mobile number, e.g. 0712 345 678.');
+      setError(t('error.phone'));
       return;
     }
     if (!pin) {
-      setError('Enter your PIN.');
+      setError(t('error.pinRequired'));
       return;
     }
     setBusy(true);
@@ -62,7 +65,7 @@ export default function LoginPage() {
       const res = await authApi.loginWithPin(e164, pin);
       finish(res.user, res.org ?? null);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(errorMessage(t, err));
     } finally {
       setBusy(false);
     }
@@ -77,17 +80,17 @@ export default function LoginPage() {
       setCooldown(res.resend_after_seconds ?? 60);
       setMode('otp-verify');
     } catch (err) {
-      setError(errorMessage(err));
+      setError(errorMessage(t, err));
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [t]);
 
   function submitOtpSend(e: React.FormEvent) {
     e.preventDefault();
     const e164 = normalizePhone(phoneInput);
     if (!e164) {
-      setError('Enter a Tanzanian mobile number, e.g. 0712 345 678.');
+      setError(t('error.phone'));
       return;
     }
     void sendOtp(e164);
@@ -96,7 +99,7 @@ export default function LoginPage() {
   async function submitOtpVerify(e: React.FormEvent) {
     e.preventDefault();
     if (!/^\d{6}$/.test(code)) {
-      setError('Enter the 6-digit code from the SMS.');
+      setError(t('error.code'));
       return;
     }
     setBusy(true);
@@ -105,7 +108,7 @@ export default function LoginPage() {
       const res = await authApi.otpVerifyLogin(phone, code);
       finish(res.user, res.org ?? null);
     } catch (err) {
-      setError(errorMessage(err, 5));
+      setError(errorMessage(t, err, 5));
     } finally {
       setBusy(false);
     }
@@ -119,14 +122,14 @@ export default function LoginPage() {
     <Screen>
       <PlatformTheme />
       <ScreenHeader
-        eyebrow="Welcome back"
-        title={mode === 'otp-verify' ? 'Enter the code' : 'Sign in'}
+        eyebrow={t('login.eyebrow')}
+        title={mode === 'otp-verify' ? t('otp.title') : t('login.title')}
         lead={
           mode === 'pin'
-            ? 'Your phone number and the PIN you chose.'
+            ? t('login.lead.pin')
             : mode === 'otp-send'
-              ? 'We will send a one-time code instead of asking for your PIN.'
-              : `Sent to ${displayPhone(phone)}.`
+              ? t('login.lead.otp')
+              : t('otp.sentTo', { phone: displayPhone(phone) })
         }
       />
 
@@ -135,7 +138,7 @@ export default function LoginPage() {
       {mode === 'pin' && (
         <form onSubmit={submitPin} style={{ display: 'grid', gap: 'var(--sp-4)' }} noValidate>
           <div className={`field${phoneInput && !isValidPhone(phoneInput) ? ' invalid' : ''}`}>
-            <label htmlFor="phone">Phone number</label>
+            <label htmlFor="phone">{t('field.phone')}</label>
             <input
               id="phone"
               className="input"
@@ -143,13 +146,13 @@ export default function LoginPage() {
               inputMode="tel"
               autoComplete="tel"
               autoFocus
-              placeholder="0712 345 678"
+              placeholder={t('field.phonePlaceholder')}
               value={phoneInput}
               onChange={(e) => setPhoneInput(e.target.value)}
             />
           </div>
           <div className="field">
-            <label htmlFor="pin">PIN</label>
+            <label htmlFor="pin">{t('field.pin')}</label>
             <input
               id="pin"
               className="input"
@@ -162,7 +165,7 @@ export default function LoginPage() {
             />
           </div>
           <button className="btn btn-primary" type="submit" disabled={busy}>
-            {busy ? 'Signing in…' : 'Sign in'}
+            {busy ? t('login.submitting') : t('login.submit')}
           </button>
           <button
             className="btn btn-quiet"
@@ -172,10 +175,10 @@ export default function LoginPage() {
               setError(null);
             }}
           >
-            Use OTP instead
+            {t('login.useOtp')}
           </button>
           <Link className="btn btn-quiet" href={registerHref}>
-            Create an account
+            {t('login.createAccount')}
           </Link>
         </form>
       )}
@@ -183,7 +186,7 @@ export default function LoginPage() {
       {mode === 'otp-send' && (
         <form onSubmit={submitOtpSend} style={{ display: 'grid', gap: 'var(--sp-4)' }} noValidate>
           <div className={`field${phoneInput && !isValidPhone(phoneInput) ? ' invalid' : ''}`}>
-            <label htmlFor="otp-phone">Phone number</label>
+            <label htmlFor="otp-phone">{t('field.phone')}</label>
             <input
               id="otp-phone"
               className="input"
@@ -191,13 +194,13 @@ export default function LoginPage() {
               inputMode="tel"
               autoComplete="tel"
               autoFocus
-              placeholder="0712 345 678"
+              placeholder={t('field.phonePlaceholder')}
               value={phoneInput}
               onChange={(e) => setPhoneInput(e.target.value)}
             />
           </div>
           <button className="btn btn-primary" type="submit" disabled={busy}>
-            {busy ? 'Sending…' : 'Send code'}
+            {busy ? t('common.sending') : t('login.sendCode')}
           </button>
           <button
             className="btn btn-quiet"
@@ -207,7 +210,7 @@ export default function LoginPage() {
               setError(null);
             }}
           >
-            Use my PIN instead
+            {t('login.usePin')}
           </button>
         </form>
       )}
@@ -215,7 +218,7 @@ export default function LoginPage() {
       {mode === 'otp-verify' && (
         <form onSubmit={submitOtpVerify} style={{ display: 'grid', gap: 'var(--sp-4)' }} noValidate>
           <div className="field">
-            <label htmlFor="code">6-digit code</label>
+            <label htmlFor="code">{t('field.code')}</label>
             <input
               id="code"
               className="input"
@@ -235,7 +238,7 @@ export default function LoginPage() {
             />
           </div>
           <button className="btn btn-primary" type="submit" disabled={busy || code.length < 6}>
-            {busy ? 'Checking…' : 'Sign in'}
+            {busy ? t('common.checking') : t('login.submit')}
           </button>
           <button
             className="btn btn-quiet"
@@ -243,7 +246,7 @@ export default function LoginPage() {
             disabled={busy || cooldown > 0}
             onClick={() => void sendOtp(phone)}
           >
-            {cooldown > 0 ? `Resend code in ${countdown(cooldown)}` : 'Resend code'}
+            {cooldown > 0 ? t('otp.resendIn', { time: countdown(cooldown) }) : t('otp.resend')}
           </button>
           <button
             className="btn btn-quiet"
@@ -254,10 +257,14 @@ export default function LoginPage() {
               setError(null);
             }}
           >
-            Use my PIN instead
+            {t('login.usePin')}
           </button>
         </form>
       )}
+
+      <footer style={{ marginTop: 'auto', paddingTop: 'var(--sp-5)' }}>
+        <LanguageToggle />
+      </footer>
     </Screen>
   );
 }

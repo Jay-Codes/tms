@@ -10,14 +10,16 @@
 INSERT INTO contracts (
     org_id, unit_id, renter_user_id, template_id, terms_snapshot_html,
     rent_amount, rent_period_days, payment_period_id, payment_period_days,
-    term_days, start_date, end_date, due_day, status, snapshot_hash, link_request_id
+    term_days, start_date, end_date, due_day, status, snapshot_hash, link_request_id,
+    language
 )
 VALUES (
     sqlc.arg(org_id), sqlc.arg(unit_id), sqlc.arg(renter_user_id), sqlc.narg(template_id),
     sqlc.arg(terms_snapshot_html), sqlc.arg(rent_amount), sqlc.arg(rent_period_days),
     sqlc.narg(payment_period_id), sqlc.arg(payment_period_days), sqlc.arg(term_days),
     sqlc.arg(start_date), sqlc.arg(end_date), sqlc.narg(due_day), sqlc.arg(status),
-    sqlc.arg(snapshot_hash), sqlc.narg(link_request_id)
+    sqlc.arg(snapshot_hash), sqlc.narg(link_request_id),
+    COALESCE(sqlc.narg(language)::text, 'en')
 )
 RETURNING *;
 

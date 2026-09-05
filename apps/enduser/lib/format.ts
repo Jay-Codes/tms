@@ -6,6 +6,7 @@
  * spending an SMS.
  */
 
+import { formatDateIntl, type Locale, type Translator } from '@tms/ui';
 import { ApiError } from './api';
 
 /**
@@ -45,23 +46,41 @@ export function isValidPin(pin: string): boolean {
 }
 
 /**
- * One line of copy for any thrown error. 429s get the "try again in N
- * minutes" wording the flows call for; the backend's own `detail` wins
- * whenever it sent one.
+ * One line of copy for any thrown error, in the reader's language.
+ *
+ * The backend's own `detail` (and `title`, when it sent one) is prose written
+ * for this renter by the API and is shown verbatim — never re-translated.
+ * Everything the client composes itself comes from the dictionaries: the
+ * "try again in N minutes" wording the flows call for, the offline line, and
+ * the generic per-status fallbacks.
  */
-export function errorMessage(err: unknown, fallbackRetryMinutes = 10): string {
+export function errorMessage(t: Translator, err: unknown, fallbackRetryMinutes = 10): string {
   if (err instanceof ApiError) {
     if (err.status === 429) {
       if (err.detail) return err.detail;
       const minutes = err.retryAfterSeconds
         ? Math.max(1, Math.ceil(err.retryAfterSeconds / 60))
         : fallbackRetryMinutes;
-      return `Too many attempts, try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`;
+      return t.n('error.retryMinutes', minutes);
     }
-    return err.userMessage;
+    if (err.detail) return err.detail;
+    if (err.is('upload_failed')) return t('error.upload');
+    if (err.is('signature_too_large')) return t('error.signatureTooLarge');
+    if (err.serverTitle) return err.serverTitle;
+    return statusText(t, err.status);
   }
-  if (err instanceof Error) return err.message;
-  return 'Something went wrong. Please try again.';
+  if (err instanceof Error && err.message) return err.message;
+  return t('error.generic');
+}
+
+/** Translated stand-in for a problem the backend did not describe itself. */
+export function statusText(t: Translator, status: number): string {
+  if (status === 0) return t('error.status.offline');
+  if (status === 401 || status === 403 || status === 404 || status === 409 || status === 429) {
+    return t(`error.status.${status}`);
+  }
+  if (status >= 500) return t('error.status.500');
+  return t('error.status.other');
 }
 
 /** Seconds → `1:05`, for the OTP resend cooldown. */
@@ -85,14 +104,19 @@ export function money(amount: number, currency = 'TZS'): string {
   return `${currency} ${formatAmount(amount)}`;
 }
 
-/** `30` → `30 days`, `1` → `1 day`. */
-export function days(n: number): string {
-  return `${formatAmount(n)} day${n === 1 ? '' : 's'}`;
+/** `30` → `30 days` / `siku 30`. */
+export function days(t: Translator, n: number): string {
+  return t.n('common.days', n, { count: formatAmount(n) });
 }
 
 /** The unit's headline price: `TZS 250,000 / 30 days`. */
-export function priceLine(amount: number, periodDays: number, currency = 'TZS'): string {
-  return `${money(amount, currency)} / ${days(periodDays)}`;
+export function priceLine(
+  t: Translator,
+  amount: number,
+  periodDays: number,
+  currency = 'TZS',
+): string {
+  return `${money(amount, currency)} / ${days(t, periodDays)}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -128,17 +152,15 @@ export function addDays(iso: string, n: number): string {
   return toIso(d);
 }
 
-/** `2026-09-08` → `8 Sep 2026`. */
-export function formatDate(iso: string | null | undefined): string {
+/**
+ * `2026-09-08` → `8 Sep 2026` (en) / `8 Sep 2026` in Swahili month names (sw).
+ * The shared runtime owns the Intl call so every app formats dates the same
+ * way; this wrapper only adds the ledger's em dash for a missing date.
+ */
+export function formatDate(locale: Locale, iso: string | null | undefined): string {
   if (!iso) return '—';
-  const d = parseDate(iso);
-  if (!d) return iso;
-  return new Intl.DateTimeFormat('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    timeZone: 'UTC',
-  }).format(d);
+  if (!parseDate(iso)) return iso;
+  return formatDateIntl(locale, iso);
 }
 
 /* ------------------------------------------------------------------ */

@@ -20,14 +20,18 @@ const pgUniqueViolation = "23505"
 
 // userResponse is the `user` shape from API.md.
 type userResponse struct {
-	ID            string    `json:"id"`
-	Kind          string    `json:"kind"`
-	Phone         *string   `json:"phone"`
-	Email         *string   `json:"email"`
-	FullName      string    `json:"full_name"`
-	EmailVerified bool      `json:"email_verified"`
-	Status        string    `json:"status"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID            string  `json:"id"`
+	Kind          string  `json:"kind"`
+	Phone         *string `json:"phone"`
+	Email         *string `json:"email"`
+	FullName      string  `json:"full_name"`
+	EmailVerified bool    `json:"email_verified"`
+	Status        string  `json:"status"`
+	// Locale is the language this person reads: `sw` or `en` (SPEC §3.2). The
+	// apps take it straight off the session payload, so a signed-in renter's
+	// screens and SMS agree without a second round trip.
+	Locale    string    `json:"locale"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func toUser(u sqlc.User) userResponse {
@@ -39,6 +43,7 @@ func toUser(u sqlc.User) userResponse {
 		FullName:      u.FullName,
 		EmailVerified: u.EmailVerifiedAt.Valid,
 		Status:        u.Status,
+		Locale:        u.Locale,
 		CreatedAt:     u.CreatedAt.Time,
 	}
 }
@@ -74,12 +79,15 @@ func toOrg(o sqlc.Org) orgResponse {
 
 // memberResponse is one row of GET /org/members.
 type memberResponse struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	Email     *string   `json:"email"`
-	FullName  string    `json:"full_name"`
-	Role      string    `json:"role"`
-	Status    string    `json:"status"`
+	ID       string  `json:"id"`
+	UserID   string  `json:"user_id"`
+	Email    *string `json:"email"`
+	FullName string  `json:"full_name"`
+	Role     string  `json:"role"`
+	Status   string  `json:"status"`
+	// Locale is the member's own language (Phase 13), so Settings → Team can
+	// show it without a second read.
+	Locale    string    `json:"locale,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 

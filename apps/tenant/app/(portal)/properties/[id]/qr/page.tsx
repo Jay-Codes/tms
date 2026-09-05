@@ -23,6 +23,7 @@ import {
   type QrSheetItem,
 } from '../../../../../lib/api';
 import { useMe } from '../../../../../lib/auth';
+import { useT } from '@tms/ui';
 
 const PRINT_CSS = `
 .qr-grid {
@@ -62,6 +63,7 @@ const PRINT_CSS = `
 `;
 
 function QrBody({ id }: { id: string }) {
+  const t = useT();
   const { org } = useMe();
   const [property, setProperty] = useState<Property | null>(null);
   const [items, setItems] = useState<QrSheetItem[] | null>(null);
@@ -93,16 +95,12 @@ function QrBody({ id }: { id: string }) {
 
       <div className="no-print">
         <PageHead
-          title="QR sheet"
-          lead={
-            property
-              ? `${property.name} — one sticker per unit. Cut along the dashed lines.`
-              : 'Loading the sheet…'
-          }
+          title={t('qr.sheet_title')}
+          lead={property ? t('qr.sheet_lead', { property: property.name }) : t('qr.loading_sheet')}
           actions={
             <>
               <Link href={`/properties/${id}`} className="btn btn-quiet">
-                Back to property
+                {t('properties.back_to_property')}
               </Link>
               <button
                 type="button"
@@ -110,7 +108,7 @@ function QrBody({ id }: { id: string }) {
                 onClick={() => window.print()}
                 disabled={!items || items.length === 0}
               >
-                <Icon icon="solar:printer-linear" width={20} /> Print
+                <Icon icon="solar:printer-linear" width={20} /> {t('common.print')}
               </button>
             </>
           }
@@ -120,18 +118,18 @@ function QrBody({ id }: { id: string }) {
           <ProblemNote error={error} />
           {items && items.length === 0 && !error ? (
             <p style={{ color: 'var(--ink-soft)' }}>
-              This property has no units yet, so there is nothing to print.{' '}
-              <Link href={`/properties/${id}`}>Add a unit first.</Link>
+              {t('qr.no_units')}{' '}
+              <Link href={`/properties/${id}`}>{t('qr.add_unit_first')}</Link>
             </p>
           ) : null}
           <p style={{ color: 'var(--ink-faint)', fontSize: 'var(--text-sm)' }}>
-            Image links expire after 15 minutes — reload the page if the codes stop showing.
+            {t('qr.expiry_note')}
           </p>
         </div>
       </div>
 
       {items === null ? (
-        <p style={{ color: 'var(--ink-soft)' }}>Loading…</p>
+        <p style={{ color: 'var(--ink-soft)' }}>{t('common.loading')}</p>
       ) : (
         <div className="qr-grid">
           {items.map((it) => (
@@ -140,7 +138,7 @@ function QrBody({ id }: { id: string }) {
               <div className="qr-prop">{property?.name ?? ''}</div>
               <div className="qr-unit">{it.unit_name}</div>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={it.png_url} alt={`QR code for ${it.unit_name}`} />
+              <img src={it.png_url} alt={t('qr.code_alt', { name: it.unit_name })} />
               <div className="qr-code">{it.unit_code}</div>
               <div className="qr-url">{it.scan_url}</div>
             </div>

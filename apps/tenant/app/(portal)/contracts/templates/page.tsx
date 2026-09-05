@@ -9,10 +9,10 @@ import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
+import { useT } from '@tms/ui';
 import { Field, ProblemNote } from '../../../../components/FormBits';
 import { PageHead } from '../../../../components/PageHead';
 import { Sheet } from '../../../../components/Sheet';
-import { SNAPSHOT_BANNER } from '../../../../components/TemplateEditor';
 import {
   ApiError,
   templatesApi,
@@ -22,7 +22,14 @@ import {
 } from '../../../../lib/api';
 import { fmtDate } from '../../../../lib/format';
 
-/** Opening draft for a new template — the landlord edits from here. */
+/**
+ * Opening draft for a new template — the landlord edits from here.
+ *
+ * Both bodies are seeded (Phase 13): the platform default is Kiswahili, so a
+ * template that only had an English body would silently issue every Kiswahili
+ * contract in English. These are deliberately not dictionary strings — they are
+ * contract wording that ends up stored on the org, not portal chrome.
+ */
 const STARTER_BODY =
   '<h1>Tenancy agreement</h1>' +
   '<p>This agreement is made between {{org_name}} (the landlord) and {{renter_name}} (the renter) ' +
@@ -32,7 +39,17 @@ const STARTER_BODY =
   '<h2>Rent</h2>' +
   '<p>Rent is {{rent}} per {{payment_period}}, due on day {{due_day}} of each period.</p>';
 
+const STARTER_BODY_SW =
+  '<h1>Mkataba wa upangaji</h1>' +
+  '<p>Mkataba huu unafanywa kati ya {{org_name}} (mwenye nyumba) na {{renter_name}} (mpangaji) ' +
+  'kwa {{unit}} katika {{property}}.</p>' +
+  '<h2>Muda</h2>' +
+  '<p>Upangaji unadumu kwa siku {{term_days}}, kuanzia {{start_date}} hadi {{end_date}}.</p>' +
+  '<h2>Kodi</h2>' +
+  '<p>Kodi ni {{rent}} kwa {{payment_period}}, inayolipwa siku ya {{due_day}} ya kila kipindi.</p>';
+
 function NewTemplateForm({ onCreated }: { onCreated: (id: string) => void }) {
+  const t = useT();
   const [name, setName] = useState('');
   const [isDefault, setIsDefault] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -43,10 +60,15 @@ function NewTemplateForm({ onCreated }: { onCreated: (id: string) => void }) {
     setBusy(true);
     setError(null);
     try {
-      const t = unwrapTemplate(
-        await templatesApi.create({ name: name.trim(), body_html: STARTER_BODY, is_default: isDefault }),
+      const created = unwrapTemplate(
+        await templatesApi.create({
+          name: name.trim(),
+          body_html: STARTER_BODY,
+          body_html_sw: STARTER_BODY_SW,
+          is_default: isDefault,
+        }),
       );
-      onCreated(t.id);
+      onCreated(created.id);
     } catch (err) {
       setError(toApiError(err));
     } finally {
@@ -57,17 +79,15 @@ function NewTemplateForm({ onCreated }: { onCreated: (id: string) => void }) {
   return (
     <form onSubmit={submit} style={{ display: 'grid', gap: 'var(--sp-4)' }} noValidate>
       <ProblemNote error={error} />
-      <p style={{ color: 'var(--ink-soft)' }}>
-        A new template starts from a plain tenancy agreement. You edit the wording next.
-      </p>
-      <Field id="new_tpl_name" label="Template name" error={error?.errors.name}>
+      <p style={{ color: 'var(--ink-soft)' }}>{t('tpl.new.lead')}</p>
+      <Field id="new_tpl_name" label={t('tpl.name')} error={error?.errors.name}>
         <input
           id="new_tpl_name"
           className="input"
           value={name}
           maxLength={80}
           onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Standard tenancy agreement"
+          placeholder={t('tpl.new.placeholder')}
         />
       </Field>
       <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', minHeight: 'var(--touch-min)' }}>
@@ -77,11 +97,11 @@ function NewTemplateForm({ onCreated }: { onCreated: (id: string) => void }) {
           onChange={(e) => setIsDefault(e.target.checked)}
           style={{ width: 18, height: 18 }}
         />
-        Make this the default template
+        {t('tpl.new.make_default')}
       </label>
       <div>
         <button type="submit" className="btn btn-primary" disabled={busy || name.trim().length === 0}>
-          {busy ? 'Creating…' : 'Create and edit'}
+          {busy ? t('common.creating') : t('tpl.new.submit')}
         </button>
       </div>
     </form>
@@ -89,6 +109,7 @@ function NewTemplateForm({ onCreated }: { onCreated: (id: string) => void }) {
 }
 
 function TemplatesBody() {
+  const t = useT();
   const router = useRouter();
   const [items, setItems] = useState<ContractTemplateSummary[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
@@ -115,22 +136,22 @@ function TemplatesBody() {
   return (
     <>
       <PageHead
-        title="Contract templates"
-        lead="The terms every new contract starts from. Variables like {{renter_name}} are filled in when a contract is written."
+        title={t('tpl.list.title')}
+        lead={t('tpl.list.lead', { example: '{{renter_name}}' })}
         actions={
           <>
             <Link href="/contracts" className="btn btn-quiet">
-              Contracts
+              {t('nav.contracts')}
             </Link>
             <button type="button" className="btn btn-primary" onClick={() => setOpen(true)}>
-              <Icon icon="solar:add-square-linear" width={20} /> New template
+              <Icon icon="solar:add-square-linear" width={20} /> {t('tpl.list.new')}
             </button>
           </>
         }
       />
 
       <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)', marginBottom: 'var(--sp-4)' }}>
-        {SNAPSHOT_BANNER}
+        {t('tpl.snapshot_banner')}
       </p>
 
       <hr className="rule rule-strong" />
@@ -140,36 +161,36 @@ function TemplatesBody() {
         <table className="ledger">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Default</th>
-              <th>Last edited</th>
-              <th>Created</th>
+              <th>{t('common.name')}</th>
+              <th>{t('tpl.default')}</th>
+              <th>{t('tpl.list.last_edited')}</th>
+              <th>{t('tpl.list.created')}</th>
             </tr>
           </thead>
           <tbody>
             {items === null ? (
               <tr>
                 <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
-                  Loading…
+                  {t('common.loading')}
                 </td>
               </tr>
             ) : items.length === 0 ? (
               <tr>
                 <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
-                  {error ? 'Nothing to show.' : 'No templates yet.'}
+                  {error ? t('common.no_results') : t('tpl.list.empty')}
                 </td>
               </tr>
             ) : (
-              items.map((t) => (
-                <tr key={t.id}>
+              items.map((row) => (
+                <tr key={row.id}>
                   <td style={{ fontWeight: 600 }}>
-                    <Link href={`/contracts/templates/${t.id}`} style={{ color: 'inherit' }}>
-                      {t.name}
+                    <Link href={`/contracts/templates/${row.id}`} style={{ color: 'inherit' }}>
+                      {row.name}
                     </Link>
                   </td>
-                  <td>{t.is_default ? <span className="stamp stamp-paid">Default</span> : null}</td>
-                  <td style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{fmtDate(t.updated_at)}</td>
-                  <td style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{fmtDate(t.created_at)}</td>
+                  <td>{row.is_default ? <span className="stamp stamp-paid">{t('tpl.default')}</span> : null}</td>
+                  <td style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{fmtDate(row.updated_at)}</td>
+                  <td style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{fmtDate(row.created_at)}</td>
                 </tr>
               ))
             )}
@@ -177,7 +198,7 @@ function TemplatesBody() {
         </table>
       </div>
 
-      <Sheet open={open} title="New template" onClose={() => setOpen(false)} width={480}>
+      <Sheet open={open} title={t('tpl.list.new')} onClose={() => setOpen(false)} width={480}>
         <NewTemplateForm onCreated={(id) => router.push(`/contracts/templates/${id}`)} />
       </Sheet>
     </>

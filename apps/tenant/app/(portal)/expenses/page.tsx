@@ -35,18 +35,19 @@ import {
   type ExpenseSummary,
   type Property,
 } from '../../../lib/api';
-import { PeriodPicker, type PeriodValue } from '@tms/ui';
+import { PeriodPicker, useT, type PeriodValue } from '@tms/ui';
 import { loadExpensePeriod, saveExpensePeriod } from '../../../lib/expensePeriod';
 
 type StatusFilter = 'recorded' | 'voided' | 'all';
 
-const STATUSES: { value: StatusFilter; label: string }[] = [
-  { value: 'recorded', label: 'Recorded' },
-  { value: 'voided', label: 'Voided' },
-  { value: 'all', label: 'All' },
+const STATUSES: { value: StatusFilter; labelKey: string }[] = [
+  { value: 'recorded', labelKey: 'expenses.status.recorded' },
+  { value: 'voided', labelKey: 'expenses.status.voided' },
+  { value: 'all', labelKey: 'common.all' },
 ];
 
 function ExpensesBody() {
+  const t = useT();
   // `/expenses?property=<id>` is how a property page hands the reader over
   // with its own filter already applied.
   const initialProperty = useSearchParams().get('property') ?? '';
@@ -178,23 +179,23 @@ function ExpensesBody() {
   return (
     <>
       <PageHead
-        title="Expenses"
-        lead="What each property costs you: repairs, utilities, levies. Recorded here, netted off in Reports."
+        title={t('expenses.title')}
+        lead={t('expenses.lead')}
         actions={
           <>
             <button type="button" className="btn btn-secondary" onClick={() => void exportCsv()} disabled={exporting}>
               <Icon icon="solar:download-minimalistic-linear" width={20} />
-              {exporting ? 'Preparing…' : 'Export CSV'}
+              {exporting ? t('expenses.export_busy') : t('common.export_csv')}
             </button>
             <button type="button" className="btn btn-primary" onClick={() => setSheetOpen(true)}>
-              <Icon icon="solar:add-circle-linear" width={20} /> Record expense
+              <Icon icon="solar:add-circle-linear" width={20} /> {t('expenses.record')}
             </button>
           </>
         }
       />
 
       <div style={{ marginBottom: 'var(--sp-4)' }}>
-        <PeriodPicker value={period} onChange={setPeriod} label="Expense period" />
+        <PeriodPicker value={period} onChange={setPeriod} label={t('expenses.period_label')} cadenceLabels={{ month: t('period.cadence.month'), quarter: t('period.cadence.quarter'), half_year: t('period.cadence.half_year'), year: t('period.cadence.year'), custom: t('period.cadence.custom') }} />
       </div>
 
       <div
@@ -207,14 +208,14 @@ function ExpensesBody() {
         }}
       >
         <div className="field" style={{ minWidth: 180 }}>
-          <label htmlFor="f_property">Property</label>
+          <label htmlFor="f_property">{t('common.property')}</label>
           <select
             id="f_property"
             className="input"
             value={propertyId}
             onChange={(e) => setPropertyId(e.target.value)}
           >
-            <option value="">All properties</option>
+            <option value="">{t('expenses.filter.all_properties')}</option>
             {properties.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -224,38 +225,38 @@ function ExpensesBody() {
         </div>
 
         <div className="field" style={{ minWidth: 180 }}>
-          <label htmlFor="f_category">Category</label>
+          <label htmlFor="f_category">{t('expenses.category')}</label>
           <select
             id="f_category"
             className="input"
             value={categoryId}
             onChange={(e) => setCategoryId(e.target.value)}
           >
-            <option value="">All categories</option>
+            <option value="">{t('expenses.filter.all_categories')}</option>
             {categories.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
-                {c.active ? '' : ' (inactive)'}
+                {c.active ? '' : ` ${t('expenses.category_inactive')}`}
               </option>
             ))}
           </select>
         </div>
 
         <div className="field" style={{ minWidth: 200, flex: 1 }}>
-          <label htmlFor="f_q">Search</label>
+          <label htmlFor="f_q">{t('common.search')}</label>
           <input
             id="f_q"
             className="input"
             type="search"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Vendor, reference or note"
+            placeholder={t('expenses.search_placeholder')}
           />
         </div>
 
         <div className="field">
           <span id="f_status_label" style={{ fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--sp-2)' }}>
-            Status
+            {t('common.status')}
           </span>
           <div className="segmented" role="group" aria-labelledby="f_status_label">
             {STATUSES.map((s) => (
@@ -265,7 +266,7 @@ function ExpensesBody() {
                 aria-pressed={status === s.value}
                 onClick={() => setStatus(s.value)}
               >
-                {s.label}
+                {t(s.labelKey)}
               </button>
             ))}
           </div>
@@ -282,25 +283,22 @@ function ExpensesBody() {
           totals={totals}
           emptyText={
             error
-              ? 'Nothing to show.'
+              ? t('common.no_results')
               : status === 'voided'
-                ? 'No voided expenses in this period.'
-                : 'No expenses in this period. Record the first one.'
+                ? t('expenses.empty.voided')
+                : t('expenses.empty.period')
           }
         />
 
         {cursor ? (
           <div>
             <button type="button" className="btn btn-secondary" onClick={() => void loadMore()} disabled={loadingMore}>
-              {loadingMore ? 'Loading…' : 'Load more'}
+              {loadingMore ? t('common.loading_more') : t('common.load_more')}
             </button>
           </div>
         ) : null}
 
-        <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-          Corrections are recorded, never erased: an expense entered by mistake is voided with a
-          reason and stays in the ledger.
-        </p>
+        <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{t('expenses.corrections_note')}</p>
       </div>
 
       <ExpenseSheet

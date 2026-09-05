@@ -1,6 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import { useT } from '@tms/ui';
 
 /** Centred single sheet used by login / signup / verify / invite. */
 export function AuthCard({
@@ -14,6 +15,7 @@ export function AuthCard({
   children: ReactNode;
   footer?: ReactNode;
 }) {
+  const t = useT();
   return (
     <main
       style={{
@@ -25,7 +27,7 @@ export function AuthCard({
       }}
     >
       <div style={{ width: '100%', maxWidth: 440 }}>
-        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>TMS — landlord portal</p>
+        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>{t('auth.portal')}</p>
         <div className="sheet" style={{ padding: 'var(--sp-6)', marginTop: 'var(--sp-3)' }}>
           <h1 style={{ fontSize: 'var(--text-xl)' }}>{title}</h1>
           {lead ? (

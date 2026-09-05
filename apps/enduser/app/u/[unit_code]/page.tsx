@@ -13,14 +13,17 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { Icon } from '@iconify/react';
+import { useT } from '@tms/ui';
 import { ApiError, publicApi, type PublicUnit } from '../../../lib/api';
 import { useMe } from '../../../lib/auth';
 import { errorMessage, money, priceLine } from '../../../lib/format';
 import { rememberScannedUnit } from '../../../lib/scan';
 import { OrgHeader, useOrgTheme } from '../../../components/OrgHeader';
 import { Notice, Screen } from '../../../components/Screen';
+import { LanguageToggle } from '../../../components/LanguageToggle';
 
 export default function UnitLandingPage() {
+  const t = useT();
   const params = useParams<{ unit_code: string }>();
   const unitCode = typeof params?.unit_code === 'string' ? params.unit_code : '';
   const router = useRouter();
@@ -53,7 +56,7 @@ export default function UnitLandingPage() {
       } catch (err) {
         if (!live || (err instanceof DOMException && err.name === 'AbortError')) return;
         if (err instanceof ApiError && err.status === 404) setNotFound(true);
-        else setError(errorMessage(err));
+        else setError(errorMessage(t, err));
       } finally {
         if (live) setLoading(false);
       }
@@ -62,7 +65,7 @@ export default function UnitLandingPage() {
       live = false;
       ac.abort();
     };
-  }, [unitCode]);
+  }, [unitCode, t]);
 
   /* Already signed in → skip the sales pitch, go to step 5. */
   const canConnect = !!unit && !unit.occupied;
@@ -75,7 +78,7 @@ export default function UnitLandingPage() {
   if (loading) {
     return (
       <Screen>
-        <p className="pencil">Looking up this unit…</p>
+        <p className="pencil">{t('unit.looking')}</p>
       </Screen>
     );
   }
@@ -84,14 +87,11 @@ export default function UnitLandingPage() {
     return (
       <Screen>
         <header style={{ display: 'grid', gap: 'var(--sp-2)' }}>
-          <h1 style={{ fontSize: 'var(--text-xl)' }}>This code doesn&rsquo;t open a unit</h1>
-          <p style={{ color: 'var(--ink-soft)' }}>
-            The QR code may be out of date, or the landlord has taken this unit off the market.
-            Check the sticker and try again, or ask the landlord for a new one.
-          </p>
+          <h1 style={{ fontSize: 'var(--text-xl)' }}>{t('unit.notFound.title')}</h1>
+          <p style={{ color: 'var(--ink-soft)' }}>{t('unit.notFound.lead')}</p>
         </header>
         <Link className="btn btn-secondary" href="/">
-          Go to my rent book
+          {t('common.goToRentBook')}
         </Link>
       </Screen>
     );
@@ -100,9 +100,9 @@ export default function UnitLandingPage() {
   if (error || !unit) {
     return (
       <Screen>
-        <Notice tone="error">{error ?? 'This unit could not be loaded.'}</Notice>
+        <Notice tone="error">{error ?? t('unit.loadFailed')}</Notice>
         <button className="btn btn-secondary" onClick={() => router.refresh()}>
-          Try again
+          {t('common.tryAgain')}
         </button>
       </Screen>
     );
@@ -115,6 +115,10 @@ export default function UnitLandingPage() {
     <Screen>
       <OrgHeader branding={unit.branding} />
 
+      {/* Pre-auth: whichever language is picked here is the one the account
+          is registered with (lib/locale.tsx → `POST /auth/register/renter`). */}
+      <LanguageToggle align="end" />
+
       <header style={{ display: 'grid', gap: 'var(--sp-1)' }}>
         <p style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)', margin: 0 }}>
           {unit.property.name}
@@ -125,29 +129,31 @@ export default function UnitLandingPage() {
 
       {unit.price ? (
         <p className="amount" style={{ fontSize: 'var(--text-xl)', margin: 0 }}>
-          {priceLine(unit.price.amount, unit.price.period_days, unit.price.currency)}
+          {priceLine(t, unit.price.amount, unit.price.period_days, unit.price.currency)}
         </p>
       ) : (
-        <p className="pencil">Price not set yet — ask the landlord.</p>
+        <p className="pencil">{t('unit.noPrice')}</p>
       )}
 
       {unit.occupied ? (
         <section style={{ display: 'grid', gap: 'var(--sp-3)' }}>
-          <Notice tone="error">Unit occupied — contact landlord.</Notice>
+          <Notice tone="error">{t('unit.occupied')}</Notice>
           <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)', margin: 0 }}>
-            Someone is already renting {unit.unit.name}. {unit.branding.display_name} can tell you
-            when it frees up, or point you at another unit.
+            {t('unit.occupiedLead', {
+              unit: unit.unit.name,
+              org: unit.branding.display_name,
+            })}
           </p>
         </section>
       ) : (
         <>
           <section style={{ display: 'grid', gap: 'var(--sp-3)' }}>
-            <h2 style={{ fontSize: 'var(--text-lg)' }}>How you can pay</h2>
+            <h2 style={{ fontSize: 'var(--text-lg)' }}>{t('unit.howYouPay')}</h2>
             <table className="ledger">
               <thead>
                 <tr>
-                  <th>Period</th>
-                  <th className="num">Each payment</th>
+                  <th>{t('common.period')}</th>
+                  <th className="num">{t('unit.eachPayment')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -160,12 +166,12 @@ export default function UnitLandingPage() {
                           className="pencil"
                           style={{ marginLeft: 'var(--sp-2)', fontStyle: 'normal' }}
                         >
-                          Recommended
+                          {t('unit.recommended')}
                         </span>
                       )}
                       <br />
                       <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-                        every {p.days} days
+                        {t('unit.everyDays', { days: p.days })}
                       </span>
                     </td>
                     <td className="num">
@@ -176,7 +182,7 @@ export default function UnitLandingPage() {
                 {unit.periods.length === 0 && (
                   <tr>
                     <td colSpan={2}>
-                      <span className="pencil">No payment periods offered yet.</span>
+                      <span className="pencil">{t('unit.noPeriods')}</span>
                     </td>
                   </tr>
                 )}
@@ -196,22 +202,22 @@ export default function UnitLandingPage() {
               }}
             >
               <Icon icon="solar:document-text-linear" width={18} aria-hidden />
-              You will review and sign the full contract after approval.
+              {t('unit.signAfterApproval')}
             </p>
             {auth.status === 'authenticated' ? (
               <Link
                 className="btn btn-primary"
                 href={`/u/${encodeURIComponent(unitCode)}/connect`}
               >
-                Continue
+                {t('common.continue')}
               </Link>
             ) : (
               <>
                 <Link className="btn btn-primary" href={registerHref}>
-                  Register to connect
+                  {t('unit.register')}
                 </Link>
                 <Link className="btn btn-quiet" href={loginHref}>
-                  Log in
+                  {t('unit.login')}
                 </Link>
               </>
             )}

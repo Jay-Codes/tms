@@ -49,10 +49,12 @@ import {
   type ScheduleRow,
 } from '../../../../lib/api';
 import { Amount, fmtDate, fmtTZS, todayISO } from '../../../../lib/format';
+import { LOCALE_LABELS, isLocale, useT } from '@tms/ui';
 
 /* ----------------------------- signature block ---------------------------- */
 
 function SignatureCard({ label, signature }: { label: string; signature: ContractSignature | null }) {
+  const t = useT();
   return (
     <div style={{ display: 'grid', gap: 'var(--sp-2)', alignContent: 'start' }}>
       <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>{label}</span>
@@ -62,19 +64,19 @@ function SignatureCard({ label, signature }: { label: string; signature: Contrac
             /* eslint-disable-next-line @next/next/no-img-element -- presigned MinIO URL */
             <img
               src={signature.signature_image_url}
-              alt={`${signature.name}'s signature`}
+              alt={t('contracts.sig.alt', { name: signature.name })}
               style={{ height: 64, width: 'auto', objectFit: 'contain', objectPosition: 'left' }}
             />
           ) : null}
           <span style={{ fontWeight: 600 }}>{signature.name}</span>
           <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>
-            Signed {fmtDate(signature.signed_at)}
-            {signature.phone_masked ? ` via phone ${signature.phone_masked}` : ''}
+            {t('contracts.sig.signed', { date: fmtDate(signature.signed_at) })}
+            {signature.phone_masked ? ` ${t('contracts.sig.via_phone', { phone: signature.phone_masked })}` : ''}
             {signature.method ? ` · ${signature.method.replace('_', ' ')}` : ''}
           </span>
         </>
       ) : (
-        <span className="pencil">not signed yet</span>
+        <span className="pencil">{t('contracts.sig.not_signed')}</span>
       )}
       <hr className="rule" style={{ marginTop: 'var(--sp-2)' }} />
     </div>
@@ -96,6 +98,7 @@ function RecordOnBehalfForm({
   onSubmit: (reason: string) => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const [reason, setReason] = useState('');
   return (
     <form
@@ -118,13 +121,13 @@ function RecordOnBehalfForm({
         }}
       >
         <Icon icon="solar:danger-triangle-linear" width={20} />
-        <span>
-          This activates the contract without {renterName}&apos;s signature. No renter signature is
-          recorded, and the action is flagged in the audit log as landlord-recorded. Use it only when the
-          renter has no phone.
-        </span>
+        <span>{t('contracts.behalf.warning', { name: renterName })}</span>
       </p>
-      <Field id="lr_reason" label="Why are you recording this yourself?" hint={`${reason.length}/200`}>
+      <Field
+        id="lr_reason"
+        label={t('contracts.behalf.reason')}
+        hint={t('contracts.chars_max', { n: reason.length })}
+      >
         <textarea
           id="lr_reason"
           className="input"
@@ -132,15 +135,15 @@ function RecordOnBehalfForm({
           maxLength={200}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="e.g. The renter has no mobile phone; the agreement was signed on paper."
+          placeholder={t('contracts.behalf.reason_placeholder')}
         />
       </Field>
       <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
         <button type="submit" className="btn btn-danger" disabled={busy || reason.trim().length === 0}>
-          {busy ? 'Activating…' : 'Record and activate'}
+          {busy ? t('contracts.behalf.submitting') : t('contracts.behalf.submit')}
         </button>
         <button type="button" className="btn btn-quiet" onClick={onCancel} disabled={busy}>
-          Cancel
+          {t('common.cancel')}
         </button>
       </div>
     </form>
@@ -158,6 +161,7 @@ function TerminateForm({
   onSubmit: (reason: string, effectiveDate: string) => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const [reason, setReason] = useState('');
   const [date, setDate] = useState(todayISO());
   return (
@@ -170,11 +174,13 @@ function TerminateForm({
       noValidate
     >
       <ProblemNote error={error} />
-      <p style={{ color: 'var(--ink-soft)' }}>
-        Payments still outstanding after the effective date are waived, the unit goes back on the vacancy
-        board, and the renter is told by SMS. The contract itself is kept, never edited.
-      </p>
-      <Field id="t_reason" label="Reason" hint={`${reason.length}/200 — the renter is sent this.`} error={error?.errors.reason}>
+      <p style={{ color: 'var(--ink-soft)' }}>{t('contracts.terminate.lead')}</p>
+      <Field
+        id="t_reason"
+        label={t('contracts.terminate.reason')}
+        hint={`${t('contracts.chars_max', { n: reason.length })} — ${t('contracts.terminate.reason_note')}`}
+        error={error?.errors.reason}
+      >
         <textarea
           id="t_reason"
           className="input"
@@ -182,18 +188,18 @@ function TerminateForm({
           maxLength={200}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="e.g. The renter is moving out early by mutual agreement."
+          placeholder={t('contracts.terminate.reason_placeholder')}
         />
       </Field>
-      <Field id="t_date" label="Effective date" error={error?.errors.effective_date}>
+      <Field id="t_date" label={t('contracts.terminate.effective_date')} error={error?.errors.effective_date}>
         <input id="t_date" className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
       </Field>
       <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
         <button type="submit" className="btn btn-danger" disabled={busy || reason.trim().length === 0}>
-          {busy ? 'Terminating…' : 'Terminate contract'}
+          {busy ? t('contracts.terminate.submitting') : t('contracts.terminate.submit')}
         </button>
         <button type="button" className="btn btn-quiet" onClick={onCancel} disabled={busy}>
-          Cancel
+          {t('common.cancel')}
         </button>
       </div>
     </form>
@@ -203,6 +209,7 @@ function TerminateForm({
 /* --------------------------------- page ---------------------------------- */
 
 function ContractBody({ id }: { id: string }) {
+  const t = useT();
   const [contract, setContract] = useState<Contract | null>(null);
   const [doc, setDoc] = useState<ContractDocument | null>(null);
   const [schedules, setSchedules] = useState<ScheduleRow[] | null>(null);
@@ -288,7 +295,7 @@ function ContractBody({ id }: { id: string }) {
     try {
       await paymentsApi.reverse(reversing.id, reason);
       setReversing(null);
-      setNote('Payment reversed. The schedule it was applied to has gone back to what it owed.');
+      setNote(t('contracts.payments.reversed'));
       await load();
     } catch (e) {
       setReverseError(toApiError(e));
@@ -312,11 +319,11 @@ function ContractBody({ id }: { id: string }) {
   if (error && !contract) {
     return (
       <>
-        <PageHead title="Contract" />
+        <PageHead title={t('contracts.detail.title')} />
         <ProblemNote error={error} />
         <p style={{ marginTop: 'var(--sp-4)' }}>
           <Link href="/contracts" className="btn btn-quiet">
-            Back to contracts
+            {t('contracts.detail.back')}
           </Link>
         </p>
       </>
@@ -326,8 +333,8 @@ function ContractBody({ id }: { id: string }) {
   if (!contract) {
     return (
       <>
-        <PageHead title="Contract" />
-        <p style={{ color: 'var(--ink-soft)' }}>Loading…</p>
+        <PageHead title={t('contracts.detail.title')} />
+        <p style={{ color: 'var(--ink-soft)' }}>{t('common.loading')}</p>
       </>
     );
   }
@@ -344,6 +351,8 @@ function ContractBody({ id }: { id: string }) {
   const contractLabel = `${contract.unit?.name ?? ''} · ${contract.unit?.property_name ?? ''} — ${
     contract.renter?.full_name ?? ''
   }`;
+  const renterName = contract.renter?.full_name ?? t('contracts.the_renter');
+  const docLanguage = isLocale(contract.language) ? LOCALE_LABELS[contract.language] : null;
   const openRecord = (scheduleId?: string) =>
     setRecordTarget({ contractId: id, scheduleId, label: contractLabel });
 
@@ -353,15 +362,15 @@ function ContractBody({ id }: { id: string }) {
 
       <div className="no-print">
         <PageHead
-          title={`${contract.unit?.name ?? 'Contract'} · ${contract.renter?.full_name ?? ''}`}
+          title={`${contract.unit?.name ?? t('contracts.detail.title')} · ${contract.renter?.full_name ?? ''}`}
           lead={`${contract.unit?.property_name ?? ''} · ${fmtDate(contract.start_date)} → ${fmtDate(contract.end_date)}`}
           actions={
             <>
               <Link href="/contracts" className="btn btn-quiet">
-                <Icon icon="solar:arrow-left-linear" width={20} /> Contracts
+                <Icon icon="solar:arrow-left-linear" width={20} /> {t('nav.contracts')}
               </Link>
               <button type="button" className="btn btn-secondary" onClick={() => window.print()}>
-                <Icon icon="solar:printer-linear" width={20} /> Print / Save as PDF
+                <Icon icon="solar:printer-linear" width={20} /> {t('contracts.detail.print')}
               </button>
             </>
           }
@@ -370,9 +379,13 @@ function ContractBody({ id }: { id: string }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
           <ContractStatusStamp status={contract.status} />
           <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-            written {fmtDate(contract.created_at)}
-            {contract.activated_at ? ` · activated ${fmtDate(contract.activated_at)}` : ''}
-            {contract.terminated_at ? ` · terminated ${fmtDate(contract.terminated_at)}` : ''}
+            {t('contracts.meta.written', { date: fmtDate(contract.created_at) })}
+            {contract.activated_at
+              ? ` · ${t('contracts.meta.activated', { date: fmtDate(contract.activated_at) })}`
+              : ''}
+            {contract.terminated_at
+              ? ` · ${t('contracts.meta.terminated', { date: fmtDate(contract.terminated_at) })}`
+              : ''}
           </span>
         </div>
 
@@ -392,33 +405,33 @@ function ContractBody({ id }: { id: string }) {
             }}
           >
             <span>
-              <span style={{ color: 'var(--ink-soft)' }}>Paid </span>
+              <span style={{ color: 'var(--ink-soft)' }}>{t('contracts.summary.paid')} </span>
               <strong className="num">
                 {summary.paid_count}/{summary.count}
               </strong>
             </span>
             <span>
-              <span style={{ color: 'var(--ink-soft)' }}>Overdue </span>
+              <span style={{ color: 'var(--ink-soft)' }}>{t('contracts.summary.overdue')} </span>
               {summary.overdue_count > 0 ? (
                 <strong className="num" style={{ color: 'var(--stamp-overdue)' }}>
                   {summary.overdue_count}
                 </strong>
               ) : (
-                <span className="pencil">none</span>
+                <span className="pencil">{t('contracts.summary.overdue_none')}</span>
               )}
             </span>
             <span>
-              <span style={{ color: 'var(--ink-soft)' }}>Next due </span>
+              <span style={{ color: 'var(--ink-soft)' }}>{t('contracts.summary.next_due')} </span>
               {summary.next_due_date ? (
                 <strong>
                   {fmtDate(summary.next_due_date)} · {fmtTZS(summary.next_due_amount ?? 0)}
                 </strong>
               ) : (
-                <span className="pencil">nothing outstanding</span>
+                <span className="pencil">{t('contracts.summary.nothing_outstanding')}</span>
               )}
             </span>
             <span>
-              <span style={{ color: 'var(--ink-soft)' }}>Contract total </span>
+              <span style={{ color: 'var(--ink-soft)' }}>{t('contracts.summary.total')} </span>
               <strong>{fmtTZS(summary.total)}</strong>
             </span>
           </div>
@@ -426,7 +439,7 @@ function ContractBody({ id }: { id: string }) {
 
         {contract.termination_reason ? (
           <p style={{ marginTop: 'var(--sp-3)', color: 'var(--ink-soft)' }}>
-            Reason given: {contract.termination_reason}
+            {t('contracts.reason_given', { reason: contract.termination_reason })}
           </p>
         ) : null}
 
@@ -444,32 +457,31 @@ function ContractBody({ id }: { id: string }) {
                   type="button"
                   className="btn btn-primary"
                   disabled={!canActivate || busy}
-                  title={canActivate ? undefined : 'The renter has not signed yet.'}
+                  title={canActivate ? undefined : t('contracts.activate.blocked')}
                   onClick={() =>
                     void act(
                       () => contractsApi.activate(id),
-                      'Activated. The schedule is generated and the unit is now occupied.',
+                      t('contracts.activate.done'),
                     )
                   }
                 >
-                  <Icon icon="solar:check-circle-linear" width={20} /> Activate
+                  <Icon icon="solar:check-circle-linear" width={20} /> {t('contracts.activate')}
                 </button>
               ) : null}
               {contract.status === 'pending_signature' && !canActivate ? (
                 <button type="button" className="btn btn-quiet" onClick={() => setBehalfOpen(true)} disabled={busy}>
-                  Record on renter&apos;s behalf
+                  {t('contracts.behalf.open')}
                 </button>
               ) : null}
               {canTerminate ? (
                 <button type="button" className="btn btn-danger" onClick={() => setTerminateOpen(true)} disabled={busy}>
-                  <Icon icon="solar:close-circle-linear" width={20} /> Terminate
+                  <Icon icon="solar:close-circle-linear" width={20} /> {t('contracts.terminate')}
                 </button>
               ) : null}
             </div>
             {contract.status === 'pending_signature' && !canActivate ? (
               <p style={{ marginTop: 'var(--sp-3)', color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-                Waiting for {contract.renter?.full_name ?? 'the renter'} to sign. Activating countersigns the
-                contract, generates every payment in the schedule and marks the unit occupied.
+                {t('contracts.activate.waiting', { name: renterName })}
               </p>
             ) : null}
           </section>
@@ -478,23 +490,40 @@ function ContractBody({ id }: { id: string }) {
         {/* -------------------------------- facts ------------------------------- */}
         <section style={{ marginTop: 'var(--sp-6)' }}>
           <hr className="rule rule-strong" />
-          <h2 style={{ fontSize: 'var(--text-lg)', margin: 'var(--sp-4) 0' }}>Terms</h2>
+          <h2 style={{ fontSize: 'var(--text-lg)', margin: 'var(--sp-4) 0' }}>{t('contracts.terms.title')}</h2>
           <div style={{ maxWidth: 640 }}>
             <Facts
               rows={[
-                ['Unit', `${contract.unit?.name ?? '—'} · ${contract.unit?.property_name ?? ''}`],
-                ['Renter', `${contract.renter?.full_name ?? '—'}${contract.renter?.phone ? ` · ${contract.renter.phone}` : ''}`],
-                ['Rent', <Amount key="rent" value={contract.rent_amount} per={contract.rent_period_days} />],
+                [t('common.unit'), `${contract.unit?.name ?? '—'} · ${contract.unit?.property_name ?? ''}`],
                 [
-                  'Payment period',
+                  t('common.renter'),
+                  `${contract.renter?.full_name ?? '—'}${contract.renter?.phone ? ` · ${contract.renter.phone}` : ''}`,
+                ],
+                [
+                  t('contracts.col.rent'),
+                  <Amount key="rent" value={contract.rent_amount} per={contract.rent_period_days} />,
+                ],
+                [
+                  t('contracts.fact.payment_period'),
                   contract.payment_period
-                    ? `${contract.payment_period.label} · ${contract.payment_period.days} days`
+                    ? t('contracts.fact.period_days', {
+                        label: contract.payment_period.label,
+                        days: contract.payment_period.days,
+                      })
                     : '—',
                 ],
-                ['Tenancy length', contract.term_days ? `${contract.term_days} days` : '—'],
-                ['Starts', fmtDate(contract.start_date)],
-                ['Ends', fmtDate(contract.end_date)],
-                ['Due day', contract.due_day ? String(contract.due_day) : 'From the start date'],
+                [
+                  t('contracts.fact.term_length'),
+                  contract.term_days ? t.n('common.day', contract.term_days) : '—',
+                ],
+                [t('contracts.fact.starts'), fmtDate(contract.start_date)],
+                [t('contracts.fact.ends'), fmtDate(contract.end_date)],
+                [
+                  t('contracts.fact.due_day'),
+                  contract.due_day ? String(contract.due_day) : t('contracts.fact.due_day_default'),
+                ],
+                /* Phase 13: which language the document itself was written in. */
+                [t('contracts.language'), docLanguage ?? <span key="lang" className="pencil">{t('contracts.language.unknown')}</span>],
               ]}
             />
           </div>
@@ -513,9 +542,9 @@ function ContractBody({ id }: { id: string }) {
             }}
           >
             <div>
-              <h2 style={{ fontSize: 'var(--text-lg)' }}>Payment schedule</h2>
+              <h2 style={{ fontSize: 'var(--text-lg)' }}>{t('contracts.schedule.title')}</h2>
               <p style={{ marginTop: 'var(--sp-2)', color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-                Generated across the whole tenancy when the contract is activated.
+                {t('contracts.schedule.lead')}
               </p>
             </div>
             <button
@@ -523,24 +552,22 @@ function ContractBody({ id }: { id: string }) {
               className="btn btn-secondary"
               disabled={!canRecord || rows.length === 0}
               title={
-                canRecord
-                  ? 'Applies to the earliest unpaid payment unless you pick another.'
-                  : 'Payments can only be recorded against an active contract.'
+                canRecord ? t('contracts.schedule.record_hint') : t('contracts.schedule.record_blocked')
               }
               onClick={() => openRecord()}
             >
-              <Icon icon="solar:wallet-money-linear" width={20} /> Record payment
+              <Icon icon="solar:wallet-money-linear" width={20} /> {t('contracts.schedule.record')}
             </button>
           </div>
 
           <table className="ledger">
             <thead>
               <tr>
-                <th>Period</th>
-                <th>Due</th>
-                <th className="num">Amount</th>
-                <th className="num">Paid</th>
-                <th>Status</th>
+                <th>{t('contracts.schedule.col.period')}</th>
+                <th>{t('contracts.schedule.col.due')}</th>
+                <th className="num">{t('common.amount')}</th>
+                <th className="num">{t('contracts.schedule.col.paid')}</th>
+                <th>{t('common.status')}</th>
                 <th />
               </tr>
             </thead>
@@ -548,13 +575,13 @@ function ContractBody({ id }: { id: string }) {
               {schedules === null ? (
                 <tr>
                   <td colSpan={6} style={{ color: 'var(--ink-soft)' }}>
-                    Loading…
+                    {t('common.loading')}
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={6} style={{ color: 'var(--ink-soft)' }}>
-                    No schedule yet — it is written when the contract is activated.
+                    {t('contracts.schedule.empty')}
                   </td>
                 </tr>
               ) : (
@@ -574,7 +601,7 @@ function ContractBody({ id }: { id: string }) {
                         <ScheduleStatusStamp status={s.status} />
                         {s.status === 'partial' ? (
                           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
-                            {fmtTZS(remainingOn(s))} still owing
+                            {t('contracts.schedule.still_owing', { amount: fmtTZS(remainingOn(s)) })}
                           </div>
                         ) : null}
                       </td>
@@ -586,14 +613,14 @@ function ContractBody({ id }: { id: string }) {
                             style={{ minHeight: 36 }}
                             onClick={() => openRecord(s.id)}
                           >
-                            Record payment
+                            {t('contracts.schedule.record')}
                           </button>
                         ) : null}
                       </td>
                     </tr>
                   ))}
                   <tr className="total">
-                    <td colSpan={2}>Total</td>
+                    <td colSpan={2}>{t('common.total')}</td>
                     <td className="num">{fmtTZS(rows.reduce((t, s) => t + (s.amount ?? 0), 0))}</td>
                     <td className="num">{fmtTZS(rows.reduce((t, s) => t + (s.paid_amount ?? 0), 0))}</td>
                     <td colSpan={2} />
@@ -608,17 +635,16 @@ function ContractBody({ id }: { id: string }) {
         <section style={{ marginTop: 'var(--sp-6)' }}>
           <hr className="rule rule-strong" />
           <div style={{ margin: 'var(--sp-4) 0' }}>
-            <h2 style={{ fontSize: 'var(--text-lg)' }}>Payments received</h2>
+            <h2 style={{ fontSize: 'var(--text-lg)' }}>{t('contracts.payments.title')}</h2>
             <p style={{ marginTop: 'var(--sp-2)', color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-              Every payment recorded against this contract. A mistake is reversed with a reason, never
-              deleted — the reversal is written to the audit log.
+              {t('contracts.payments.lead')}
             </p>
           </div>
           <PaymentsTable
             items={payments}
             showRenter={false}
             showUnit={false}
-            emptyText="No payments recorded against this contract yet."
+            emptyText={t('contracts.payments.empty')}
             onReverse={(p) => {
               setReverseError(null);
               setReversing(p);
@@ -627,7 +653,7 @@ function ContractBody({ id }: { id: string }) {
         </section>
 
         <hr className="rule rule-strong" style={{ marginTop: 'var(--sp-6)' }} />
-        <h2 style={{ fontSize: 'var(--text-lg)', margin: 'var(--sp-4) 0' }}>Document</h2>
+        <h2 style={{ fontSize: 'var(--text-lg)', margin: 'var(--sp-4) 0' }}>{t('contracts.doc.title')}</h2>
       </div>
 
       {/* -------------------------------- paper -------------------------------- */}
@@ -640,12 +666,12 @@ function ContractBody({ id }: { id: string }) {
           footerText={org?.footer_text}
         >
           <section style={{ marginTop: 'var(--sp-5)' }}>
-            <h3 style={{ fontSize: 'var(--text-md)', marginBottom: 'var(--sp-3)' }}>Parties</h3>
+            <h3 style={{ fontSize: 'var(--text-md)', marginBottom: 'var(--sp-3)' }}>{t('contracts.doc.parties')}</h3>
             <Facts
               rows={[
-                ['Landlord', doc.parties?.landlord?.name ?? '—'],
+                [t('contracts.doc.landlord'), doc.parties?.landlord?.name ?? '—'],
                 [
-                  'Renter',
+                  t('common.renter'),
                   `${doc.parties?.renter?.name ?? '—'}${
                     doc.parties?.renter?.phone_masked ? ` · ${doc.parties.renter.phone_masked}` : ''
                   }`,
@@ -656,13 +682,13 @@ function ContractBody({ id }: { id: string }) {
 
           {(doc.schedule ?? []).length > 0 ? (
             <section style={{ marginTop: 'var(--sp-5)' }}>
-              <h3 style={{ fontSize: 'var(--text-md)', marginBottom: 'var(--sp-3)' }}>Payments</h3>
+              <h3 style={{ fontSize: 'var(--text-md)', marginBottom: 'var(--sp-3)' }}>{t('contracts.doc.payments')}</h3>
               <table className="ledger">
                 <thead>
                   <tr>
-                    <th>Period</th>
-                    <th>Due</th>
-                    <th className="num">Amount</th>
+                    <th>{t('contracts.schedule.col.period')}</th>
+                    <th>{t('contracts.schedule.col.due')}</th>
+                    <th className="num">{t('common.amount')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -676,7 +702,7 @@ function ContractBody({ id }: { id: string }) {
                     </tr>
                   ))}
                   <tr className="total">
-                    <td colSpan={2}>Total</td>
+                    <td colSpan={2}>{t('common.total')}</td>
                     <td className="num">{fmtTZS(doc.schedule.reduce((t, s) => t + (s.amount ?? 0), 0))}</td>
                   </tr>
                 </tbody>
@@ -685,14 +711,14 @@ function ContractBody({ id }: { id: string }) {
           ) : null}
 
           <section style={{ marginTop: 'var(--sp-6)' }}>
-            <h3 style={{ fontSize: 'var(--text-md)', marginBottom: 'var(--sp-4)' }}>Signatures</h3>
+            <h3 style={{ fontSize: 'var(--text-md)', marginBottom: 'var(--sp-4)' }}>{t('contracts.doc.signatures')}</h3>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-6)' }}>
               <SignatureCard
-                label="Renter"
+                label={t('common.renter')}
                 signature={(doc.signatures ?? []).find((s) => s.party === 'renter') ?? signedByRenter}
               />
               <SignatureCard
-                label="Landlord"
+                label={t('contracts.doc.landlord')}
                 signature={(doc.signatures ?? []).find((s) => s.party === 'landlord') ?? signedByLandlord}
               />
             </div>
@@ -701,20 +727,20 @@ function ContractBody({ id }: { id: string }) {
           <section style={{ marginTop: 'var(--sp-6)' }}>
             <hr className="rule" />
             <p style={{ marginTop: 'var(--sp-3)', fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>
-              Verification hash{' '}
+              {t('contracts.verify.hash')}{' '}
               <span className="num" style={{ wordBreak: 'break-all' }}>
                 {doc.snapshot_hash ?? contract.snapshot_hash}
               </span>
             </p>
             <div className="no-print" style={{ marginTop: 'var(--sp-3)', display: 'flex', gap: 'var(--sp-3)', alignItems: 'center', flexWrap: 'wrap' }}>
               <button type="button" className="btn btn-quiet" onClick={() => void verify()} disabled={verifying}>
-                <Icon icon="solar:shield-check-linear" width={20} /> {verifying ? 'Checking…' : 'Verify'}
+                <Icon icon="solar:shield-check-linear" width={20} /> {verifying ? t('contracts.verify.checking') : t('contracts.verify.action')}
               </button>
               {verification ? (
                 verification.valid ? (
-                  <span className="stamp stamp-paid">Unchanged since signing</span>
+                  <span className="stamp stamp-paid">{t('contracts.verify.valid')}</span>
                 ) : (
-                  <span className="stamp stamp-overdue">Does not match</span>
+                  <span className="stamp stamp-overdue">{t('contracts.verify.invalid')}</span>
                 )
               ) : null}
             </div>
@@ -722,7 +748,7 @@ function ContractBody({ id }: { id: string }) {
         </DocumentPaper>
       ) : (
         <p className="no-print" style={{ color: 'var(--ink-soft)' }}>
-          The document could not be loaded.
+          {t('contracts.doc.unavailable')}
         </p>
       )}
 
@@ -743,25 +769,25 @@ function ContractBody({ id }: { id: string }) {
 
       <Sheet
         open={behalfOpen}
-        title="Record on the renter's behalf"
+        title={t('contracts.behalf.title')}
         onClose={() => setBehalfOpen(false)}
         width={520}
       >
         <RecordOnBehalfForm
-          renterName={contract.renter?.full_name ?? 'the renter'}
+          renterName={renterName}
           busy={busy}
           error={actionError}
           onCancel={() => setBehalfOpen(false)}
           onSubmit={(reason) =>
             void act(
               () => contractsApi.activate(id, { landlord_recorded: true, reason }),
-              'Activated and recorded on the renter’s behalf. The action is flagged in the audit log.',
+              t('contracts.behalf.done'),
             )
           }
         />
       </Sheet>
 
-      <Sheet open={terminateOpen} title="Terminate this contract" onClose={() => setTerminateOpen(false)} width={520}>
+      <Sheet open={terminateOpen} title={t('contracts.terminate.title')} onClose={() => setTerminateOpen(false)} width={520}>
         <TerminateForm
           busy={busy}
           error={actionError}

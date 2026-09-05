@@ -53,6 +53,9 @@ func (s *Server) handleCreateOrg(w http.ResponseWriter, r *http.Request) {
 		Email     string `json:"email"`
 		Phone     string `json:"phone"`
 		Password  string `json:"password"`
+		// Locale is the language the owner signed up in (SPEC §3.2); it
+		// drives their screens and, until they change it, nothing else.
+		Locale string `json:"locale"`
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
@@ -70,6 +73,7 @@ func (s *Server) handleCreateOrg(w http.ResponseWriter, r *http.Request) {
 	email := f.Email("email", body.Email)
 	phone := f.Phone("phone", body.Phone)
 	f.Password("password", body.Password)
+	locale := optLocale(f, "locale", body.Locale)
 	if !f.Empty() {
 		badRequest(w, f)
 		return
@@ -116,6 +120,7 @@ func (s *Server) handleCreateOrg(w http.ResponseWriter, r *http.Request) {
 			Email:        &email,
 			FullName:     ownerName,
 			PasswordHash: &passwordHash,
+			Locale:       locale,
 		})
 		if err != nil {
 			return err
@@ -133,9 +138,14 @@ func (s *Server) handleCreateOrg(w http.ResponseWriter, r *http.Request) {
 		// Every org starts with terms it can actually issue a contract from.
 		// Migration 000005 seeds the byte-identical body for orgs that already
 		// existed, so old and new orgs agree on what "standard" means.
+		// Both bodies: an org's first contract for a Swahili-speaking renter
+		// should be in Swahili without the landlord having written a word
+		// (Phase 13). Migration 000015 seeds the same body for the orgs that
+		// already existed.
+		swBody := contract.DefaultTemplateBodySW
 		if _, err := q.CreateContractTemplate(r.Context(), sqlc.CreateContractTemplateParams{
 			OrgID: org.ID, Name: contract.DefaultTemplateName,
-			BodyHtml: contract.DefaultTemplateBody, IsDefault: true,
+			BodyHtml: contract.DefaultTemplateBody, BodyHtmlSw: &swBody, IsDefault: true,
 		}); err != nil {
 			return err
 		}
@@ -162,7 +172,9 @@ func (s *Server) handleCreateOrg(w http.ResponseWriter, r *http.Request) {
 			Action:      audit.ActionOrgCreate,
 			EntityType:  audit.EntityOrg,
 			EntityID:    db.UUIDString(org.ID),
-			After:       map[string]any{"name": orgName, "slug": slug, "owner_email": email},
+			After: map[string]any{
+				"name": orgName, "slug": slug, "owner_email": email, "locale": owner.Locale,
+			},
 		}); err != nil {
 			return err
 		}
@@ -388,6 +400,7 @@ func (s *Server) handleListMembers(w http.ResponseWriter, r *http.Request) {
 			FullName:  m.FullName,
 			Role:      m.Role,
 			Status:    m.Status,
+			Locale:    m.Locale,
 			CreatedAt: m.CreatedAt.Time,
 		})
 	}
@@ -404,6 +417,10 @@ func (s *Server) handleCreateMember(w http.ResponseWriter, r *http.Request) {
 		Email    string `json:"email"`
 		FullName string `json:"full_name"`
 		Role     string `json:"role"`
+		// Locale is the language the invited member's screens open in; they
+		// change it themselves through PATCH /org/members/me. Absent is
+		// Swahili, like every other account.
+		Locale string `json:"locale"`
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
@@ -412,6 +429,7 @@ func (s *Server) handleCreateMember(w http.ResponseWriter, r *http.Request) {
 	email := f.Email("email", body.Email)
 	fullName := f.MaxLen("full_name", f.Required("full_name", body.FullName), 120)
 	role := f.OneOf("role", body.Role, auth.RoleOwner, auth.RoleManager)
+	locale := optLocale(f, "locale", body.Locale)
 	if !f.Empty() {
 		badRequest(w, f)
 		return
@@ -440,7 +458,8 @@ func (s *Server) handleCreateMember(w http.ResponseWriter, r *http.Request) {
 	err = s.inTx(r.Context(), func(q *sqlc.Queries) error {
 		var err error
 		user, err = q.CreateUser(r.Context(), sqlc.CreateUserParams{
-			Kind: auth.KindOrgUser, Email: &email, FullName: fullName, PasswordHash: &tempHash,
+			Kind: auth.KindOrgUser, Email: &email, FullName: fullName,
+			PasswordHash: &tempHash, Locale: locale,
 		})
 		if err != nil {
 			return err
@@ -457,7 +476,9 @@ func (s *Server) handleCreateMember(w http.ResponseWriter, r *http.Request) {
 			Action:      audit.ActionMemberInvite,
 			EntityType:  audit.EntityOrgMember,
 			EntityID:    db.UUIDString(member.ID),
-			After:       map[string]any{"email": email, "full_name": fullName, "role": role},
+			After: map[string]any{
+				"email": email, "full_name": fullName, "role": role, "locale": user.Locale,
+			},
 		})
 	})
 	if isUnique(err) {
@@ -495,6 +516,7 @@ func (s *Server) handleCreateMember(w http.ResponseWriter, r *http.Request) {
 			FullName:  user.FullName,
 			Role:      member.Role,
 			Status:    member.Status,
+			Locale:    user.Locale,
 			CreatedAt: member.CreatedAt.Time,
 		},
 		"invite": invite,

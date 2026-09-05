@@ -8,7 +8,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { Field, ProblemNote } from '../../../components/FormBits';
-import { FilterTabs, KycStamp } from '../../../components/RenterBits';
+import { FilterTabs, KycStamp, linkStatusLabel, localeLabel } from '../../../components/RenterBits';
 import { PageHead } from '../../../components/PageHead';
 import {
   ApiError,
@@ -18,16 +18,18 @@ import {
   type RenterSummary,
 } from '../../../lib/api';
 import { fmtDate } from '../../../lib/format';
-import { TableScroll } from '@tms/ui';
+import { TableScroll, useT } from '@tms/ui';
 
-const KYC_TABS: { value: KycStatus | ''; label: string }[] = [
-  { value: '', label: 'All' },
-  { value: 'verified', label: 'Verified' },
-  { value: 'submitted', label: 'Submitted' },
-  { value: 'none', label: 'No KYC' },
+/** Tab values with the key of their label — the words are picked at render. */
+const KYC_TABS: { value: KycStatus | ''; key: string }[] = [
+  { value: '', key: 'common.all' },
+  { value: 'verified', key: 'renters.kyc.tab.verified' },
+  { value: 'submitted', key: 'renters.kyc.tab.submitted' },
+  { value: 'none', key: 'renters.kyc.tab.none' },
 ];
 
 function DirectoryBody() {
+  const t = useT();
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
   const [kyc, setKyc] = useState<KycStatus | ''>('');
@@ -66,25 +68,30 @@ function DirectoryBody() {
   return (
     <>
       <PageHead
-        title="Renters"
-        lead="Everyone linked to — or asking to link to — one of your units."
+        title={t('renters.title')}
+        lead={t('renters.lead')}
         actions={
           <Link href="/link-requests" className="btn btn-secondary">
-            Link requests
+            {t('nav.link_requests')}
           </Link>
         }
       />
 
       <div style={{ display: 'flex', gap: 'var(--sp-4)', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 'var(--sp-4)' }}>
-        <FilterTabs<KycStatus | ''> value={kyc} options={KYC_TABS} onChange={setKyc} label="KYC status" />
-        <Field id="r_q" label="Search">
+        <FilterTabs<KycStatus | ''>
+          value={kyc}
+          options={KYC_TABS.map((o) => ({ value: o.value, label: t(o.key) }))}
+          onChange={setKyc}
+          label={t('renters.kyc.filter_label')}
+        />
+        <Field id="r_q" label={t('common.search')}>
           <input
             id="r_q"
             className="input"
             type="search"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Name or phone"
+            placeholder={t('renters.search_placeholder')}
             style={{ minWidth: 240 }}
           />
         </Field>
@@ -95,28 +102,29 @@ function DirectoryBody() {
       <div style={{ paddingTop: 'var(--sp-4)', display: 'grid', gap: 'var(--sp-4)' }}>
         <ProblemNote error={error} />
 
-        <TableScroll label="Renters">
+        <TableScroll label={t('renters.title')}>
         <table className="ledger">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Phone</th>
-              <th>KYC</th>
-              <th>Units</th>
-              <th>Known since</th>
+              <th>{t('common.name')}</th>
+              <th>{t('common.phone')}</th>
+              <th>{t('renters.col.kyc')}</th>
+              <th>{t('renters.locale')}</th>
+              <th>{t('renters.col.units')}</th>
+              <th>{t('renters.col.known_since')}</th>
             </tr>
           </thead>
           <tbody>
             {items === null ? (
               <tr>
-                <td colSpan={5} style={{ color: 'var(--ink-soft)' }}>
-                  Loading…
+                <td colSpan={6} style={{ color: 'var(--ink-soft)' }}>
+                  {t('common.loading')}
                 </td>
               </tr>
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={5} style={{ color: 'var(--ink-soft)' }}>
-                  {error ? 'Nothing to show.' : 'No renters match this filter.'}
+                <td colSpan={6} style={{ color: 'var(--ink-soft)' }}>
+                  {error ? t('common.no_results') : t('renters.empty')}
                 </td>
               </tr>
             ) : (
@@ -136,6 +144,9 @@ function DirectoryBody() {
                   <td>
                     <KycStamp status={r.kyc_status} />
                   </td>
+                  <td style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+                    {localeLabel(t, r.locale)}
+                  </td>
                   <td style={{ fontSize: 'var(--text-sm)' }}>
                     {(r.units ?? []).length === 0 ? (
                       <span style={{ color: 'var(--ink-faint)' }}>—</span>
@@ -148,7 +159,7 @@ function DirectoryBody() {
                             </Link>
                             <span style={{ color: 'var(--ink-soft)' }}>
                               {' '}
-                              · {u.property_name} · {u.link_status}
+                              · {u.property_name} · {linkStatusLabel(t, u.link_status)}
                             </span>
                           </li>
                         ))}

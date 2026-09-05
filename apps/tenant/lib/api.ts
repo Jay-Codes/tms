@@ -11,7 +11,7 @@
  *  - No business logic lives here; the backend is the only source of truth.
  */
 
-import type { ThemePreset, ThemeTokens } from '@tms/ui';
+import type { Locale, ThemePreset, ThemeTokens } from '@tms/ui';
 
 export const API_BASE = '/api/v1';
 
@@ -153,6 +153,8 @@ export interface User {
   full_name: string;
   email_verified: boolean;
   status: string;
+  /** Language this person reads the app — and receives their SMS — in. */
+  locale?: Locale;
   created_at: string;
 }
 
@@ -225,6 +227,8 @@ export const authApi = {
     email: string;
     phone: string;
     password: string;
+    /** The language the SW/EN toggle on the signup page was left on. */
+    locale?: Locale;
   }) => api.post<{ org: Org; user: User }>('/orgs', body),
   verifyEmail: (token: string) => api.post<{ verified: boolean }>('/auth/verify-email', { token }),
   resendVerification: () => api.post<void>('/auth/verify-email/resend'),
@@ -251,6 +255,15 @@ export const orgApi = {
     },
     signal?: AbortSignal,
   ) => api.get<{ items: AuditEntry[]; next_cursor: string | null }>('/audit-log', { query, signal }),
+};
+
+/**
+ * The signed-in org user's own record. Phase 13 adds `PATCH /org/members/me`
+ * so a landlord's language choice follows the account, not the browser.
+ */
+export const membersApi = {
+  updateMe: (body: { locale?: Locale; full_name?: string }) =>
+    api.patch<{ user: User } | User>('/org/members/me', body),
 };
 
 /** `PATCH /org` may answer `{org}` or a bare org; normalise. */
@@ -492,6 +505,8 @@ export interface LinkRequestRenter {
   full_name: string;
   phone: string | null;
   kyc_status: KycStatus;
+  /** The renter's own language — the default for their contract and SMS. */
+  locale?: Locale;
 }
 
 export interface LinkRequestPeriod {
@@ -557,6 +572,8 @@ export interface RenterSummary {
   phone: string | null;
   email: string | null;
   kyc_status: KycStatus;
+  /** The renter's own language — the default for their contract and SMS. */
+  locale?: Locale;
   units: RenterUnitLink[];
   created_at: string;
 }
@@ -655,7 +672,10 @@ export interface ContractTemplateSummary {
 }
 
 export interface ContractTemplate extends ContractTemplateSummary {
+  /** English body. Phase 13 kept the original field name for compatibility. */
   body_html: string;
+  /** Swahili body; absent on templates written before Phase 13. */
+  body_html_sw?: string | null;
   variables?: string[];
 }
 
@@ -714,6 +734,8 @@ export interface Contract {
   end_date: string;
   due_day: number | null;
   snapshot_hash: string;
+  /** Language the document was rendered in; absent on pre-Phase-13 contracts. */
+  language?: Locale;
   signatures: ContractSignature[];
   link_request_id: string | null;
   created_at: string;
@@ -770,6 +792,8 @@ export interface ContractInput {
   term_days: number;
   start_date: string;
   due_day?: number | null;
+  /** Which body of the template to render. Defaults to the renter's locale. */
+  language?: Locale;
   link_request_id?: string;
 }
 
@@ -850,13 +874,25 @@ export const templatesApi = {
     api.get<{ template: ContractTemplate } | ContractTemplate>(`/contract-templates/${id}`, {
       signal,
     }),
-  create: (body: { name: string; body_html: string; is_default?: boolean }) =>
-    api.post<{ template: ContractTemplate } | ContractTemplate>('/contract-templates', body),
-  update: (id: string, body: { name?: string; body_html?: string; is_default?: boolean }) =>
-    api.patch<{ template: ContractTemplate } | ContractTemplate>(`/contract-templates/${id}`, body),
+  create: (body: {
+    name: string;
+    body_html: string;
+    body_html_sw?: string | null;
+    is_default?: boolean;
+  }) => api.post<{ template: ContractTemplate } | ContractTemplate>('/contract-templates', body),
+  update: (
+    id: string,
+    body: {
+      name?: string;
+      body_html?: string;
+      body_html_sw?: string | null;
+      is_default?: boolean;
+    },
+  ) => api.patch<{ template: ContractTemplate } | ContractTemplate>(`/contract-templates/${id}`, body),
   remove: (id: string) => api.del<void>(`/contract-templates/${id}`),
-  preview: (id: string, sample = true) =>
-    api.post<TemplatePreview>(`/contract-templates/${id}/preview`, { sample }),
+  /** `language` picks which body is rendered; the backend defaults to English. */
+  preview: (id: string, sample = true, language?: Locale) =>
+    api.post<TemplatePreview>(`/contract-templates/${id}/preview`, { sample, language }),
 };
 
 export const contractsApi = {
@@ -1237,21 +1273,42 @@ export interface NotificationLogEntry {
   attempts: number;
   /** Set on rows from a custom broadcast; groups one batch together. */
   batch_id?: string | null;
+  /** Phase 13: the language the body was sent in. */
+  language?: Locale | null;
   created_at: string;
   sent_at: string | null;
 }
 
-/** `202 {batch_id, queued, skipped}` from a custom bulk send. */
+/** How a bulk send (or its preview) splits across the two languages. */
+export interface ByLanguage {
+  sw: number;
+  en: number;
+}
+
+/** `202 {batch_id, queued, skipped, by_language}` from a custom bulk send. */
 export interface CustomSendResult {
   batch_id?: string;
   queued: number;
   skipped: number;
+  /** Phase 13: how many messages went out in each language. */
+  by_language?: ByLanguage;
 }
 
+/**
+ * A bulk send carries one body per language; at least one is required. When
+ * only one is filled every recipient gets it, whatever their own language.
+ */
 export interface CustomSendInput {
   recipients: 'all_active' | 'selected';
   renter_user_ids?: string[];
-  body: string;
+  body_sw?: string;
+  body_en?: string;
+}
+
+/** `GET /notifications/custom/recipients-preview` — who a filter would reach. */
+export interface RecipientsPreview {
+  count: number;
+  by_language: ByLanguage;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1287,6 +1344,23 @@ export const notificationsApi = {
     }),
   retry: (id: string) => api.post<{ entry?: NotificationLogEntry } | void>(`/notifications/log/${id}/retry`),
   sendCustom: (body: CustomSendInput) => api.post<CustomSendResult>('/notifications/custom', body),
+  /**
+   * Recipient counts for the compose screen, split by the language each renter
+   * reads. Same filters as `sendCustom`; refreshed whenever they change.
+   */
+  recipientsPreview: (
+    query: { recipients: 'all_active' | 'selected'; renter_user_ids?: string[] },
+    signal?: AbortSignal,
+  ) =>
+    api.get<RecipientsPreview>('/notifications/custom/recipients-preview', {
+      query: {
+        recipients: query.recipients,
+        renter_user_ids: query.renter_user_ids?.length
+          ? query.renter_user_ids.join(',')
+          : undefined,
+      },
+      signal,
+    }),
 };
 
 /** `GET/PUT /org/notification-settings` may answer `{settings}` or a bare object. */

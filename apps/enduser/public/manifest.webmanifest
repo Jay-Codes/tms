@@ -1,7 +1,7 @@
 {
-  "name": "TMS Rent Book",
-  "short_name": "Rent Book",
-  "description": "Your tenancy, your payments and your contract — in one rent book.",
+  "name": "Kitabu cha kodi",
+  "short_name": "Kitabu cha kodi",
+  "description": "Upangaji wako, malipo yako na mkataba wako — katika kitabu kimoja cha kodi.",
   "id": "/enduser/",
   "start_url": "/enduser/",
   "scope": "/enduser/",
@@ -9,7 +9,7 @@
   "orientation": "portrait",
   "background_color": "#fbfbf7",
   "theme_color": "#fbfbf7",
-  "lang": "en",
+  "lang": "sw",
   "dir": "ltr",
   "icons": [
     {

@@ -145,7 +145,7 @@ func (q *Queries) GetOrgMemberByUser(ctx context.Context, arg GetOrgMemberByUser
 
 const listOrgMembers = `-- name: ListOrgMembers :many
 SELECT m.id, m.org_id, m.user_id, m.role, m.status, m.created_at,
-       u.email, u.full_name
+       u.email, u.full_name, u.locale
 FROM org_members m
 JOIN users u ON u.id = m.user_id
 WHERE m.org_id = $1 AND m.deleted_at IS NULL
@@ -161,6 +161,7 @@ type ListOrgMembersRow struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	Email     *string            `json:"email"`
 	FullName  string             `json:"full_name"`
+	Locale    string             `json:"locale"`
 }
 
 func (q *Queries) ListOrgMembers(ctx context.Context, orgID pgtype.UUID) ([]ListOrgMembersRow, error) {
@@ -181,6 +182,7 @@ func (q *Queries) ListOrgMembers(ctx context.Context, orgID pgtype.UUID) ([]List
 			&i.CreatedAt,
 			&i.Email,
 			&i.FullName,
+			&i.Locale,
 		); err != nil {
 			return nil, err
 		}

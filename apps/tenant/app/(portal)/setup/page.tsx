@@ -3,6 +3,7 @@
 import { Icon } from '@iconify/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { useT } from '@tms/ui';
 import { PageHead } from '../../../components/PageHead';
 import { STEPS } from './steps';
 
@@ -26,6 +27,7 @@ function readStoredStep(): number {
 }
 
 function Stepper({ current, onPick }: { current: number; onPick: (i: number) => void }) {
+  const t = useT();
   return (
     <ol
       style={{
@@ -64,7 +66,7 @@ function Stepper({ current, onPick }: { current: number; onPick: (i: number) => 
               <span className="num" style={{ fontWeight: 600 }}>
                 {done ? <Icon icon="solar:check-circle-linear" width={16} /> : i + 1}
               </span>
-              {step.label}
+              {t(step.labelKey)}
             </button>
           </li>
         );
@@ -74,6 +76,7 @@ function Stepper({ current, onPick }: { current: number; onPick: (i: number) => 
 }
 
 function SetupBody() {
+  const t = useT();
   const router = useRouter();
   const [current, setCurrent] = useState(0);
   const [hydrated, setHydrated] = useState(false);
@@ -98,20 +101,20 @@ function SetupBody() {
   return (
     <>
       <PageHead
-        title="Set up your business"
-        lead={`Step ${current + 1} of ${STEPS.length} · ${step.label}. You can leave and come back — we remember where you stopped.`}
+        title={t('setup.title')}
+        lead={t('setup.lead', { step: current + 1, total: STEPS.length, name: t(step.labelKey) })}
       />
       <Stepper current={current} onPick={setCurrent} />
       <hr className="rule rule-strong" />
 
       <section style={{ paddingTop: 'var(--sp-5)' }}>
-        <h2 style={{ fontSize: 'var(--text-lg)' }}>{step.label}</h2>
+        <h2 style={{ fontSize: 'var(--text-lg)' }}>{t(step.labelKey)}</h2>
         <div style={{ marginTop: 'var(--sp-3)' }}>
           <step.Body />
         </div>
         {step.built ? null : (
           <p style={{ marginTop: 'var(--sp-4)', fontSize: 'var(--text-sm)', color: 'var(--ink-faint)' }}>
-            This step is filled in during Phase {step.phase}.
+            {t('setup.unbuilt', { phase: step.phase })}
           </p>
         )}
       </section>
@@ -123,11 +126,11 @@ function SetupBody() {
           onClick={() => setCurrent((c) => Math.max(0, c - 1))}
           disabled={current === 0}
         >
-          Back
+          {t('common.back')}
         </button>
         {isLast ? (
           <button type="button" className="btn btn-primary" onClick={() => router.push('/')}>
-            Go to dashboard
+            {t('setup.go_dashboard')}
           </button>
         ) : (
           <button
@@ -135,11 +138,11 @@ function SetupBody() {
             className="btn btn-primary"
             onClick={() => setCurrent((c) => Math.min(STEPS.length - 1, c + 1))}
           >
-            Next
+            {t('common.next')}
           </button>
         )}
         <button type="button" className="btn btn-quiet" onClick={() => router.push('/')}>
-          Finish later
+          {t('setup.finish_later')}
         </button>
       </div>
     </>

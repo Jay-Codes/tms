@@ -99,6 +99,11 @@ type contractInput struct {
 	DueDay          *int32
 	LinkRequestID   pgtype.UUID
 	ActorUserID     string
+	// Language is the language the document is rendered in ('sw' or 'en').
+	// Empty means "the renter's own locale" (Phase 13): the landlord may
+	// override it per contract, but the default is the language the person
+	// signing actually reads.
+	Language string
 }
 
 // createContractTx writes one contract and its audit row through the supplied
@@ -210,18 +215,27 @@ func (s *Server) createContractTx(
 	// itself, which read as the wrong figure whenever the two bases differed
 	// (PLAN2 Phase 9).
 	rentPerPeriod := contract.RentPerPeriod(unit.PriceAmount, int(unit.PricePeriodDays), int(period.Days))
-	terms := contract.Render(contract.SanitizeHTML(tpl.BodyHtml), map[string]string{
+	// Language: the caller's choice, else the renter's locale. The Swahili
+	// body is used when the org has written one; an org that has not keeps
+	// issuing the English document rather than a blank one, and `language`
+	// records which of the two the renter actually received.
+	wanted := in.Language
+	if wanted == "" {
+		wanted = renter.Locale
+	}
+	body, lang := contract.BodyFor(wanted, tpl.BodyHtml, tpl.BodyHtmlSw)
+	terms := contract.Render(contract.SanitizeHTML(body), map[string]string{
 		"renter_name":    renter.FullName,
 		"unit":           unit.Name,
 		"property":       unit.PropertyName,
 		"rent":           formatTZS(rentPerPeriod),
-		"rent_basis":     contract.RentBasisPhrase(formatTZS(unit.PriceAmount), int(unit.PricePeriodDays)),
+		"rent_basis":     contract.RentBasisPhraseFor(lang, formatTZS(unit.PriceAmount), int(unit.PricePeriodDays)),
 		"start_date":     start.Format(dateLayout),
 		"end_date":       end.Format(dateLayout),
 		"payment_period": fmt.Sprintf("%s (%d days)", period.Label, period.Days),
 		"org_name":       displayName,
 		"term_days":      strconv.Itoa(int(in.TermDays)),
-		"due_day":        contract.DueDayPhrase(intPtr(dueDay)),
+		"due_day":        contract.DueDayPhraseFor(lang, intPtr(dueDay)),
 	})
 
 	hash := contract.Snapshot{
@@ -247,6 +261,7 @@ func (s *Server) createContractTx(
 		EndDate:   pgtype.Date{Time: end, Valid: true},
 		DueDay:    dueDay, Status: contractPendingSignature,
 		SnapshotHash: &hash, LinkRequestID: in.LinkRequestID,
+		Language: &lang,
 	})
 	if err != nil {
 		// The partial unique index on (unit_id) over the live statuses is the
@@ -270,6 +285,7 @@ func (s *Server) createContractTx(
 			"term_days": in.TermDays, "start_date": start.Format(dateLayout),
 			"end_date": end.Format(dateLayout), "due_day": dueDayString(dueDay),
 			"status": contractPendingSignature, "snapshot_hash": hash,
+			"language": lang,
 		},
 	}); err != nil {
 		return zero, "", err
@@ -305,6 +321,7 @@ func (s *Server) handleCreateContract(w http.ResponseWriter, r *http.Request) {
 		StartDate       string `json:"start_date"`
 		DueDay          *int32 `json:"due_day"`
 		LinkRequestID   string `json:"link_request_id"`
+		Language        string `json:"language"`
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
@@ -317,6 +334,9 @@ func (s *Server) handleCreateContract(w http.ResponseWriter, r *http.Request) {
 	in.PaymentPeriodID = uuidField(f, "payment_period_id", body.PaymentPeriodID, true)
 	in.TemplateID = uuidField(f, "template_id", body.TemplateID, false)
 	in.LinkRequestID = uuidField(f, "link_request_id", body.LinkRequestID, false)
+	if lang := optLocale(f, "language", body.Language); lang != nil {
+		in.Language = *lang
+	}
 	if body.TermDays <= 0 || body.TermDays > termDaysMax {
 		f.Add("term_days", "must be a whole number of days between 1 and 3650")
 	}
@@ -1370,10 +1390,12 @@ type contractMessage struct {
 	UserID     string
 	ContractID string
 	Kind       string
-	Lang       string
-	Phone      string
-	Vars       notify.Vars
-	Overrides  notify.Overrides
+	// Lang is the org's default for renters without a preference; the
+	// recipient's own `users.locale` wins over it (Phase 13).
+	Lang      string
+	Phone     string
+	Vars      notify.Vars
+	Overrides notify.Overrides
 }
 
 // queueContractSMS writes the notification row inside the caller's transaction
@@ -1384,10 +1406,12 @@ func (s *Server) queueContractSMS(ctx context.Context, q *sqlc.Queries, m contra
 			"contract_id", m.ContractID, "kind", m.Kind)
 		return "", nil
 	}
+	lang := s.recipientLang(ctx, q, m.UserID, m.Lang)
 	id, err := notify.Queue(ctx, q, notify.Msg{
 		OrgID: m.OrgID, UserID: m.UserID, Kind: m.Kind,
 		DedupeKey: m.Kind + ":" + m.ContractID, Phone: m.Phone,
-		Body: notify.Render(m.Kind, m.Lang, m.Vars, m.Overrides),
+		Body:     notify.Render(m.Kind, lang, m.Vars, m.Overrides),
+		Language: lang,
 	})
 	if errors.Is(err, notify.ErrDuplicate) {
 		return "", nil

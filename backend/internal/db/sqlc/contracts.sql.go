@@ -16,7 +16,7 @@ UPDATE contracts
 SET status = 'active', activated_at = now()
 WHERE org_id = $1 AND id = $2
   AND status = 'pending_signature' AND deleted_at IS NULL
-RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id
+RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language
 `
 
 type ActivateContractParams struct {
@@ -52,6 +52,7 @@ func (q *Queries) ActivateContract(ctx context.Context, arg ActivateContractPara
 		&i.TerminationReason,
 		&i.TerminationEffectiveDate,
 		&i.LinkRequestID,
+		&i.Language,
 	)
 	return i, err
 }
@@ -103,16 +104,18 @@ const createContract = `-- name: CreateContract :one
 INSERT INTO contracts (
     org_id, unit_id, renter_user_id, template_id, terms_snapshot_html,
     rent_amount, rent_period_days, payment_period_id, payment_period_days,
-    term_days, start_date, end_date, due_day, status, snapshot_hash, link_request_id
+    term_days, start_date, end_date, due_day, status, snapshot_hash, link_request_id,
+    language
 )
 VALUES (
     $1, $2, $3, $4,
     $5, $6, $7,
     $8, $9, $10,
     $11, $12, $13, $14,
-    $15, $16
+    $15, $16,
+    COALESCE($17::text, 'en')
 )
-RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id
+RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language
 `
 
 type CreateContractParams struct {
@@ -132,6 +135,7 @@ type CreateContractParams struct {
 	Status            string      `json:"status"`
 	SnapshotHash      *string     `json:"snapshot_hash"`
 	LinkRequestID     pgtype.UUID `json:"link_request_id"`
+	Language          *string     `json:"language"`
 }
 
 // A contract is the agreement between an org and a renter over one unit. Like
@@ -159,6 +163,7 @@ func (q *Queries) CreateContract(ctx context.Context, arg CreateContractParams) 
 		arg.Status,
 		arg.SnapshotHash,
 		arg.LinkRequestID,
+		arg.Language,
 	)
 	var i Contract
 	err := row.Scan(
@@ -186,12 +191,13 @@ func (q *Queries) CreateContract(ctx context.Context, arg CreateContractParams) 
 		&i.TerminationReason,
 		&i.TerminationEffectiveDate,
 		&i.LinkRequestID,
+		&i.Language,
 	)
 	return i, err
 }
 
 const getContract = `-- name: GetContract :one
-SELECT c.id, c.org_id, c.unit_id, c.renter_user_id, c.template_id, c.terms_snapshot_html, c.rent_amount, c.rent_period_days, c.payment_period_id, c.payment_period_days, c.term_days, c.start_date, c.end_date, c.due_day, c.status, c.snapshot_hash, c.created_at, c.updated_at, c.deleted_at, c.activated_at, c.terminated_at, c.termination_reason, c.termination_effective_date, c.link_request_id,
+SELECT c.id, c.org_id, c.unit_id, c.renter_user_id, c.template_id, c.terms_snapshot_html, c.rent_amount, c.rent_period_days, c.payment_period_id, c.payment_period_days, c.term_days, c.start_date, c.end_date, c.due_day, c.status, c.snapshot_hash, c.created_at, c.updated_at, c.deleted_at, c.activated_at, c.terminated_at, c.termination_reason, c.termination_effective_date, c.link_request_id, c.language,
        u.name AS unit_name, u.unit_code, u.status AS unit_status,
        p.name AS property_name, p.location_text AS property_location_text,
        o.name AS org_name, o.slug AS org_slug,
@@ -258,6 +264,7 @@ type GetContractRow struct {
 	TerminationReason        *string            `json:"termination_reason"`
 	TerminationEffectiveDate pgtype.Date        `json:"termination_effective_date"`
 	LinkRequestID            pgtype.UUID        `json:"link_request_id"`
+	Language                 string             `json:"language"`
 	UnitName                 string             `json:"unit_name"`
 	UnitCode                 string             `json:"unit_code"`
 	UnitStatus               string             `json:"unit_status"`
@@ -306,6 +313,7 @@ func (q *Queries) GetContract(ctx context.Context, arg GetContractParams) (GetCo
 		&i.TerminationReason,
 		&i.TerminationEffectiveDate,
 		&i.LinkRequestID,
+		&i.Language,
 		&i.UnitName,
 		&i.UnitCode,
 		&i.UnitStatus,
@@ -349,7 +357,7 @@ func (q *Queries) GetContractForLinkRequest(ctx context.Context, arg GetContract
 }
 
 const listContracts = `-- name: ListContracts :many
-SELECT c.id, c.org_id, c.unit_id, c.renter_user_id, c.template_id, c.terms_snapshot_html, c.rent_amount, c.rent_period_days, c.payment_period_id, c.payment_period_days, c.term_days, c.start_date, c.end_date, c.due_day, c.status, c.snapshot_hash, c.created_at, c.updated_at, c.deleted_at, c.activated_at, c.terminated_at, c.termination_reason, c.termination_effective_date, c.link_request_id,
+SELECT c.id, c.org_id, c.unit_id, c.renter_user_id, c.template_id, c.terms_snapshot_html, c.rent_amount, c.rent_period_days, c.payment_period_id, c.payment_period_days, c.term_days, c.start_date, c.end_date, c.due_day, c.status, c.snapshot_hash, c.created_at, c.updated_at, c.deleted_at, c.activated_at, c.terminated_at, c.termination_reason, c.termination_effective_date, c.link_request_id, c.language,
        u.name AS unit_name, u.unit_code, u.status AS unit_status,
        p.name AS property_name, p.location_text AS property_location_text,
        o.name AS org_name, o.slug AS org_slug,
@@ -426,6 +434,7 @@ type ListContractsRow struct {
 	TerminationReason        *string            `json:"termination_reason"`
 	TerminationEffectiveDate pgtype.Date        `json:"termination_effective_date"`
 	LinkRequestID            pgtype.UUID        `json:"link_request_id"`
+	Language                 string             `json:"language"`
 	UnitName                 string             `json:"unit_name"`
 	UnitCode                 string             `json:"unit_code"`
 	UnitStatus               string             `json:"unit_status"`
@@ -488,6 +497,7 @@ func (q *Queries) ListContracts(ctx context.Context, arg ListContractsParams) ([
 			&i.TerminationReason,
 			&i.TerminationEffectiveDate,
 			&i.LinkRequestID,
+			&i.Language,
 			&i.UnitName,
 			&i.UnitCode,
 			&i.UnitStatus,
@@ -550,7 +560,7 @@ SET status = 'terminated', terminated_at = now(),
     termination_effective_date = $2
 WHERE org_id = $3 AND id = $4
   AND status IN ('pending_signature', 'active', 'expiring') AND deleted_at IS NULL
-RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id
+RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language
 `
 
 type TerminateContractParams struct {
@@ -593,6 +603,7 @@ func (q *Queries) TerminateContract(ctx context.Context, arg TerminateContractPa
 		&i.TerminationReason,
 		&i.TerminationEffectiveDate,
 		&i.LinkRequestID,
+		&i.Language,
 	)
 	return i, err
 }

@@ -3,25 +3,27 @@
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useT } from '@tms/ui';
 
 /**
  * Renter tab bar. Phase 1 ships Home and Profile; Contract and Payments are
  * routed but land on a "coming soon" sheet until Phases 3–5 fill them.
  */
-const TABS: Array<{ href: string; label: string; icon: string }> = [
-  { href: '/', label: 'Home', icon: 'solar:home-2-linear' },
-  { href: '/contract', label: 'Contract', icon: 'solar:document-text-linear' },
-  { href: '/payments', label: 'Payments', icon: 'solar:wallet-money-linear' },
-  { href: '/profile', label: 'Profile', icon: 'solar:user-circle-linear' },
+const TABS: Array<{ href: string; key: string; icon: string }> = [
+  { href: '/', key: 'nav.home', icon: 'solar:home-2-linear' },
+  { href: '/contract', key: 'nav.contract', icon: 'solar:document-text-linear' },
+  { href: '/payments', key: 'nav.payments', icon: 'solar:wallet-money-linear' },
+  { href: '/profile', key: 'nav.profile', icon: 'solar:user-circle-linear' },
 ];
 
 export function BottomBar() {
   const pathname = usePathname();
+  const t = useT();
 
   return (
     <nav
       className="bottom-bar"
-      aria-label="Main"
+      aria-label={t('nav.aria')}
       style={{
         position: 'fixed',
         insetInline: 0,
@@ -44,7 +46,7 @@ export function BottomBar() {
               aria-current={current ? 'page' : undefined}
             >
               <Icon icon={tab.icon} width={22} aria-hidden />
-              {tab.label}
+              {t(tab.key)}
             </Link>
           );
         })}

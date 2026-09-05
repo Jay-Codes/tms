@@ -48,26 +48,32 @@ func (q *Queries) CountContractsForTemplate(ctx context.Context, arg CountContra
 
 const createContractTemplate = `-- name: CreateContractTemplate :one
 
-INSERT INTO contract_templates (org_id, name, body_html, is_default)
-VALUES ($1, $2, $3, $4)
-RETURNING id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at
+INSERT INTO contract_templates (org_id, name, body_html, body_html_sw, is_default)
+VALUES ($1, $2, $3,
+        COALESCE($4::text, ''), $5)
+RETURNING id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw
 `
 
 type CreateContractTemplateParams struct {
-	OrgID     pgtype.UUID `json:"org_id"`
-	Name      string      `json:"name"`
-	BodyHtml  string      `json:"body_html"`
-	IsDefault bool        `json:"is_default"`
+	OrgID      pgtype.UUID `json:"org_id"`
+	Name       string      `json:"name"`
+	BodyHtml   string      `json:"body_html"`
+	BodyHtmlSw *string     `json:"body_html_sw"`
+	IsDefault  bool        `json:"is_default"`
 }
 
 // Contract templates are the org's terms library. Editing one never touches an
 // existing contract: a contract stores its own rendered `terms_snapshot_html`
 // (SPEC §4, "contracts snapshot terms and rent at signing").
+// `body_html` is the English body and `body_html_sw` the Swahili one
+// (Phase 13). An empty Swahili body means "this org has no Swahili terms":
+// a Swahili contract then renders from the English body rather than a blank.
 func (q *Queries) CreateContractTemplate(ctx context.Context, arg CreateContractTemplateParams) (ContractTemplate, error) {
 	row := q.db.QueryRow(ctx, createContractTemplate,
 		arg.OrgID,
 		arg.Name,
 		arg.BodyHtml,
+		arg.BodyHtmlSw,
 		arg.IsDefault,
 	)
 	var i ContractTemplate
@@ -80,12 +86,13 @@ func (q *Queries) CreateContractTemplate(ctx context.Context, arg CreateContract
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.BodyHtmlSw,
 	)
 	return i, err
 }
 
 const getContractTemplate = `-- name: GetContractTemplate :one
-SELECT id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at FROM contract_templates
+SELECT id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw FROM contract_templates
 WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
 `
 
@@ -106,12 +113,13 @@ func (q *Queries) GetContractTemplate(ctx context.Context, arg GetContractTempla
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.BodyHtmlSw,
 	)
 	return i, err
 }
 
 const getDefaultContractTemplate = `-- name: GetDefaultContractTemplate :one
-SELECT id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at FROM contract_templates
+SELECT id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw FROM contract_templates
 WHERE org_id = $1 AND is_default AND deleted_at IS NULL
 LIMIT 1
 `
@@ -128,12 +136,13 @@ func (q *Queries) GetDefaultContractTemplate(ctx context.Context, orgID pgtype.U
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.BodyHtmlSw,
 	)
 	return i, err
 }
 
 const listContractTemplates = `-- name: ListContractTemplates :many
-SELECT id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at FROM contract_templates
+SELECT id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw FROM contract_templates
 WHERE org_id = $1 AND deleted_at IS NULL
 ORDER BY is_default DESC, created_at DESC, id DESC
 `
@@ -156,6 +165,7 @@ func (q *Queries) ListContractTemplates(ctx context.Context, orgID pgtype.UUID) 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.BodyHtmlSw,
 		); err != nil {
 			return nil, err
 		}
@@ -170,7 +180,7 @@ func (q *Queries) ListContractTemplates(ctx context.Context, orgID pgtype.UUID) 
 const softDeleteContractTemplate = `-- name: SoftDeleteContractTemplate :one
 UPDATE contract_templates SET deleted_at = now()
 WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at
+RETURNING id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw
 `
 
 type SoftDeleteContractTemplateParams struct {
@@ -190,31 +200,35 @@ func (q *Queries) SoftDeleteContractTemplate(ctx context.Context, arg SoftDelete
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.BodyHtmlSw,
 	)
 	return i, err
 }
 
 const updateContractTemplate = `-- name: UpdateContractTemplate :one
 UPDATE contract_templates
-SET name       = COALESCE($1, name),
-    body_html  = COALESCE($2, body_html),
-    is_default = COALESCE($3, is_default)
-WHERE org_id = $4 AND id = $5 AND deleted_at IS NULL
-RETURNING id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at
+SET name         = COALESCE($1, name),
+    body_html    = COALESCE($2, body_html),
+    body_html_sw = COALESCE($3, body_html_sw),
+    is_default   = COALESCE($4, is_default)
+WHERE org_id = $5 AND id = $6 AND deleted_at IS NULL
+RETURNING id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw
 `
 
 type UpdateContractTemplateParams struct {
-	Name      *string     `json:"name"`
-	BodyHtml  *string     `json:"body_html"`
-	IsDefault *bool       `json:"is_default"`
-	OrgID     pgtype.UUID `json:"org_id"`
-	ID        pgtype.UUID `json:"id"`
+	Name       *string     `json:"name"`
+	BodyHtml   *string     `json:"body_html"`
+	BodyHtmlSw *string     `json:"body_html_sw"`
+	IsDefault  *bool       `json:"is_default"`
+	OrgID      pgtype.UUID `json:"org_id"`
+	ID         pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) UpdateContractTemplate(ctx context.Context, arg UpdateContractTemplateParams) (ContractTemplate, error) {
 	row := q.db.QueryRow(ctx, updateContractTemplate,
 		arg.Name,
 		arg.BodyHtml,
+		arg.BodyHtmlSw,
 		arg.IsDefault,
 		arg.OrgID,
 		arg.ID,
@@ -229,6 +243,7 @@ func (q *Queries) UpdateContractTemplate(ctx context.Context, arg UpdateContract
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.BodyHtmlSw,
 	)
 	return i, err
 }

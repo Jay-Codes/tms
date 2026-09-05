@@ -3,6 +3,7 @@
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
+import { useT, type Translator } from '@tms/ui';
 import { Field, Note, ProblemNote } from '../../../components/FormBits';
 import { PageHead } from '../../../components/PageHead';
 import {
@@ -16,9 +17,23 @@ import {
 } from '../../../lib/api';
 import { useMe } from '../../../lib/auth';
 
+/** Membership status is a small server enum; anything unknown prints as it came. */
+const MEMBER_STATUS_KEYS: Record<string, string> = {
+  active: 'settings.members.status.active',
+  invited: 'settings.members.status.invited',
+  disabled: 'settings.members.status.disabled',
+  removed: 'settings.members.status.removed',
+};
+
+function memberStatus(t: Translator, status: string): string {
+  const key = MEMBER_STATUS_KEYS[status];
+  return key ? t(key) : status;
+}
+
 /* ------------------------------ org profile ------------------------------ */
 
 function OrgProfile({ org, onSaved }: { org: Org; onSaved: (o: Org) => void }) {
+  const t = useT();
   const [name, setName] = useState(org.name);
   const [settings, setSettings] = useState<OrgSettings>(org.settings);
   const [error, setError] = useState<ApiError | null>(null);
@@ -61,14 +76,14 @@ function OrgProfile({ org, onSaved }: { org: Org; onSaved: (o: Org) => void }) {
   return (
     <form onSubmit={submit} style={{ display: 'grid', gap: 'var(--sp-4)', maxWidth: 640 }} noValidate>
       <ProblemNote error={error} />
-      {saved ? <Note>Settings saved.</Note> : null}
+      {saved ? <Note>{t('settings.saved')}</Note> : null}
 
-      <Field id="name" label="Business name" error={error?.errors.name}>
+      <Field id="name" label={t('settings.field.business_name')} error={error?.errors.name}>
         <input id="name" className="input" value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
 
       <div className="field">
-        <label htmlFor="auto_approve">Link requests</label>
+        <label htmlFor="auto_approve">{t('settings.field.link_requests')}</label>
         <label
           htmlFor="auto_approve"
           style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', minHeight: 'var(--touch-min)', fontWeight: 400 }}
@@ -80,16 +95,16 @@ function OrgProfile({ org, onSaved }: { org: Org; onSaved: (o: Org) => void }) {
             onChange={(e) => set('auto_approve_links', e.target.checked)}
             style={{ width: 18, height: 18 }}
           />
-          Approve renter link requests automatically
+          {t('settings.link_requests.auto')}
         </label>
-        <span className="hint">Off means every scan waits for you to approve it.</span>
+        <span className="hint">{t('settings.link_requests.hint')}</span>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-4)' }}>
         <Field
           id="due_day"
-          label="Due day of month"
-          hint="1–28, or leave blank to use each contract's start date."
+          label={t('settings.field.due_day')}
+          hint={t('settings.field.due_day.hint')}
           error={error?.errors['settings.due_day']}
         >
           <input
@@ -102,7 +117,7 @@ function OrgProfile({ org, onSaved }: { org: Org; onSaved: (o: Org) => void }) {
             onChange={(e) => set('due_day', num(e.target.value))}
           />
         </Field>
-        <Field id="grace_days" label="Grace days" hint="Days after the due date before rent counts as overdue.">
+        <Field id="grace_days" label={t('settings.field.grace_days')} hint={t('settings.field.grace_days.hint')}>
           <input
             id="grace_days"
             className="input num"
@@ -112,7 +127,11 @@ function OrgProfile({ org, onSaved }: { org: Org; onSaved: (o: Org) => void }) {
             onChange={(e) => set('grace_days', Number(e.target.value))}
           />
         </Field>
-        <Field id="sms_language" label="SMS language">
+        <Field
+          id="sms_language"
+          label={t('notifysettings.language.label')}
+          hint={t('notifysettings.language.hint')}
+        >
           <select
             id="sms_language"
             className="input"
@@ -125,8 +144,8 @@ function OrgProfile({ org, onSaved }: { org: Org; onSaved: (o: Org) => void }) {
         </Field>
         <Field
           id="unsigned_reminder_days"
-          label="Unsigned contract reminder"
-          hint="Days to wait before nudging a renter who has not signed."
+          label={t('settings.field.unsigned_reminder')}
+          hint={t('settings.field.unsigned_reminder.hint')}
         >
           <input
             id="unsigned_reminder_days"
@@ -141,7 +160,7 @@ function OrgProfile({ org, onSaved }: { org: Org; onSaved: (o: Org) => void }) {
 
       <div>
         <button type="submit" className="btn btn-primary" disabled={busy}>
-          {busy ? 'Saving…' : 'Save settings'}
+          {busy ? t('common.saving') : t('settings.save')}
         </button>
       </div>
     </form>
@@ -151,6 +170,7 @@ function OrgProfile({ org, onSaved }: { org: Org; onSaved: (o: Org) => void }) {
 /* -------------------------------- members -------------------------------- */
 
 function Members({ canManage }: { canManage: boolean }) {
+  const t = useT();
   const [items, setItems] = useState<Member[] | null>(null);
   const [loadError, setLoadError] = useState<ApiError | null>(null);
   const [form, setForm] = useState({ email: '', full_name: '', role: 'org_manager' as OrgRole });
@@ -181,7 +201,7 @@ function Members({ canManage }: { canManage: boolean }) {
     try {
       await orgApi.invite({ email: form.email.trim(), full_name: form.full_name.trim(), role: form.role });
       setForm({ email: '', full_name: '', role: 'org_manager' });
-      setNote('Invitation sent. They set their password from the emailed link.');
+      setNote(t('settings.members.invite_sent'));
       await load();
     } catch (err) {
       setFormError(err instanceof ApiError ? err : new ApiError(0, { detail: String(err) }));
@@ -191,7 +211,7 @@ function Members({ canManage }: { canManage: boolean }) {
   };
 
   const remove = async (m: Member) => {
-    if (!window.confirm(`Remove ${m.full_name || m.email} from this business? They lose access immediately.`)) return;
+    if (!window.confirm(t('settings.members.remove_confirm', { name: m.full_name || m.email }))) return;
     setFormError(null);
     setNote(null);
     try {
@@ -208,10 +228,10 @@ function Members({ canManage }: { canManage: boolean }) {
       <table className="ledger">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Email</th>
-            <th>Role</th>
-            <th>Status</th>
+            <th>{t('common.name')}</th>
+            <th>{t('common.email')}</th>
+            <th>{t('settings.members.col.role')}</th>
+            <th>{t('common.status')}</th>
             <th style={{ textAlign: 'right' }} />
           </tr>
         </thead>
@@ -219,13 +239,13 @@ function Members({ canManage }: { canManage: boolean }) {
           {items === null ? (
             <tr>
               <td colSpan={5} style={{ color: 'var(--ink-soft)' }}>
-                Loading…
+                {t('common.loading')}
               </td>
             </tr>
           ) : items.length === 0 ? (
             <tr>
               <td colSpan={5} style={{ color: 'var(--ink-soft)' }}>
-                No staff yet.
+                {t('settings.members.empty')}
               </td>
             </tr>
           ) : (
@@ -233,12 +253,12 @@ function Members({ canManage }: { canManage: boolean }) {
               <tr key={m.id}>
                 <td style={{ fontWeight: 500 }}>{m.full_name}</td>
                 <td>{m.email}</td>
-                <td>{m.role === 'org_owner' ? 'Owner' : 'Manager'}</td>
-                <td className="pencil">{m.status}</td>
+                <td>{m.role === 'org_owner' ? t('settings.members.role.owner') : t('settings.members.role.manager')}</td>
+                <td className="pencil">{memberStatus(t, m.status)}</td>
                 <td className="num">
                   {canManage ? (
                     <button type="button" className="btn btn-quiet" onClick={() => void remove(m)} style={{ minHeight: 32 }}>
-                      Remove
+                      {t('common.remove')}
                     </button>
                   ) : null}
                 </td>
@@ -250,11 +270,11 @@ function Members({ canManage }: { canManage: boolean }) {
 
       {canManage ? (
         <form onSubmit={invite} style={{ display: 'grid', gap: 'var(--sp-4)', maxWidth: 640 }} noValidate>
-          <h3 style={{ fontSize: 'var(--text-lg)' }}>Invite someone</h3>
+          <h3 style={{ fontSize: 'var(--text-lg)' }}>{t('settings.members.invite_heading')}</h3>
           <ProblemNote error={formError} />
           {note ? <Note>{note}</Note> : null}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-4)' }}>
-            <Field id="m_name" label="Full name" error={formError?.errors.full_name}>
+            <Field id="m_name" label={t('settings.members.full_name')} error={formError?.errors.full_name}>
               <input
                 id="m_name"
                 className="input"
@@ -262,7 +282,7 @@ function Members({ canManage }: { canManage: boolean }) {
                 onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))}
               />
             </Field>
-            <Field id="m_email" label="Email" error={formError?.errors.email}>
+            <Field id="m_email" label={t('common.email')} error={formError?.errors.email}>
               <input
                 id="m_email"
                 className="input"
@@ -271,27 +291,28 @@ function Members({ canManage }: { canManage: boolean }) {
                 onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
               />
             </Field>
-            <Field id="m_role" label="Role" hint="Managers cannot invite or remove staff.">
+            <Field id="m_role" label={t('settings.members.col.role')} hint={t('settings.members.role_hint')}>
               <select
                 id="m_role"
                 className="input"
                 value={form.role}
                 onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as OrgRole }))}
               >
-                <option value="org_manager">Manager</option>
-                <option value="org_owner">Owner</option>
+                <option value="org_manager">{t('settings.members.role.manager')}</option>
+                <option value="org_owner">{t('settings.members.role.owner')}</option>
               </select>
             </Field>
           </div>
           <div>
             <button type="submit" className="btn btn-primary" disabled={busy}>
-              <Icon icon="solar:user-plus-linear" width={20} /> {busy ? 'Inviting…' : 'Send invitation'}
+              <Icon icon="solar:user-plus-linear" width={20} />{' '}
+              {busy ? t('settings.members.inviting') : t('settings.members.send_invite')}
             </button>
           </div>
         </form>
       ) : (
         <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-          Only the business owner can invite or remove staff.
+          {t('settings.members.owner_only')}
         </p>
       )}
     </div>
@@ -300,7 +321,46 @@ function Members({ canManage }: { canManage: boolean }) {
 
 /* --------------------------------- page ---------------------------------- */
 
+/** One row of the settings index: a heading, a line of copy and a way in. */
+function SettingsCard({
+  title,
+  lead,
+  href,
+  action,
+}: {
+  title: string;
+  lead: string;
+  href: string;
+  action: string;
+}) {
+  return (
+    <section style={{ paddingTop: 'var(--sp-7)' }}>
+      <hr className="rule rule-strong" />
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-end',
+          justifyContent: 'space-between',
+          gap: 'var(--sp-4)',
+          margin: 'var(--sp-4) 0',
+        }}
+      >
+        <div>
+          <h2 style={{ fontSize: 'var(--text-lg)' }}>{title}</h2>
+          <p style={{ marginTop: 'var(--sp-2)', color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+            {lead}
+          </p>
+        </div>
+        <Link href={href} className="btn btn-secondary">
+          {action}
+        </Link>
+      </div>
+    </section>
+  );
+}
+
 function SettingsBody() {
+  const t = useT();
   const { org: orgRef } = useMe();
   const [org, setOrg] = useState<Org | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
@@ -319,139 +379,64 @@ function SettingsBody() {
 
   return (
     <>
-      <PageHead title="Settings" lead="How your business behaves: approvals, due dates and who has access." />
+      <PageHead title={t('settings.title')} lead={t('settings.lead')} />
       <hr className="rule rule-strong" />
 
       <section style={{ paddingTop: 'var(--sp-5)' }}>
-        <h2 style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--sp-4)' }}>Business profile</h2>
+        <h2 style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--sp-4)' }}>{t('settings.profile.heading')}</h2>
         <ProblemNote error={error} />
         {org ? (
           <OrgProfile org={org} onSaved={setOrg} />
         ) : error ? null : (
-          <p style={{ color: 'var(--ink-soft)' }}>Loading…</p>
+          <p style={{ color: 'var(--ink-soft)' }}>{t('common.loading')}</p>
         )}
       </section>
 
-      <section style={{ paddingTop: 'var(--sp-7)' }}>
-        <hr className="rule rule-strong" />
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-end',
-            justifyContent: 'space-between',
-            gap: 'var(--sp-4)',
-            margin: 'var(--sp-4) 0',
-          }}
-        >
-          <div>
-            <h2 style={{ fontSize: 'var(--text-lg)' }}>Payment periods</h2>
-            <p style={{ marginTop: 'var(--sp-2)', color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-              Monthly, quarterly or any number of days you like. Changes affect future contracts only.
-            </p>
-          </div>
-          <Link href="/settings/periods" className="btn btn-secondary">
-            Manage periods
-          </Link>
-        </div>
-      </section>
+      <SettingsCard
+        title={t('settings.card.periods.title')}
+        lead={t('settings.card.periods.lead')}
+        href="/settings/periods"
+        action={t('settings.card.periods.action')}
+      />
+
+      <SettingsCard
+        title={t('settings.card.branding.title')}
+        lead={t('settings.card.branding.lead')}
+        href="/settings/branding"
+        action={t('settings.card.branding.action')}
+      />
+
+      <SettingsCard
+        title={t('settings.card.bank.title')}
+        lead={t('settings.card.bank.lead')}
+        href="/settings/bank-account"
+        action={t('settings.card.bank.action')}
+      />
+
+      <SettingsCard
+        title={t('settings.card.notifications.title')}
+        lead={t('settings.card.notifications.lead')}
+        href="/settings/notifications"
+        action={t('settings.card.notifications.action')}
+      />
+
+      <SettingsCard
+        title={t('settings.card.expcat.title')}
+        lead={t('settings.card.expcat.lead')}
+        href="/settings/expense-categories"
+        action={t('settings.card.expcat.action')}
+      />
+
+      <SettingsCard
+        title={t('settings.card.preferences.title')}
+        lead={t('settings.card.preferences.lead')}
+        href="/settings/preferences"
+        action={t('settings.card.preferences.action')}
+      />
 
       <section style={{ paddingTop: 'var(--sp-7)' }}>
         <hr className="rule rule-strong" />
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-end',
-            justifyContent: 'space-between',
-            gap: 'var(--sp-4)',
-            margin: 'var(--sp-4) 0',
-          }}
-        >
-          <div>
-            <h2 style={{ fontSize: 'var(--text-lg)' }}>Branding</h2>
-            <p style={{ marginTop: 'var(--sp-2)', color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-              Display name, colour, typeface, logo and the letterhead printed on every contract.
-            </p>
-          </div>
-          <Link href="/settings/branding" className="btn btn-secondary">
-            Edit branding
-          </Link>
-        </div>
-      </section>
-
-      <section style={{ paddingTop: 'var(--sp-7)' }}>
-        <hr className="rule rule-strong" />
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-end',
-            justifyContent: 'space-between',
-            gap: 'var(--sp-4)',
-            margin: 'var(--sp-4) 0',
-          }}
-        >
-          <div>
-            <h2 style={{ fontSize: 'var(--text-lg)' }}>Bank account</h2>
-            <p style={{ marginTop: 'var(--sp-2)', color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-              Where renters send their rent. Shown to them on their payment screen, with your reference
-              instructions.
-            </p>
-          </div>
-          <Link href="/settings/bank-account" className="btn btn-secondary">
-            Edit bank account
-          </Link>
-        </div>
-      </section>
-
-      <section style={{ paddingTop: 'var(--sp-7)' }}>
-        <hr className="rule rule-strong" />
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-end',
-            justifyContent: 'space-between',
-            gap: 'var(--sp-4)',
-            margin: 'var(--sp-4) 0',
-          }}
-        >
-          <div>
-            <h2 style={{ fontSize: 'var(--text-lg)' }}>Notifications</h2>
-            <p style={{ marginTop: 'var(--sp-2)', color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-              Which rent reminders go out, at what hour, in which language, and the words they use.
-            </p>
-          </div>
-          <Link href="/settings/notifications" className="btn btn-secondary">
-            Edit notifications
-          </Link>
-        </div>
-      </section>
-
-      <section style={{ paddingTop: 'var(--sp-7)' }}>
-        <hr className="rule rule-strong" />
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-end',
-            justifyContent: 'space-between',
-            gap: 'var(--sp-4)',
-            margin: 'var(--sp-4) 0',
-          }}
-        >
-          <div>
-            <h2 style={{ fontSize: 'var(--text-lg)' }}>Expense categories</h2>
-            <p style={{ marginTop: 'var(--sp-2)', color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-              What your spending is filed under: repairs, utilities, security and any category of your
-              own.
-            </p>
-          </div>
-          <Link href="/settings/expense-categories" className="btn btn-secondary">
-            Manage categories
-          </Link>
-        </div>
-      </section>
-
-      <section style={{ paddingTop: 'var(--sp-7)' }}>
-        <hr className="rule rule-strong" />
-        <h2 style={{ fontSize: 'var(--text-lg)', margin: 'var(--sp-4) 0' }}>Staff</h2>
+        <h2 style={{ fontSize: 'var(--text-lg)', margin: 'var(--sp-4) 0' }}>{t('settings.members.heading')}</h2>
         <Members canManage={orgRef?.role === 'org_owner'} />
       </section>
     </>

@@ -39,6 +39,9 @@ const dateLayout = "2006-01-02"
 // HTTP layer owns the full shape (and its validation); this is what the sweep
 // needs to decide whether, when and in what words to send.
 type SchedulerSettings struct {
+	// Language is the org's default for renters who have no locale of their
+	// own (`orgs.settings.sms_language`). A recipient's own `users.locale`
+	// wins over it — see LanguageFor.
 	Language       string
 	SendHourLocal  int
 	Overrides      Overrides
@@ -213,7 +216,11 @@ func runForOrg(
 				continue
 			}
 			contractID := db.UUIDString(row.ID)
-			body := Render(KindUnsignedReminder, set.Language, Vars{
+			// The renter's own locale decides the language; the org's
+			// setting is only the fallback for a renter who has never
+			// expressed one (SPEC §3.2).
+			lang := LanguageFor(row.RenterLocale, set.Language)
+			body := Render(KindUnsignedReminder, lang, Vars{
 				Name:     row.RenterName,
 				Unit:     row.UnitName,
 				Property: row.PropertyName,
@@ -226,7 +233,7 @@ func runForOrg(
 				// API.md fixes this key as `unsigned:` — shorter than the kind
 				// it writes, and the contract, so it is used verbatim.
 				DedupeKey: "unsigned:" + contractID + ":" + date,
-				Phone:     phone, Body: body,
+				Phone:     phone, Body: body, Language: lang,
 			})
 		}
 	}
@@ -258,11 +265,13 @@ func queueScheduleRows(
 		if row.NextDueDate.Valid {
 			vars.NextDueDate = row.NextDueDate.Time.Format(dateLayout)
 		}
+		lang := LanguageFor(row.RenterLocale, set.Language)
 		queueOne(ctx, q, res, Msg{
 			OrgID: orgID, UserID: db.UUIDString(row.RenterUserID), Kind: kind,
 			DedupeKey: kind + ":" + db.UUIDString(row.ID) + ":" + date,
 			Phone:     phone,
-			Body:      Render(kind, set.Language, vars, set.Overrides),
+			Body:      Render(kind, lang, vars, set.Overrides),
+			Language:  lang,
 		})
 	}
 }

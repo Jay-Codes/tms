@@ -10,6 +10,7 @@
  */
 
 import { Icon } from '@iconify/react';
+import { useT } from '@tms/ui';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ApiError,
@@ -21,6 +22,7 @@ import { Field, Note, ProblemNote } from './FormBits';
 import { TableScroll } from '@tms/ui';
 
 function Recommended() {
+  const t = useT();
   return (
     <span
       style={{
@@ -34,7 +36,7 @@ function Recommended() {
         whiteSpace: 'nowrap',
       }}
     >
-      Recommended
+      {t('periods.recommended')}
     </span>
   );
 }
@@ -52,6 +54,7 @@ function Row({
   onChanged: () => Promise<void>;
   onError: (e: ApiError | null) => void;
 }) {
+  const t = useT();
   const [editing, setEditing] = useState(false);
   const [label, setLabel] = useState(period.label);
   const [days, setDays] = useState(String(period.days));
@@ -84,7 +87,7 @@ function Row({
             }}
             style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}
           >
-            <Field id={`lbl-${period.id}`} label="Label">
+            <Field id={`lbl-${period.id}`} label={t('periods.col.label')}>
               <input
                 id={`lbl-${period.id}`}
                 className="input"
@@ -94,7 +97,7 @@ function Row({
                 style={{ width: 220 }}
               />
             </Field>
-            <Field id={`days-${period.id}`} label="Days">
+            <Field id={`days-${period.id}`} label={t('periods.col.days')}>
               <input
                 id={`days-${period.id}`}
                 className="input num"
@@ -106,7 +109,7 @@ function Row({
               />
             </Field>
             <button type="submit" className="btn btn-primary" disabled={busy} style={{ minHeight: 40 }}>
-              {busy ? 'Saving…' : 'Save'}
+              {busy ? t('common.saving') : t('common.save')}
             </button>
             <button
               type="button"
@@ -118,7 +121,7 @@ function Row({
               }}
               style={{ minHeight: 40 }}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           </form>
         </td>
@@ -132,7 +135,7 @@ function Row({
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
           {period.label}
           {period.is_recommended ? <Recommended /> : null}
-          {period.active ? null : <span className="pencil">inactive</span>}
+          {period.active ? null : <span className="pencil">{t('periods.inactive')}</span>}
         </span>
       </td>
       <td className="num">{period.days}</td>
@@ -142,7 +145,7 @@ function Row({
             <button
               type="button"
               className="btn btn-quiet"
-              aria-label={`Move ${period.label} up`}
+              aria-label={t('periods.move_up', { label: period.label })}
               disabled={first || busy}
               onClick={() => void run(() => periodsApi.update(period.id, { sort_order: period.sort_order - 1 }))}
               style={{ minHeight: 32, padding: '0 var(--sp-2)' }}
@@ -152,7 +155,7 @@ function Row({
             <button
               type="button"
               className="btn btn-quiet"
-              aria-label={`Move ${period.label} down`}
+              aria-label={t('periods.move_down', { label: period.label })}
               disabled={last || busy}
               onClick={() => void run(() => periodsApi.update(period.id, { sort_order: period.sort_order + 1 }))}
               style={{ minHeight: 32, padding: '0 var(--sp-2)' }}
@@ -173,7 +176,7 @@ function Row({
                 disabled={busy}
                 style={{ minHeight: 32 }}
               >
-                Set as recommended
+                {t('periods.set_recommended')}
               </button>
             )}
             <button
@@ -183,7 +186,7 @@ function Row({
               disabled={busy}
               style={{ minHeight: 32 }}
             >
-              Edit
+              {t('common.edit')}
             </button>
             <button
               type="button"
@@ -192,7 +195,7 @@ function Row({
               disabled={busy}
               style={{ minHeight: 32 }}
             >
-              Deactivate
+              {t('periods.deactivate')}
             </button>
           </>
         ) : (
@@ -203,7 +206,7 @@ function Row({
             disabled={busy}
             style={{ minHeight: 32 }}
           >
-            Restore
+            {t('periods.restore')}
           </button>
         )}
       </td>
@@ -212,6 +215,7 @@ function Row({
 }
 
 export function PeriodsManager({ heading }: { heading?: string }) {
+  const t = useT();
   const [items, setItems] = useState<PaymentPeriod[] | null>(null);
   const [loadError, setLoadError] = useState<ApiError | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
@@ -251,7 +255,7 @@ export function PeriodsManager({ heading }: { heading?: string }) {
       await periodsApi.create({ label: label.trim(), days: Number(days) });
       setLabel('');
       setDays('');
-      setNote('Period added.');
+      setNote(t('periods.added'));
       await reload();
     } catch (err) {
       setActionError(toApiError(err));
@@ -266,7 +270,7 @@ export function PeriodsManager({ heading }: { heading?: string }) {
     setNote(null);
     try {
       await periodsApi.restoreRecommended();
-      setNote('Recommended presets restored.');
+      setNote(t('periods.presets_restored'));
       await reload();
     } catch (err) {
       setActionError(toApiError(err));
@@ -284,13 +288,13 @@ export function PeriodsManager({ heading }: { heading?: string }) {
       <ProblemNote error={actionError} />
       {note ? <Note>{note}</Note> : null}
 
-      <TableScroll label="Payment periods">
+      <TableScroll label={t('periods.title')}>
       <table className="ledger">
         <thead>
           <tr>
-            <th>Period</th>
-            <th className="num">Days</th>
-            <th className="num">Order</th>
+            <th>{t('periods.col.period')}</th>
+            <th className="num">{t('periods.col.days')}</th>
+            <th className="num">{t('periods.col.order')}</th>
             <th className="num" />
           </tr>
         </thead>
@@ -298,13 +302,13 @@ export function PeriodsManager({ heading }: { heading?: string }) {
           {items === null ? (
             <tr>
               <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
-                Loading…
+                {t('common.loading')}
               </td>
             </tr>
           ) : items.length === 0 ? (
             <tr>
               <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
-                No payment periods yet. Add one below, or restore the recommended presets.
+                {t('periods.empty')}
               </td>
             </tr>
           ) : (
@@ -323,19 +327,15 @@ export function PeriodsManager({ heading }: { heading?: string }) {
       </table>
       </TableScroll>
 
-      <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-        Recommended is shown first to renters and pre-selected when they connect.
-      </p>
+      <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{t('periods.note.recommended')}</p>
 
-      <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-        Changes affect future contracts only. Active contracts keep the cadence they were signed with.
-      </p>
+      <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{t('periods.note.future_only')}</p>
 
       <form onSubmit={add} style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'flex-end', flexWrap: 'wrap' }} noValidate>
         <Field
           id="p_label"
-          label="New period"
-          hint='A name renters will read, e.g. "Weekly" or "45 days".'
+          label={t('periods.new.label')}
+          hint={t('periods.new.hint')}
           error={actionError?.errors.label}
         >
           <input
@@ -344,11 +344,11 @@ export function PeriodsManager({ heading }: { heading?: string }) {
             value={label}
             maxLength={40}
             onChange={(e) => setLabel(e.target.value)}
-            placeholder="Weekly"
+            placeholder={t('periods.new.placeholder')}
             style={{ width: 240 }}
           />
         </Field>
-        <Field id="p_days" label="Days" error={actionError?.errors.days}>
+        <Field id="p_days" label={t('periods.col.days')} error={actionError?.errors.days}>
           <input
             id="p_days"
             className="input num"
@@ -366,10 +366,10 @@ export function PeriodsManager({ heading }: { heading?: string }) {
           disabled={busy || !label.trim() || !days}
           style={{ minHeight: 40 }}
         >
-          <Icon icon="solar:add-circle-linear" width={20} /> Add period
+          <Icon icon="solar:add-circle-linear" width={20} /> {t('periods.add')}
         </button>
         <button type="button" className="btn btn-secondary" onClick={() => void restoreRecommended()} disabled={busy} style={{ minHeight: 40 }}>
-          Restore recommended presets
+          {t('periods.restore_presets')}
         </button>
       </form>
     </div>

@@ -11,6 +11,7 @@
  */
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { useT } from '@tms/ui';
 
 export interface SignaturePadHandle {
   /** Transparent PNG of the strokes, or null when nothing was drawn. */
@@ -24,6 +25,7 @@ const INK = '#1c2b5a'; /* --ink; canvas cannot read a CSS variable */
 
 export const SignaturePad = forwardRef<SignaturePadHandle, { onChange?: (empty: boolean) => void }>(
   function SignaturePad({ onChange }, ref) {
+    const t = useT();
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const drawing = useRef(false);
     const empty = useRef(true);
@@ -129,7 +131,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, { onChange?: (empty: 
       <div style={{ display: 'grid', gap: 'var(--sp-2)' }}>
         <canvas
           ref={canvasRef}
-          aria-label="Sign with your finger"
+          aria-label={t('sign.pad.aria')}
           onPointerDown={start}
           onPointerMove={move}
           onPointerUp={end}
@@ -153,7 +155,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, { onChange?: (empty: 
         />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span className="pencil">
-            {isEmpty ? 'Sign above with your finger' : 'Looks good?'}
+            {isEmpty ? t('sign.pad.hint') : t('sign.pad.done')}
           </span>
           <button
             type="button"
@@ -162,7 +164,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, { onChange?: (empty: 
             disabled={isEmpty}
             style={{ width: 'auto' }}
           >
-            Clear
+            {t('sign.pad.clear')}
           </button>
         </div>
       </div>

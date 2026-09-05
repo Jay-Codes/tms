@@ -379,18 +379,21 @@ func SchedulerSettings(raw []byte) notify.SchedulerSettings {
 // their tenancy and already has it on the renter card, so masking it here
 // would hide a delivery problem without hiding anything they cannot see.
 type notificationLogItem struct {
-	ID            string     `json:"id"`
-	Kind          string     `json:"kind"`
-	ToPhone       string     `json:"to_phone"`
-	RenterName    string     `json:"renter_name"`
-	Body          string     `json:"body"`
-	Status        string     `json:"status"`
-	ProviderMsgID *string    `json:"provider_msg_id"`
-	Error         *string    `json:"error"`
-	Attempts      int        `json:"attempts"`
-	BatchID       *string    `json:"batch_id"`
-	CreatedAt     time.Time  `json:"created_at"`
-	SentAt        *time.Time `json:"sent_at"`
+	ID            string  `json:"id"`
+	Kind          string  `json:"kind"`
+	ToPhone       string  `json:"to_phone"`
+	RenterName    string  `json:"renter_name"`
+	Body          string  `json:"body"`
+	Status        string  `json:"status"`
+	ProviderMsgID *string `json:"provider_msg_id"`
+	Error         *string `json:"error"`
+	Attempts      int     `json:"attempts"`
+	BatchID       *string `json:"batch_id"`
+	// Language is what this message was actually written in (Phase 13) —
+	// the recipient's locale, or the org default when they had none.
+	Language  string     `json:"language"`
+	CreatedAt time.Time  `json:"created_at"`
+	SentAt    *time.Time `json:"sent_at"`
 }
 
 func toNotificationLogItem(r sqlc.ListOrgNotificationsRow) notificationLogItem {
@@ -404,6 +407,7 @@ func toNotificationLogItem(r sqlc.ListOrgNotificationsRow) notificationLogItem {
 		ProviderMsgID: r.ProviderMsgID,
 		Error:         r.Error,
 		Attempts:      int(r.Attempts),
+		Language:      r.Language,
 		CreatedAt:     r.CreatedAt.Time,
 	}
 	if r.BatchID.Valid {

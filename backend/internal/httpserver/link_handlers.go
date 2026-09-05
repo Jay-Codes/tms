@@ -760,14 +760,16 @@ type linkDecision struct {
 	RenterUserID string
 	RequestID    string
 	Kind         string
-	Lang         string
-	Unit         string
-	Org          string
-	Reason       string
-	Phone        string
-	Name         string
-	Property     string
-	Overrides    notify.Overrides
+	// Lang is the org's default for renters without a preference; the
+	// recipient's own `users.locale` wins over it (Phase 13).
+	Lang      string
+	Unit      string
+	Org       string
+	Reason    string
+	Phone     string
+	Name      string
+	Property  string
+	Overrides notify.Overrides
 }
 
 // queueLinkDecision writes the notification_log row inside the decision's own
@@ -780,12 +782,14 @@ func (s *Server) queueLinkDecision(ctx context.Context, q *sqlc.Queries, d linkD
 			"request_id", d.RequestID, "kind", d.Kind)
 		return "", nil
 	}
-	body := notify.Render(d.Kind, d.Lang, notify.Vars{
+	lang := s.recipientLang(ctx, q, d.RenterUserID, d.Lang)
+	body := notify.Render(d.Kind, lang, notify.Vars{
 		Name: d.Name, Unit: d.Unit, Property: d.Property, Org: d.Org, Reason: d.Reason,
 	}, d.Overrides)
 	id, err := notify.Queue(ctx, q, notify.Msg{
 		OrgID: d.OrgID, UserID: d.RenterUserID, Kind: d.Kind,
 		DedupeKey: d.Kind + ":" + d.RequestID, Phone: d.Phone, Body: body,
+		Language: lang,
 	})
 	if errors.Is(err, notify.ErrDuplicate) {
 		return "", nil

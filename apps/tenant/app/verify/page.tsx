@@ -3,7 +3,9 @@
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState } from 'react';
+import { useT } from '@tms/ui';
 import { AuthCard } from '../../components/AuthCard';
+import { LanguageToggle } from '../../components/LanguageToggle';
 import { Note, ProblemNote } from '../../components/FormBits';
 import { ApiError, authApi } from '../../lib/api';
 import { useMe } from '../../lib/auth';
@@ -11,6 +13,7 @@ import { useMe } from '../../lib/auth';
 function VerifyBody() {
   const token = useSearchParams().get('token') ?? '';
   const { refresh } = useMe();
+  const t = useT();
   const [state, setState] = useState<'idle' | 'working' | 'done' | 'failed'>('idle');
   const [error, setError] = useState<ApiError | null>(null);
   const ran = useRef(false);
@@ -20,7 +23,7 @@ function VerifyBody() {
     ran.current = true;
     if (!token) {
       setState('failed');
-      setError(new ApiError(400, { detail: 'This link is missing its token. Open the link from your email again.' }));
+      setError(new ApiError(400, { detail: t('auth.verify.missing_token') }));
       return;
     }
     setState('working');
@@ -34,19 +37,22 @@ function VerifyBody() {
         setError(e instanceof ApiError ? e : new ApiError(0, { detail: String(e) }));
         setState('failed');
       });
+    // `t` is intentionally not a dependency: re-running the verification when
+    // the language changes would POST the one-shot token a second time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, refresh]);
 
   return (
-    <AuthCard title="Email verification">
+    <AuthCard title={t('auth.verify.title')} footer={<LanguageToggle />}>
       {state === 'working' || state === 'idle' ? (
-        <p style={{ color: 'var(--ink-soft)' }}>Checking your link…</p>
+        <p style={{ color: 'var(--ink-soft)' }}>{t('auth.verify.checking')}</p>
       ) : null}
 
       {state === 'done' ? (
         <>
-          <Note>Your email address is verified.</Note>
+          <Note>{t('auth.verify.ok')}</Note>
           <Link href="/" className="btn btn-primary">
-            Go to dashboard
+            {t('auth.verify.go_dashboard')}
           </Link>
         </>
       ) : null}
@@ -54,11 +60,9 @@ function VerifyBody() {
       {state === 'failed' ? (
         <>
           <ProblemNote error={error} />
-          <p style={{ color: 'var(--ink-soft)' }}>
-            You can sign in and send yourself a new link from the banner on the dashboard.
-          </p>
+          <p style={{ color: 'var(--ink-soft)' }}>{t('auth.verify.resend_hint')}</p>
           <Link href="/login" className="btn btn-secondary">
-            Sign in
+            {t('auth.verify.sign_in')}
           </Link>
         </>
       ) : null}

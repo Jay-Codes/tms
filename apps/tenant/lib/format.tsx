@@ -1,8 +1,33 @@
 'use client';
 
-/** Money and date formatting. Display only — the backend owns every number. */
+/**
+ * Money and date formatting. Display only — the backend owns every number.
+ *
+ * Money is never translated: TZS is TZS and the digits are grouped the same
+ * way in both languages (SPEC §5). Dates are, so the pure helpers below read
+ * the active locale from a module slot that <LocaleProvider> keeps in step
+ * during render — that way the ~100 existing `fmtDate(x)` call sites keep
+ * working without threading a locale through every component.
+ */
 
+import { formatDateIntl, intlTag, makeTranslator, type Locale, type Translator } from '@tms/ui';
+import en from '../i18n/en';
+import sw from '../i18n/sw';
 import type { Price } from './api';
+
+let activeLocale: Locale = 'sw';
+let activeT: Translator = makeTranslator('sw', sw, en);
+
+/** Called by <LocaleProvider> on every render, before any child formats. */
+export function setFormatLocale(locale: Locale): void {
+  if (locale === activeLocale) return;
+  activeLocale = locale;
+  activeT = makeTranslator(locale, locale === 'sw' ? sw : en, locale === 'sw' ? en : sw);
+}
+
+export function formatLocale(): Locale {
+  return activeLocale;
+}
 
 /** `250000` → `TZS 250,000`. Integer TZS, no decimals (SPEC §5 money rule). */
 export function fmtTZS(n: number | null | undefined): string {
@@ -19,12 +44,15 @@ export function fmtAmount(n: number | null | undefined): string {
 /** `{amount: 250000, period_days: 30}` → `TZS 250,000 / 30 days`. */
 export function fmtPrice(price: Price | null | undefined): string {
   if (!price) return '—';
-  return `${fmtTZS(price.amount)} / ${price.period_days} ${price.period_days === 1 ? 'day' : 'days'}`;
+  const per = activeT(price.period_days === 1 ? 'common.per_day' : 'common.per_days', {
+    count: price.period_days,
+  });
+  return `${fmtTZS(price.amount)} ${per}`;
 }
 
 /** Tabular money, currency set small and raised by the design system. */
 export function Amount({ value, per }: { value: number | null | undefined; per?: number | null }) {
-  if (value === null || value === undefined) return <span className="pencil">no price</span>;
+  if (value === null || value === undefined) return <span className="pencil">{activeT('common.no_price')}</span>;
   return (
     <span className="amount">
       <span className="currency">TZS</span>
@@ -32,7 +60,7 @@ export function Amount({ value, per }: { value: number | null | undefined; per?:
       {per ? (
         <span style={{ fontWeight: 400, fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>
           {' '}
-          / {per} {per === 1 ? 'day' : 'days'}
+          {activeT(per === 1 ? 'common.per_day' : 'common.per_days', { count: per })}
         </span>
       ) : null}
     </span>
@@ -44,7 +72,7 @@ export function fmtDate(value: string | null | undefined): string {
   if (!value) return '—';
   const d = new Date(value.length === 10 ? `${value}T00:00:00Z` : value);
   if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return formatDateIntl(activeLocale, value);
 }
 
 /** Today as `YYYY-MM-DD` in the browser's zone — a default for `effective_from`. */
@@ -68,10 +96,12 @@ export function fmtDateTime(value: string | null | undefined): string {
   if (!value) return '—';
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  return `${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}, ${d.toLocaleTimeString(
-    'en-GB',
-    { hour: '2-digit', minute: '2-digit' },
-  )}`;
+  const time = d.toLocaleTimeString(intlTag(activeLocale), {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  return `${formatDateIntl(activeLocale, value)}, ${time}`;
 }
 
 /** `YYYY-MM-DDTHH:mm` in the browser's zone — the default for `paid_at`. */
