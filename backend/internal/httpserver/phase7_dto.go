@@ -25,15 +25,24 @@ type reportContracts struct {
 	PendingSignature int64 `json:"pending_signature"`
 }
 
-// reportPeriod is the money block: what the period asked for, what came in.
+// reportPeriodTotals is the money the window asked for and the money that came
+// in. It is a type of its own because Phase 11 quotes the same five figures for
+// the previous window, and two structs that had to agree would eventually not.
+type reportPeriodTotals struct {
+	Expected      int64 `json:"expected"`
+	Collected     int64 `json:"collected"`
+	Outstanding   int64 `json:"outstanding"`
+	OverdueCount  int64 `json:"overdue_count"`
+	OverdueAmount int64 `json:"overdue_amount"`
+}
+
+// reportPeriod is the money block. `from`/`to` are the **inclusive** dates
+// Phase 7 shipped and clients still read; the half-open pair lives beside it in
+// `window` (Phase 11).
 type reportPeriod struct {
-	From          string `json:"from"`
-	To            string `json:"to"`
-	Expected      int64  `json:"expected"`
-	Collected     int64  `json:"collected"`
-	Outstanding   int64  `json:"outstanding"`
-	OverdueCount  int64  `json:"overdue_count"`
-	OverdueAmount int64  `json:"overdue_amount"`
+	From string `json:"from"`
+	To   string `json:"to"`
+	reportPeriodTotals
 }
 
 type vacantUnitResponse struct {
@@ -44,11 +53,17 @@ type vacantUnitResponse struct {
 }
 
 type reportSummaryResponse struct {
-	Assets      reportAssets         `json:"assets"`
-	Renters     reportRenters        `json:"renters"`
-	Contracts   reportContracts      `json:"contracts"`
-	Period      reportPeriod         `json:"period"`
-	VacantUnits []vacantUnitResponse `json:"vacant_units"`
+	Assets    reportAssets    `json:"assets"`
+	Renters   reportRenters   `json:"renters"`
+	Contracts reportContracts `json:"contracts"`
+	Period    reportPeriod    `json:"period"`
+	// Window and Previous are the Phase 11 halves: the resolved window with an
+	// exclusive `to`, and the equivalent one before it.
+	Window         reportWindow         `json:"window"`
+	Previous       reportWindow         `json:"previous"`
+	PreviousTotals reportPeriodTotals   `json:"previous_totals"`
+	ChangePct      map[string]*float64  `json:"change_pct"`
+	VacantUnits    []vacantUnitResponse `json:"vacant_units"`
 }
 
 // paymentStatusRow is one renter's line of GET /reports/payment-status.
@@ -76,6 +91,27 @@ type collectionBucket struct {
 type collectionTotals struct {
 	Expected  int64 `json:"expected"`
 	Collected int64 `json:"collected"`
+}
+
+// collectionsResponse is GET /reports/collections. The `buckets`/`totals` pair
+// is Phase 7's; the rest is Phase 11's window arithmetic.
+type collectionsResponse struct {
+	Window         reportWindow        `json:"window"`
+	Previous       reportWindow        `json:"previous"`
+	Group          string              `json:"group"`
+	Buckets        []collectionBucket  `json:"buckets"`
+	Totals         collectionTotals    `json:"totals"`
+	PreviousTotals collectionTotals    `json:"previous_totals"`
+	ChangePct      map[string]*float64 `json:"change_pct"`
+}
+
+// paymentStatusResponse is GET /reports/payment-status. The report is a
+// statement of where every renter stands *now*, so the window it echoes is
+// context for the page around it rather than a filter on the rows.
+type paymentStatusResponse struct {
+	Window   reportWindow       `json:"window"`
+	Previous reportWindow       `json:"previous"`
+	Items    []paymentStatusRow `json:"items"`
 }
 
 // -------------------------------------------------------- platform admin --

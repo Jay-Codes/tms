@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"tms/backend/internal/db/sqlc"
+	"tms/backend/internal/report"
 )
 
 // DefaultCategories are the eight categories every org is bootstrapped with
@@ -97,20 +98,11 @@ func less(a, b Group) bool {
 // "+100%", it is a first month, and quoting a number there would be inventing
 // one. A fall to nothing from a non-empty previous window is -100%, which is
 // exactly what happened.
+// The arithmetic itself is internal/report's, shared with the Phase 11 series
+// so a "-8.4%" on the expenses card and a "-8.4%" on the revenue chart are the
+// same computation rather than two that happen to agree today.
 func ChangePct(current, previous int64) *float64 {
-	if previous == 0 {
-		return nil
-	}
-	pct := float64(current-previous) / float64(previous) * 100
-	rounded := float64(int64(pct*10+copySign(0.5, pct))) / 10
-	return &rounded
-}
-
-func copySign(v, sign float64) float64 {
-	if sign < 0 {
-		return -v
-	}
-	return v
+	return report.ChangePct(current, previous)
 }
 
 // SeedCategories writes the eight defaults for an org using the supplied

@@ -338,6 +338,8 @@ var isoRoutes = []isoCase{
 	{method: "GET", pattern: "/reports/summary", aud: isoOrg, want: []int{200}},
 	{method: "GET", pattern: "/reports/payment-status", aud: isoOrg, want: []int{200}},
 	{method: "GET", pattern: "/reports/collections", aud: isoOrg, want: []int{200}},
+	{method: "GET", pattern: "/reports/revenue", aud: isoOrg, want: []int{200}},
+	{method: "GET", pattern: "/reports/occupancy", aud: isoOrg, want: []int{200}},
 
 	// ----------------------------------------------------------- branding --
 	{method: "GET", pattern: "/org/branding", aud: isoOrg, want: []int{200}},

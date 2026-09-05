@@ -126,6 +126,9 @@ func main() {
 		{name: "GET /units?status=vacant", path: "/units?status=vacant&limit=50"},
 		{name: "GET /schedules?status=overdue", path: "/schedules?status=overdue&limit=50"},
 		{name: "GET /reports/summary", path: "/reports/summary"},
+		{name: "GET /reports/revenue", path: "/reports/revenue?cadence=year"},
+		{name: "GET /reports/revenue by property", path: "/reports/revenue?cadence=year&group_by=property"},
+		{name: "GET /reports/occupancy", path: "/reports/occupancy?cadence=year"},
 		{name: "GET /public/units/{code}", path: "/public/units/" + unitCode, public: true},
 		{name: "GET /contracts", path: "/contracts?limit=50"},
 	}

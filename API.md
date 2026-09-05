@@ -284,7 +284,7 @@ Notes fixed in Phase 7 (implementation detail, same for all three reports):
 - `status=` on payment-status filters the *derived* status; an unknown value is a 400.
 
 ### Dashboard prefs
-`PUT /org/branding {dashboard_prefs:{cards:["assets","renters","payment_status","collections","link_requests","overdue","expenses"], layout:"grid"|"list"}}` — free JSON validated to known card ids; frontend orders cards by it.
+`PUT /org/branding {dashboard_prefs:{cards:["assets","renters","payment_status","collections","link_requests","overdue","expenses","revenue","net_income"], layout:"grid"|"list"}}` — free JSON validated to known card ids; frontend orders cards by it.
 
 Validation (400 with `errors.dashboard_prefs.*`): `cards` must be an array of ids drawn from that exact list, with no repeats; `layout` must be `grid` (default) or `list`; any other key in the object is refused rather than silently dropped. The stored blob is the canonical `{cards, layout}` shape, and `cards` keeps the order it was sent in — that order is the dashboard's.
 
@@ -473,3 +473,120 @@ Phase 10 notes (implementation-confirmed):
 Phase 10 audit actions: `expense_category.create`, `expense_category.update`,
 `expense_category.delete`, `expense.create`, `expense.update`, `expense.void`,
 `expense.receipt_attach`, `expense.receipt_remove`.
+
+## Part 2 — Phase 11 (shipped)
+
+Reports v2 (SPEC §5.9, FLOWS 9, PLAN2 Phase 11): the same window vocabulary on
+every report, two new series, and a per-property breakdown. Audience **org**
+(`tms_o`), the same roles as the Phase 7 reports. Another org's `property_id`
+matches nothing rather than erroring — a foreign id is never confirmed.
+
+### The shared window
+
+`cadence=month|quarter|half_year|year|custom`, `anchor=YYYY-MM-DD`, `from`, `to`
+are accepted by `GET /reports/summary`, `/reports/payment-status`,
+`/reports/collections`, `/reports/revenue`, `/reports/occupancy` and
+`GET /expenses/summary`. They resolve through `internal/period` on the Dar es
+Salaam wall clock, so "this quarter" means the same thing on every one of them.
+
+Every response carries:
+
+- `window:{from, to, cadence}` — half-open: `from` inclusive, **`to` exclusive**.
+- `previous:{from, to, cadence}` — the equivalent span immediately before (the
+  previous calendar unit for a calendar cadence, an equal-length span for a
+  custom range).
+
+`anchor` names the unit for a calendar cadence (any day in May selects May) and
+defaults to today; `from`/`to` are read as **inclusive** wire dates and are
+required for `custom`. `cadence` defaults to `month`.
+
+Refusals separate the malformed from the impossible:
+
+| unknown `cadence` or `bucket`, unparseable `anchor`/date | **400** `errors.cadence` / `errors.bucket` |
+| `custom` with `from` after `to`, a range beyond five years, or a missing date | **422** "window cannot be resolved", `errors.cadence` |
+| a window needing more than 400 buckets at the requested size | **422** `type:"too_many_buckets"` |
+
+`GET /reports/summary` also still takes the Phase 7 `period=month|YYYY-MM`,
+translated to `cadence=month` with that month's anchor; sending both `period`
+and `cadence` is a 400 on `period`. `GET /expenses` (the ledger listing, not the
+summary) keeps its Phase 10 behaviour: 400 for every window refusal.
+
+### What the four existing reports gained
+
+| `GET /reports/summary` | `window`, `previous`, `previous_totals:{expected,collected,outstanding,overdue_count,overdue_amount}` and `change_pct` keyed by those same five names. The Phase 7 `period` block is unchanged — still **inclusive** `from`/`to` and the same five figures — so existing clients keep working. |
+| `GET /reports/payment-status` | `window` and `previous`, beside the unchanged `items`. The window is context for the page, **not** a filter: a renter's standing is a fact about now. |
+| `GET /reports/collections` | `window`, `previous`, `group` (the size actually used), `previous_totals:{expected,collected}` and `change_pct:{expected,collected}`. With a `cadence` the window drives the range and the grouping defaults to the auto-sized bucket (`bucket=` is accepted as a synonym for `group=`); without one, the Phase 7 defaults stand — `group=month`, the twelve months ending today, `from`/`to` inclusive — and the echoed window is `cadence:"custom"`. Buckets stay calendar-aligned here, as they always were. |
+| `GET /expenses/summary` | unchanged shape (it already carried `window`, `previous`, `previous_total`, `change_pct`); only the 422 refusals above are new. |
+
+### `GET /reports/revenue`
+
+`?cadence=&anchor=&from=&to=&bucket=day|week|month&property_id=`
+
+→ `{window, previous, bucket, buckets:[{start,expected,collected,expenses,net}], totals:{expected,collected,expenses,net}, previous_totals:{…}, change_pct:{expected,collected,expenses,net}, trend:{slope_collected_per_bucket}, collection_rate}`
+
+- **collected** = non-reversed, non-deleted payments by `paid_at`, bucketed on
+  the EAT wall clock. **expected** = `payment_schedules` by `due_date`,
+  excluding `waived` (which is how a terminated tenancy's remaining periods drop
+  out — FLOWS 6.5 waives them). **expenses** = `recorded` expenses by
+  `incurred_on`. **net** = collected − expenses: cash in minus cash out, because
+  a bank balance does not move on an invoice.
+- `bucket` is auto-sized when absent — `day` ≤ 62 days, `week` ≤ 26 weeks, else
+  `month` — and echoed. Buckets are zero-filled, and the **first bucket starts
+  on the window's own first day**: a custom range opened on the 12th reports
+  from the 12th rather than snapping back to the 1st.
+- `trend.slope_collected_per_bucket` is the least-squares gradient of the
+  collected series against its bucket index, rounded to one decimal; 0 for a
+  series of fewer than two points.
+- `collection_rate` is `collected / expected` as a fraction, **null** when
+  nothing was expected.
+- `change_pct` members are percentages rounded to one decimal and are **null**
+  when the previous window's figure was zero — a rise from nothing is a first
+  period, not "+100%" (Phase 10's rule, now `internal/report.ChangePct`).
+- `property_id` narrows all three series alike: payments through
+  contract → unit → property, schedules likewise, expenses directly.
+
+`?group_by=property` (with the same parameters) →
+`{window, previous, groups:[{id,name,expected,collected,expenses,net,collection_rate}], totals, previous_totals, change_pct}`
+
+One row per **live property**, zero-filled from the property list rather than
+from the money, so a block that earned nothing keeps its place and its colour in
+the legend. Sorted by `net` descending, ties broken by name. The rows always add
+up to `totals`. Any `group_by` other than `property` is a 400.
+
+### `GET /reports/occupancy`
+
+`?cadence=&anchor=&from=&to=&bucket=&property_id=` →
+`{window, previous, bucket, buckets:[{start, units_total, units_occupied, occupancy_pct}], current:{units_total, units_occupied, occupancy_pct}}`
+
+- Each bucket is measured on the **last day inside it**: a month's point is how
+  full the portfolio was on the 31st, not on the 1st of the month after.
+- A unit is occupied on day *d* when a contract covers it — `start_date ≤ d <
+  end_date`, `end_date` being exclusive as everywhere else (SPEC §4). Statuses
+  `active`, `expiring`, `ended` and `terminated` all count, because occupancy is
+  a history: a unit let in March was let in March whatever happened since.
+  `draft` and `pending_signature` never count — nobody moved in. A terminated
+  tenancy counts **through its `termination_effective_date` inclusive**, the
+  same day its remaining schedules stop being waived.
+- `units_total` counts the org's non-deleted units that already existed on that
+  day (by `created_at`), so a bucket before a unit was created does not count
+  it. A tenancy on a since-deleted unit is dropped, so the ratio cannot exceed 1.
+- `occupancy_pct` is a **percentage, 0–100**, rounded to one decimal (unlike the
+  Phase 7 summary's `occupancy_rate`, which is a 0–1 fraction).
+- `current` is the most recent real measurement the window contains: today when
+  today falls inside it, otherwise the nearest end of it — a window that has not
+  finished is never measured at a day that has not happened.
+
+Phase 11 notes:
+
+- **Indexes** (`000014_report_indexes`): `payments (org_id, paid_at) WHERE
+  deleted_at IS NULL AND reversed_at IS NULL`, `expenses (org_id, incurred_on)
+  WHERE status='recorded' AND deleted_at IS NULL`, and `contracts (org_id,
+  start_date, end_date) WHERE deleted_at IS NULL`. The other two the phase
+  called for already existed: `expenses (org_id, property_id, incurred_on)`
+  (000012) and `payment_schedules (org_id, due_date, id)` (000007).
+- **Bucketing is done in Go**, over day-grain SQL aggregates, rather than with
+  `date_trunc`: the resolver's first bucket may start mid-month, and two
+  alignments that disagree by eleven days would be a wrong chart. A five-year
+  window is at most ~1830 rows per series.
+- Every series endpoint runs the org-scoped overdue flip first, as the Phase 7
+  reports do.

@@ -490,10 +490,8 @@ func (s *Server) handleExpenseSummary(w http.ResponseWriter, r *http.Request) {
 		groupBy = f.OneOf("group_by", strings.ToLower(v), "property", "category")
 	}
 	propertyID := optQueryUUID(f, "property_id", qs.Get("property_id"))
-	window, ok := resolveWindow(f, orMonth(qs.Get("cadence")), qs.Get("anchor"),
-		optQueryDate(f, "from", qs.Get("from")), optQueryDate(f, "to", qs.Get("to")))
-	if !f.Empty() || !ok {
-		badRequest(w, f)
+	window, ok := reportWindowOf(w, f, qs)
+	if !ok {
 		return
 	}
 
