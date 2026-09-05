@@ -36,3 +36,10 @@ RETURNING *;
 
 -- name: CountPlatformAdmins :one
 SELECT count(*) FROM users WHERE kind = 'platform_admin' AND deleted_at IS NULL;
+
+-- SetUserEmail backs the optional `email` field of PUT /me/profile. A renter
+-- registers by phone, so the address is added later or not at all.
+-- name: SetUserEmail :one
+UPDATE users SET email = sqlc.narg(email)
+WHERE id = sqlc.arg(id) AND deleted_at IS NULL
+RETURNING *;

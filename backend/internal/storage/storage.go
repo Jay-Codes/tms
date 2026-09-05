@@ -131,6 +131,39 @@ func (c *Client) Exists(ctx context.Context, bucket, object string) bool {
 	return err == nil
 }
 
+// ObjectInfo is the subset of an object's metadata the upload-completion
+// callbacks check (SPEC §7: content-type and size limits are enforced on
+// completion, because a presigned PUT cannot enforce them itself).
+type ObjectInfo struct {
+	Size        int64
+	ContentType string
+}
+
+// Stat reads an object's size and content type. A missing object yields an
+// error, so a completion callback for something never uploaded fails cleanly.
+func (c *Client) Stat(ctx context.Context, bucket, object string) (ObjectInfo, error) {
+	if c == nil || c.Client == nil {
+		return ObjectInfo{}, fmt.Errorf("storage: no client")
+	}
+	info, err := c.Client.StatObject(ctx, bucket, object, minio.StatObjectOptions{})
+	if err != nil {
+		return ObjectInfo{}, fmt.Errorf("storage: stat %s/%s: %w", bucket, object, err)
+	}
+	return ObjectInfo{Size: info.Size, ContentType: info.ContentType}, nil
+}
+
+// Remove deletes an object, used to clean up an upload that failed its
+// completion checks rather than leaving an unreferenced file in the bucket.
+func (c *Client) Remove(ctx context.Context, bucket, object string) error {
+	if c == nil || c.Client == nil {
+		return fmt.Errorf("storage: no client")
+	}
+	if err := c.Client.RemoveObject(ctx, bucket, object, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("storage: remove %s/%s: %w", bucket, object, err)
+	}
+	return nil
+}
+
 // PresignGet returns a time-limited download URL for an object.
 func (c *Client) PresignGet(ctx context.Context, bucket, object string, ttl time.Duration) (string, error) {
 	if c == nil || c.Client == nil {

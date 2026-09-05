@@ -11,10 +11,48 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const ensureRenterProfile = `-- name: EnsureRenterProfile :one
+INSERT INTO renter_profiles (user_id, full_name)
+VALUES ($1, $2)
+ON CONFLICT (user_id) DO UPDATE SET user_id = renter_profiles.user_id
+RETURNING id, user_id, full_name, nida_number_enc, next_of_kin_name, next_of_kin_phone, kyc_status, kyc_doc_object_key, created_at, updated_at, deleted_at
+`
+
+type EnsureRenterProfileParams struct {
+	UserID   pgtype.UUID `json:"user_id"`
+	FullName string      `json:"full_name"`
+}
+
+// EnsureRenterProfile creates the empty profile row a renter gets on first
+// read, so GET /me/profile answers with a shape rather than a 404.
+func (q *Queries) EnsureRenterProfile(ctx context.Context, arg EnsureRenterProfileParams) (RenterProfile, error) {
+	row := q.db.QueryRow(ctx, ensureRenterProfile, arg.UserID, arg.FullName)
+	var i RenterProfile
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.FullName,
+		&i.NidaNumberEnc,
+		&i.NextOfKinName,
+		&i.NextOfKinPhone,
+		&i.KycStatus,
+		&i.KycDocObjectKey,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const getRenterProfileDecrypted = `-- name: GetRenterProfileDecrypted :one
 SELECT p.id, p.user_id, p.full_name,
-       CASE WHEN p.nida_number_enc IS NULL THEN NULL
-            ELSE pgp_sym_decrypt(p.nida_number_enc, $1::text) END::text AS nida_number,
+       -- Empty rather than NULL: "no number on file" and "a number we could
+       -- not read" are the same thing to the caller, and the masking helper
+       -- already renders a short value as no mask at all.
+       COALESCE(
+           CASE WHEN p.nida_number_enc IS NULL THEN NULL
+                ELSE pgp_sym_decrypt(p.nida_number_enc, $1::text) END,
+           '')::text AS nida_number,
        p.next_of_kin_name, p.next_of_kin_phone, p.kyc_status, p.kyc_doc_object_key,
        p.created_at, p.updated_at
 FROM renter_profiles p
@@ -53,6 +91,72 @@ func (q *Queries) GetRenterProfileDecrypted(ctx context.Context, arg GetRenterPr
 		&i.KycDocObjectKey,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const setRenterKycDoc = `-- name: SetRenterKycDoc :one
+UPDATE renter_profiles
+SET kyc_doc_object_key = $1
+WHERE user_id = $2 AND deleted_at IS NULL
+RETURNING id, user_id, full_name, nida_number_enc, next_of_kin_name, next_of_kin_phone, kyc_status, kyc_doc_object_key, created_at, updated_at, deleted_at
+`
+
+type SetRenterKycDocParams struct {
+	KycDocObjectKey *string     `json:"kyc_doc_object_key"`
+	UserID          pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) SetRenterKycDoc(ctx context.Context, arg SetRenterKycDocParams) (RenterProfile, error) {
+	row := q.db.QueryRow(ctx, setRenterKycDoc, arg.KycDocObjectKey, arg.UserID)
+	var i RenterProfile
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.FullName,
+		&i.NidaNumberEnc,
+		&i.NextOfKinName,
+		&i.NextOfKinPhone,
+		&i.KycStatus,
+		&i.KycDocObjectKey,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const setRenterKycStatus = `-- name: SetRenterKycStatus :one
+UPDATE renter_profiles
+SET kyc_status = $1
+WHERE user_id = $2 AND deleted_at IS NULL
+  AND kyc_status <> 'verified'
+RETURNING id, user_id, full_name, nida_number_enc, next_of_kin_name, next_of_kin_phone, kyc_status, kyc_doc_object_key, created_at, updated_at, deleted_at
+`
+
+type SetRenterKycStatusParams struct {
+	KycStatus string      `json:"kyc_status"`
+	UserID    pgtype.UUID `json:"user_id"`
+}
+
+// SetRenterKycStatus is the derivation from the PUT handler (API.md: a profile
+// carrying NIDA and next of kin is `submitted`). `verified` is set by an
+// operator and is never lowered here.
+func (q *Queries) SetRenterKycStatus(ctx context.Context, arg SetRenterKycStatusParams) (RenterProfile, error) {
+	row := q.db.QueryRow(ctx, setRenterKycStatus, arg.KycStatus, arg.UserID)
+	var i RenterProfile
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.FullName,
+		&i.NidaNumberEnc,
+		&i.NextOfKinName,
+		&i.NextOfKinPhone,
+		&i.KycStatus,
+		&i.KycDocObjectKey,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
