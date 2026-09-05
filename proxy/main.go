@@ -69,6 +69,7 @@ func routes() map[string]*httputil.ReverseProxy {
 		"/qrcodes":    minioProxy,
 		"/kyc":        minioProxy,
 		"/signatures": minioProxy,
+		"/receipts":   minioProxy,
 	}
 }
 
