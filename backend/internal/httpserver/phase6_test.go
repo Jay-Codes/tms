@@ -10,6 +10,7 @@ import (
 	"tms/backend/internal/db/sqlc"
 	"tms/backend/internal/httpserver"
 	"tms/backend/internal/notify"
+	"tms/backend/internal/tz"
 )
 
 // dateLayout is the wire form of a bare date.
@@ -20,6 +21,13 @@ const testDateLayout = "2006-01-02"
 // queries is the sqlc handle the scheduler runs against — the same one cmd/api
 // builds from the pool.
 func (h *harness) queries() *sqlc.Queries { return sqlc.New(h.pool) }
+
+// schedulerToday is the calendar day the sweep is reading, which is the day on
+// the platform's wall clock (Africa/Dar_es_Salaam) and not the UTC one. The two
+// disagree for the three hours after 21:00 UTC, so a test that says
+// `time.Now().UTC()` places its "due today" row on yesterday for a quarter of
+// every evening and the sweep finds nothing.
+func schedulerToday() time.Time { return tz.LocalDate(time.Now().In(tz.Zone())) }
 
 // setDueDate moves one schedule's due date (and, optionally, its status) so a
 // one-day test can watch a month-long timeline.
@@ -220,10 +228,12 @@ func TestNotificationTemplateOverrideReachesTheRenter(t *testing.T) {
 	h := newHarness(t)
 	fix := h.newPaymentFixture(t, "Override", "0715006100", "+255715006101")
 
+	// The renter's locale decides which of the two wordings is rendered
+	// (Phase 13), so the override is written in the language they read.
 	fix.owner.do(http.MethodPut, "/org/notification-settings", map[string]any{
-		"language": "en",
+		"language": "sw",
 		"templates": map[string]any{
-			"thank_you": map[string]any{"en": "JJnE thanks you {{name}} — {{amount}} received for {{unit}}."},
+			"thank_you": map[string]any{"sw": "JJnE thanks you {{name}} — {{amount}} received for {{unit}}."},
 		},
 	}).mustStatus(t, http.StatusOK, "override thank_you")
 
@@ -269,7 +279,7 @@ func TestSchedulerTimeline(t *testing.T) {
 	// Place the three schedules the sweep should find, and move the rest out
 	// of the way so nothing else fires.
 	h.parkSchedules(t, fix.contractID)
-	today := time.Now().UTC()
+	today := schedulerToday()
 	h.setDueDate(t, fix.scheduleIDs[0], today.AddDate(0, 0, 7), "pending")
 	h.setDueDate(t, fix.scheduleIDs[1], today, "pending")
 	h.setDueDate(t, fix.scheduleIDs[2], today.AddDate(0, 0, -1), "overdue")
@@ -324,7 +334,7 @@ func TestSchedulerWaitsForTheSendHour(t *testing.T) {
 	h := newHarness(t)
 	fix := h.newPaymentFixture(t, "SendHour", "0715006300", "+255715006301")
 	h.parkSchedules(t, fix.contractID)
-	h.setDueDate(t, fix.scheduleIDs[0], time.Now().UTC(), "pending")
+	h.setDueDate(t, fix.scheduleIDs[0], schedulerToday(), "pending")
 
 	// 23:00 local is an hour no test run can already have passed.
 	fix.owner.do(http.MethodPut, "/org/notification-settings", map[string]any{
@@ -347,8 +357,8 @@ func TestSchedulerRespectsDisabledKinds(t *testing.T) {
 	h := newHarness(t)
 	fix := h.newPaymentFixture(t, "Disabled", "0715006400", "+255715006401")
 	h.parkSchedules(t, fix.contractID)
-	h.setDueDate(t, fix.scheduleIDs[0], time.Now().UTC(), "pending")
-	h.setDueDate(t, fix.scheduleIDs[1], time.Now().UTC().AddDate(0, 0, -3), "overdue")
+	h.setDueDate(t, fix.scheduleIDs[0], schedulerToday(), "pending")
+	h.setDueDate(t, fix.scheduleIDs[1], schedulerToday().AddDate(0, 0, -3), "overdue")
 
 	fix.owner.do(http.MethodPut, "/org/notification-settings", map[string]any{
 		"kinds": map[string]any{
@@ -372,7 +382,7 @@ func TestSchedulerCustomOffset(t *testing.T) {
 	h := newHarness(t)
 	fix := h.newPaymentFixture(t, "Offset", "0715006500", "+255715006501")
 	h.parkSchedules(t, fix.contractID)
-	h.setDueDate(t, fix.scheduleIDs[0], time.Now().UTC().AddDate(0, 0, 3), "pending")
+	h.setDueDate(t, fix.scheduleIDs[0], schedulerToday().AddDate(0, 0, 3), "pending")
 
 	if res := h.runScheduler(t, notify.Options{ForceHour: true}); res.Queued[notify.KindReminder7d] != 0 {
 		t.Fatalf("a schedule due in 3 days fired the 7-day reminder: %v", res.Queued)
@@ -392,7 +402,7 @@ func TestAdminNotificationsJob(t *testing.T) {
 	h := newHarness(t)
 	fix := h.newPaymentFixture(t, "Job", "0715006600", "+255715006601")
 	h.parkSchedules(t, fix.contractID)
-	h.setDueDate(t, fix.scheduleIDs[0], time.Now().UTC(), "pending")
+	h.setDueDate(t, fix.scheduleIDs[0], schedulerToday(), "pending")
 
 	admin := h.adminClient(t)
 	res := admin.do(http.MethodPost, "/admin/jobs/notifications", map[string]any{"force_hour": true}).
@@ -696,7 +706,7 @@ func TestSchedulerKeepsOrgsApart(t *testing.T) {
 	b := h.newPaymentFixture(t, "SchedB", "0715007510", "+255715007511")
 	h.parkSchedules(t, a.contractID)
 	h.parkSchedules(t, b.contractID)
-	h.setDueDate(t, a.scheduleIDs[0], time.Now().UTC(), "pending")
+	h.setDueDate(t, a.scheduleIDs[0], schedulerToday(), "pending")
 
 	// Org B switches the kind off; org A's reminder must still go out.
 	b.owner.do(http.MethodPut, "/org/notification-settings", map[string]any{
@@ -722,8 +732,8 @@ func TestSchedulerSkipsSuspendedOrgs(t *testing.T) {
 	dead := h.newPaymentFixture(t, "Dead", "0715007610", "+255715007611")
 	h.parkSchedules(t, live.contractID)
 	h.parkSchedules(t, dead.contractID)
-	h.setDueDate(t, live.scheduleIDs[0], time.Now().UTC(), "pending")
-	h.setDueDate(t, dead.scheduleIDs[0], time.Now().UTC(), "pending")
+	h.setDueDate(t, live.scheduleIDs[0], schedulerToday(), "pending")
+	h.setDueDate(t, dead.scheduleIDs[0], schedulerToday(), "pending")
 
 	if _, err := h.pool.Exec(context.Background(),
 		`UPDATE orgs SET status = 'suspended' WHERE id = $1`, dead.orgID); err != nil {
@@ -748,7 +758,7 @@ func TestOverdueDailyStopsOncePaid(t *testing.T) {
 	h := newHarness(t)
 	fix := h.newPaymentFixture(t, "Chase", "0715007700", "+255715007701")
 	h.parkSchedules(t, fix.contractID)
-	h.setDueDate(t, fix.scheduleIDs[0], time.Now().UTC().AddDate(0, 0, -5), "overdue")
+	h.setDueDate(t, fix.scheduleIDs[0], schedulerToday().AddDate(0, 0, -5), "overdue")
 
 	if res := h.runScheduler(t, notify.Options{ForceHour: true}); res.Queued[notify.KindOverdueDaily] != 1 {
 		t.Fatalf("sweep queued %v, want one overdue_daily", res.Queued)

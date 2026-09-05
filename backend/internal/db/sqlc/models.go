@@ -47,6 +47,7 @@ type Contract struct {
 	TerminationReason        *string            `json:"termination_reason"`
 	TerminationEffectiveDate pgtype.Date        `json:"termination_effective_date"`
 	LinkRequestID            pgtype.UUID        `json:"link_request_id"`
+	Language                 string             `json:"language"`
 }
 
 type ContractSignature struct {
@@ -67,14 +68,15 @@ type ContractSignature struct {
 }
 
 type ContractTemplate struct {
-	ID        pgtype.UUID        `json:"id"`
-	OrgID     pgtype.UUID        `json:"org_id"`
-	Name      string             `json:"name"`
-	BodyHtml  string             `json:"body_html"`
-	IsDefault bool               `json:"is_default"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+	ID         pgtype.UUID        `json:"id"`
+	OrgID      pgtype.UUID        `json:"org_id"`
+	Name       string             `json:"name"`
+	BodyHtml   string             `json:"body_html"`
+	IsDefault  bool               `json:"is_default"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt  pgtype.Timestamptz `json:"deleted_at"`
+	BodyHtmlSw string             `json:"body_html_sw"`
 }
 
 type Expense struct {
@@ -130,6 +132,7 @@ type NotificationLog struct {
 	Error         *string            `json:"error"`
 	Attempts      int32              `json:"attempts"`
 	BatchID       pgtype.UUID        `json:"batch_id"`
+	Language      string             `json:"language"`
 }
 
 type Org struct {

@@ -25,6 +25,7 @@ const (
 	ActionRegisterRenter = "auth.register_renter"
 	ActionVerifyEmail    = "auth.verify_email"
 	ActionInviteAccept   = "auth.invite_accept"
+	ActionLocaleUpdate   = "user.locale_update"
 	ActionOrgCreate      = "org.create"
 	ActionOrgUpdate      = "org.update"
 	ActionMemberInvite   = "org.member_invite"

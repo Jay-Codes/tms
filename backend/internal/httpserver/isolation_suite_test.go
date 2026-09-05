@@ -114,6 +114,12 @@ var isoRoutes = []isoCase{
 	},
 	{method: "GET", pattern: "/org/members", aud: isoOrg, want: []int{200}},
 	{
+		// The caller's own language. Like PATCH /me it names no id: an org
+		// user cannot move another member's preference through it.
+		method: "PATCH", pattern: "/org/members/me", aud: isoOrg,
+		body: map[string]any{"locale": "sw"}, want: []int{200},
+	},
+	{
 		method: "POST", pattern: "/org/members", aud: isoOrg,
 		body: map[string]any{"email": "iso-staff@beta.test", "full_name": "Beta Staff", "role": "org_manager"},
 		want: []int{201},
@@ -332,6 +338,14 @@ var isoRoutes = []isoCase{
 		},
 		want: []int{200, 202},
 	},
+	{
+		// The preview counts the caller's own renters and answers with numbers
+		// only: naming another org's renter is `skipped`, exactly as the send
+		// treats it, and no id of A's comes back to be counted.
+		method: "GET", pattern: "/notifications/custom/recipients-preview", aud: isoOrg,
+		path: "/notifications/custom/recipients-preview?recipients=selected&renter_user_ids={renterUserA}",
+		want: []int{200},
+	},
 	{method: "GET", pattern: "/notifications/log", aud: isoOrg, want: []int{200}},
 	{
 		method: "POST", pattern: "/notifications/log/{id}/retry", aud: isoOrg,
@@ -377,6 +391,12 @@ var isoRoutes = []isoCase{
 	{method: "DELETE", pattern: "/org/branding/letterhead", aud: isoOrg, want: []int{200, 204}},
 
 	// ------------------------------------------------------ renter scope --
+	{
+		// The caller's own language, and only ever their own: the route names
+		// no user id, so there is no other renter to reach through it.
+		method: "PATCH", pattern: "/me", aud: isoRenter,
+		body: map[string]any{"locale": "sw"}, want: []int{200},
+	},
 	{method: "GET", pattern: "/me/profile", aud: isoRenter, want: []int{200}},
 	{
 		method: "PUT", pattern: "/me/profile", aud: isoRenter,

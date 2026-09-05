@@ -109,6 +109,9 @@ type customRecipient struct {
 	Phone    string
 	Unit     string
 	Property string
+	// Locale is the renter's own language, already resolved against the org's
+	// default: the body they get is chosen by it (Phase 13).
+	Locale string
 }
 
 // handleCustomSMS is the landlord's bulk send (FLOWS 8: "water outage
@@ -127,7 +130,16 @@ func (s *Server) handleCustomSMS(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Recipients    string   `json:"recipients"`
 		RenterUserIDs []string `json:"renter_user_ids"`
-		Body          string   `json:"body"`
+		// Body is the legacy single-language field: it stands for both
+		// languages, so an existing caller keeps working unchanged. It is a
+		// pointer so a caller who sent it — and sent it blank — is told about
+		// `body` rather than about a field they never used.
+		Body *string `json:"body"`
+		// BodySW / BodyEN are the Phase 13 pair. At least one is required;
+		// a recipient whose language has no body gets the other one, because
+		// the alternative is telling nobody about the water outage.
+		BodySW string `json:"body_sw"`
+		BodyEN string `json:"body_en"`
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
@@ -135,19 +147,7 @@ func (s *Server) handleCustomSMS(w http.ResponseWriter, r *http.Request) {
 
 	f := validate.Fields{}
 	mode := f.OneOf("recipients", strings.TrimSpace(body.Recipients), recipientsAllActive, recipientsSelected)
-	text := strings.TrimSpace(body.Body)
-	if text == "" {
-		f.Add("body", "body is required")
-	}
-	if len([]rune(text)) > customBodyMax {
-		f.Add("body", "must be at most "+strconv.Itoa(customBodyMax)+" characters")
-	}
-	if notify.HasControlChars(text) {
-		f.Add("body", "must not contain control characters")
-	}
-	if unknown := notify.UnknownVariables(text, notify.CustomVariables); len(unknown) > 0 {
-		f.Add("body", "unknown variables: {{"+strings.Join(unknown, "}}, {{")+"}}")
-	}
+	bodies := customBodies(f, body.Body, body.BodySW, body.BodyEN)
 	ids := s.parseRecipientIDs(f, mode, body.RenterUserIDs)
 	if !f.Empty() {
 		badRequest(w, f)
@@ -185,16 +185,20 @@ func (s *Server) handleCustomSMS(w http.ResponseWriter, r *http.Request) {
 		queuedIDs []string
 		queued    int
 	)
+	byLanguage := map[string]int{notify.LangSwahili: 0, notify.LangEnglish: 0}
 	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
 		for _, rc := range recipients {
+			lang := notify.LanguageFor(rc.Locale, settings.SMSLanguage)
+			text, sent := bodies.For(lang)
 			id, qErr := notify.Queue(r.Context(), q, notify.Msg{
 				OrgID: p.OrgIDString(), UserID: rc.UserID, Kind: notify.KindCustom,
 				DedupeKey: "custom:" + batchID + ":" + rc.UserID,
 				Phone:     rc.Phone,
-				Body: notify.Render(notify.KindCustom, settings.SMSLanguage, notify.Vars{
+				Body: notify.Render(notify.KindCustom, sent, notify.Vars{
 					Name: rc.Name, Unit: rc.Unit, Property: rc.Property, Org: orgName, Body: text,
 				}, settings.notifyOverrides()),
-				BatchID: batchID,
+				BatchID:  batchID,
+				Language: sent,
 			})
 			if errors.Is(qErr, notify.ErrDuplicate) {
 				skipped++
@@ -205,6 +209,7 @@ func (s *Server) handleCustomSMS(w http.ResponseWriter, r *http.Request) {
 			}
 			queuedIDs = append(queuedIDs, id)
 			queued++
+			byLanguage[sent]++
 		}
 		return audit.Record(r.Context(), q, audit.Entry{
 			OrgID:       p.OrgIDString(),
@@ -213,7 +218,9 @@ func (s *Server) handleCustomSMS(w http.ResponseWriter, r *http.Request) {
 			EntityType:  audit.EntityNotification,
 			After: map[string]any{
 				"batch_id": batchID, "recipients": mode,
-				"queued": queued, "skipped": skipped, "body": text,
+				"queued": queued, "skipped": skipped,
+				"body_sw": bodies.SW, "body_en": bodies.EN,
+				"by_language": byLanguage,
 			},
 		})
 	}); err != nil {
@@ -224,7 +231,127 @@ func (s *Server) handleCustomSMS(w http.ResponseWriter, r *http.Request) {
 	s.enqueueNotifications(r.Context(), queuedIDs...)
 	WriteJSON(w, http.StatusAccepted, map[string]any{
 		"batch_id": batchID, "queued": queued, "skipped": skipped,
+		"by_language": byLanguage,
 	})
+}
+
+// ------------------------ GET /notifications/custom/recipients-preview --
+
+// handleCustomRecipientsPreview answers the compose screen's question before
+// anything is sent: how many renters this selector reaches, and how many of
+// them read each language. It takes the same filters as the send and resolves
+// them through the same helper, so the counts it shows are the counts the send
+// will produce.
+func (s *Server) handleCustomRecipientsPreview(w http.ResponseWriter, r *http.Request) {
+	if s.dbUnavailable(w) {
+		return
+	}
+	p := auth.MustFromContext(r.Context())
+
+	qs := r.URL.Query()
+	f := validate.Fields{}
+	mode := f.OneOf("recipients", strings.TrimSpace(qs.Get("recipients")),
+		recipientsAllActive, recipientsSelected)
+	var raw []string
+	if v := strings.TrimSpace(qs.Get("renter_user_ids")); v != "" {
+		raw = strings.Split(v, ",")
+	}
+	ids := s.parseRecipientIDs(f, mode, raw)
+	if !f.Empty() {
+		badRequest(w, f)
+		return
+	}
+
+	org, err := s.q.GetOrg(r.Context(), p.OrgID)
+	if err != nil {
+		s.serverError(w, r, "notifications.custom.preview.org", err)
+		return
+	}
+	orgLang := parseSettings(org.Settings).SMSLanguage
+
+	recipients, skipped, err := s.resolveRecipients(r.Context(), p.OrgID, mode, ids)
+	if err != nil {
+		s.serverError(w, r, "notifications.custom.preview.recipients", err)
+		return
+	}
+	byLanguage := map[string]int{notify.LangSwahili: 0, notify.LangEnglish: 0}
+	for _, rc := range recipients {
+		byLanguage[notify.LanguageFor(rc.Locale, orgLang)]++
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"count": len(recipients), "skipped": skipped, "by_language": byLanguage,
+	})
+}
+
+// customBodyPair is a broadcast's wording in each language.
+type customBodyPair struct {
+	SW string
+	EN string
+}
+
+// For returns the body one recipient gets and the language it is actually in.
+// A landlord who wrote only one of the two reaches everybody in that one:
+// silence is not the safer failure for "the water is off tomorrow".
+func (b customBodyPair) For(lang string) (body, sent string) {
+	if lang == notify.LangEnglish {
+		if b.EN != "" {
+			return b.EN, notify.LangEnglish
+		}
+		return b.SW, notify.LangSwahili
+	}
+	if b.SW != "" {
+		return b.SW, notify.LangSwahili
+	}
+	return b.EN, notify.LangEnglish
+}
+
+// customBodies validates the submitted wording. `body` is the legacy field and
+// stands for both languages; `body_sw` / `body_en` are the Phase 13 pair, of
+// which at least one is required. Each is validated on its own so the error a
+// landlord sees names the tab they typed in.
+func customBodies(f validate.Fields, legacy *string, sw, en string) customBodyPair {
+	sw, en = strings.TrimSpace(sw), strings.TrimSpace(en)
+	if legacy != nil && sw == "" && en == "" {
+		text := strings.TrimSpace(*legacy)
+		if text == "" {
+			f.Add("body", "body is required")
+			return customBodyPair{}
+		}
+		if !customBodyValid(f, "body", text) {
+			return customBodyPair{}
+		}
+		return customBodyPair{SW: text, EN: text}
+	}
+	if sw == "" && en == "" {
+		f.Add("body_sw", "provide body_sw, body_en, or both")
+		return customBodyPair{}
+	}
+	if sw != "" {
+		customBodyValid(f, "body_sw", sw)
+	}
+	if en != "" {
+		customBodyValid(f, "body_en", en)
+	}
+	return customBodyPair{SW: sw, EN: en}
+}
+
+// customBodyValid applies the broadcast rules to one body, reporting under the
+// field name it arrived as.
+func customBodyValid(f validate.Fields, field, text string) bool {
+	ok := true
+	if len([]rune(text)) > customBodyMax {
+		f.Add(field, "must be at most "+strconv.Itoa(customBodyMax)+" characters")
+		ok = false
+	}
+	if notify.HasControlChars(text) {
+		f.Add(field, "must not contain control characters")
+		ok = false
+	}
+	if unknown := notify.UnknownVariables(text, notify.CustomVariables); len(unknown) > 0 {
+		f.Add(field, "unknown variables: {{"+strings.Join(unknown, "}}, {{")+"}}")
+		ok = false
+	}
+	return ok
 }
 
 // parseRecipientIDs validates the `selected` id list. `all_active` carries no
@@ -269,14 +396,14 @@ func (s *Server) resolveRecipients(
 		out     []customRecipient
 		skipped int
 	)
-	add := func(userID pgtype.UUID, name, phone, unit, property string) {
+	add := func(userID pgtype.UUID, name, phone, unit, property, locale string) {
 		if strings.TrimSpace(phone) == "" {
 			skipped++ // no number on file; the rest of the batch still goes
 			return
 		}
 		out = append(out, customRecipient{
 			UserID: db.UUIDString(userID), Name: name, Phone: phone,
-			Unit: unit, Property: property,
+			Unit: unit, Property: property, Locale: locale,
 		})
 	}
 
@@ -286,7 +413,8 @@ func (s *Server) resolveRecipients(
 			return nil, 0, err
 		}
 		for _, row := range rows {
-			add(row.RenterUserID, row.RenterName, db.StrVal(row.RenterPhone), row.UnitName, row.PropertyName)
+			add(row.RenterUserID, row.RenterName, db.StrVal(row.RenterPhone),
+				row.UnitName, row.PropertyName, row.RenterLocale)
 		}
 		return out, skipped, nil
 	}
@@ -300,7 +428,8 @@ func (s *Server) resolveRecipients(
 	found := make(map[string]bool, len(rows))
 	for _, row := range rows {
 		found[db.UUIDString(row.RenterUserID)] = true
-		add(row.RenterUserID, row.RenterName, db.StrVal(row.RenterPhone), row.UnitName, row.PropertyName)
+		add(row.RenterUserID, row.RenterName, db.StrVal(row.RenterPhone),
+			row.UnitName, row.PropertyName, row.RenterLocale)
 	}
 	// Ids this org does not know are skipped, never a 404: the request itself
 	// was well formed, and the count is the honest answer.

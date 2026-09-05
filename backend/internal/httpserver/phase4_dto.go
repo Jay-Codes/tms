@@ -97,12 +97,15 @@ type contractResponse struct {
 	// period, with the schedule's rounding: the figure the document states and
 	// the amount a full schedule row carries. Derived, never stored — the
 	// snapshot columns remain the source of truth (PLAN2 Phase 9).
-	RentPerPeriod     int64            `json:"rent_per_period"`
-	PaymentPeriod     *contractPeriod  `json:"payment_period"`
-	TermDays          int32            `json:"term_days"`
-	StartDate         string           `json:"start_date"`
-	EndDate           string           `json:"end_date"`
-	DueDay            *int32           `json:"due_day"`
+	RentPerPeriod int64           `json:"rent_per_period"`
+	PaymentPeriod *contractPeriod `json:"payment_period"`
+	TermDays      int32           `json:"term_days"`
+	StartDate     string          `json:"start_date"`
+	EndDate       string          `json:"end_date"`
+	DueDay        *int32          `json:"due_day"`
+	// Language is the language the terms were rendered in, frozen with them
+	// (Phase 13). Contracts issued before Part 2 read 'en'.
+	Language          string           `json:"language"`
 	SnapshotHash      string           `json:"snapshot_hash"`
 	Signatures        []signatureBlock `json:"signatures"`
 	LinkRequestID     *string          `json:"link_request_id"`
@@ -126,13 +129,17 @@ type scheduleResponse struct {
 
 // templateResponse is the `template` shape from API.md.
 type templateResponse struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	BodyHTML  string    `json:"body_html,omitempty"`
-	IsDefault bool      `json:"is_default"`
-	Variables []string  `json:"variables,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	BodyHTML string `json:"body_html,omitempty"`
+	// BodyHTMLSW is the Swahili body (Phase 13). It is sent alongside
+	// `body_html` on the single-template reads, empty when the org has not
+	// written one — the editor shows two tabs and only one of them is filled.
+	BodyHTMLSW string    `json:"body_html_sw,omitempty"`
+	IsDefault  bool      `json:"is_default"`
+	Variables  []string  `json:"variables,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // brandingResponse is GET/PUT /org/branding.
@@ -167,6 +174,7 @@ func toContract(r contractRow, signatures []signatureBlock) contractResponse {
 		StartDate:    r.StartDate.Time.Format(dateLayout),
 		EndDate:      r.EndDate.Time.Format(dateLayout),
 		DueDay:       r.DueDay,
+		Language:     r.Language,
 		SnapshotHash: db.StrVal(r.SnapshotHash),
 		Signatures:   signatures,
 		CreatedAt:    r.CreatedAt.Time,

@@ -14,6 +14,7 @@ import (
 	"tms/backend/internal/db"
 	"tms/backend/internal/db/sqlc"
 	"tms/backend/internal/httpx"
+	"tms/backend/internal/notify"
 	"tms/backend/internal/ratelimit"
 	"tms/backend/internal/validate"
 )
@@ -77,6 +78,10 @@ func (s *Server) handleOTPSend(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Phone   string `json:"phone"`
 		Purpose string `json:"purpose"`
+		// Locale is what the public SW/EN toggle was set to. It is a hint, not
+		// a preference: it only decides the language of this one code, and
+		// only for a number that has no account yet.
+		Locale string `json:"locale"`
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
@@ -84,6 +89,7 @@ func (s *Server) handleOTPSend(w http.ResponseWriter, r *http.Request) {
 	f := validate.Fields{}
 	phone := f.Phone("phone", body.Phone)
 	purpose := f.OneOf("purpose", body.Purpose, "register", "login", "sign")
+	locale := optLocale(f, "locale", body.Locale)
 	if !f.Empty() {
 		badRequest(w, f)
 		return
@@ -109,17 +115,27 @@ func (s *Server) handleOTPSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body_ := fmt.Sprintf("TMS: your verification code is %s. It expires in 5 minutes.", code)
+	// The code goes out in the recipient's language. A phone number is not
+	// necessarily an account yet (this is how one is created), so the ladder
+	// is: the user's own locale if the number resolves to a user, else the
+	// `locale` the caller carried over from the public SW/EN toggle, else
+	// Swahili (SPEC §3.2). The lookup is the one the audit row needs anyway.
+	actorID := ""
+	userLocale := ""
+	if u, err := s.q.GetUserByPhone(r.Context(), &phone); err == nil {
+		actorID = db.UUIDString(u.ID)
+		userLocale = u.Locale
+	}
+	hinted := ""
+	if locale != nil {
+		hinted = *locale
+	}
+	lang := notify.LanguageFor(userLocale, hinted)
+	body_ := notify.Render(notify.KindOTP, lang, notify.Vars{Code: code}, nil)
 	// Sender: the platform default. An OTP is sent before any org is known —
 	// the number may not belong to a renter of anyone yet.
 	if _, err := s.deps.SMS.Send(r.Context(), phone, body_, ""); err != nil {
 		s.logger.Error("otp sms send failed", "error", err)
-	}
-
-	// Audit: the actor is only known if this phone already has an account.
-	actorID := ""
-	if u, err := s.q.GetUserByPhone(r.Context(), &phone); err == nil {
-		actorID = db.UUIDString(u.ID)
 	}
 	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
 		return audit.Record(r.Context(), q, audit.Entry{
@@ -127,7 +143,7 @@ func (s *Server) handleOTPSend(w http.ResponseWriter, r *http.Request) {
 			Action:      audit.ActionOTPSend,
 			EntityType:  audit.EntityUser,
 			EntityID:    actorID,
-			After:       map[string]any{"phone": phone, "purpose": purpose},
+			After:       map[string]any{"phone": phone, "purpose": purpose, "language": lang},
 		})
 	}); err != nil {
 		s.serverError(w, r, "otp.audit", err)
@@ -253,6 +269,9 @@ func (s *Server) handleRegisterRenter(w http.ResponseWriter, r *http.Request) {
 		OTPToken string `json:"otp_token"`
 		PIN      string `json:"pin"`
 		FullName string `json:"full_name"`
+		// Locale is the language the renter chose on the public SW/EN toggle
+		// before registering (SPEC §3.2). Absent means Swahili.
+		Locale string `json:"locale"`
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
@@ -262,6 +281,7 @@ func (s *Server) handleRegisterRenter(w http.ResponseWriter, r *http.Request) {
 	f.Required("otp_token", body.OTPToken)
 	f.PIN("pin", body.PIN)
 	fullName := f.MaxLen("full_name", f.Required("full_name", body.FullName), 120)
+	locale := optLocale(f, "locale", body.Locale)
 	if !f.Empty() {
 		badRequest(w, f)
 		return
@@ -310,6 +330,7 @@ func (s *Server) handleRegisterRenter(w http.ResponseWriter, r *http.Request) {
 			Phone:    &phone,
 			FullName: fullName,
 			PinHash:  &pinHash,
+			Locale:   locale,
 		})
 		if err != nil {
 			return err
@@ -326,7 +347,7 @@ func (s *Server) handleRegisterRenter(w http.ResponseWriter, r *http.Request) {
 			Action:      audit.ActionRegisterRenter,
 			EntityType:  audit.EntityUser,
 			EntityID:    db.UUIDString(user.ID),
-			After:       map[string]any{"phone": phone, "full_name": fullName},
+			After:       map[string]any{"phone": phone, "full_name": fullName, "locale": user.Locale},
 		}); err != nil {
 			return err
 		}

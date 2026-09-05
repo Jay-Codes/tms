@@ -22,12 +22,33 @@ const (
 	KindOTP                = "otp"
 )
 
-// Languages an org may send in (orgs.settings.sms_language). Swahili is the
+// Languages a message may be written in. Every user carries one
+// (`users.locale`, SPEC §3.2); `orgs.settings.sms_language` survives as the
+// fallback for renters who have expressed no preference. Swahili is the
 // default for the first client's renters.
 const (
 	LangSwahili = "sw"
 	LangEnglish = "en"
 )
+
+// LanguageFor resolves the language one SMS is written in (SPEC §6, PLAN2
+// Phase 13): the recipient's own locale, then the org's default for renters
+// without a preference, then Swahili.
+//
+// It is total by design — every argument may be empty or nonsense (a user row
+// that predates `users.locale`, an org whose settings blob has never been
+// written) and a message still has to go out in a language somebody reads.
+func LanguageFor(userLocale, orgLanguage string) string {
+	switch userLocale {
+	case LangSwahili, LangEnglish:
+		return userLocale
+	}
+	switch orgLanguage {
+	case LangSwahili, LangEnglish:
+		return orgLanguage
+	}
+	return LangSwahili
+}
 
 // BodyMaxLen is the longest SMS body the product accepts, for a platform
 // template, an org override or a landlord's custom message alike (API.md).
@@ -67,6 +88,7 @@ type Vars struct {
 	Reason     string // termination / rejection only
 	StartDate  string // welcome only
 	NextAmount string // thank-you only
+	Code       string // OTP only: the six-digit verification code
 
 	// Body is the landlord's own text for a `custom` broadcast. It is not a
 	// placeholder: it IS the template, so `{{name}}` inside it still resolves
@@ -145,7 +167,7 @@ var platformTemplates = map[string]Template{
 	},
 	KindWelcome: {
 		EN: "Welcome to {{org}}. Your tenancy at {{unit}} starts {{start_date}}. First payment {{amount}} due {{due_date}}.",
-		SW: "Karibu {{org}}. Upangaji wako wa {{unit}} unaanza {{start_date}}. Malipo ya kwanza {{amount}} yanatakiwa {{due_date}}.",
+		SW: "Karibu {{org}}. Upangaji wako wa {{unit}} unaanza tarehe {{start_date}}. Malipo ya kwanza ya {{amount}} yanatakiwa ifikapo {{due_date}}.",
 	},
 	KindContractTerminated: {
 		EN: "Your tenancy of {{unit}} at {{org}} has been ended: {{reason}}",
@@ -153,23 +175,32 @@ var platformTemplates = map[string]Template{
 	},
 	KindThankYou: {
 		EN: "Payment of {{amount}} for {{unit}} at {{org}} received. Thank you. Next payment {{next_amount}} due {{next_due_date}}.",
-		SW: "Malipo ya {{amount}} kwa {{unit}} katika {{org}} yamepokelewa. Asante. Malipo yajayo {{next_amount}} yanatakiwa {{next_due_date}}.",
+		SW: "Tumepokea malipo ya {{amount}} kwa {{unit}} katika {{org}}. Asante. Malipo yajayo ya {{next_amount}} yanatakiwa ifikapo {{next_due_date}}.",
 	},
 	thankYouSettled: {
 		EN: "Payment of {{amount}} for {{unit}} at {{org}} received. Thank you. All payments are up to date.",
-		SW: "Malipo ya {{amount}} kwa {{unit}} katika {{org}} yamepokelewa. Asante. Malipo yote yamekamilika.",
+		SW: "Tumepokea malipo ya {{amount}} kwa {{unit}} katika {{org}}. Asante. Malipo yako yote yapo sawa.",
 	},
 	KindReminder7d: {
 		EN: "Hello {{name}}, your rent of {{amount}} for {{unit}} at {{org}} is due on {{due_date}}.",
-		SW: "Habari {{name}}, kodi yako ya {{amount}} kwa {{unit}} katika {{org}} inatakiwa tarehe {{due_date}}.",
+		SW: "Habari {{name}}, kodi yako ya {{amount}} kwa {{unit}} katika {{org}} inatakiwa kulipwa ifikapo tarehe {{due_date}}.",
 	},
 	KindReminderDue: {
 		EN: "Hello {{name}}, your rent of {{amount}} for {{unit}} at {{org}} is due today, {{due_date}}.",
-		SW: "Habari {{name}}, kodi yako ya {{amount}} kwa {{unit}} katika {{org}} inatakiwa leo, {{due_date}}.",
+		SW: "Habari {{name}}, kodi yako ya {{amount}} kwa {{unit}} katika {{org}} inatakiwa kulipwa leo, tarehe {{due_date}}.",
 	},
 	KindOverdueDaily: {
 		EN: "Hello {{name}}, your rent of {{amount}} for {{unit}} at {{org}} was due on {{due_date}} and is still outstanding.",
-		SW: "Habari {{name}}, kodi yako ya {{amount}} kwa {{unit}} katika {{org}} ilitakiwa tarehe {{due_date}} na bado haijalipwa.",
+		SW: "Habari {{name}}, kodi yako ya {{amount}} kwa {{unit}} katika {{org}} ilitakiwa kulipwa tarehe {{due_date}} na bado haijalipwa.",
+	},
+	// The verification code is renter-facing platform text like the rest, so
+	// it lives in this catalogue rather than as a format string in the auth
+	// handler. It is excluded from TemplateKinds: an org cannot re-word the
+	// message that lets someone into their account, and `{{code}}` is not a
+	// variable the template validator offers.
+	KindOTP: {
+		EN: "TMS: your verification code is {{code}}. It expires in 5 minutes.",
+		SW: "TMS: msimbo wako wa uthibitisho ni {{code}}. Utaisha baada ya dakika 5.",
 	},
 	KindUnsignedReminder: {
 		EN: "Hello {{name}}, your contract for {{unit}} at {{org}} is still waiting for your signature. Open {{link}}",
@@ -264,6 +295,7 @@ func replacerFor(v Vars) *strings.Replacer {
 		"{{reason}}", v.Reason,
 		"{{start_date}}", v.StartDate,
 		"{{next_amount}}", v.NextAmount,
+		"{{code}}", v.Code,
 	)
 }
 
@@ -318,7 +350,9 @@ func KnownKind(kind string) bool {
 func TemplateKinds() []string {
 	out := make([]string, 0, len(platformTemplates))
 	for k := range platformTemplates {
-		if k == thankYouSettled {
+		// `thank_you_settled` is a second wording of `thank_you`, and `otp` is
+		// the sign-in code: neither is an org's to re-word.
+		if k == thankYouSettled || k == KindOTP {
 			continue
 		}
 		out = append(out, k)

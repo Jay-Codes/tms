@@ -68,6 +68,10 @@ func (s *Server) handleGetMyProfile(w http.ResponseWriter, r *http.Request) {
 		"user": map[string]any{
 			"id": db.UUIDString(user.ID), "phone": user.Phone,
 			"full_name": user.FullName, "email": user.Email,
+			// The renter Profile screen is where the language switch lives, so
+			// it is handed the current value with the rest of the account
+			// (Phase 13); PATCH /me writes it back.
+			"locale": user.Locale,
 		},
 		"profile": toProfile(profile, user.Email),
 	})

@@ -78,6 +78,7 @@ func (s *Server) handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 	out := toTemplateSummary(row)
 	out.BodyHTML = row.BodyHtml
+	out.BodyHTMLSW = row.BodyHtmlSw
 	out.Variables = contract.Variables
 	WriteJSON(w, http.StatusOK, map[string]any{"template": out})
 }
@@ -91,16 +92,18 @@ func (s *Server) handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 	p := auth.MustFromContext(r.Context())
 
 	var body struct {
-		Name      string `json:"name"`
-		BodyHTML  string `json:"body_html"`
-		IsDefault bool   `json:"is_default"`
+		Name       string `json:"name"`
+		BodyHTML   string `json:"body_html"`
+		BodyHTMLSW string `json:"body_html_sw"`
+		IsDefault  bool   `json:"is_default"`
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
 	}
 	f := validate.Fields{}
 	name := f.MaxLen("name", f.Required("name", body.Name), templateNameMax)
-	html := templateBody(f, body.BodyHTML)
+	html := templateBody(f, "body_html", body.BodyHTML, true)
+	htmlSW := templateBody(f, "body_html_sw", body.BodyHTMLSW, false)
 	if !f.Empty() {
 		badRequest(w, f)
 		return
@@ -120,7 +123,8 @@ func (s *Server) handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 		}
 		var err error
 		created, err = q.CreateContractTemplate(r.Context(), sqlc.CreateContractTemplateParams{
-			OrgID: p.OrgID, Name: name, BodyHtml: html, IsDefault: body.IsDefault,
+			OrgID: p.OrgID, Name: name, BodyHtml: html, BodyHtmlSw: &htmlSW,
+			IsDefault: body.IsDefault,
 		})
 		if err != nil {
 			return err
@@ -131,7 +135,10 @@ func (s *Server) handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 			Action:      audit.ActionTemplateCreate,
 			EntityType:  audit.EntityContractTemplate,
 			EntityID:    db.UUIDString(created.ID),
-			After:       map[string]any{"name": name, "is_default": body.IsDefault, "body_bytes": len(html)},
+			After: map[string]any{
+				"name": name, "is_default": body.IsDefault,
+				"body_bytes": len(html), "body_sw_bytes": len(htmlSW),
+			},
 		})
 	}); err != nil {
 		s.serverError(w, r, "template.create.tx", err)
@@ -140,6 +147,7 @@ func (s *Server) handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 
 	out := toTemplateSummary(created)
 	out.BodyHTML = created.BodyHtml
+	out.BodyHTMLSW = created.BodyHtmlSw
 	out.Variables = contract.Variables
 	out.IsDefault = body.IsDefault
 	WriteJSON(w, http.StatusCreated, map[string]any{"template": out})
@@ -158,22 +166,29 @@ func (s *Server) handlePatchTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Name      *string `json:"name"`
-		BodyHTML  *string `json:"body_html"`
-		IsDefault *bool   `json:"is_default"`
+		Name       *string `json:"name"`
+		BodyHTML   *string `json:"body_html"`
+		BodyHTMLSW *string `json:"body_html_sw"`
+		IsDefault  *bool   `json:"is_default"`
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
 	}
 	f := validate.Fields{}
-	var name, html *string
+	var name, html, htmlSW *string
 	if body.Name != nil {
 		v := f.MaxLen("name", f.Required("name", *body.Name), templateNameMax)
 		name = &v
 	}
 	if body.BodyHTML != nil {
-		v := templateBody(f, *body.BodyHTML)
+		v := templateBody(f, "body_html", *body.BodyHTML, true)
 		html = &v
+	}
+	// The Swahili body may be cleared (an org that decides it does not want
+	// one), so an explicit empty string is a write, not a validation failure.
+	if body.BodyHTMLSW != nil {
+		v := templateBody(f, "body_html_sw", *body.BodyHTMLSW, false)
+		htmlSW = &v
 	}
 	// Demoting the only default would leave an org with no template to fall
 	// back to when a contract is created without naming one.
@@ -196,7 +211,8 @@ func (s *Server) handlePatchTemplate(w http.ResponseWriter, r *http.Request) {
 		}
 		var err error
 		updated, err = q.UpdateContractTemplate(r.Context(), sqlc.UpdateContractTemplateParams{
-			OrgID: p.OrgID, ID: existing.ID, Name: name, BodyHtml: html, IsDefault: body.IsDefault,
+			OrgID: p.OrgID, ID: existing.ID, Name: name, BodyHtml: html,
+			BodyHtmlSw: htmlSW, IsDefault: body.IsDefault,
 		})
 		if err != nil {
 			return err
@@ -208,6 +224,10 @@ func (s *Server) handlePatchTemplate(w http.ResponseWriter, r *http.Request) {
 		if updated.BodyHtml != existing.BodyHtml {
 			before["body_bytes"] = len(existing.BodyHtml)
 			after["body_bytes"] = len(updated.BodyHtml)
+		}
+		if updated.BodyHtmlSw != existing.BodyHtmlSw {
+			before["body_sw_bytes"] = len(existing.BodyHtmlSw)
+			after["body_sw_bytes"] = len(updated.BodyHtmlSw)
 		}
 		return audit.Record(r.Context(), q, audit.Entry{
 			OrgID:       p.OrgIDString(),
@@ -225,6 +245,7 @@ func (s *Server) handlePatchTemplate(w http.ResponseWriter, r *http.Request) {
 
 	out := toTemplateSummary(updated)
 	out.BodyHTML = updated.BodyHtml
+	out.BodyHTMLSW = updated.BodyHtmlSw
 	out.Variables = contract.Variables
 	WriteJSON(w, http.StatusOK, map[string]any{"template": out})
 }
@@ -285,9 +306,19 @@ func (s *Server) handlePreviewTemplate(w http.ResponseWriter, r *http.Request) {
 	// The body carries an optional {sample:bool}; a preview has nothing but
 	// sample values to render with, so the flag only documents the intent.
 	var body struct {
-		Sample *bool `json:"sample"`
+		Sample   *bool  `json:"sample"`
+		Language string `json:"language"`
 	}
 	if r.ContentLength > 0 && !DecodeJSON(w, r, &body) {
+		return
+	}
+	f := validate.Fields{}
+	lang := ""
+	if v := optLocale(f, "language", body.Language); v != nil {
+		lang = *v
+	}
+	if !f.Empty() {
+		badRequest(w, f)
 		return
 	}
 
@@ -299,10 +330,17 @@ func (s *Server) handlePreviewTemplate(w http.ResponseWriter, r *http.Request) {
 	brand := s.brandingAssets(r.Context(), p.OrgID, org.Name)
 
 	// Sanitizing on render as well as on write means a body stored before a
-	// policy change can never escape the current allowlist.
-	html := contract.Render(contract.SanitizeHTML(row.BodyHtml), contract.SampleVars(brand.DisplayName))
+	// policy change can never escape the current allowlist. `language` picks
+	// the body the same way a contract does, and the answer says which body
+	// was actually used — asking for Swahili from a template that has none
+	// previews the English one rather than a blank page.
+	src, resolved := contract.BodyFor(lang, row.BodyHtml, row.BodyHtmlSw)
+	vars := contract.SampleVars(brand.DisplayName)
+	vars["due_day"] = contract.DueDayPhraseFor(resolved, nil)
+	html := contract.Render(contract.SanitizeHTML(src), vars)
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"html":           html,
+		"language":       resolved,
 		"letterhead_url": brand.LetterheadURL,
 		"logo_url":       brand.LogoURL,
 		"display_name":   brand.DisplayName,
@@ -315,19 +353,24 @@ func (s *Server) handlePreviewTemplate(w http.ResponseWriter, r *http.Request) {
 // templateBody validates and sanitizes a submitted template body. The stored
 // value is always the sanitized one: what a landlord sees on reload is exactly
 // what a contract will snapshot.
-func templateBody(f validate.Fields, in string) string {
+// `field` names the body being validated (`body_html` or `body_html_sw`), and
+// `required` says whether an empty one is an error: the English body is the
+// document, the Swahili body is optional and may be cleared.
+func templateBody(f validate.Fields, field, in string, required bool) string {
 	raw := strings.TrimSpace(in)
 	if raw == "" {
-		f.Add("body_html", "body_html is required")
+		if required {
+			f.Add(field, field+" is required")
+		}
 		return ""
 	}
 	if len(raw) > templateBodyMax {
-		f.Add("body_html", "must be at most 200 KiB")
+		f.Add(field, "must be at most 200 KiB")
 		return ""
 	}
 	clean := contract.SanitizeHTML(raw)
 	if strings.TrimSpace(clean) == "" {
-		f.Add("body_html", "contains no usable content once sanitized")
+		f.Add(field, "contains no usable content once sanitized")
 	}
 	return clean
 }

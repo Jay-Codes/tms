@@ -815,13 +815,18 @@ func TestLinkDecisionStateMachine(t *testing.T) {
 	})
 }
 
-// TestLinkNotificationLanguage: the body follows the org's sms_language.
+// TestLinkNotificationLanguage: the body follows the *renter's* locale, and
+// the org's sms_language is only the fallback for a renter who has none
+// (Phase 13). Here the org sends Swahili by default and the renter has asked
+// for English: the renter wins.
 func TestLinkNotificationLanguage(t *testing.T) {
 	h := newHarness(t)
 	fix := h.newLinkFixture(t, "Lang", "0712003240", "+255712003241")
 	fix.owner.do(http.MethodPatch, "/org", map[string]any{
-		"settings": map[string]any{"sms_language": "en"},
-	}).mustStatus(t, http.StatusOK, "english")
+		"settings": map[string]any{"sms_language": "sw"},
+	}).mustStatus(t, http.StatusOK, "org default swahili")
+	fix.renter.do(http.MethodPatch, "/me", map[string]any{"locale": "en"}).
+		mustStatus(t, http.StatusOK, "renter prefers english")
 
 	created := fix.renter.do(http.MethodPost, "/units/"+fix.unitCode+"/link",
 		linkBody(fix.periodID, testTermDays)).

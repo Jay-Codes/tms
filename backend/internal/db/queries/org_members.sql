@@ -5,7 +5,7 @@ RETURNING *;
 
 -- name: ListOrgMembers :many
 SELECT m.id, m.org_id, m.user_id, m.role, m.status, m.created_at,
-       u.email, u.full_name
+       u.email, u.full_name, u.locale
 FROM org_members m
 JOIN users u ON u.id = m.user_id
 WHERE m.org_id = sqlc.arg(org_id) AND m.deleted_at IS NULL

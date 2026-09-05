@@ -244,9 +244,10 @@ func (s *Seeder) ensureOrg(ctx context.Context, name, slug, ownerName, ownerEmai
 			}); err != nil {
 				return err
 			}
+			swBody := contract.DefaultTemplateBodySW
 			if _, err := q.CreateContractTemplate(ctx, sqlc.CreateContractTemplateParams{
 				OrgID: org.ID, Name: contract.DefaultTemplateName,
-				BodyHtml: contract.DefaultTemplateBody, IsDefault: true,
+				BodyHtml: contract.DefaultTemplateBody, BodyHtmlSw: &swBody, IsDefault: true,
 			}); err != nil {
 				return err
 			}
@@ -678,6 +679,7 @@ func (s *Seeder) notifyRow(ctx context.Context, q *sqlc.Queries, orgID, userID p
 	row, err := q.InsertNotification(ctx, sqlc.InsertNotificationParams{
 		OrgID: orgID, UserID: userID, Kind: kind, DedupeKey: dedupe,
 		Payload: payload, ToPhone: phone, Body: body,
+		Language: notify.LanguageFor(lang, ""),
 	})
 	if isNoRows(err) {
 		return false, nil // dedupe hit: already seeded

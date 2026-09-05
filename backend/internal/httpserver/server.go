@@ -174,6 +174,9 @@ func (s *Server) routes() chi.Router {
 			r.Get("/org", s.handleGetOrg)
 			r.Patch("/org", s.handlePatchOrg)
 			r.Get("/org/members", s.handleListMembers)
+			// Phase 13: an org user's own language. It names no member id —
+			// it is always the caller's own row.
+			r.Patch("/org/members/me", s.handlePatchMemberLocale)
 			r.Get("/audit-log", s.handleListAuditLog)
 			r.Get("/audit-log/{id}", s.handleGetAuditEntry)
 
@@ -245,6 +248,9 @@ func (s *Server) routes() chi.Router {
 			r.Get("/org/notification-settings", s.handleGetNotificationSettings)
 			r.Put("/org/notification-settings", s.handlePutNotificationSettings)
 			r.Post("/notifications/custom", s.handleCustomSMS)
+			// Phase 13: the compose screen's per-language recipient counts,
+			// taken with the same filters as the send.
+			r.Get("/notifications/custom/recipients-preview", s.handleCustomRecipientsPreview)
 			r.Get("/notifications/log", s.handleListNotificationLog)
 			r.Post("/notifications/log/{id}/retry", s.handleRetryNotification)
 
@@ -299,6 +305,8 @@ func (s *Server) routes() chi.Router {
 		// --- Phase 3: renter scope (tms_r) ---
 		r.Group(func(r chi.Router) {
 			r.Use(s.sessions.RequireRenter())
+			// Phase 13: the renter's own language (renter Profile).
+			r.Patch("/me", s.handlePatchMyLocale)
 			r.Get("/me/profile", s.handleGetMyProfile)
 			r.Put("/me/profile", s.handlePutMyProfile)
 			r.Post("/me/profile/kyc-upload", s.handleKYCUpload)

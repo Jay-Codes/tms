@@ -69,6 +69,11 @@ type Msg struct {
 	// BatchID groups the rows of one landlord broadcast (API.md:
 	// `POST /notifications/custom`). Empty for every other kind.
 	BatchID string
+	// Language is the language Body was rendered in (Phase 13). It is stored
+	// on the row so the delivery log can answer "which language did this
+	// renter get?" without reading the prose. Empty is stored as Swahili, the
+	// platform default.
+	Language string
 }
 
 // ErrDuplicate reports that a message with the same dedupe key already exists,
@@ -86,8 +91,9 @@ func Queue(ctx context.Context, q *sqlc.Queries, m Msg) (string, error) {
 	if q == nil {
 		return "", fmt.Errorf("notify: nil queries handle")
 	}
+	lang := LanguageFor(m.Language, "")
 	payload, err := json.Marshal(map[string]any{
-		"kind": m.Kind, "to": m.Phone, "body": m.Body,
+		"kind": m.Kind, "to": m.Phone, "body": m.Body, "language": lang,
 	})
 	if err != nil {
 		return "", fmt.Errorf("notify: marshal payload: %w", err)
@@ -119,6 +125,7 @@ func Queue(ctx context.Context, q *sqlc.Queries, m Msg) (string, error) {
 		ToPhone:   m.Phone,
 		Body:      m.Body,
 		BatchID:   batchID,
+		Language:  lang,
 	})
 	// ON CONFLICT DO NOTHING returns no row when the key was already taken.
 	if errors.Is(err, pgx.ErrNoRows) {
