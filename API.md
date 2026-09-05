@@ -143,3 +143,40 @@ Phase 2 audit actions: `property.create`, `property.update`, `property.delete`, 
 - **Templates** are plain Go string substitution in `internal/notify/templates.go`, Swahili and English per `orgs.settings.sms_language` (unknown language falls back to Swahili).
 
 Phase 3 audit actions: `renter_profile.update` (records `nida_changed`, never the number), `kyc.upload`, `kyc.view`, `link_request.create`, `link_request.cancel`, `link_request.approve`, `link_request.reject`.
+
+## Phase 4 — contract templates, contracts, signing, schedules
+
+### Templates (audience org)
+| `GET /contract-templates` | → `{items:[{id,name,is_default,updated_at,created_at}]}` |
+| `GET /contract-templates/{id}` | → `{template:{id,name,body_html,is_default,variables:[...],created_at,updated_at}}` |
+| `POST /contract-templates` | `{name(1–80), body_html(≤200 KiB, sanitized server-side: allow p,br,h1-h3,ul,ol,li,strong,em,u,table,thead,tbody,tr,td,th,blockquote; strip everything else incl. attributes except `class`), is_default?}` → `201 {template}` |
+| `PATCH /contract-templates/{id}` | partial → `200 {template}` (never affects existing contracts — snapshot rule) |
+| `DELETE /contract-templates/{id}` | soft; 409 if default and others exist? → simplest: 409 if is_default → `204` |
+| `POST /contract-templates/{id}/preview` | `{sample?:bool}` → `{html}` variables resolved with sample values + org letterhead/logo URLs `{letterhead_url,logo_url,display_name,footer_text}` |
+Variables: `{{renter_name}} {{unit}} {{property}} {{rent}} {{start_date}} {{end_date}} {{payment_period}} {{org_name}} {{term_days}} {{due_day}}`. Org creation seeds one default template ("Standard tenancy agreement") — migration/seed in this phase for existing orgs too.
+
+### Contracts
+`contract` shape: `{id,unit:{id,name,property_name},renter:{user_id,full_name,phone},template_id,status:"draft"|"pending_signature"|"active"|"expiring"|"ended"|"terminated",rent_amount,rent_period_days,payment_period:{id,label,days},term_days,start_date,end_date,due_day,snapshot_hash,signatures:[{party,name,signed_at,method,phone_masked,has_image}],link_request_id,created_at,activated_at,terminated_at,termination_reason,schedules_summary:{count,total,next_due_date,next_due_amount,paid_count,overdue_count}}`
+| `POST /contracts` (org) | `{unit_id, renter_user_id, template_id?(default), payment_period_id, term_days, start_date, due_day?, link_request_id?}` → `201 {contract}` status `pending_signature`: resolves variables, stores `terms_snapshot_html`, computes `snapshot_hash = sha256(terms_snapshot_html + "|" + unit_id + renter_user_id + rent_amount + rent_period_days + payment_period_days + term_days + start_date + end_date + due_day)`. Unit must be vacant/listed, renter known to org, no other active/pending contract on unit → 409. Queues SMS `contract_ready` ("Your contract for {unit} is ready to sign. Open {APP_BASE_URL}/enduser/contract/{id}"). |
+| Link approval hook | `POST /link-requests/{id}/approve` now creates the contract from the request (default template) in the same tx and returns `{request, contract}`. Auto-approve does the same. |
+| `GET /contracts?status=&unit_id=&renter_user_id=&cursor=` (org) / `GET /me/contracts` (renter) | → `{items:[contract],next_cursor}` |
+| `GET /contracts/{id}` | org: any in org; renter: own only (else 404) → `{contract}` |
+| `GET /contracts/{id}/document` | both parties → `{contract_id,status,org:{display_name,logo_url,letterhead_url,footer_text},parties:{landlord:{name},renter:{name,phone_masked}},terms_html,schedule:[{period_start,period_end,due_date,amount}],signatures:[{party,name,signed_at,method,phone_masked,signature_image_url}],snapshot_hash,generated_at}`. Schedule shown from `payment_schedules` when active, else generated preview. |
+| `POST /contracts/{id}/sign/otp` (renter, own, status pending_signature, not yet signed) | → `202 {resend_after_seconds}`; OTP purpose `sign`, keyed to contract; rate-limited. |
+| `POST /contracts/{id}/signature-upload` (renter) | `{content_type:"image/png", size_bytes ≤ 512 KiB}` → `{upload_url, object_key, headers}` (bucket `signatures`, key `{org_id}/{contract_id}/renter.png`). |
+| `POST /contracts/{id}/sign` (renter) | `{otp_code, signature_object_key?}` → `200 {contract}`; verifies OTP, verifies hash unchanged, inserts `contract_signatures` row (party renter, method `drawn` if key else `otp_accept`, otp_ref, ip, ua, snapshot_hash). Second sign → 409. Queues SMS `contract_signed` to landlord? (no — landlords use email/dashboard; skip). |
+| `POST /contracts/{id}/activate` (org) | requires renter signature → else 412 `renter_signature_required`; inserts landlord signature row (method `otp_accept`, user = session), generates all `payment_schedules` via `contract.Generate`, status `active`, `activated_at`, unit → `occupied` (clears override), link request → `linked`?? keep `approved`. Queues SMS `welcome` ("Welcome to {org}. Your tenancy at {unit} starts {date}. First payment {amount} due {date}."). |
+| `POST /contracts/{id}/terminate` (org) | `{reason(1–200), effective_date?(default today)}` → `200 {contract}`: status `terminated`, remaining `pending`/`overdue` schedules with period_start > effective_date → `waived`; unit → vacant; SMS `contract_terminated`. Allowed from pending_signature/active/expiring. Pending-signature cancel = same endpoint. |
+| `GET /contracts/{id}/verify` | → `{valid:bool, computed_hash, stored_hash, signatures:[...]}` |
+| Landlord-recorded renter (FLOWS 3.6) | `POST /contracts/{id}/activate` with body `{landlord_recorded:true, reason}` when renter has no signature → allowed, audit action `contract.activate_landlord_recorded`; no renter signature row. |
+| Expiring job | scheduler tick (hourly): `active` with `end_date - 30d <= today` → `expiring`; `expiring`/`active` with `end_date < today` → `ended`, unit → vacant (if no other active contract). Also exposed as `make`-free internal function for tests. |
+
+### Schedules (read; payments in Phase 5)
+| `GET /contracts/{id}/schedules` | → `{items:[{id,period_start,period_end,due_date,amount,status,paid_amount}]}` |
+| `GET /me/schedules` (renter) | → `{items:[... + contract:{id,unit_name}] , next_due:{...}|null}` |
+
+### Branding (audience org; needed for contract documents — full theming UI in Phase 7)
+| `GET /org/branding` | → `{display_name, logo_url|null, letterhead_url|null, theme:{primary_color,font_id}, dashboard_prefs:{}, document_footer_text|null}` (URLs presigned 1h) |
+| `PUT /org/branding` | `{display_name?, theme?:{primary_color(hex), font_id(bricolage|archivo|instrument|hanken)}, dashboard_prefs?, document_footer_text?(≤500)}` → `200 {branding}` |
+| `POST /org/branding/logo` / `POST /org/branding/letterhead` | `{content_type:image/png|image/jpeg, size_bytes ≤ 2 MiB}` → `{upload_url, object_key, headers}` (bucket `branding`, key `{org_id}/logo.{ext}` / `{org_id}/letterhead.{ext}`); then `POST /org/branding/{logo|letterhead}/complete {object_key}` → `{branding}`. `DELETE /org/branding/{logo|letterhead}` → `{branding}`. |
+Public branding endpoint (`/public/orgs/{slug}/branding`, `/public/units/{code}`) now returns `logo_url` presigned (1h) when set.
