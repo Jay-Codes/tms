@@ -2,8 +2,13 @@
 
 /**
  * Org branding (SPEC §5.2, API.md Branding): the display name renters see, the
- * one theme colour and one whitelisted font the design system allows, the logo
- * and letterhead images, and the footer line printed under every contract.
+ * theme (a preset, or hand-set tokens, plus one whitelisted font — see
+ * <ThemePanel>), the logo and letterhead images, and the footer line printed
+ * under every contract.
+ *
+ * The theme is validated client-side with the same contrast table the backend
+ * enforces, so Save is disabled rather than rejected; a server 400 still shows
+ * its own `failures` in case the two ever disagree.
  *
  * Uploads follow the presign → PUT → complete dance: the backend signs a MinIO
  * URL, the browser PUTs the file straight at storage (no cookies on a signed
@@ -11,21 +16,23 @@
  */
 
 import { Icon } from '@iconify/react';
-import { FONT_IDS, FONT_LABELS } from '@tms/ui';
+import { validateTheme } from '@tms/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Field, Note, ProblemNote } from './FormBits';
 import {
   ApiError,
   brandingApi,
+  themeFailures,
   toApiError,
   unwrapBranding,
   uploadToPresignedUrl,
   type BrandingAsset,
   type OrgBranding,
+  type ThemeContrastFailure,
 } from '../lib/api';
-import { applyBranding, fontId } from '../lib/branding';
+import { applyBranding, resolveTheme } from '../lib/branding';
+import { LEDGER_DRAFT, ThemePanel, draftFromTheme, type ThemeDraft } from './ThemePanel';
 
-const HEX = /^#[0-9a-fA-F]{6}$/;
 const ACCEPT = 'image/png,image/jpeg';
 const MAX_BYTES = 2 * 1024 * 1024;
 
@@ -144,9 +151,9 @@ function AssetField({
 export function BrandingForm({ onSaved }: { onSaved?: (b: OrgBranding) => void }) {
   const [branding, setBranding] = useState<OrgBranding | null>(null);
   const [displayName, setDisplayName] = useState('');
-  const [color, setColor] = useState('#2b4fd0');
-  const [font, setFont] = useState<string>('bricolage');
+  const [theme, setTheme] = useState<ThemeDraft>(LEDGER_DRAFT);
   const [footer, setFooter] = useState('');
+  const [failures, setFailures] = useState<ThemeContrastFailure[]>([]);
   const [loadError, setLoadError] = useState<ApiError | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [saved, setSaved] = useState(false);
@@ -156,9 +163,9 @@ export function BrandingForm({ onSaved }: { onSaved?: (b: OrgBranding) => void }
     (b: OrgBranding) => {
       setBranding(b);
       setDisplayName(b.display_name ?? '');
-      setColor(b.theme?.primary_color ?? '#2b4fd0');
-      setFont(fontId(b.theme?.font_id));
+      setTheme(draftFromTheme(resolveTheme(b), { source: b.theme?.source }));
       setFooter(b.document_footer_text ?? '');
+      setFailures([]);
       applyBranding(b);
       onSaved?.(b);
     },
@@ -186,16 +193,25 @@ export function BrandingForm({ onSaved }: { onSaved?: (b: OrgBranding) => void }
     setBusy(true);
     setError(null);
     setSaved(false);
+    setFailures([]);
     try {
       const res = await brandingApi.save({
         display_name: displayName.trim(),
-        theme: { primary_color: color, font_id: font },
+        theme: {
+          // The base preset always rides along; `tokens` only once a colour was
+          // hand-edited, so an untouched preset stays linked to the platform's
+          // copy and picks up any future correction to it.
+          preset_id: theme.preset_id,
+          ...(theme.customised ? { tokens: theme.tokens } : {}),
+          font_id: theme.font_id,
+        },
         document_footer_text: footer.trim() ? footer.trim() : null,
       });
       adopt(unwrapBranding(res));
       setSaved(true);
     } catch (err) {
       setError(toApiError(err));
+      setFailures(themeFailures(err));
     } finally {
       setBusy(false);
     }
@@ -209,7 +225,7 @@ export function BrandingForm({ onSaved }: { onSaved?: (b: OrgBranding) => void }
     return <p style={{ color: 'var(--ink-soft)' }}>Loading…</p>;
   }
 
-  const hexValid = HEX.test(color);
+  const contrastFailures = validateTheme(theme.tokens);
 
   return (
     <form onSubmit={submit} style={{ display: 'grid', gap: 'var(--sp-5)', maxWidth: 720 }} noValidate>
@@ -233,62 +249,15 @@ export function BrandingForm({ onSaved }: { onSaved?: (b: OrgBranding) => void }
         />
       </Field>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-4)' }}>
-        <Field
-          id="primary_hex"
-          label="Theme colour"
-          hint="One colour; the pressed and tinted shades are derived so contrast holds."
-          error={hexValid ? error?.errors['theme.primary_color'] : 'Use a 6-digit hex colour, e.g. #2b4fd0.'}
-        >
-          <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center' }}>
-            <input
-              aria-label="Theme colour picker"
-              type="color"
-              value={hexValid ? color : '#2b4fd0'}
-              onChange={(e) => {
-                setColor(e.target.value);
-                setSaved(false);
-              }}
-              style={{
-                width: 52,
-                height: 44,
-                padding: 0,
-                border: '1px solid var(--rule)',
-                borderRadius: 'var(--radius-sm)',
-                background: 'var(--sheet)',
-              }}
-            />
-            <input
-              id="primary_hex"
-              className="input num"
-              value={color}
-              maxLength={7}
-              onChange={(e) => {
-                setColor(e.target.value.trim());
-                setSaved(false);
-              }}
-            />
-          </div>
-        </Field>
-
-        <Field id="font_id" label="Typeface" hint="Four faces are whitelisted so every screen stays legible offline.">
-          <select
-            id="font_id"
-            className="input"
-            value={font}
-            onChange={(e) => {
-              setFont(e.target.value);
-              setSaved(false);
-            }}
-          >
-            {FONT_IDS.map((f) => (
-              <option key={f} value={f}>
-                {FONT_LABELS[f]}
-              </option>
-            ))}
-          </select>
-        </Field>
-      </div>
+      <ThemePanel
+        draft={theme}
+        onChange={(next) => {
+          setTheme(next);
+          setSaved(false);
+          setFailures([]);
+        }}
+        serverFailures={failures}
+      />
 
       <AssetField
         asset="logo"
@@ -326,9 +295,16 @@ export function BrandingForm({ onSaved }: { onSaved?: (b: OrgBranding) => void }
       </Field>
 
       <div>
-        <button type="submit" className="btn btn-primary" disabled={busy || !hexValid}>
+        <button type="submit" className="btn btn-primary" disabled={busy || contrastFailures.length > 0}>
           {busy ? 'Saving…' : 'Save branding'}
         </button>
+        {contrastFailures.length ? (
+          <p className="error" style={{ marginTop: 'var(--sp-2)' }}>
+            Fix the contrast on{' '}
+            {contrastFailures.map((f) => `${f.pair} (${f.ratio.toFixed(2)}:1)`).join(', ')} before
+            saving.
+          </p>
+        ) : null}
       </div>
     </form>
   );

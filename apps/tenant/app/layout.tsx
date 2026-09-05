@@ -39,6 +39,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${bricolage.variable} ${archivo.variable} ${instrument.variable} ${hanken.variable}`}
     >
       <body>
+        {/*
+          No flash of platform blue: the last resolved org theme is cached by
+          lib/branding.ts under `tms.tenant.theme` with its derived variable map
+          already expanded, and painted here before React hydrates. The branding
+          fetch in <Shell> then confirms or replaces it.
+        */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var e=JSON.parse(localStorage.getItem('tms.tenant.theme')||'null');if(!e||!e.vars)return;var r=document.documentElement;for(var k in e.vars)r.style.setProperty(k,e.vars[k]);if(e.theme&&e.theme.dark)r.setAttribute('data-theme','dark');}catch(_){}})();`,
+          }}
+        />
         <AuthProvider>{children}</AuthProvider>
         <RegisterSW />
       </body>

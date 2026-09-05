@@ -11,6 +11,8 @@
  *  - No business logic lives here; the backend is the only source of truth.
  */
 
+import type { ThemePreset, ThemeTokens } from '@tms/ui';
+
 export const API_BASE = '/api/v1';
 
 export interface Problem {
@@ -338,7 +340,8 @@ export interface PublicBranding {
   org: { id: string; name: string; slug: string };
   display_name: string;
   logo_url: string | null;
-  theme: { primary_color: string; font_id: string };
+  /** Phase 12: the full resolved token set, same shape as `/org/branding`. */
+  theme: BrandingTheme;
 }
 
 export interface PriceInput {
@@ -772,20 +775,59 @@ export interface ContractInput {
 
 /* --------------------------------- branding -------------------------------- */
 
+/**
+ * The resolved theme (Phase 12). `source` says where it came from: a preset, a
+ * custom token set, the v1 single-colour record (`legacy`) or nothing at all.
+ * `primary_color` is kept so v1 callers keep working.
+ */
+export interface BrandingTheme {
+  preset_id: string | null;
+  tokens: ThemeTokens;
+  font_id: string;
+  dark: boolean;
+  source?: 'preset' | 'custom' | 'legacy' | 'default';
+  primary_color?: string;
+}
+
 export interface OrgBranding {
   display_name: string;
   logo_url: string | null;
   letterhead_url: string | null;
-  theme: { primary_color: string; font_id: string };
+  theme: BrandingTheme;
   dashboard_prefs?: Record<string, unknown>;
   document_footer_text: string | null;
 }
 
+/** `PUT /org/branding` — send `tokens` only when the landlord customised them. */
+export interface BrandingThemeInput {
+  preset_id?: string | null;
+  tokens?: ThemeTokens;
+  font_id?: string;
+}
+
 export interface BrandingInput {
   display_name?: string;
-  theme?: { primary_color: string; font_id: string };
+  theme?: BrandingThemeInput;
   dashboard_prefs?: Record<string, unknown>;
   document_footer_text?: string | null;
+}
+
+/** `400` from `PUT /org/branding` when a pair falls under its minimum. */
+export interface ThemeContrastFailure {
+  pair: string;
+  ratio: number;
+  minimum: number;
+}
+
+/** Read the failing pairs out of an RFC-7807 body, if it carries any. */
+export function themeFailures(err: unknown): ThemeContrastFailure[] {
+  if (!(err instanceof ApiError)) return [];
+  const raw = err.body.failures;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (f): f is ThemeContrastFailure =>
+      !!f && typeof (f as ThemeContrastFailure).pair === 'string',
+  );
 }
 
 /** Presigned PUT ticket (logo, letterhead) — the same shape KYC uses. */
@@ -845,6 +887,9 @@ export const contractsApi = {
 };
 
 export const brandingApi = {
+  /** Public: the eight platform presets. No session needed. */
+  presets: (signal?: AbortSignal) =>
+    api.get<{ presets: ThemePreset[] }>('/themes/presets', { signal }),
   get: (signal?: AbortSignal) =>
     api.get<{ branding: OrgBranding } | OrgBranding>('/org/branding', { signal }),
   save: (body: BrandingInput) =>
