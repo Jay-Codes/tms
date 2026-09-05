@@ -1320,6 +1320,12 @@ export interface ReportSummary {
   contracts: { active: number; expiring: number; pending_signature: number };
   period: ReportPeriod;
   vacant_units: VacantUnitRow[];
+  /* Phase 11 — the resolved window and the one before it, for comparison.
+     Optional so the screen still renders against the Phase 7 shape. */
+  window?: ReportWindow;
+  previous?: ReportWindow;
+  previous_totals?: Partial<ReportPeriod>;
+  change_pct?: ChangePct;
 }
 
 /** Worst status across a renter's unsettled schedules (API.md). */
@@ -1351,6 +1357,102 @@ export interface CollectionsBucket {
 export interface CollectionsReport {
   buckets: CollectionsBucket[];
   totals: { expected: number; collected: number };
+  /* Phase 11 — present once the cadence-aware backend is in. */
+  window?: ReportWindow;
+  previous?: ReportWindow;
+  previous_totals?: { expected: number; collected: number };
+  change_pct?: ChangePct;
+}
+
+/* ------------------------------------------------------------------ */
+/* Shapes — API.md Phase 11 (cadence, revenue series, occupancy).      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The window every Phase 11 report echoes back: half-open `[from, to)`, `to`
+ * exclusive — the same contract `@tms/ui`'s PeriodPicker emits, so a window
+ * never has to be converted on the way in or out.
+ */
+export interface ReportWindow {
+  from: string;
+  to: string;
+  cadence: string;
+}
+
+/** `{collected: 12.4, expenses: null}` — null means the previous window was empty. */
+export type ChangePct = Record<string, number | null>;
+
+/** Bucket size for a series. The backend picks one from the window unless told. */
+export type ReportBucket = 'day' | 'week' | 'month';
+
+/**
+ * What every cadence-aware report takes. Send `cadence` + `anchor` for a named
+ * window, or `from` + `to` for a custom one; the PeriodPicker's value maps
+ * straight onto the second form.
+ */
+export interface PeriodQuery {
+  /* Indexed so a query can be spread with the extra keys a report takes
+     (`bucket`, `property_id`, `group_by`) and still satisfy the fetch
+     wrapper's query type. */
+  [key: string]: string | undefined;
+  cadence?: string;
+  anchor?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface RevenueTotals {
+  expected: number;
+  collected: number;
+  expenses: number;
+  net: number;
+}
+
+export interface RevenueBucket extends RevenueTotals {
+  start: string;
+}
+
+export interface RevenueReport {
+  window: ReportWindow;
+  previous: ReportWindow;
+  bucket: ReportBucket;
+  buckets: RevenueBucket[];
+  totals: RevenueTotals;
+  previous_totals: RevenueTotals;
+  change_pct: ChangePct;
+  trend: { slope_collected_per_bucket: number };
+  /** collected ÷ expected, 0–1; null when nothing was expected. */
+  collection_rate: number | null;
+}
+
+export interface RevenuePropertyGroup extends RevenueTotals {
+  id: string;
+  name: string;
+  collection_rate: number | null;
+}
+
+export interface RevenueByPropertyReport {
+  window: ReportWindow;
+  previous: ReportWindow;
+  groups: RevenuePropertyGroup[];
+  totals: RevenueTotals;
+  previous_totals: RevenueTotals;
+  change_pct: ChangePct;
+}
+
+export interface OccupancyBucket {
+  start: string;
+  units_total: number;
+  units_occupied: number;
+  /** 0–1, like `assets.occupancy_rate` on the summary. */
+  occupancy_pct: number;
+}
+
+export interface OccupancyReport {
+  window: ReportWindow;
+  bucket: ReportBucket;
+  buckets: OccupancyBucket[];
+  current: { units_total: number; units_occupied: number; occupancy_pct: number };
 }
 
 /**
@@ -1366,6 +1468,8 @@ export const DASHBOARD_CARDS = [
   'link_requests',
   'overdue',
   'expenses',
+  'revenue',
+  'net_income',
 ] as const;
 
 export type DashboardCard = (typeof DASHBOARD_CARDS)[number];
@@ -1379,6 +1483,8 @@ export type DashboardCard = (typeof DASHBOARD_CARDS)[number];
 export const DEFAULT_DASHBOARD_CARDS: readonly DashboardCard[] = [
   'assets',
   'renters',
+  'revenue',
+  'net_income',
   'payment_status',
   'collections',
   'link_requests',
@@ -1419,27 +1525,53 @@ export function hiddenDashboardCards(prefs: DashboardPrefs): DashboardCard[] {
 /* ------------------------------------------------------------------ */
 
 export const reportsApi = {
-  /** `period` is `month` or `YYYY-MM`; omitted means the current month. */
-  summary: (period?: string, signal?: AbortSignal) =>
-    api.get<ReportSummary>('/reports/summary', { query: { period: period || undefined }, signal }),
+  /**
+   * The period is given the Phase 11 way — `cadence` + `anchor`, or the
+   * PeriodPicker's `from`/`to`. `period` (`month` or `YYYY-MM`) is the Phase 7
+   * spelling and still works.
+   */
+  summary: (query: PeriodQuery & { period?: string } = {}, signal?: AbortSignal) =>
+    api.get<ReportSummary>('/reports/summary', { query, signal }),
   paymentStatus: (
-    query: { status?: PaymentStatusValue | ''; property_id?: string } = {},
+    query: PeriodQuery & { status?: PaymentStatusValue | ''; property_id?: string } = {},
     signal?: AbortSignal,
   ) => api.get<{ items: PaymentStatusRow[] }>('/reports/payment-status', { query, signal }),
   collections: (
-    query: { from: string; to: string; group: CollectionsGroup },
+    query: PeriodQuery & { group?: CollectionsGroup; property_id?: string },
     signal?: AbortSignal,
   ) => api.get<CollectionsReport>('/reports/collections', { query, signal }),
+
+  /* ------------------------------ phase 11 ------------------------------ */
+
+  /** Expected / collected / expenses / net per bucket across the window. */
+  revenue: (
+    query: PeriodQuery & { bucket?: ReportBucket; property_id?: string } = {},
+    signal?: AbortSignal,
+  ) => api.get<RevenueReport>('/reports/revenue', { query, signal }),
+  /** The same window, cut by property instead of by time. */
+  revenueByProperty: (query: PeriodQuery = {}, signal?: AbortSignal) =>
+    api.get<RevenueByPropertyReport>('/reports/revenue', {
+      query: { ...query, group_by: 'property' },
+      signal,
+    }),
+  occupancy: (
+    query: PeriodQuery & { bucket?: ReportBucket; property_id?: string } = {},
+    signal?: AbortSignal,
+  ) => api.get<OccupancyReport>('/reports/occupancy', { query, signal }),
   /**
    * The CSV is a download, not a fetch: the browser opens it same-origin so the
    * httpOnly `tms_o` cookie rides along and the attachment lands in Downloads.
    * Written against API_BASE (absolute path) so the '/tenant' basePath is not
    * prepended — the same rule the fetch wrapper follows.
    */
-  paymentStatusCsvUrl: (query: { status?: PaymentStatusValue | ''; property_id?: string } = {}) => {
+  paymentStatusCsvUrl: (
+    query: PeriodQuery & { status?: PaymentStatusValue | ''; property_id?: string } = {},
+  ) => {
     const qs = new URLSearchParams({ format: 'csv' });
-    if (query.status) qs.set('status', query.status);
-    if (query.property_id) qs.set('property_id', query.property_id);
+    for (const k of ['status', 'property_id', 'cadence', 'anchor', 'from', 'to'] as const) {
+      const v = query[k];
+      if (v) qs.set(k, String(v));
+    }
     return `${API_BASE}/reports/payment-status?${qs.toString()}`;
   },
 };

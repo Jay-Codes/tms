@@ -16,6 +16,7 @@ import { useReadyToCountersign } from '../../components/ContractBits';
 import { CARD_LABELS, DashboardCustomize } from '../../components/DashboardCustomize';
 import { ChangeMark } from '../../components/ExpenseBits';
 import { StatTile, TileRow } from '../../components/ReportBits';
+import { CHART_ROLES, ChangeMark as DeltaMark, Sparkline } from '@tms/ui';
 import { PageHead } from '../../components/PageHead';
 import { pendingLabel, usePendingLinkRequests } from '../../components/NavBadges';
 import {
@@ -31,6 +32,7 @@ import {
   type PaymentStatusRow,
   type Property,
   type ReportSummary,
+  type RevenueReport,
 } from '../../lib/api';
 import { useMe } from '../../lib/auth';
 import { fmtTZS } from '../../lib/format';
@@ -132,11 +134,12 @@ function useDashboardData() {
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [statuses, setStatuses] = useState<PaymentStatusRow[] | null>(null);
   const [expenses, setExpenses] = useState<ExpenseSummary | null>(null);
+  const [revenue, setRevenue] = useState<RevenueReport | null>(null);
 
   useEffect(() => {
     const ac = new AbortController();
     reportsApi
-      .summary('month', ac.signal)
+      .summary({ cadence: 'month' }, ac.signal)
       .then(setSummary)
       .catch(() => setSummary(null));
     reportsApi
@@ -149,10 +152,16 @@ function useDashboardData() {
       .summary({ cadence: 'month' }, ac.signal)
       .then(setExpenses)
       .catch(() => setExpenses(null));
+    // The month's money as a daily series — the revenue and net cards read
+    // their figure, their change and their sparkline from this one call.
+    reportsApi
+      .revenue({ cadence: 'month', bucket: 'day' }, ac.signal)
+      .then(setRevenue)
+      .catch(() => setRevenue(null));
     return () => ac.abort();
   }, []);
 
-  return { summary, statuses, expenses };
+  return { summary, statuses, expenses, revenue };
 }
 
 function DashboardBody() {
@@ -162,7 +171,7 @@ function DashboardBody() {
   const [customizing, setCustomizing] = useState(false);
   const pending = usePendingLinkRequests();
   const countersign = useReadyToCountersign();
-  const { summary, statuses, expenses } = useDashboardData();
+  const { summary, statuses, expenses, revenue } = useDashboardData();
 
   useEffect(() => {
     const ac = new AbortController();
@@ -299,11 +308,58 @@ function DashboardBody() {
               />
             </DashCard>
           );
+        case 'revenue':
+          return (
+            <DashCard key={card} icon="solar:chart-square-linear" label={CARD_LABELS.revenue} href="/reports" cta="Revenue report">
+              <Figure
+                value={revenue ? fmtTZS(revenue.totals.collected) : '—'}
+                sub={
+                  revenue ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                      <DeltaMark change={revenue.change_pct?.collected ?? null} goodDirection="up" />
+                      <span>vs {fmtTZS(revenue.previous_totals?.collected ?? 0)} last month</span>
+                    </span>
+                  ) : (
+                    'Waiting for figures.'
+                  )
+                }
+              />
+              {revenue && revenue.buckets.length > 1 ? (
+                <Sparkline
+                  values={revenue.buckets.map((b) => b.collected)}
+                  color={CHART_ROLES.collected}
+                  width={180}
+                  ariaLabel={`Collected each day this month, ${revenue.buckets.length} days`}
+                />
+              ) : null}
+            </DashCard>
+          );
+        case 'net_income':
+          return (
+            <DashCard key={card} icon="solar:banknote-2-linear" label={CARD_LABELS.net_income} href="/reports" cta="Revenue report">
+              <Figure
+                tone={revenue && revenue.totals.net < 0 ? 'overdue' : undefined}
+                value={revenue ? fmtTZS(revenue.totals.net) : '—'}
+                sub={
+                  revenue ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                      <DeltaMark change={revenue.change_pct?.net ?? null} goodDirection="up" />
+                      <span>
+                        collected {fmtTZS(revenue.totals.collected)} less expenses {fmtTZS(revenue.totals.expenses)}
+                      </span>
+                    </span>
+                  ) : (
+                    'Waiting for figures.'
+                  )
+                }
+              />
+            </DashCard>
+          );
         default:
           return null;
       }
     },
-    [summary, statuses, pending, expenses],
+    [summary, statuses, pending, expenses, revenue],
   );
 
   return (

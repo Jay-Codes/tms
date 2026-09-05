@@ -692,3 +692,70 @@ button, input, select, textarea {
   color: var(--ink);
   font-weight: 600;
 }
+
+/* ---------------- Charts (added Phase 11) ---------------- */
+/*
+   The chart layer is additive: it adds colours, it never changes one. Every
+   chart in `packages/ui/src/charts` reads these variables and nothing else, so
+   a chart is themed (and, when the shell grows a dark mode, re-stepped) here
+   rather than in the drawing code.
+
+   The eight categorical slots are the validated default palette from the
+   dataviz skill, checked against this app's own paper (#fbfbf7):
+     lightness band PASS · chroma PASS · adjacent CVD ΔE 9.1 PASS ·
+     adjacent normal-vision ΔE 19.6 PASS · contrast WARN on aqua/yellow/magenta,
+     which is why every chart in the app ships the table beside it (the
+     documented relief). Assign the slots in order and never cycle them: a
+     ninth series folds into "Other".
+
+   They are deliberately NOT derived from --primary. An org may theme itself
+   any colour it likes, and a series palette has to hold its CVD separations —
+   which a themed hue cannot promise. The brand still owns the chrome; the data
+   owns these.
+*/
+
+:root {
+  /* Categorical slots — fixed order (blue, orange, aqua, yellow, magenta,
+     green, violet, red). */
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
+  --chart-5: #e87ba4;
+  --chart-6: #008300;
+  --chart-7: #4a3aa7;
+  --chart-8: #e34948;
+
+  /* Roles. `expected` is a reference series, not an identity: soft ink, drawn
+     dashed, so what was written down never competes with what happened. */
+  --chart-collected: var(--chart-1);
+  --chart-expected: var(--ink-soft);
+  --chart-expenses: var(--chart-2);
+  --chart-net: var(--chart-3);
+  --chart-occupancy: var(--chart-1);
+
+  /* Chrome. Recessive by design — hairline rules, soft ink labels. */
+  --chart-surface: var(--paper);
+  --chart-grid: var(--rule);
+  --chart-axis: var(--rule-strong);
+  --chart-label: var(--ink-soft);
+}
+
+/*
+   Dark is a *selected* set of steps for a dark surface, not an inversion — the
+   same eight hues re-stepped and re-validated (worst adjacent CVD ΔE 8.4).
+   It is scoped to an explicit `data-theme="dark"` only: the shell's paper and
+   ink are still light-only, so flipping the charts on `prefers-color-scheme`
+   alone would put dark-surface steps on white paper. When the shell gains a
+   dark theme (Phase 12) it stamps that attribute and the charts follow.
+*/
+:root[data-theme='dark'] {
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
+  --chart-5: #d55181;
+  --chart-6: #008300;
+  --chart-7: #9085e9;
+  --chart-8: #e66767;
+}

@@ -253,6 +253,13 @@ func (s *Server) routes() chi.Router {
 			r.Get("/reports/payment-status", s.handleReportPaymentStatus)
 			r.Get("/reports/collections", s.handleReportCollections)
 
+			// --- Phase 11: the cadence-driven series ---
+			//
+			// Same audience and roles as the Phase 7 reports above: whoever may
+			// read the summary may read the chart behind it.
+			r.Get("/reports/revenue", s.handleReportRevenue)
+			r.Get("/reports/occupancy", s.handleReportOccupancy)
+
 			// --- Phase 10: the expense ledger ---
 			//
 			// Owner and manager, the org's two roles: whoever may record a

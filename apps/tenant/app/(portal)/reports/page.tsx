@@ -1,50 +1,77 @@
 'use client';
 
 /**
- * Reports (SPEC §5.9, FLOWS flow 9). Three readings of the same ledger:
+ * Reports (SPEC §5.9, FLOWS flow 9; reworked in PLAN2 phase 11).
  *
- *  - Overview — what the business is, for one month: assets and occupancy,
- *    renters, contracts, and the month's money set out as an account with an
- *    accountant's double rule under the total.
- *  - Payment status — one row per renter with a live contract, filterable,
- *    exportable as CSV.
- *  - Collections — expected against collected over a date range.
+ * One window governs the whole screen. The `PeriodPicker` at the top emits the
+ * half-open range `[from, to)` the API takes, the property filter beside it
+ * narrows the same window to one building, and every tab below re-reads
+ * against that slice — so no two numbers on this page can be answering
+ * different questions. The window is remembered between visits; nothing else
+ * is kept in the browser.
  *
- * Every figure is computed by the backend; this screen only lays it out.
+ *  - Overview — the six figures that describe the period, each against the
+ *    period before it.
+ *  - Revenue — collected against expected over time, what it cost, what was
+ *    left, and the same window cut by property.
+ *  - Expenses — where the money went, by category.
+ *  - Occupancy — how full the buildings were.
+ *  - Payment status — one row per renter, exportable as CSV.
+ *  - Collections — expected against collected, bucket by bucket.
+ *
+ * Every figure is computed by the backend. This screen lays it out and, in the
+ * charts, scales it to pixels — it never sums.
  */
 
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
-import { Field, ProblemNote } from '../../../components/FormBits';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  CollectionsChart,
-  PaymentStatusStampCell,
-  SectionHead,
+  BarChart,
+  CHART_ROLES,
+  LineAreaChart,
+  PeriodPicker,
+  RowBar,
+  Sparkline,
   StatTile,
-  TabBar,
-  TileRow,
-  bucketLabel,
-  type TabDef,
-} from '../../../components/ReportBits';
+  TableScroll,
+  bucketHeading,
+  bucketTick,
+  compactNumber,
+  pctLabel,
+  periodLabel,
+  type PeriodValue,
+} from '@tms/ui';
+import { Field, ProblemNote } from '../../../components/FormBits';
+import { PaymentStatusStampCell, SectionHead, TabBar, TileRow, type TabDef } from '../../../components/ReportBits';
 import { PageHead } from '../../../components/PageHead';
 import {
   ApiError,
   propertiesApi,
   reportsApi,
+  expensesApi,
   type CollectionsGroup,
   type CollectionsReport,
+  type ExpenseSummary,
+  type OccupancyReport,
   type PaymentStatusRow,
   type PaymentStatusValue,
   type Property,
+  type ReportBucket,
   type ReportSummary,
+  type RevenueByPropertyReport,
+  type RevenueReport,
 } from '../../../lib/api';
-import { fmtDate, fmtDateTime, fmtTZS, monthStartISO, todayISO } from '../../../lib/format';
+import { fmtDate, fmtDateTime, fmtTZS } from '../../../lib/format';
+import { loadReportPeriod, periodQuery, saveReportPeriod } from '../../../lib/reportPeriod';
 
-type TabId = 'overview' | 'payment_status' | 'collections';
+type TabId = 'overview' | 'revenue' | 'expenses' | 'occupancy' | 'payment_status' | 'collections';
 
 const TABS: readonly TabDef<TabId>[] = [
   { value: 'overview', label: 'Overview' },
+  { value: 'revenue', label: 'Revenue' },
+  { value: 'expenses', label: 'Expenses' },
+  { value: 'occupancy', label: 'Occupancy' },
   { value: 'payment_status', label: 'Payment status' },
   { value: 'collections', label: 'Collections' },
 ];
@@ -59,21 +86,59 @@ const STATUS_OPTIONS: { value: PaymentStatusValue | ''; label: string }[] = [
 
 const asError = (e: unknown) => (e instanceof ApiError ? e : new ApiError(0, { detail: String(e) }));
 
-/** Current month as `YYYY-MM` — the default for the month picker. */
-function currentMonth(): string {
-  return monthStartISO().slice(0, 7);
+/** Money on an axis: the currency is said once, the figures stay short. */
+const money = (v: number) => `TZS ${compactNumber(v)}`;
+
+/**
+ * `occupancy_pct` comes back as a percentage (83.3), while `collection_rate`
+ * and the summary's `occupancy_rate` are fractions (0.833). `pctLabel` takes
+ * fractions, so the percentage is divided here — once, named, rather than in
+ * four call sites.
+ */
+const frac = (pct: number | null | undefined): number | null =>
+  pct === null || pct === undefined || !Number.isFinite(pct) ? null : pct / 100;
+
+interface Scope {
+  period: PeriodValue;
+  propertyId: string;
+  /** What the tiles compare against, spelled out: "vs previous quarter". */
+  previousLabel: string;
 }
 
-/** `YYYY-MM-DD` six months back, the default left edge of the collections range. */
-function sixMonthsAgoISO(): string {
-  const d = new Date();
-  d.setDate(1);
-  d.setMonth(d.getMonth() - 5);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-01`;
+/* ------------------------------ data plumbing ----------------------------- */
+
+interface Async<T> {
+  data: T | null;
+  error: ApiError | null;
+  loading: boolean;
 }
 
-/** The org's properties, for the payment-status property filter. Silent on failure. */
+/**
+ * One read, aborted when the window changes. The previous render is kept while
+ * a new one loads (the frame does not flash) — the tab only dims.
+ */
+function useRead<T>(load: (signal: AbortSignal) => Promise<T>, deps: unknown[]): Async<T> {
+  const [state, setState] = useState<Async<T>>({ data: null, error: null, loading: true });
+
+  useEffect(() => {
+    const ac = new AbortController();
+    setState((s) => ({ ...s, loading: true, error: null }));
+    load(ac.signal)
+      .then((data) => {
+        if (!ac.signal.aborted) setState({ data, error: null, loading: false });
+      })
+      .catch((e) => {
+        if (ac.signal.aborted) return;
+        setState({ data: null, error: asError(e), loading: false });
+      });
+    return () => ac.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+
+  return state;
+}
+
+/** The org's properties, for the filter. Silent on failure. */
 function useProperties(): Property[] {
   const [items, setItems] = useState<Property[]>([]);
   useEffect(() => {
@@ -87,453 +152,818 @@ function useProperties(): Property[] {
   return items;
 }
 
+/** Dim, don't blank: a reloading tab keeps its figures until the new ones land. */
+function Loading({ busy, children }: { busy: boolean; children: React.ReactNode }) {
+  return (
+    <div style={{ opacity: busy ? 0.55 : 1, transition: 'opacity 120ms linear' }} aria-busy={busy}>
+      {children}
+    </div>
+  );
+}
+
+function EmptyNote({ children }: { children: React.ReactNode }) {
+  return (
+    <p style={{ color: 'var(--ink-soft)', border: '1px dashed var(--rule)', borderRadius: 'var(--radius-sm)', padding: 'var(--sp-5)' }}>
+      {children}
+    </p>
+  );
+}
+
 /* -------------------------------- overview -------------------------------- */
 
-function OverviewTab() {
-  const [month, setMonth] = useState(currentMonth());
-  const [data, setData] = useState<ReportSummary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<ApiError | null>(null);
+function OverviewTab({ period, propertyId, previousLabel }: Scope) {
+  const q = periodQuery(period);
+  const revenue = useRead<RevenueReport>(
+    (s) => reportsApi.revenue({ ...q, property_id: propertyId || undefined }, s),
+    [q.from, q.to, q.cadence, propertyId],
+  );
+  const occupancy = useRead<OccupancyReport>(
+    (s) => reportsApi.occupancy({ ...q, property_id: propertyId || undefined }, s),
+    [q.from, q.to, q.cadence, propertyId],
+  );
+  const summary = useRead<ReportSummary>((s) => reportsApi.summary({ ...q }, s), [q.from, q.to, q.cadence]);
 
-  useEffect(() => {
-    const ac = new AbortController();
-    setLoading(true);
-    setError(null);
-    reportsApi
-      .summary(month, ac.signal)
-      .then((r) => setData(r))
-      .catch((e) => {
-        if (ac.signal.aborted) return;
-        setError(asError(e));
-        setData(null);
-      })
-      .finally(() => {
-        if (!ac.signal.aborted) setLoading(false);
-      });
-    return () => ac.abort();
-  }, [month]);
-
-  const a = data?.assets;
-  const p = data?.period;
+  const r = revenue.data;
+  const t = r?.totals;
+  const change = r?.change_pct ?? {};
+  const spark = (r?.buckets ?? []).map((b) => b.collected);
+  const nothing = t ? !t.expected && !t.collected && !t.expenses : false;
+  const a = summary.data?.assets;
 
   return (
-    <div style={{ display: 'grid', gap: 'var(--sp-6)' }}>
-      <div style={{ display: 'flex', gap: 'var(--sp-4)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <Field id="period" label="Month" hint="Expected and collected are counted inside this month.">
-          <input
-            id="period"
-            className="input"
-            type="month"
-            value={month}
-            max={currentMonth()}
-            onChange={(e) => setMonth(e.target.value || currentMonth())}
-            style={{ minWidth: 200 }}
-          />
-        </Field>
-        {loading ? <span style={{ color: 'var(--ink-soft)', paddingBottom: 'var(--sp-3)' }}>Loading…</span> : null}
-      </div>
+    <Loading busy={revenue.loading || occupancy.loading}>
+      <div style={{ display: 'grid', gap: 'var(--sp-6)' }}>
+        <ProblemNote error={revenue.error ?? occupancy.error} />
 
-      <ProblemNote error={error} />
+        {nothing ? <EmptyNote>No activity in this period.</EmptyNote> : null}
 
-      {a && data ? (
-        <>
-          <section style={{ display: 'grid', gap: 'var(--sp-4)' }}>
-            <SectionHead icon="solar:buildings-2-linear" title="Assets" />
-            <TileRow>
-              <StatTile label="Properties" value={a.properties} />
-              <StatTile label="Units" value={a.units} sub={`${a.vacant} vacant · ${a.maintenance} maintenance`} />
-              <StatTile
-                label="Occupancy"
-                value={`${Math.round((a.occupancy_rate ?? 0) * 100)}%`}
-                sub={`${a.occupied} of ${a.units} occupied`}
-              />
-              <StatTile label="Active renters" value={data.renters.active} sub="Renters on a live contract" />
-            </TileRow>
-          </section>
+        <section style={{ display: 'grid', gap: 'var(--sp-4)' }}>
+          <SectionHead icon="solar:wallet-money-linear" title="This period" />
+          <TileRow min={220}>
+            <StatTile
+              label="Collected"
+              value={fmtTZS(t?.collected ?? null)}
+              change={change.collected ?? null}
+              changeLabelText={previousLabel}
+              goodDirection="up"
+              tone="paid"
+              trend={
+                spark.length > 1 ? (
+                  <Sparkline
+                    values={spark}
+                    color={CHART_ROLES.collected}
+                    ariaLabel={`Collected across ${spark.length} ${r?.bucket ?? 'day'} buckets`}
+                  />
+                ) : undefined
+              }
+            />
+            <StatTile
+              label="Expected"
+              value={fmtTZS(t?.expected ?? null)}
+              change={change.expected ?? null}
+              changeLabelText={previousLabel}
+              goodDirection="none"
+              sub="What the schedules said was due."
+            />
+            <StatTile
+              label="Expenses"
+              value={fmtTZS(t?.expenses ?? null)}
+              change={change.expenses ?? null}
+              changeLabelText={previousLabel}
+              goodDirection="down"
+            />
+            <StatTile
+              label="Net"
+              value={fmtTZS(t?.net ?? null)}
+              change={change.net ?? null}
+              changeLabelText={previousLabel}
+              goodDirection="up"
+              tone={t && t.net < 0 ? 'overdue' : undefined}
+              sub="Collected less expenses."
+            />
+            <StatTile
+              label="Collection rate"
+              value={pctLabel(r?.collection_rate ?? null)}
+              sub={t ? `${fmtTZS(t.collected)} of ${fmtTZS(t.expected)}` : undefined}
+            />
+            <StatTile
+              label="Occupancy"
+              value={pctLabel(occupancy.data ? frac(occupancy.data.current.occupancy_pct) : (a?.occupancy_rate ?? null))}
+              sub={
+                occupancy.data
+                  ? `${occupancy.data.current.units_occupied} of ${occupancy.data.current.units_total} units occupied`
+                  : a
+                    ? `${a.occupied} of ${a.units} units occupied`
+                    : undefined
+              }
+            />
+          </TileRow>
+        </section>
 
-          <section style={{ display: 'grid', gap: 'var(--sp-4)' }}>
-            <SectionHead icon="solar:document-text-linear" title="Contracts" />
-            <TileRow>
-              <StatTile label="Active" value={data.contracts.active} />
-              <StatTile label="Expiring" value={data.contracts.expiring} sub="Ending within 30 days" />
-              <StatTile
-                label="Awaiting signature"
-                value={data.contracts.pending_signature}
-                sub={
-                  data.contracts.pending_signature > 0 ? (
-                    <Link href="/contracts?status=pending_signature">Open contracts</Link>
-                  ) : undefined
-                }
-              />
-            </TileRow>
-          </section>
-
-          {p ? (
+        {summary.data && a ? (
+          <>
             <section style={{ display: 'grid', gap: 'var(--sp-4)' }}>
-              <SectionHead
-                icon="solar:wallet-money-linear"
-                title="Money this period"
-                aside={
-                  <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-                    {fmtDate(p.from)} — {fmtDate(p.to)}
-                  </span>
-                }
-              />
-              <table className="ledger" style={{ maxWidth: 560 }}>
-                <tbody>
-                  <tr>
-                    <td>Expected</td>
-                    <td className="num">{fmtTZS(p.expected)}</td>
-                  </tr>
-                  <tr>
-                    <td>Collected</td>
-                    <td className="num" style={{ color: 'var(--stamp-paid)' }}>
-                      {fmtTZS(p.collected)}
-                    </td>
-                  </tr>
-                  <tr className="total">
-                    <td>Outstanding</td>
-                    <td className="num" style={{ color: p.outstanding > 0 ? 'var(--stamp-overdue)' : 'var(--ink)' }}>
-                      {fmtTZS(p.outstanding)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+              <SectionHead icon="solar:buildings-2-linear" title="Assets and contracts" />
               <TileRow>
+                <StatTile label="Properties" value={a.properties} />
+                <StatTile label="Units" value={a.units} sub={`${a.vacant} vacant · ${a.maintenance} maintenance`} />
+                <StatTile label="Active renters" value={summary.data.renters.active} sub="On a live contract" />
                 <StatTile
-                  label="Overdue payments"
-                  value={p.overdue_count}
-                  tone={p.overdue_count > 0 ? 'overdue' : undefined}
-                  sub={p.overdue_count > 0 ? <Link href="/payments?tab=overdue">Chase them</Link> : 'Nothing late.'}
-                />
-                <StatTile
-                  label="Overdue amount"
-                  value={fmtTZS(p.overdue_amount)}
-                  tone={p.overdue_amount > 0 ? 'overdue' : undefined}
+                  label="Contracts"
+                  value={summary.data.contracts.active}
+                  sub={`${summary.data.contracts.expiring} expiring · ${summary.data.contracts.pending_signature} awaiting signature`}
                 />
               </TileRow>
             </section>
-          ) : null}
 
-          <section style={{ display: 'grid', gap: 'var(--sp-4)' }}>
-            <SectionHead
-              icon="solar:home-smile-linear"
-              title="Vacant units"
-              aside={
-                <Link href="/units?status=vacant" className="btn btn-quiet" style={{ minHeight: 36 }}>
-                  Vacancy board
-                </Link>
-              }
-            />
-            <table className="ledger">
-              <thead>
-                <tr>
-                  <th>Unit</th>
-                  <th>Property</th>
-                  <th className="num">Days vacant</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(data.vacant_units ?? []).length === 0 ? (
+            <section style={{ display: 'grid', gap: 'var(--sp-4)' }}>
+              <SectionHead
+                icon="solar:home-smile-linear"
+                title="Vacant units"
+                aside={
+                  <Link href="/units?status=vacant" className="btn btn-quiet" style={{ minHeight: 36 }}>
+                    Vacancy board
+                  </Link>
+                }
+              />
+              <TableScroll label="Vacant units">
+                <table className="ledger">
+                  <thead>
+                    <tr>
+                      <th>Unit</th>
+                      <th>Property</th>
+                      <th className="num">Days vacant</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(summary.data.vacant_units ?? []).length === 0 ? (
+                      <tr>
+                        <td colSpan={3} style={{ color: 'var(--ink-soft)' }}>
+                          Every unit is spoken for.
+                        </td>
+                      </tr>
+                    ) : (
+                      summary.data.vacant_units.map((v) => (
+                        <tr key={v.unit_id}>
+                          <td style={{ fontWeight: 500 }}>
+                            <Link href={`/units/${v.unit_id}`}>{v.name}</Link>
+                          </td>
+                          <td style={{ color: 'var(--ink-soft)' }}>{v.property_name}</td>
+                          <td className="num">{v.days_vacant}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </TableScroll>
+            </section>
+          </>
+        ) : null}
+      </div>
+    </Loading>
+  );
+}
+
+/* -------------------------------- revenue --------------------------------- */
+
+function RevenueTab({ period, propertyId, previousLabel }: Scope) {
+  const q = periodQuery(period);
+  const [byProperty, setByProperty] = useState(false);
+
+  const revenue = useRead<RevenueReport>(
+    (s) => reportsApi.revenue({ ...q, property_id: propertyId || undefined }, s),
+    [q.from, q.to, q.cadence, propertyId],
+  );
+  // Only read the per-property cut when it is on screen — the toggle is a
+  // different question, not a different rendering of the same answer.
+  const groups = useRead<RevenueByPropertyReport | null>(
+    (s) => (byProperty ? reportsApi.revenueByProperty({ ...q }, s) : Promise.resolve(null)),
+    [q.from, q.to, q.cadence, byProperty],
+  );
+
+  const r = revenue.data;
+  const bucket: ReportBucket = r?.bucket ?? 'month';
+  const buckets = r?.buckets ?? [];
+  const labels = buckets.map((b) => bucketTick(b.start, bucket));
+  const headings = buckets.map((b) => bucketHeading(b.start, bucket));
+  const t = r?.totals;
+  const change = r?.change_pct ?? {};
+  const netMax = Math.max(1, ...(groups.data?.groups ?? []).map((g) => Math.abs(g.net)));
+
+  return (
+    <Loading busy={revenue.loading}>
+      <div style={{ display: 'grid', gap: 'var(--sp-6)' }}>
+        <ProblemNote error={revenue.error} />
+
+        <TileRow min={200}>
+          <StatTile
+            label="Collected"
+            value={fmtTZS(t?.collected ?? null)}
+            change={change.collected ?? null}
+            changeLabelText={previousLabel}
+            tone="paid"
+          />
+          <StatTile label="Expected" value={fmtTZS(t?.expected ?? null)} goodDirection="none" />
+          <StatTile
+            label="Expenses"
+            value={fmtTZS(t?.expenses ?? null)}
+            change={change.expenses ?? null}
+            changeLabelText={previousLabel}
+            goodDirection="down"
+          />
+          <StatTile
+            label="Net"
+            value={fmtTZS(t?.net ?? null)}
+            change={change.net ?? null}
+            changeLabelText={previousLabel}
+            tone={t && t.net < 0 ? 'overdue' : undefined}
+          />
+        </TileRow>
+
+        <LineAreaChart
+          title={`Collected against expected, by ${bucket}. Expected is the reference line.`}
+          ariaLabel="Collected, expected and net over the period"
+          labels={labels}
+          headings={headings}
+          formatValue={fmtTZS}
+          formatTick={money}
+          series={[
+            { id: 'collected', label: 'Collected', color: CHART_ROLES.collected, values: buckets.map((b) => b.collected), area: true },
+            { id: 'expected', label: 'Expected', color: CHART_ROLES.expected, values: buckets.map((b) => b.expected), dashed: true },
+            { id: 'net', label: 'Net', color: CHART_ROLES.net, values: buckets.map((b) => b.net) },
+          ]}
+        />
+
+        <BarChart
+          title={`What was spent, by ${bucket}.`}
+          ariaLabel="Expenses over the period"
+          labels={labels}
+          headings={headings}
+          height={200}
+          formatValue={fmtTZS}
+          formatTick={money}
+          series={[{ id: 'expenses', label: 'Expenses', color: CHART_ROLES.expenses, values: buckets.map((b) => b.expenses) }]}
+        />
+
+        <section style={{ display: 'grid', gap: 'var(--sp-4)' }}>
+          <SectionHead
+            icon="solar:chart-2-linear"
+            title={byProperty ? 'By property' : 'By period'}
+            aside={
+              <div className="segmented" role="group" aria-label="Break the window down by">
+                <button type="button" aria-pressed={!byProperty} onClick={() => setByProperty(false)}>
+                  By period
+                </button>
+                <button type="button" aria-pressed={byProperty} onClick={() => setByProperty(true)}>
+                  By property
+                </button>
+              </div>
+            }
+          />
+
+          {byProperty ? (
+            <>
+              <ProblemNote error={groups.error} />
+              <TableScroll label="Revenue by property">
+                <table className="ledger">
+                  <thead>
+                    <tr>
+                      <th>Property</th>
+                      <th className="num">Expected</th>
+                      <th className="num">Collected</th>
+                      <th className="num">Expenses</th>
+                      <th className="num">Net</th>
+                      <th>Net share</th>
+                      <th className="num">Collected</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(groups.data?.groups ?? []).length === 0 ? (
+                      <tr>
+                        <td colSpan={7} style={{ color: 'var(--ink-soft)' }}>
+                          {groups.loading ? 'Loading…' : 'No activity in this period.'}
+                        </td>
+                      </tr>
+                    ) : (
+                      (groups.data?.groups ?? []).map((g) => (
+                        <tr key={g.id}>
+                          <td style={{ fontWeight: 500 }}>
+                            <Link href={`/properties/${g.id}`}>{g.name}</Link>
+                          </td>
+                          <td className="num">{fmtTZS(g.expected)}</td>
+                          <td className="num">{fmtTZS(g.collected)}</td>
+                          <td className="num">{fmtTZS(g.expenses)}</td>
+                          <td className="num" style={{ color: g.net < 0 ? 'var(--stamp-overdue)' : undefined }}>
+                            {fmtTZS(g.net)}
+                          </td>
+                          <td>
+                            <RowBar
+                              value={g.net}
+                              max={netMax}
+                              color={CHART_ROLES.net}
+                              ariaLabel={`${g.name}: net ${fmtTZS(g.net)}`}
+                            />
+                          </td>
+                          <td className="num">{pctLabel(g.collection_rate)}</td>
+                        </tr>
+                      ))
+                    )}
+                    {groups.data && groups.data.groups.length > 0 ? (
+                      <tr className="total">
+                        <td>Total</td>
+                        <td className="num">{fmtTZS(groups.data.totals.expected)}</td>
+                        <td className="num">{fmtTZS(groups.data.totals.collected)}</td>
+                        <td className="num">{fmtTZS(groups.data.totals.expenses)}</td>
+                        <td className="num">{fmtTZS(groups.data.totals.net)}</td>
+                        <td />
+                        <td />
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </TableScroll>
+            </>
+          ) : (
+            <TableScroll label="Revenue by period">
+              <table className="ledger">
+                <thead>
                   <tr>
-                    <td colSpan={3} style={{ color: 'var(--ink-soft)' }}>
-                      Every unit is spoken for.
+                    <th>Period</th>
+                    <th className="num">Expected</th>
+                    <th className="num">Collected</th>
+                    <th className="num">Expenses</th>
+                    <th className="num">Net</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {buckets.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} style={{ color: 'var(--ink-soft)' }}>
+                        No activity in this period.
+                      </td>
+                    </tr>
+                  ) : (
+                    buckets.map((b, i) => (
+                      <tr key={b.start}>
+                        <td>{headings[i]}</td>
+                        <td className="num">{fmtTZS(b.expected)}</td>
+                        <td className="num">{fmtTZS(b.collected)}</td>
+                        <td className="num">{fmtTZS(b.expenses)}</td>
+                        <td className="num" style={{ color: b.net < 0 ? 'var(--stamp-overdue)' : undefined }}>
+                          {fmtTZS(b.net)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                  {t && buckets.length > 0 ? (
+                    <tr className="total">
+                      <td>Total</td>
+                      <td className="num">{fmtTZS(t.expected)}</td>
+                      <td className="num">{fmtTZS(t.collected)}</td>
+                      <td className="num">{fmtTZS(t.expenses)}</td>
+                      <td className="num">{fmtTZS(t.net)}</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </TableScroll>
+          )}
+        </section>
+      </div>
+    </Loading>
+  );
+}
+
+/* -------------------------------- expenses -------------------------------- */
+
+function ExpensesTab({ period, propertyId, previousLabel }: Scope) {
+  const q = periodQuery(period);
+  const summary = useRead<ExpenseSummary>(
+    (s) => expensesApi.summary({ ...q, group_by: 'category', property_id: propertyId || undefined }, s),
+    [q.from, q.to, q.cadence, propertyId],
+  );
+  const revenue = useRead<RevenueReport>(
+    (s) => reportsApi.revenue({ ...q, property_id: propertyId || undefined }, s),
+    [q.from, q.to, q.cadence, propertyId],
+  );
+
+  const bucket: ReportBucket = revenue.data?.bucket ?? 'month';
+  const buckets = revenue.data?.buckets ?? [];
+  // Sorted big-to-small: a breakdown is read as a ranking, so the order is the
+  // ranking rather than whatever order the categories were created in.
+  const groups = useMemo(
+    () => [...(summary.data?.groups ?? [])].sort((a, b) => b.amount - a.amount),
+    [summary.data],
+  );
+  const total = summary.data?.total.amount ?? 0;
+  const max = Math.max(1, ...groups.map((g) => g.amount));
+
+  return (
+    <Loading busy={summary.loading}>
+      <div style={{ display: 'grid', gap: 'var(--sp-6)' }}>
+        <ProblemNote error={summary.error} />
+
+        <TileRow min={220}>
+          <StatTile
+            label="Spent this period"
+            value={fmtTZS(total)}
+            change={summary.data?.change_pct ?? null}
+            changeLabelText={previousLabel}
+            goodDirection="down"
+            sub={
+              summary.data
+                ? `${summary.data.total.count} expense${summary.data.total.count === 1 ? '' : 's'} · previously ${fmtTZS(
+                    summary.data.previous_total?.amount ?? 0,
+                  )}`
+                : undefined
+            }
+          />
+          <StatTile
+            label="Largest category"
+            value={groups[0]?.name ?? '—'}
+            sub={groups[0] ? fmtTZS(groups[0].amount) : 'Nothing recorded in this window.'}
+          />
+        </TileRow>
+
+        <BarChart
+          title={`What was spent, by ${bucket}.`}
+          ariaLabel="Expenses over the period"
+          labels={buckets.map((b) => bucketTick(b.start, bucket))}
+          headings={buckets.map((b) => bucketHeading(b.start, bucket))}
+          height={200}
+          formatValue={fmtTZS}
+          formatTick={money}
+          empty="Nothing was spent in this period."
+          series={[{ id: 'expenses', label: 'Expenses', color: CHART_ROLES.expenses, values: buckets.map((b) => b.expenses) }]}
+        />
+
+        {/*
+          A stack by category *over time* would need a category × bucket cut and
+          `/expenses/summary` gives the window's categories only — so the
+          breakdown is drawn for the window as a whole and time is carried by the
+          chart above it. One measure, one hue: the axis already names each
+          category, so colouring them differently would be colour by rank.
+        */}
+        <BarChart
+          title="Where the money went, over the whole window."
+          ariaLabel="Expenses by category"
+          labels={groups.slice(0, 8).map((g) => g.name)}
+          height={220}
+          formatValue={fmtTZS}
+          formatTick={money}
+          empty="Nothing was spent in this period."
+          series={[
+            {
+              id: 'amount',
+              label: 'Spent',
+              color: CHART_ROLES.expenses,
+              values: groups.slice(0, 8).map((g) => g.amount),
+            },
+          ]}
+        />
+
+        <TableScroll label="Expenses by category">
+          <table className="ledger">
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th className="num">Expenses</th>
+                <th className="num">Amount</th>
+                <th>Share</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groups.length === 0 ? (
+                <tr>
+                  <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
+                    No activity in this period.
+                  </td>
+                </tr>
+              ) : (
+                groups.map((g) => (
+                  <tr key={g.id}>
+                    <td style={{ fontWeight: 500 }}>{g.name}</td>
+                    <td className="num">{g.count}</td>
+                    <td className="num">{fmtTZS(g.amount)}</td>
+                    <td>
+                      <RowBar
+                        value={g.amount}
+                        max={max}
+                        color={CHART_ROLES.expenses}
+                        ariaLabel={`${g.name}: ${fmtTZS(g.amount)}`}
+                      />
                     </td>
                   </tr>
-                ) : (
-                  data.vacant_units.map((v) => (
-                    <tr key={v.unit_id}>
-                      <td style={{ fontWeight: 500 }}>
-                        <Link href={`/units/${v.unit_id}`}>{v.name}</Link>
-                      </td>
-                      <td style={{ color: 'var(--ink-soft)' }}>{v.property_name}</td>
-                      <td className="num">{v.days_vacant}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </section>
-        </>
-      ) : null}
-    </div>
+                ))
+              )}
+              {groups.length > 0 ? (
+                <tr className="total">
+                  <td>Total</td>
+                  <td className="num">{summary.data?.total.count ?? 0}</td>
+                  <td className="num">{fmtTZS(total)}</td>
+                  <td />
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </TableScroll>
+
+        <p>
+          <Link href="/expenses" className="btn btn-quiet" style={{ minHeight: 36 }}>
+            Open the expense ledger
+          </Link>
+        </p>
+      </div>
+    </Loading>
+  );
+}
+
+/* ------------------------------- occupancy -------------------------------- */
+
+function OccupancyTab({ period, propertyId }: Scope) {
+  const q = periodQuery(period);
+  const occ = useRead<OccupancyReport>(
+    (s) => reportsApi.occupancy({ ...q, property_id: propertyId || undefined }, s),
+    [q.from, q.to, q.cadence, propertyId],
+  );
+
+  const bucket: ReportBucket = occ.data?.bucket ?? 'month';
+  const buckets = occ.data?.buckets ?? [];
+  const current = occ.data?.current;
+
+  return (
+    <Loading busy={occ.loading}>
+      <div style={{ display: 'grid', gap: 'var(--sp-6)' }}>
+        <ProblemNote error={occ.error} />
+
+        <TileRow min={220}>
+          <StatTile label="Occupancy now" value={pctLabel(frac(current?.occupancy_pct))} />
+          <StatTile
+            label="Units occupied"
+            value={current ? `${current.units_occupied} of ${current.units_total}` : '—'}
+            sub={current ? `${current.units_total - current.units_occupied} standing empty` : undefined}
+          />
+        </TileRow>
+
+        {/* Two measures, two charts — the percentage and the count never share
+            an axis (dataviz: never a second y-scale). */}
+        <LineAreaChart
+          title={`How full the units were, by ${bucket}.`}
+          ariaLabel="Occupancy over the period"
+          labels={buckets.map((b) => bucketTick(b.start, bucket))}
+          headings={buckets.map((b) => bucketHeading(b.start, bucket))}
+          formatValue={(v) => pctLabel(v, 1)}
+          formatTick={(v) => pctLabel(v)}
+          empty="No units were on the books in this period."
+          series={[
+            {
+              id: 'occupancy',
+              label: 'Occupancy',
+              color: CHART_ROLES.occupancy,
+              values: buckets.map((b) => frac(b.occupancy_pct) ?? 0),
+              area: true,
+            },
+          ]}
+        />
+
+        <TableScroll label="Occupancy by period">
+          <table className="ledger">
+            <thead>
+              <tr>
+                <th>Period</th>
+                <th className="num">Units</th>
+                <th className="num">Occupied</th>
+                <th className="num">Occupancy</th>
+              </tr>
+            </thead>
+            <tbody>
+              {buckets.length === 0 ? (
+                <tr>
+                  <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
+                    No activity in this period.
+                  </td>
+                </tr>
+              ) : (
+                buckets.map((b) => (
+                  <tr key={b.start}>
+                    <td>{bucketHeading(b.start, bucket)}</td>
+                    <td className="num">{b.units_total}</td>
+                    <td className="num">{b.units_occupied}</td>
+                    <td className="num">{pctLabel(frac(b.occupancy_pct))}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </TableScroll>
+      </div>
+    </Loading>
   );
 }
 
 /* ----------------------------- payment status ----------------------------- */
 
-function PaymentStatusTab() {
-  const properties = useProperties();
-  const [filters, setFilters] = useState<{ status: PaymentStatusValue | ''; property_id: string }>({
-    status: '',
-    property_id: '',
-  });
-  const [items, setItems] = useState<PaymentStatusRow[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<ApiError | null>(null);
+function PaymentStatusTab({ period, propertyId }: Scope) {
+  const q = periodQuery(period);
+  const [status, setStatus] = useState<PaymentStatusValue | ''>('');
 
-  useEffect(() => {
-    const ac = new AbortController();
-    setLoading(true);
-    setError(null);
-    reportsApi
-      .paymentStatus(
-        { status: filters.status || undefined, property_id: filters.property_id || undefined },
-        ac.signal,
-      )
-      .then((r) => setItems(r.items ?? []))
-      .catch((e) => {
-        if (ac.signal.aborted) return;
-        setError(asError(e));
-        setItems(null);
-      })
-      .finally(() => {
-        if (!ac.signal.aborted) setLoading(false);
-      });
-    return () => ac.abort();
-  }, [filters]);
+  const read = useRead<{ items: PaymentStatusRow[] }>(
+    (s) => reportsApi.paymentStatus({ ...q, status: status || undefined, property_id: propertyId || undefined }, s),
+    [q.from, q.to, q.cadence, status, propertyId],
+  );
 
-  const rows = items ?? [];
+  const rows = read.data?.items ?? [];
   const outstanding = rows.reduce((t, r) => t + (r.outstanding ?? 0), 0);
 
   return (
-    <div style={{ display: 'grid', gap: 'var(--sp-4)' }}>
-      <div style={{ display: 'flex', gap: 'var(--sp-4)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <Field id="status" label="Status">
-          <select
-            id="status"
-            className="input"
-            value={filters.status}
-            onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value as PaymentStatusValue | '' }))}
-            style={{ minWidth: 180 }}
+    <Loading busy={read.loading}>
+      <div style={{ display: 'grid', gap: 'var(--sp-4)' }}>
+        <div style={{ display: 'flex', gap: 'var(--sp-4)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <Field id="status" label="Status">
+            <select
+              id="status"
+              className="input"
+              value={status}
+              onChange={(e) => setStatus(e.target.value as PaymentStatusValue | '')}
+              style={{ minWidth: 180 }}
+            >
+              {STATUS_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {/*
+            A download, not a fetch: the link opens the same-origin CSV so the
+            httpOnly session cookie rides along and the browser saves the file.
+          */}
+          <a
+            className="btn btn-secondary"
+            href={reportsApi.paymentStatusCsvUrl({
+              ...q,
+              status: status || undefined,
+              property_id: propertyId || undefined,
+            })}
+            target="_blank"
+            rel="noreferrer"
           >
-            {STATUS_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field id="property_id" label="Property">
-          <select
-            id="property_id"
-            className="input"
-            value={filters.property_id}
-            onChange={(e) => setFilters((f) => ({ ...f, property_id: e.target.value }))}
-            style={{ minWidth: 200 }}
-          >
-            <option value="">All properties</option>
-            {properties.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        {/*
-          A download, not a fetch: the link opens the same-origin CSV so the
-          httpOnly session cookie rides along and the browser saves the file.
-        */}
-        <a
-          className="btn btn-secondary"
-          href={reportsApi.paymentStatusCsvUrl({
-            status: filters.status || undefined,
-            property_id: filters.property_id || undefined,
-          })}
-          target="_blank"
-          rel="noreferrer"
-        >
-          <Icon icon="solar:download-minimalistic-linear" width={18} /> Export CSV
-        </a>
-      </div>
+            <Icon icon="solar:download-minimalistic-linear" width={18} /> Export CSV
+          </a>
+        </div>
 
-      <ProblemNote error={error} />
+        <ProblemNote error={read.error} />
 
-      {rows.length > 0 ? (
-        <p style={{ color: 'var(--ink-soft)' }}>
-          {rows.length} renter{rows.length === 1 ? '' : 's'} ·{' '}
-          <strong style={{ color: 'var(--ink)' }}>{fmtTZS(outstanding)}</strong> outstanding
-        </p>
-      ) : null}
+        {rows.length > 0 ? (
+          <p style={{ color: 'var(--ink-soft)' }}>
+            {rows.length} renter{rows.length === 1 ? '' : 's'} ·{' '}
+            <strong style={{ color: 'var(--ink)' }}>{fmtTZS(outstanding)}</strong> outstanding
+          </p>
+        ) : null}
 
-      <table className="ledger">
-        <thead>
-          <tr>
-            <th>Renter</th>
-            <th>Unit</th>
-            <th>Status</th>
-            <th>Next due</th>
-            <th className="num">Outstanding</th>
-            <th className="num">Overdue</th>
-            <th>Last payment</th>
-          </tr>
-        </thead>
-        <tbody>
-          {loading ? (
-            <tr>
-              <td colSpan={7} style={{ color: 'var(--ink-soft)' }}>
-                Loading…
-              </td>
-            </tr>
-          ) : rows.length === 0 ? (
-            <tr>
-              <td colSpan={7} style={{ color: 'var(--ink-soft)' }}>
-                {error ? 'Nothing to show.' : 'No renter matches these filters.'}
-              </td>
-            </tr>
-          ) : (
-            rows.map((r) => (
-              <tr key={`${r.contract_id}-${r.renter_user_id}`}>
-                <td style={{ fontWeight: 500 }}>
-                  <Link href={`/renters/${r.renter_user_id}`}>{r.renter_name}</Link>
-                  {r.phone ? (
-                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)', fontWeight: 400 }}>
-                      {r.phone}
-                    </div>
-                  ) : null}
-                </td>
-                <td style={{ color: 'var(--ink-soft)' }}>
-                  <Link href={`/contracts/${r.contract_id}`}>{r.unit_name}</Link>
-                  <div style={{ fontSize: 'var(--text-xs)' }}>{r.property_name}</div>
-                </td>
-                <td>
-                  <PaymentStatusStampCell status={r.status} />
-                </td>
-                <td>
-                  {r.next_due_date ? (
-                    <>
-                      {fmtDate(r.next_due_date)}
-                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
-                        {fmtTZS(r.next_due_amount)}
-                      </div>
-                    </>
-                  ) : (
-                    <span className="pencil">nothing due</span>
-                  )}
-                </td>
-                <td className="num">{fmtTZS(r.outstanding)}</td>
-                <td className="num" style={{ color: r.overdue_amount > 0 ? 'var(--stamp-overdue)' : undefined }}>
-                  {fmtTZS(r.overdue_amount)}
-                </td>
-                <td style={{ color: 'var(--ink-soft)' }}>
-                  {r.last_payment_at ? fmtDateTime(r.last_payment_at) : <span className="pencil">never</span>}
-                </td>
+        <TableScroll label="Payment status by renter">
+          <table className="ledger">
+            <thead>
+              <tr>
+                <th>Renter</th>
+                <th>Unit</th>
+                <th>Status</th>
+                <th>Next due</th>
+                <th className="num">Outstanding</th>
+                <th className="num">Overdue</th>
+                <th>Last payment</th>
               </tr>
-            ))
-          )}
-          {rows.length > 0 ? (
-            <tr className="total">
-              <td colSpan={4}>Total outstanding</td>
-              <td className="num">{fmtTZS(outstanding)}</td>
-              <td className="num">{fmtTZS(rows.reduce((t, r) => t + (r.overdue_amount ?? 0), 0))}</td>
-              <td />
-            </tr>
-          ) : null}
-        </tbody>
-      </table>
-    </div>
+            </thead>
+            <tbody>
+              {read.loading && rows.length === 0 ? (
+                <tr>
+                  <td colSpan={7} style={{ color: 'var(--ink-soft)' }}>
+                    Loading…
+                  </td>
+                </tr>
+              ) : rows.length === 0 ? (
+                <tr>
+                  <td colSpan={7} style={{ color: 'var(--ink-soft)' }}>
+                    {read.error ? 'Nothing to show.' : 'No renter matches these filters.'}
+                  </td>
+                </tr>
+              ) : (
+                rows.map((r) => (
+                  <tr key={`${r.contract_id}-${r.renter_user_id}`}>
+                    <td style={{ fontWeight: 500 }}>
+                      <Link href={`/renters/${r.renter_user_id}`}>{r.renter_name}</Link>
+                      {r.phone ? (
+                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)', fontWeight: 400 }}>
+                          {r.phone}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td style={{ color: 'var(--ink-soft)' }}>
+                      <Link href={`/contracts/${r.contract_id}`}>{r.unit_name}</Link>
+                      <div style={{ fontSize: 'var(--text-xs)' }}>{r.property_name}</div>
+                    </td>
+                    <td>
+                      <PaymentStatusStampCell status={r.status} />
+                    </td>
+                    <td>
+                      {r.next_due_date ? (
+                        <>
+                          {fmtDate(r.next_due_date)}
+                          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
+                            {fmtTZS(r.next_due_amount)}
+                          </div>
+                        </>
+                      ) : (
+                        <span className="pencil">nothing due</span>
+                      )}
+                    </td>
+                    <td className="num">{fmtTZS(r.outstanding)}</td>
+                    <td className="num" style={{ color: r.overdue_amount > 0 ? 'var(--stamp-overdue)' : undefined }}>
+                      {fmtTZS(r.overdue_amount)}
+                    </td>
+                    <td style={{ color: 'var(--ink-soft)' }}>
+                      {r.last_payment_at ? fmtDateTime(r.last_payment_at) : <span className="pencil">never</span>}
+                    </td>
+                  </tr>
+                ))
+              )}
+              {rows.length > 0 ? (
+                <tr className="total">
+                  <td colSpan={4}>Total outstanding</td>
+                  <td className="num">{fmtTZS(outstanding)}</td>
+                  <td className="num">{fmtTZS(rows.reduce((t, r) => t + (r.overdue_amount ?? 0), 0))}</td>
+                  <td />
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </TableScroll>
+      </div>
+    </Loading>
   );
 }
 
 /* ------------------------------- collections ------------------------------ */
 
-function CollectionsTab() {
-  const [form, setForm] = useState<{ from: string; to: string; group: CollectionsGroup }>({
-    from: sixMonthsAgoISO(),
-    to: todayISO(),
-    group: 'month',
-  });
-  const [applied, setApplied] = useState(form);
-  const [data, setData] = useState<CollectionsReport | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<ApiError | null>(null);
+function CollectionsTab({ period, propertyId }: Scope) {
+  const q = periodQuery(period);
+  const [group, setGroup] = useState<CollectionsGroup>('month');
 
-  const load = useCallback((q: typeof form, signal: AbortSignal) => {
-    setLoading(true);
-    setError(null);
-    reportsApi
-      .collections(q, signal)
-      .then((r) => setData(r))
-      .catch((e) => {
-        if (signal.aborted) return;
-        setError(asError(e));
-        setData(null);
-      })
-      .finally(() => {
-        if (!signal.aborted) setLoading(false);
-      });
-  }, []);
+  const read = useRead<CollectionsReport>(
+    (s) => reportsApi.collections({ ...q, group, property_id: propertyId || undefined }, s),
+    [q.from, q.to, q.cadence, group, propertyId],
+  );
 
-  useEffect(() => {
-    const ac = new AbortController();
-    load(applied, ac.signal);
-    return () => ac.abort();
-  }, [applied, load]);
-
+  const data = read.data;
   const buckets = data?.buckets ?? [];
+  const labels = buckets.map((b) => bucketTick(b.start, group));
+  const headings = buckets.map((b) => bucketHeading(b.start, group));
 
   return (
-    <div style={{ display: 'grid', gap: 'var(--sp-5)' }}>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          setApplied(form);
-        }}
-        style={{ display: 'flex', gap: 'var(--sp-4)', alignItems: 'flex-end', flexWrap: 'wrap' }}
-      >
-        <Field id="from" label="From">
-          <input
-            id="from"
-            className="input"
-            type="date"
-            value={form.from}
-            onChange={(e) => setForm((f) => ({ ...f, from: e.target.value }))}
+    <Loading busy={read.loading}>
+      <div style={{ display: 'grid', gap: 'var(--sp-5)' }}>
+        <div className="segmented" role="group" aria-label="Group collections by" style={{ alignSelf: 'start' }}>
+          {(['day', 'week', 'month'] as CollectionsGroup[]).map((g) => (
+            <button key={g} type="button" aria-pressed={group === g} onClick={() => setGroup(g)}>
+              {g === 'day' ? 'Day' : g === 'week' ? 'Week' : 'Month'}
+            </button>
+          ))}
+        </div>
+
+        <ProblemNote error={read.error} />
+
+        <TileRow>
+          <StatTile label="Expected" value={fmtTZS(data?.totals.expected ?? null)} goodDirection="none" />
+          <StatTile
+            label="Collected"
+            value={fmtTZS(data?.totals.collected ?? null)}
+            tone="paid"
+            change={data?.change_pct?.collected ?? undefined}
+            changeLabelText={data?.change_pct ? 'vs previous period' : undefined}
           />
-        </Field>
-        <Field id="to" label="To">
-          <input
-            id="to"
-            className="input"
-            type="date"
-            value={form.to}
-            onChange={(e) => setForm((f) => ({ ...f, to: e.target.value }))}
+          <StatTile
+            label="Shortfall"
+            value={fmtTZS(data ? Math.max(0, data.totals.expected - data.totals.collected) : null)}
+            tone={data && data.totals.collected < data.totals.expected ? 'overdue' : undefined}
+            sub="Expected less collected, for the window shown."
           />
-        </Field>
-        <Field id="group" label="Group by">
-          <select
-            id="group"
-            className="input"
-            value={form.group}
-            onChange={(e) => setForm((f) => ({ ...f, group: e.target.value as CollectionsGroup }))}
-            style={{ minWidth: 140 }}
-          >
-            <option value="day">Day</option>
-            <option value="week">Week</option>
-            <option value="month">Month</option>
-          </select>
-        </Field>
-        <button type="submit" className="btn btn-secondary" disabled={loading}>
-          {loading ? 'Loading…' : 'Apply'}
-        </button>
-      </form>
+        </TileRow>
 
-      <ProblemNote error={error} />
+        <BarChart
+          title={`Expected against collected, by ${group}.`}
+          ariaLabel="Expected against collected"
+          labels={labels}
+          headings={headings}
+          formatValue={fmtTZS}
+          formatTick={money}
+          empty="Nothing was due or paid in this window."
+          series={[
+            { id: 'expected', label: 'Expected', color: 'var(--chart-expected)', values: buckets.map((b) => b.expected) },
+            { id: 'collected', label: 'Collected', color: CHART_ROLES.collected, values: buckets.map((b) => b.collected) },
+          ]}
+        />
 
-      {data ? (
-        <>
-          <TileRow>
-            <StatTile label="Expected" value={fmtTZS(data.totals.expected)} />
-            <StatTile label="Collected" value={fmtTZS(data.totals.collected)} tone="paid" />
-            <StatTile
-              label="Shortfall"
-              value={fmtTZS(Math.max(0, data.totals.expected - data.totals.collected))}
-              tone={data.totals.collected < data.totals.expected ? 'overdue' : undefined}
-              sub="Expected less collected, for the range shown."
-            />
-          </TileRow>
-
-          <CollectionsChart buckets={buckets} group={applied.group} />
-
+        <TableScroll label="Collections by period">
           <table className="ledger">
             <thead>
               <tr>
@@ -547,15 +977,15 @@ function CollectionsTab() {
               {buckets.length === 0 ? (
                 <tr>
                   <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
-                    Nothing was due or paid in this range.
+                    Nothing was due or paid in this window.
                   </td>
                 </tr>
               ) : (
-                buckets.map((b) => {
+                buckets.map((b, i) => {
                   const diff = b.collected - b.expected;
                   return (
                     <tr key={b.start}>
-                      <td>{bucketLabel(b.start, applied.group)}</td>
+                      <td>{headings[i]}</td>
                       <td className="num">{fmtTZS(b.expected)}</td>
                       <td className="num">{fmtTZS(b.collected)}</td>
                       <td className="num" style={{ color: diff < 0 ? 'var(--stamp-overdue)' : 'var(--stamp-paid)' }}>
@@ -565,7 +995,7 @@ function CollectionsTab() {
                   );
                 })
               )}
-              {buckets.length > 0 ? (
+              {data && buckets.length > 0 ? (
                 <tr className="total">
                   <td>Total</td>
                   <td className="num">{fmtTZS(data.totals.expected)}</td>
@@ -575,32 +1005,89 @@ function CollectionsTab() {
               ) : null}
             </tbody>
           </table>
-        </>
-      ) : null}
-    </div>
+        </TableScroll>
+      </div>
+    </Loading>
   );
 }
 
 /* --------------------------------- page ---------------------------------- */
 
+/** "vs previous quarter" — the comparison is always named, never just "Δ". */
+function previousLabelFor(p: PeriodValue): string {
+  if (p.cadence === 'month') return 'vs previous month';
+  if (p.cadence === 'quarter') return 'vs previous quarter';
+  if (p.cadence === 'half_year') return 'vs previous 6 months';
+  if (p.cadence === 'year') return 'vs previous year';
+  return 'vs the window before';
+}
+
 function ReportsBody() {
   const [tab, setTab] = useState<TabId>('overview');
+  const [period, setPeriod] = useState<PeriodValue>(loadReportPeriod);
+  const [propertyId, setPropertyId] = useState('');
+  const properties = useProperties();
+
+  useEffect(() => saveReportPeriod(period), [period]);
+
+  const scope: Scope = useMemo(
+    () => ({ period, propertyId, previousLabel: previousLabelFor(period) }),
+    [period, propertyId],
+  );
+
+  const onPeriod = useCallback((next: PeriodValue) => setPeriod(next), []);
 
   return (
     <>
       <PageHead
         title="Reports"
-        lead="What you own, who is in it, and what has actually been paid."
+        lead="What you own, who is in it, what has actually been paid — and what it cost."
       />
+
+      {/* One filter row above everything: it scopes every tab below, so no two
+          figures on the page can be answering different questions. */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 'var(--sp-4)',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          paddingBottom: 'var(--sp-4)',
+        }}
+      >
+        <PeriodPicker value={period} onChange={onPeriod} label="Reporting period" />
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+          <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>Property</span>
+          <select
+            className="input"
+            value={propertyId}
+            onChange={(e) => setPropertyId(e.target.value)}
+            style={{ width: 'auto', minWidth: 180 }}
+          >
+            <option value="">All properties</option>
+            {properties.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+          {periodLabel(period)} · {fmtDate(period.from)} to {fmtDate(period.to)} (exclusive)
+        </span>
+      </div>
 
       <TabBar tabs={TABS} value={tab} onChange={setTab} />
 
       <hr className="rule rule-strong" />
 
       <div style={{ paddingTop: 'var(--sp-5)' }}>
-        {tab === 'overview' ? <OverviewTab /> : null}
-        {tab === 'payment_status' ? <PaymentStatusTab /> : null}
-        {tab === 'collections' ? <CollectionsTab /> : null}
+        {tab === 'overview' ? <OverviewTab {...scope} /> : null}
+        {tab === 'revenue' ? <RevenueTab {...scope} /> : null}
+        {tab === 'expenses' ? <ExpensesTab {...scope} /> : null}
+        {tab === 'occupancy' ? <OccupancyTab {...scope} /> : null}
+        {tab === 'payment_status' ? <PaymentStatusTab {...scope} /> : null}
+        {tab === 'collections' ? <CollectionsTab {...scope} /> : null}
       </div>
     </>
   );

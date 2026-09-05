@@ -32,6 +32,8 @@ export const CARD_LABELS: Record<DashboardCard, string> = {
   link_requests: 'Link requests',
   overdue: 'Overdue',
   expenses: 'Expenses this month',
+  revenue: 'Revenue this month',
+  net_income: 'Net income',
 };
 
 export function DashboardCustomize({

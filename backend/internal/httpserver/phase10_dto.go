@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -178,11 +179,7 @@ func toExpense(r expenseRow) expenseResponse {
 
 // expenseWindowResponse is the `{from, to, cadence}` block every Part 2 report
 // echoes, so a client can prove which period it is looking at.
-type expenseWindowResponse struct {
-	From    string `json:"from"`
-	To      string `json:"to"`
-	Cadence string `json:"cadence"`
-}
+type expenseWindowResponse = reportWindow
 
 // expenseSummaryResponse is GET /expenses/summary.
 type expenseSummaryResponse struct {
@@ -283,12 +280,23 @@ func parseExpenseFilters(f validate.Fields, qs urlValues) expenseFilters {
 // resolveWindow runs the shared cadence resolver and translates its refusals
 // into field errors, so every Part 2 endpoint rejects the same spellings.
 func resolveWindow(f validate.Fields, cadence, anchorRaw string, from, to pgtype.Date) (period.Window, bool) {
+	w, _, ok := resolveWindowStatus(f, cadence, anchorRaw, from, to)
+	return w, ok
+}
+
+// resolveWindowStatus is the same resolution, plus the status its refusal
+// deserves: see windowRefusalStatus. Reports call this one; the expense
+// ledger's list filter calls resolveWindow and answers 400 throughout, the
+// status it shipped with.
+func resolveWindowStatus(
+	f validate.Fields, cadence, anchorRaw string, from, to pgtype.Date,
+) (period.Window, int, bool) {
 	anchor := time.Now().In(tz.Zone())
 	if v := strings.TrimSpace(anchorRaw); v != "" {
 		t, err := time.Parse(dateLayout, v)
 		if err != nil {
 			f.Add("anchor", "must be a date (YYYY-MM-DD)")
-			return period.Window{}, false
+			return period.Window{}, http.StatusBadRequest, false
 		}
 		anchor = t
 	}
@@ -307,9 +315,27 @@ func resolveWindow(f validate.Fields, cadence, anchorRaw string, from, to pgtype
 	w, err := period.Resolve(cadence, anchor, fromPtr, toPtr)
 	if err != nil {
 		f.Add("cadence", err.Error())
-		return period.Window{}, false
+		return period.Window{}, windowRefusalStatus(err), false
 	}
-	return w, true
+	return w, http.StatusOK, true
+}
+
+// windowRefusalStatus separates the two ways a window request can fail.
+//
+// A cadence the API does not know, or a date it cannot parse, is malformed:
+// 400. A custom range that is well-formed but cannot exist — ends before it
+// starts, or spans more than five years — is a 422: nothing about the request
+// needs reformatting, the answer simply is not one this API will produce, and
+// the client's fix is different in each case (PLAN2 Phase 11).
+func windowRefusalStatus(err error) int {
+	switch {
+	case errors.Is(err, period.ErrRangeOrder),
+		errors.Is(err, period.ErrRangeTooLong),
+		errors.Is(err, period.ErrRangeMissing):
+		return http.StatusUnprocessableEntity
+	default:
+		return http.StatusBadRequest
+	}
 }
 
 // urlValues is the slice of net/url.Values the parsers actually use, named so

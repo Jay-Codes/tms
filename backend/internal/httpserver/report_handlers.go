@@ -14,7 +14,9 @@ import (
 	"tms/backend/internal/db"
 	"tms/backend/internal/db/sqlc"
 	"tms/backend/internal/payment"
+	"tms/backend/internal/period"
 	"tms/backend/internal/report"
+	"tms/backend/internal/tz"
 	"tms/backend/internal/validate"
 )
 
@@ -39,6 +41,41 @@ func dateParam(d time.Time) pgtype.Date {
 	return pgtype.Date{Time: time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, time.UTC), Valid: true}
 }
 
+// summaryWindow resolves the window of GET /reports/summary from either
+// vocabulary.
+//
+// Phase 7 shipped `period=month|YYYY-MM`, and dashboards in the wild still send
+// it; Phase 11 speaks `cadence`/`anchor`/`from`/`to` like every other Part 2
+// report. The legacy parameter is therefore not deprecated, it is *translated*:
+// `period=2026-03` is `cadence=month&anchor=2026-03-01`, resolved by the same
+// code, so the two spellings cannot drift apart. Sending both is a refusal
+// rather than a silent winner.
+func (s *Server) summaryWindow(w http.ResponseWriter, f validate.Fields, qs urlValues) (period.Window, bool) {
+	legacy := strings.TrimSpace(qs.Get("period"))
+	cadence := strings.TrimSpace(qs.Get("cadence"))
+	if legacy == "" {
+		return reportWindowOf(w, f, qs)
+	}
+	if cadence != "" {
+		f.Add("period", "send either the legacy `period` or `cadence`, not both")
+		badRequest(w, f)
+		return period.Window{}, false
+	}
+	legacyPeriod, err := report.ParsePeriod(legacy, time.Now())
+	if err != nil {
+		f.Add("period", err.Error())
+		badRequest(w, f)
+		return period.Window{}, false
+	}
+	win, err := period.Resolve(period.CadenceMonth, legacyPeriod.From, nil, nil)
+	if err != nil {
+		f.Add("period", err.Error())
+		badRequest(w, f)
+		return period.Window{}, false
+	}
+	return win, true
+}
+
 // ----------------------------------------------------- GET /reports/summary --
 
 func (s *Server) handleReportSummary(w http.ResponseWriter, r *http.Request) {
@@ -47,13 +84,16 @@ func (s *Server) handleReportSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	p := auth.MustFromContext(r.Context())
 
+	qs := r.URL.Query()
 	f := validate.Fields{}
-	period, err := report.ParsePeriod(strings.TrimSpace(r.URL.Query().Get("period")), time.Now())
-	if err != nil {
-		f.Add("period", err.Error())
-		badRequest(w, f)
+	win, ok := s.summaryWindow(w, f, qs)
+	if !ok {
 		return
 	}
+	// The Phase 7 body quotes inclusive dates; the resolver's `to` is
+	// exclusive. Both appear in the response, and this is the pair the two
+	// Phase 7 queries below take.
+	span := report.Period{From: win.From, To: win.To.AddDate(0, 0, -1)}
 	s.sweepOverdue(r, p.OrgID)
 
 	assets, err := s.q.ReportAssets(r.Context(), p.OrgID)
@@ -67,14 +107,14 @@ func (s *Server) handleReportSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sched, err := s.q.ReportSchedulePeriod(r.Context(), sqlc.ReportSchedulePeriodParams{
-		OrgID: p.OrgID, FromDate: dateParam(period.From), ToDate: dateParam(period.To),
+		OrgID: p.OrgID, FromDate: dateParam(span.From), ToDate: dateParam(span.To),
 	})
 	if err != nil {
 		s.serverError(w, r, "report.summary.schedules", err)
 		return
 	}
 	collected, err := s.q.ReportCollectedPeriod(r.Context(), sqlc.ReportCollectedPeriodParams{
-		OrgID: p.OrgID, FromTs: db.TS(period.FromTime()), ToTs: db.TS(period.ToTime()),
+		OrgID: p.OrgID, FromTs: db.TS(span.FromTime()), ToTs: db.TS(span.ToTime()),
 	})
 	if err != nil {
 		s.serverError(w, r, "report.summary.collected", err)
@@ -107,6 +147,30 @@ func (s *Server) handleReportSummary(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	prev := *win.Previous
+	prevSched, err := s.q.ReportSchedulePeriod(r.Context(), sqlc.ReportSchedulePeriodParams{
+		OrgID: p.OrgID, FromDate: dateParam(prev.From), ToDate: dateParam(prev.To.AddDate(0, 0, -1)),
+	})
+	if err != nil {
+		s.serverError(w, r, "report.summary.previous_schedules", err)
+		return
+	}
+	prevCollected, err := s.q.ReportCollectedPeriod(r.Context(), sqlc.ReportCollectedPeriodParams{
+		OrgID: p.OrgID, FromTs: db.TS(prev.From), ToTs: db.TS(prev.To),
+	})
+	if err != nil {
+		s.serverError(w, r, "report.summary.previous_collected", err)
+		return
+	}
+	totals := reportPeriodTotals{
+		Expected: sched.Expected, Collected: collected, Outstanding: sched.Outstanding,
+		OverdueCount: sched.OverdueCount, OverdueAmount: sched.OverdueAmount,
+	}
+	previousTotals := reportPeriodTotals{
+		Expected: prevSched.Expected, Collected: prevCollected, Outstanding: prevSched.Outstanding,
+		OverdueCount: prevSched.OverdueCount, OverdueAmount: prevSched.OverdueAmount,
+	}
+
 	WriteJSON(w, http.StatusOK, reportSummaryResponse{
 		Assets: reportAssets{
 			Properties:    assets.Properties,
@@ -120,13 +184,19 @@ func (s *Server) handleReportSummary(w http.ResponseWriter, r *http.Request) {
 		Renters:   reportRenters{Active: counts.ActiveRenters},
 		Contracts: reportContracts{Active: counts.Active, Expiring: counts.Expiring, PendingSignature: counts.PendingSignature},
 		Period: reportPeriod{
-			From:          period.From.Format(dateOnly),
-			To:            period.To.Format(dateOnly),
-			Expected:      sched.Expected,
-			Collected:     collected,
-			Outstanding:   sched.Outstanding,
-			OverdueCount:  sched.OverdueCount,
-			OverdueAmount: sched.OverdueAmount,
+			From:               span.From.Format(dateOnly),
+			To:                 span.To.Format(dateOnly),
+			reportPeriodTotals: totals,
+		},
+		Window:         windowDTO(win),
+		Previous:       previousDTO(win),
+		PreviousTotals: previousTotals,
+		ChangePct: map[string]*float64{
+			"expected":       report.ChangePct(totals.Expected, previousTotals.Expected),
+			"collected":      report.ChangePct(totals.Collected, previousTotals.Collected),
+			"outstanding":    report.ChangePct(totals.Outstanding, previousTotals.Outstanding),
+			"overdue_count":  report.ChangePct(totals.OverdueCount, previousTotals.OverdueCount),
+			"overdue_amount": report.ChangePct(totals.OverdueAmount, previousTotals.OverdueAmount),
 		},
 		VacantUnits: empties,
 	})
@@ -159,8 +229,11 @@ func (s *Server) handleReportPaymentStatus(w http.ResponseWriter, r *http.Reques
 			params.PropertyID = id
 		}
 	}
-	if !f.Empty() {
-		badRequest(w, f)
+	// The window does not filter the rows — a renter's standing is a fact about
+	// now, not about March — but the page around this table is driven by the
+	// shared PeriodPicker, and it needs to be told which period it is showing.
+	win, ok := reportWindowOf(w, f, qs)
+	if !ok {
 		return
 	}
 	s.sweepOverdue(r, p.OrgID)
@@ -174,7 +247,9 @@ func (s *Server) handleReportPaymentStatus(w http.ResponseWriter, r *http.Reques
 		writePaymentStatusCSV(w, items)
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	WriteJSON(w, http.StatusOK, paymentStatusResponse{
+		Window: windowDTO(win), Previous: previousDTO(win), Items: items,
+	})
 }
 
 // paymentStatusRows assembles the per-renter report from four constant-count
@@ -300,36 +375,82 @@ func (s *Server) handleReportCollections(w http.ResponseWriter, r *http.Request)
 	qs := r.URL.Query()
 	f := validate.Fields{}
 
-	group := report.GroupMonth
+	// Two vocabularies, one series. With a `cadence` the window comes from the
+	// shared resolver and the grouping defaults to the size that cadence draws
+	// well; without one, the Phase 7 defaults stand — `group=month` over the
+	// twelve months ending today, `from`/`to` read as inclusive dates. Either
+	// way the buckets stay calendar-aligned, which is what this endpoint has
+	// always meant by "month".
+	cadence := strings.TrimSpace(qs.Get("cadence"))
+	group := ""
 	if v := strings.TrimSpace(qs.Get("group")); v != "" {
 		group = f.OneOf("group", strings.ToLower(v), report.Groups...)
+	} else if v := strings.TrimSpace(qs.Get("bucket")); v != "" {
+		group = f.OneOf("bucket", strings.ToLower(v), report.Groups...)
 	}
-	// The default window is the twelve months ending today — the series a
-	// dashboard opens with when the client sends no dates.
-	now := time.Now().In(report.Zone())
-	to := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	from := to.AddDate(0, -11, 0)
-	from = time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, time.UTC)
 
-	if v := strings.TrimSpace(qs.Get("from")); v != "" {
-		t, err := time.Parse(dateOnly, v)
-		if err != nil {
-			f.Add("from", "must be a date (YYYY-MM-DD)")
-		} else {
-			from = t
+	var win period.Window
+	var from, to time.Time
+	if cadence != "" {
+		resolved, ok := reportWindowOf(w, f, qs)
+		if !ok {
+			return
+		}
+		win = resolved
+		from, to = win.From, win.To.AddDate(0, 0, -1)
+		if group == "" {
+			size, err := period.BucketSize(win, "")
+			if err != nil {
+				s.serverError(w, r, "report.collections.bucket", err)
+				return
+			}
+			group = size
+		}
+	} else {
+		if group == "" {
+			group = report.GroupMonth
+		}
+		// The default window is the twelve months ending today — the series a
+		// dashboard opens with when the client sends no dates.
+		now := time.Now().In(report.Zone())
+		to = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		from = to.AddDate(0, -11, 0)
+		from = time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, time.UTC)
+
+		if v := strings.TrimSpace(qs.Get("from")); v != "" {
+			t, err := time.Parse(dateOnly, v)
+			if err != nil {
+				f.Add("from", "must be a date (YYYY-MM-DD)")
+			} else {
+				from = t
+			}
+		}
+		if v := strings.TrimSpace(qs.Get("to")); v != "" {
+			t, err := time.Parse(dateOnly, v)
+			if err != nil {
+				f.Add("to", "must be a date (YYYY-MM-DD)")
+			} else {
+				to = t
+			}
+		}
+		if f.Empty() && to.Before(from) {
+			f.Add("to", "must not be before `from`")
+		}
+		if f.Empty() {
+			// A hand-rolled window still owes the response a `previous`: the
+			// equally long span immediately before it, which is what the
+			// resolver would have produced for a custom range.
+			start := tz.StartOfDay(from)
+			end := tz.StartOfDay(to).AddDate(0, 0, 1)
+			win = period.Window{
+				From: start, To: end, Cadence: period.CadenceCustom,
+				Previous: &period.Window{
+					From: start.Add(-end.Sub(start)), To: start, Cadence: period.CadenceCustom,
+				},
+			}
 		}
 	}
-	if v := strings.TrimSpace(qs.Get("to")); v != "" {
-		t, err := time.Parse(dateOnly, v)
-		if err != nil {
-			f.Add("to", "must be a date (YYYY-MM-DD)")
-		} else {
-			to = t
-		}
-	}
-	if f.Empty() && to.Before(from) {
-		f.Add("to", "must not be before `from`")
-	}
+
 	buckets := report.Buckets(from, to, group)
 	if f.Empty() && len(buckets) > report.MaxBuckets {
 		f.Add("group", "the range is too long for this grouping — at most "+
@@ -356,6 +477,29 @@ func (s *Server) handleReportCollections(w http.ResponseWriter, r *http.Request)
 		s.serverError(w, r, "report.collections.collected", err)
 		return
 	}
+	prevExpected, err := s.q.ReportCollectionsExpected(r.Context(), sqlc.ReportCollectionsExpectedParams{
+		Bucket: group, OrgID: p.OrgID,
+		FromDate: dateParam(win.Previous.From), ToDate: dateParam(win.Previous.To.AddDate(0, 0, -1)),
+	})
+	if err != nil {
+		s.serverError(w, r, "report.collections.previous_expected", err)
+		return
+	}
+	prevCollected, err := s.q.ReportCollectionsCollected(r.Context(), sqlc.ReportCollectionsCollectedParams{
+		Bucket: group, OrgID: p.OrgID,
+		FromTs: db.TS(win.Previous.From), ToTs: db.TS(win.Previous.To),
+	})
+	if err != nil {
+		s.serverError(w, r, "report.collections.previous_collected", err)
+		return
+	}
+	var previousTotals collectionTotals
+	for _, e := range prevExpected {
+		previousTotals.Expected += e.Expected
+	}
+	for _, c := range prevCollected {
+		previousTotals.Collected += c.Collected
+	}
 
 	expectedBy := map[string]int64{}
 	for _, e := range expected {
@@ -375,5 +519,16 @@ func (s *Server) handleReportCollections(w http.ResponseWriter, r *http.Request)
 		totals.Collected += bucket.Collected
 		items = append(items, bucket)
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"buckets": items, "totals": totals})
+	WriteJSON(w, http.StatusOK, collectionsResponse{
+		Window:         windowDTO(win),
+		Previous:       previousDTO(win),
+		Group:          group,
+		Buckets:        items,
+		Totals:         totals,
+		PreviousTotals: previousTotals,
+		ChangePct: map[string]*float64{
+			"expected":  report.ChangePct(totals.Expected, previousTotals.Expected),
+			"collected": report.ChangePct(totals.Collected, previousTotals.Collected),
+		},
+	})
 }

@@ -201,6 +201,21 @@ func Buckets(w Window, size string) []time.Time {
 	return out
 }
 
+// Overflows reports whether a window needs more buckets than MaxBuckets, which
+// is the question an endpoint must answer *before* it draws a series: Buckets
+// silently stops at the cap, and a series that quietly ends two years early is
+// a wrong chart rather than a refused one.
+func Overflows(w Window, size string) bool {
+	n := 0
+	for cur := w.From; cur.Before(w.To); cur = advance(cur, size) {
+		n++
+		if n > MaxBuckets {
+			return true
+		}
+	}
+	return false
+}
+
 // advance steps one bucket forward. AddDate on a zoned midnight keeps the
 // result at midnight, so a month step lands on the 1st of the next month rather
 // than drifting by the length of the one it left.
