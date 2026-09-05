@@ -30,6 +30,27 @@ const (
 	orgCreateWindow = time.Hour
 )
 
+// Phase 8 rate limits on the remaining unmetered write paths. Each of these
+// either mints a presigned upload URL (a free write into object storage) or
+// creates a row a landlord then has to triage, so each is capped per principal
+// rather than per IP: the caller is authenticated, so the account is the
+// sharper bucket.
+const (
+	// kycUploadLimit caps presigned KYC PUT URLs per renter. A renter retakes
+	// a photo a few times; ten a minute is generous for that and closes the
+	// loop where one session mints unbounded upload URLs.
+	kycUploadLimit  = 10
+	kycUploadWindow = time.Minute
+	// signatureUploadLimit caps presigned signature PUT URLs. A drawn
+	// signature is redrawn once or twice, not five times a minute.
+	signatureUploadLimit  = 5
+	signatureUploadWindow = time.Minute
+	// linkCreateLimit caps link requests per renter. Applying for a handful of
+	// units in an hour is real behaviour; forty is a landlord's inbox flooded.
+	linkCreateLimit  = 5
+	linkCreateWindow = time.Hour
+)
+
 // otpResendAfterSeconds mirrors auth.OTPResendCooldown for the API response.
 const otpResendAfterSeconds = 60
 

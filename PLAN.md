@@ -106,11 +106,11 @@ Execution plan for [SPEC.md](SPEC.md) / [FLOWS.md](FLOWS.md). Target: **testing-
 
 ## Phase 8 — Hardening & UAT prep (Sep 13–14, 2 days)
 
-- [ ] Isolation test suite: cross-org 404 on every org-scoped route (§8).
-- [ ] Rate-limit pass (auth, OTP, public QR). Input-validation sweep.
-- [ ] Load pass: seed script (1 org, 5 properties, 50 units, 40 renters); p95 checks on hot endpoints.
-- [ ] Full-stack compose profile: build images for backend + 3 apps + proxy; one-command bring-up.
-- [ ] UAT script from FLOWS.md; seed demo data for JJnE Rentals; bug triage buffer.
+- [x] Isolation test suite: cross-org 404 on every org-scoped route (§8).
+- [x] Rate-limit pass (auth, OTP, public QR). Input-validation sweep.
+- [x] Load pass: seed script (1 org, 5 properties, 50 units, 40 renters); p95 checks on hot endpoints.
+- [x] Full-stack compose profile: build images for backend + 3 apps + proxy; one-command bring-up.
+- [x] UAT script from FLOWS.md; seed demo data for JJnE Rentals; bug triage buffer.
 
 **Exit (Sep 15):** demo environment up via compose + ngrok; UAT checklist executed clean.
 

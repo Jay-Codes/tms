@@ -80,3 +80,15 @@
 - Verified live: reports numbers for JJnE (2 props, 7 units, 33% occupancy), CSV download, dashboard customize persisted, admin suspended/activated Org B, audit search shows both events.
 
 **Carried to Phase 8:** `units`/`renters` `q` ILIKE wildcard escaping; global `audit_log(at,id)` index; shared tz package; `PUT /org/branding` dashboard_prefs replace semantics doc.
+
+## 2026-09-05 — Phase 8: Hardening & UAT prep ✅
+
+**Shipped**
+- Isolation census: chi.Walk over all 110 routes; org B / renter 2 / non-admin runs; new routes fail the build until covered. Rate-limit pass (11 endpoints, 3 new limits), validation sweep (159 probes, no 5xx), race run clean, `internal/tz`, migrations 000010 (audit index) + 000011 (contract list indexes).
+- Full-stack compose profile: Dockerfiles (api 38MB, proxy 24MB, apps ~320MB), `make images/deploy/deploy-down/logs`, proxy env upstreams + TLS + `make tls-selfsigned`, `MIGRATE_ON_START`; verified on :8090 incl. presigned QR through the proxy.
+- Seed (`make seed`), demo seed (`make seed-demo`), `make loadtest` (all p95 < 60 ms after batching contract signatures; pool `DB_MAX_CONNS`), `docs/UAT.md`, `docs/LOADTEST.md`, README/DEV updated.
+
+**Open items for the user**
+- Restart ngrok (`make preview` or ngrok alone) and set `APP_BASE_URL` + `MINIO_PUBLIC_URL` in `.env`, then `make api-restart`, so QR scan URLs and presigned images resolve from phones.
+- Supply Beem creds for the live SMS smoke (PLAN Phase 6 item).
+- golangci-lint not installed locally (`brew install golangci-lint`); `make lint` falls back to `go vet`.

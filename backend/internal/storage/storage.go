@@ -22,6 +22,11 @@ const (
 	BucketSignatures = "signatures"
 )
 
+// minioRegion is the region presigned URLs are signed for. MinIO serves a
+// single region and defaults to us-east-1; stating it keeps the presigning
+// client from making a network call to discover it.
+const minioRegion = "us-east-1"
+
 // DefaultPresignTTL is the lifetime of issued presigned URLs.
 const DefaultPresignTTL = 15 * time.Minute
 
@@ -61,6 +66,16 @@ func Open(endpoint, accessKey, secretKey string, useSSL bool, publicURL string) 
 	pub, err := minio.New(host, &minio.Options{
 		Creds:  creds,
 		Secure: secure,
+		// Region must be stated explicitly. Without it minio-go resolves the
+		// bucket's location on the first presign by calling `GET /bucket
+		// ?location` against this client's endpoint — the PUBLIC origin, which
+		// the API process usually cannot reach (in a container, a public URL
+		// of http://localhost:8090 is the container's own loopback). That
+		// lookup fails, presigning fails, and the QR routes answer 503. With
+		// the region fixed the public client keeps its documented contract of
+		// performing no I/O at all. MinIO's default region is us-east-1 and it
+		// does not validate the value beyond the signature.
+		Region: minioRegion,
 		// The proxy routes by bucket-name path prefix, so URLs must be
 		// path-style (host/bucket/object), never virtual-host style.
 		BucketLookup: minio.BucketLookupPath,

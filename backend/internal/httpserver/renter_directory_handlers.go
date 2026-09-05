@@ -38,7 +38,7 @@ func (s *Server) handleListRenters(w http.ResponseWriter, r *http.Request) {
 	if v := strings.TrimSpace(qs.Get("q")); v != "" {
 		// The value lands in an ILIKE pattern; escaping the wildcards keeps a
 		// search for "_" from matching every renter.
-		escaped := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(v)
+		escaped := escapeLike(v)
 		params.Q = &escaped
 	}
 	if v := strings.TrimSpace(qs.Get("kyc_status")); v != "" {

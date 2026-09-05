@@ -54,6 +54,11 @@ func (s *Server) handleCreateLinkRequest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	p := auth.MustFromContext(r.Context())
+	if res := s.limiter.Allow(r.Context(), "link:create:"+p.UserIDString(),
+		linkCreateLimit, linkCreateWindow); !res.Allowed {
+		tooMany(w, res, "too many link requests; try again later")
+		return
+	}
 	code := strings.ToUpper(strings.TrimSpace(chi.URLParam(r, "unit_code")))
 
 	var body struct {

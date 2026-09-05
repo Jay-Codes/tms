@@ -157,3 +157,134 @@ func (q *Queries) ListContractSignatures(ctx context.Context, arg ListContractSi
 	}
 	return items, nil
 }
+
+const listContractSignaturesForContracts = `-- name: ListContractSignaturesForContracts :many
+SELECT sg.id, sg.org_id, sg.contract_id, sg.party, sg.user_id, sg.method,
+       sg.otp_ref, sg.signature_object_key, sg.snapshot_hash, sg.signed_at,
+       COALESCE(u.full_name, '')::text AS signer_name,
+       u.phone AS signer_phone
+FROM contract_signatures sg
+LEFT JOIN users u ON u.id = sg.user_id
+WHERE sg.org_id = $1 AND sg.contract_id = ANY ($2::uuid[])
+ORDER BY sg.contract_id, sg.signed_at, sg.party
+`
+
+type ListContractSignaturesForContractsParams struct {
+	OrgID       pgtype.UUID   `json:"org_id"`
+	ContractIds []pgtype.UUID `json:"contract_ids"`
+}
+
+type ListContractSignaturesForContractsRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	OrgID              pgtype.UUID        `json:"org_id"`
+	ContractID         pgtype.UUID        `json:"contract_id"`
+	Party              string             `json:"party"`
+	UserID             pgtype.UUID        `json:"user_id"`
+	Method             string             `json:"method"`
+	OtpRef             *string            `json:"otp_ref"`
+	SignatureObjectKey *string            `json:"signature_object_key"`
+	SnapshotHash       string             `json:"snapshot_hash"`
+	SignedAt           pgtype.Timestamptz `json:"signed_at"`
+	SignerName         string             `json:"signer_name"`
+	SignerPhone        *string            `json:"signer_phone"`
+}
+
+// ListContractSignaturesForContracts fills the signature block of every
+// contract in a listing in one round trip: the list handler used to call
+// ListContractSignatures once per row, which is 1 + N queries per request and
+// the whole of the GET /contracts latency (docs/LOADTEST.md).
+func (q *Queries) ListContractSignaturesForContracts(ctx context.Context, arg ListContractSignaturesForContractsParams) ([]ListContractSignaturesForContractsRow, error) {
+	rows, err := q.db.Query(ctx, listContractSignaturesForContracts, arg.OrgID, arg.ContractIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListContractSignaturesForContractsRow{}
+	for rows.Next() {
+		var i ListContractSignaturesForContractsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ContractID,
+			&i.Party,
+			&i.UserID,
+			&i.Method,
+			&i.OtpRef,
+			&i.SignatureObjectKey,
+			&i.SnapshotHash,
+			&i.SignedAt,
+			&i.SignerName,
+			&i.SignerPhone,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listContractSignaturesForContractsAnyOrg = `-- name: ListContractSignaturesForContractsAnyOrg :many
+SELECT sg.id, sg.org_id, sg.contract_id, sg.party, sg.user_id, sg.method,
+       sg.otp_ref, sg.signature_object_key, sg.snapshot_hash, sg.signed_at,
+       COALESCE(u.full_name, '')::text AS signer_name,
+       u.phone AS signer_phone
+FROM contract_signatures sg
+LEFT JOIN users u ON u.id = sg.user_id
+WHERE sg.contract_id = ANY ($1::uuid[])
+ORDER BY sg.contract_id, sg.signed_at, sg.party
+`
+
+type ListContractSignaturesForContractsAnyOrgRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	OrgID              pgtype.UUID        `json:"org_id"`
+	ContractID         pgtype.UUID        `json:"contract_id"`
+	Party              string             `json:"party"`
+	UserID             pgtype.UUID        `json:"user_id"`
+	Method             string             `json:"method"`
+	OtpRef             *string            `json:"otp_ref"`
+	SignatureObjectKey *string            `json:"signature_object_key"`
+	SnapshotHash       string             `json:"snapshot_hash"`
+	SignedAt           pgtype.Timestamptz `json:"signed_at"`
+	SignerName         string             `json:"signer_name"`
+	SignerPhone        *string            `json:"signer_phone"`
+}
+
+// ListContractSignaturesForContractsAnyOrg serves GET /me/contracts, which
+// spans every org the renter rents from; the contract ids it is given were
+// already scoped to that renter's own contracts.
+// guard-exempt: the contract ids were already scoped to the renter's own contracts.
+func (q *Queries) ListContractSignaturesForContractsAnyOrg(ctx context.Context, contractIds []pgtype.UUID) ([]ListContractSignaturesForContractsAnyOrgRow, error) {
+	rows, err := q.db.Query(ctx, listContractSignaturesForContractsAnyOrg, contractIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListContractSignaturesForContractsAnyOrgRow{}
+	for rows.Next() {
+		var i ListContractSignaturesForContractsAnyOrgRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ContractID,
+			&i.Party,
+			&i.UserID,
+			&i.Method,
+			&i.OtpRef,
+			&i.SignatureObjectKey,
+			&i.SnapshotHash,
+			&i.SignedAt,
+			&i.SignerName,
+			&i.SignerPhone,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

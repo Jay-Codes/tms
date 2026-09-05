@@ -82,7 +82,7 @@ func (q *Queries) ReportCollectedPeriod(ctx context.Context, arg ReportCollected
 }
 
 const reportCollectionsCollected = `-- name: ReportCollectionsCollected :many
-SELECT date_trunc($1::text, p.paid_at)::date AS bucket_start,
+SELECT date_trunc($1::text, p.paid_at AT TIME ZONE 'Africa/Dar_es_Salaam')::date AS bucket_start,
        COALESCE(sum(p.amount), 0)::bigint AS collected
 FROM payments p
 WHERE p.org_id = $2 AND p.deleted_at IS NULL AND p.status <> 'reversed'
@@ -103,6 +103,9 @@ type ReportCollectionsCollectedRow struct {
 	Collected   int64       `json:"collected"`
 }
 
+// `paid_at` is an instant; the bucket it belongs to is the one on the org's own
+// wall clock, so it is shifted into EAT before truncation. Otherwise a payment
+// taken at 22:00 on the last day of a month lands in the month before.
 func (q *Queries) ReportCollectionsCollected(ctx context.Context, arg ReportCollectionsCollectedParams) ([]ReportCollectionsCollectedRow, error) {
 	rows, err := q.db.Query(ctx, reportCollectionsCollected,
 		arg.Bucket,

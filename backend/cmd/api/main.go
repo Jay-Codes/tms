@@ -15,6 +15,8 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/redis/go-redis/v9"
@@ -53,7 +55,28 @@ func main() {
 		return
 	}
 
+	// MIGRATE_ON_START=1 applies pending migrations in-process before the
+	// server binds. Used by the compose `full` profile, where the API image is
+	// the only thing that owns the schema and there is no separate migration
+	// step. A failure here is fatal: serving an out-of-date schema is worse
+	// than not starting.
+	if migrateOnStart() {
+		logger.Info("MIGRATE_ON_START set; applying migrations before serving")
+		runMigrate(cfg, logger, "up")
+	}
+
 	os.Exit(serve(cfg, logger))
+}
+
+// migrateOnStart reports whether MIGRATE_ON_START asks for migrations at boot.
+// Anything strconv.ParseBool accepts as true (1, t, true, TRUE…) enables it.
+func migrateOnStart() bool {
+	v, ok := os.LookupEnv("MIGRATE_ON_START")
+	if !ok {
+		return false
+	}
+	b, err := strconv.ParseBool(strings.TrimSpace(v))
+	return err == nil && b
 }
 
 func newLogger(cfg config.Config) *slog.Logger {
@@ -107,7 +130,7 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 	deps.Email = email
 	logger.Info("sms provider selected", "beem_configured", cfg.BeemAPIKey != "", "provider_type", providerName(deps.SMS))
 
-	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	pool, err := db.Open(ctx, cfg.DatabaseURL, cfg.DBMaxConns)
 	if err != nil {
 		logger.Error("postgres unavailable at startup; serving degraded", "error", err)
 	} else {

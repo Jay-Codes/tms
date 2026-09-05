@@ -5,7 +5,8 @@ NGROK_API := http://127.0.0.1:4040/api/tunnels
 
 .PHONY: help preview dev stop url install up down \
         api api-stop api-restart api-log proxy-restart \
-        migrate migrate-down test-db sqlc build test lint
+        migrate migrate-down test-db sqlc build test test-isolation test-race lint \
+        seed seed-demo loadtest
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  make %-14s %s\n", $$1, $$2}'
@@ -99,6 +100,25 @@ sqlc: ## Regenerate sqlc query code into backend/internal/db/sqlc
 		     go run github.com/sqlc-dev/sqlc/cmd/sqlc@latest generate; fi
 	@echo "sqlc: generated."
 
+# --- seeding / load pass (Phase 8) ---
+
+# SEED_ARGS passes flags through, e.g. `make seed SEED_ARGS=-reset`.
+SEED_ARGS ?=
+# LOADTEST_ARGS likewise, e.g. `make loadtest LOADTEST_ARGS="-duration 60s"`.
+LOADTEST_ARGS ?=
+
+seed: ## Seed the load-test org (5 properties, 50 units, 40 renters); idempotent
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+		cd backend && go run ./cmd/seed $(SEED_ARGS)
+
+seed-demo: ## Top up the JJnE Rentals demo org so every FLOWS screen has data
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+		cd backend && go run ./cmd/seed -demo $(SEED_ARGS)
+
+loadtest: ## Hammer the hot endpoints for 20s (needs `make seed` and a running API)
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+		cd backend && go run ./cmd/loadtest $(LOADTEST_ARGS)
+
 # --- build / test / lint ---
 
 build: ## Build backend, proxy and all Next.js apps (next builds are slow)
@@ -109,9 +129,25 @@ build: ## Build backend, proxy and all Next.js apps (next builds are slow)
 # -p 1 runs one package at a time: every DB-backed package truncates the SAME
 # tms_test database between tests, so packages running in parallel wipe each
 # other's rows and fail at random.
-test: ## Run backend Go tests and workspace tests
+test: ## Run backend Go tests and workspace tests (includes the isolation suite)
 	@cd backend && TEST_DATABASE_URL="$${TEST_DATABASE_URL:-postgres://tms:tms_dev@localhost:5433/tms_test?sslmode=disable}" go test -p 1 ./...
 	@npm test --workspaces --if-present
+
+# The SPEC §8 suite on its own, for the tight loop while adding a route. The
+# route-census test needs no database, so it still fails usefully (with the list
+# of uncovered routes) on a machine with no compose stack running.
+test-isolation: ## Run only the org/renter/admin isolation suite (SPEC §8)
+	@cd backend && TEST_DATABASE_URL="$${TEST_DATABASE_URL:-postgres://tms:tms_dev@localhost:5433/tms_test?sslmode=disable}" \
+		go test -v -count=1 ./internal/httpserver/ \
+		-run 'TestIsolationSuiteCoversEveryRoute|TestCrossOrgIsolationSuite|TestCrossRenterIsolationSuite|TestAdminRoutesRefuseTenantSessions'
+
+# The three packages that run goroutines of their own: the HTTP handlers, the
+# notification scheduler/worker pool, and the payment allocator. -race makes
+# each test far slower, so this is a separate target rather than part of
+# `make test`: the run takes ~2m15s (httpserver ~2m of it), against ~10s plain.
+test-race: ## Run the concurrent packages under the race detector
+	@cd backend && TEST_DATABASE_URL="$${TEST_DATABASE_URL:-postgres://tms:tms_dev@localhost:5433/tms_test?sslmode=disable}" \
+		go test -race -p 1 -count=1 ./internal/httpserver/... ./internal/notify/... ./internal/payment/...
 
 lint: ## Lint backend (golangci-lint, falls back to go vet) and frontends
 	@cd backend && \
@@ -120,3 +156,34 @@ lint: ## Lint backend (golangci-lint, falls back to go vet) and frontends
 		     echo "      install: brew install golangci-lint"; \
 		     go vet ./...; fi
 	@npm run lint --workspaces --if-present
+
+# --- deployment (full compose profile) ---
+
+.PHONY: images deploy deploy-down logs tls-selfsigned
+
+images: ## Build all deployable images (api, 3 apps, proxy)
+	docker compose --profile full build
+
+deploy: images ## Build images and bring the full stack up (proxy on $PROXY_HTTP_PORT, default 80)
+	docker compose --profile full up -d --wait api enduser tenant admin proxy
+	@echo "full stack up — proxy on http://localhost:$${PROXY_HTTP_PORT:-80}  (/enduser /tenant /admin /api)"
+
+# Stops and removes only the application containers. Postgres, Redis and MinIO
+# are deliberately left running: they are shared with the dev loop and hold the
+# data volumes.
+deploy-down: ## Stop and remove the full-profile app containers (infra stays up)
+	docker compose --profile full stop api enduser tenant admin proxy
+	docker compose --profile full rm -f api enduser tenant admin proxy
+	@echo "full-profile services removed; postgres/redis/minio still running."
+
+logs: ## Tail logs from the full-profile services
+	docker compose --profile full logs -f --tail=100
+
+tls-selfsigned: ## Generate a self-signed cert/key pair into .dev/tls for the proxy
+	@mkdir -p $(DEVDIR)/tls
+	@openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+		-keyout $(DEVDIR)/tls/key.pem -out $(DEVDIR)/tls/cert.pem \
+		-subj "/CN=$${TLS_CN:-localhost}" \
+		-addext "subjectAltName=DNS:$${TLS_CN:-localhost},DNS:localhost,IP:127.0.0.1" 2>/dev/null
+	@echo "wrote $(DEVDIR)/tls/cert.pem and $(DEVDIR)/tls/key.pem"
+	@echo "enable TLS: set TLS_CERT_FILE=/etc/tms/tls/cert.pem TLS_KEY_FILE=/etc/tms/tls/key.pem in .env, then make deploy"

@@ -62,8 +62,115 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-tms_dev_secret}
 
   # --- full profile (Phase 8): built application images ---
-  # api, enduser, tenant, admin, proxy join here under `--profile full`
-  # once backend/ and app Dockerfiles land. See PLAN.md "Deployment".
+  #
+  # `make deploy` builds these and brings them up alongside the infra above.
+  # They are gated behind `--profile full` so the dev loop (`make up`, host
+  # processes via `make preview`) never starts them by accident.
+  #
+  # Everything here talks over the compose network, so hosts are service names
+  # (postgres:5432, redis:6379, minio:9000) rather than published host ports.
+  # `env_file: .env` supplies secrets and tunables; the `environment:` block
+  # below wins over it, and rewrites exactly the values that must differ
+  # inside the network.
+
+  api:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: tms-api:local
+    env_file: .env
+    environment:
+      ENV: ${ENV:-dev}
+      API_PORT: "8081"
+      # In-network endpoints. Note postgres is 5432 here — 5433 is only the
+      # host-published port for the dev loop.
+      DATABASE_URL: postgres://${POSTGRES_USER:-tms}:${POSTGRES_PASSWORD:-tms_dev}@postgres:5432/${POSTGRES_DB:-tms}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: minio:9000
+      MINIO_USE_SSL: "false"
+      # Public origin of the deployment: the proxy. Presigned MinIO URLs and
+      # QR targets are built from these, so they must be the origin a browser
+      # or phone can actually reach.
+      APP_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost}
+      MINIO_PUBLIC_URL: ${PUBLIC_BASE_URL:-http://localhost}
+      # The proxy container is the only hop in front of the API and its IP is
+      # assigned from the compose bridge network, so forwarded-for headers are
+      # trusted from RFC1918 space rather than a fixed address.
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS_FULL:-172.16.0.0/12,10.0.0.0/8,127.0.0.0/8}
+      # Migrations run in-process before the listener binds, so a deploy needs
+      # no separate migrate step.
+      MIGRATE_ON_START: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+  enduser:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: apps/enduser/Dockerfile
+    image: tms-enduser:local
+    restart: unless-stopped
+
+  tenant:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: apps/tenant/Dockerfile
+    image: tms-tenant:local
+    restart: unless-stopped
+
+  admin:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: apps/admin/Dockerfile
+    image: tms-admin:local
+    restart: unless-stopped
+
+  proxy:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: proxy/Dockerfile
+    image: tms-proxy:local
+    environment:
+      PROXY_HTTP_ADDR: ":80"
+      PROXY_HTTPS_ADDR: ":443"
+      UPSTREAM_ENDUSER: http://enduser:3001
+      UPSTREAM_TENANT: http://tenant:3002
+      UPSTREAM_ADMIN: http://admin:3003
+      UPSTREAM_API: http://api:8081
+      UPSTREAM_MINIO: http://minio:9000
+      # Set both to serve TLS on 443 and redirect 80 -> 443. Paths are inside
+      # the container; `make tls-selfsigned` writes a pair into .dev/tls,
+      # mounted read-only below.
+      TLS_CERT_FILE: ${TLS_CERT_FILE:-}
+      TLS_KEY_FILE: ${TLS_KEY_FILE:-}
+    volumes:
+      - ./.dev/tls:/etc/tms/tls:ro
+    ports:
+      # PROXY_HTTP_PORT/PROXY_HTTPS_PORT exist so a deploy can be exercised on
+      # alternate host ports while the dev preview keeps :8080.
+      - "${PROXY_HTTP_PORT:-80}:80"
+      - "${PROXY_HTTPS_PORT:-443}:443"
+    depends_on:
+      api:
+        condition: service_healthy
+      enduser:
+        condition: service_healthy
+      tenant:
+        condition: service_healthy
+      admin:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   pgdata:

@@ -13,21 +13,16 @@ import (
 
 	"tms/backend/internal/db"
 	"tms/backend/internal/db/sqlc"
+	"tms/backend/internal/tz"
 )
 
 // SchedulerInterval is how often the ticker derives due sends from Postgres
 // (SPEC §2.2: a 5-minute scan inside the API binary).
 const SchedulerInterval = 5 * time.Minute
 
-// LocalZone is the wall clock every org's send hour is read against. Tanzania
-// keeps one zone year-round, so a single location serves the whole platform;
-// it is named here rather than assumed so a second country is one constant.
-const LocalZone = "Africa/Dar_es_Salaam"
-
-// eatOffset is the fallback when the host has no tzdata: East Africa Time is
-// UTC+3 with no daylight saving, so a fixed zone is exact rather than
-// approximate.
-const eatOffsetHours = 3
+// LocalZone is the wall clock every org's send hour is read against
+// (internal/tz, shared with the reports).
+const LocalZone = tz.LocalZone
 
 // Scheduler defaults, overridable per org through
 // `orgs.settings.notifications` (API.md Phase 6).
@@ -290,25 +285,13 @@ func contractLink(baseURL, contractID string) string {
 	return strings.TrimRight(baseURL, "/") + "/enduser/contract/" + contractID
 }
 
-// LocalDate is the calendar day t names, as a UTC midnight.
-//
-// t must already be in the org's zone: the day a renter is living in is the
-// one on their own wall clock, so 02:30 EAT belongs to the day that has just
-// started and not to the UTC day still running behind it. Truncating the
-// instant would answer the second question, which at 23:30 UTC is the wrong
-// day by one.
-func LocalDate(t time.Time) time.Time {
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
-}
+// LocalDate is the calendar day t names, as a UTC midnight. t must already be
+// in the org's zone (internal/tz).
+func LocalDate(t time.Time) time.Time { return tz.LocalDate(t) }
 
 // localZone resolves the org wall clock, falling back to a fixed UTC+3 when the
 // host image ships without tzdata.
-func localZone() *time.Location {
-	if loc, err := time.LoadLocation(LocalZone); err == nil {
-		return loc
-	}
-	return time.FixedZone("EAT", eatOffsetHours*60*60)
-}
+func localZone() *time.Location { return tz.Zone() }
 
 // FormatTZS renders an amount in the money form the SMS templates use.
 func FormatTZS(amount int64) string {
