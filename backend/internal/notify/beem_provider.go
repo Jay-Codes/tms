@@ -26,6 +26,9 @@ const beemTimeout = 10 * time.Second
 // BEEM_SENDER_ID names one. Beem requires a non-empty source address.
 const DefaultSenderID = "INFO"
 
+// senderIDMaxLen is the GSM alphanumeric sender-ID limit.
+const senderIDMaxLen = 11
+
 // beemMaxErrBody caps how much of a provider error response is read back into
 // the notification_log `error` column.
 const beemMaxErrBody = 2048
@@ -88,14 +91,34 @@ type beemResponse struct {
 // SourceAddr resolves the sender name for one send: the org's own approved
 // sender ID if it has one, else the platform's BEEM_SENDER_ID, else "INFO"
 // (SPEC §6: "sender ID per org where approved; platform default otherwise").
+// The name is sanitised here as well as validated on the way in: it travels
+// from org settings into a provider request, so the send path never trusts
+// that whatever is stored is still a legal GSM sender ID.
 func (p *BeemProvider) SourceAddr(senderName string) string {
-	if v := strings.TrimSpace(senderName); v != "" {
+	if v := sanitizeSenderID(senderName); v != "" {
 		return v
 	}
-	if p != nil && strings.TrimSpace(p.SenderID) != "" {
-		return strings.TrimSpace(p.SenderID)
+	if p != nil {
+		if v := sanitizeSenderID(p.SenderID); v != "" {
+			return v
+		}
 	}
 	return DefaultSenderID
+}
+
+// sanitizeSenderID reduces a sender name to what an alphanumeric sender ID may
+// be: letters and digits, at most 11 of them.
+func sanitizeSenderID(name string) string {
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(name) {
+		if b.Len() >= senderIDMaxLen {
+			break
+		}
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // Send delivers one SMS through Beem and returns its request id.

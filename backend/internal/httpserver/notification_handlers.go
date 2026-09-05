@@ -142,6 +142,9 @@ func (s *Server) handleCustomSMS(w http.ResponseWriter, r *http.Request) {
 	if len([]rune(text)) > customBodyMax {
 		f.Add("body", "must be at most "+strconv.Itoa(customBodyMax)+" characters")
 	}
+	if notify.HasControlChars(text) {
+		f.Add("body", "must not contain control characters")
+	}
 	if unknown := notify.UnknownVariables(text, notify.CustomVariables); len(unknown) > 0 {
 		f.Add("body", "unknown variables: {{"+strings.Join(unknown, "}}, {{")+"}}")
 	}

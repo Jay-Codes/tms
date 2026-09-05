@@ -712,3 +712,91 @@ func TestSchedulerKeepsOrgsApart(t *testing.T) {
 		t.Errorf("reminder went to %+v, want org A's renter only", notes)
 	}
 }
+
+// TestSchedulerSkipsSuspendedOrgs: a suspended tenant sends nothing. The org is
+// off the platform (SPEC §5.10), and a scheduler that kept texting its renters
+// would be the one part of the product that had not noticed.
+func TestSchedulerSkipsSuspendedOrgs(t *testing.T) {
+	h := newHarness(t)
+	live := h.newPaymentFixture(t, "Live", "0715007600", "+255715007601")
+	dead := h.newPaymentFixture(t, "Dead", "0715007610", "+255715007611")
+	h.parkSchedules(t, live.contractID)
+	h.parkSchedules(t, dead.contractID)
+	h.setDueDate(t, live.scheduleIDs[0], time.Now().UTC(), "pending")
+	h.setDueDate(t, dead.scheduleIDs[0], time.Now().UTC(), "pending")
+
+	if _, err := h.pool.Exec(context.Background(),
+		`UPDATE orgs SET status = 'suspended' WHERE id = $1`, dead.orgID); err != nil {
+		t.Fatalf("suspend org: %v", err)
+	}
+
+	res := h.runScheduler(t, notify.Options{ForceHour: true})
+	if res.Queued[notify.KindReminderDue] != 1 {
+		t.Fatalf("sweep queued %v, want exactly one reminder_due", res.Queued)
+	}
+	for _, n := range ofKind(h.notifications(t), notify.KindReminderDue) {
+		if n.ToPhone == "+255715007611" {
+			t.Error("a suspended org's renter was texted")
+		}
+	}
+}
+
+// TestOverdueDailyStopsOncePaid: the daily chase is "until paid or waived"
+// (SPEC §6) — recording the money is what ends it, with no separate switch to
+// remember to turn off.
+func TestOverdueDailyStopsOncePaid(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newPaymentFixture(t, "Chase", "0715007700", "+255715007701")
+	h.parkSchedules(t, fix.contractID)
+	h.setDueDate(t, fix.scheduleIDs[0], time.Now().UTC().AddDate(0, 0, -5), "overdue")
+
+	if res := h.runScheduler(t, notify.Options{ForceHour: true}); res.Queued[notify.KindOverdueDaily] != 1 {
+		t.Fatalf("sweep queued %v, want one overdue_daily", res.Queued)
+	}
+
+	fix.owner.recordPayment(map[string]any{
+		"contract_id": fix.contractID, "schedule_id": fix.scheduleIDs[0],
+		"amount": fix.amounts[0], "method": "cash",
+	}).mustStatus(t, http.StatusCreated, "settle the overdue instalment")
+
+	// Tomorrow's key is a fresh one, so nothing here is the dedupe key's doing.
+	tomorrow := time.Now().UTC().AddDate(0, 0, 1)
+	if res := h.runScheduler(t, notify.Options{ForceHour: true, Date: tomorrow}); res.Queued[notify.KindOverdueDaily] != 0 {
+		t.Errorf("the chase continued after payment: %v", res.Queued)
+	}
+}
+
+// TestCustomSMSRejectsControlCharacters: the body travels verbatim to the
+// provider, so what may not be in an SMS may not be in the request either.
+func TestCustomSMSRejectsControlCharacters(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newPaymentFixture(t, "Ctrl", "0715007800", "+255715007801")
+
+	fix.owner.do(http.MethodPost, "/notifications/custom", map[string]any{
+		"recipients": "all_active", "body": "Water off\x00 on Sunday",
+	}).mustStatus(t, http.StatusBadRequest, "control character in a broadcast")
+
+	fix.owner.do(http.MethodPut, "/org/notification-settings", map[string]any{
+		"sender_name": "JJnE Ltd!",
+	}).mustStatus(t, http.StatusBadRequest, "non-alphanumeric sender id")
+}
+
+// TestThankYouToggleIsHonoured: `thank_you` is event-driven (Phase 5), but the
+// switch on the notifications screen is the same switch — turning it off has to
+// stop the SMS, not just change the screen.
+func TestThankYouToggleIsHonoured(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newPaymentFixture(t, "Thanks", "0715007900", "+255715007901")
+
+	fix.owner.do(http.MethodPut, "/org/notification-settings", map[string]any{
+		"kinds": map[string]any{"thank_you": map[string]any{"enabled": false}},
+	}).mustStatus(t, http.StatusOK, "disable thank_you")
+
+	fix.owner.recordPayment(map[string]any{
+		"contract_id": fix.contractID, "amount": fix.amounts[0], "method": "cash",
+	}).mustStatus(t, http.StatusCreated, "record payment")
+
+	if got := ofKind(h.notifications(t), notify.KindThankYou); len(got) != 0 {
+		t.Errorf("a thank-you went out with the kind disabled: %+v", got)
+	}
+}

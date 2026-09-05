@@ -226,6 +226,10 @@ func applyNotificationPatch(cur OrgSettings, p notificationSettingsPatch, f vali
 			ns.SenderName = nil // back to the platform default
 		case len([]rune(name)) > senderNameMax:
 			f.Add("sender_name", "must be at most 11 characters")
+		case !isAlphanumeric(name):
+			// It becomes the provider's `source_addr`; an alphanumeric sender
+			// ID is letters and digits, and nothing else may travel there.
+			f.Add("sender_name", "must be letters and digits only")
 		default:
 			ns.SenderName = &name
 		}
@@ -250,6 +254,18 @@ func applyNotificationPatch(cur OrgSettings, p notificationSettingsPatch, f vali
 
 	cur.Notifications = &ns
 	return cur
+}
+
+// isAlphanumeric reports whether every rune of s is an ASCII letter or digit.
+func isAlphanumeric(s string) bool {
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return s != ""
 }
 
 func applyKindsPatch(k *notificationKinds, p notificationKindsPatch, f validate.Fields) {
@@ -324,6 +340,9 @@ func checkTemplateBody(f validate.Fields, field, body string) {
 	}
 	if len([]rune(body)) > notify.BodyMaxLen {
 		f.Add(field, "must be at most 320 characters")
+	}
+	if notify.HasControlChars(body) {
+		f.Add(field, "must not contain control characters")
 	}
 	if unknown := notify.UnknownVariables(body, notify.OrgVariables); len(unknown) > 0 {
 		f.Add(field, "unknown variables: {{"+strings.Join(unknown, "}}, {{")+"}}")

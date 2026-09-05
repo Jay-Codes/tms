@@ -291,7 +291,10 @@ func (w Worker) deliver(ctx context.Context, logger *slog.Logger, rawID string) 
 			"id", rawID, "kind", row.Kind, "attempts", attempts, "error", sendErr)
 		return
 	}
-	if err := w.Q.MarkNotificationSent(ctx, sqlc.MarkNotificationSentParams{
+	// The SMS is already gone; recording that fact is not cancellable. A row
+	// left `sending` because the pool was shutting down would be re-queued by
+	// the startup sweep and sent to the renter a second time.
+	if err := w.Q.MarkNotificationSent(context.WithoutCancel(ctx), sqlc.MarkNotificationSentParams{
 		ID: id, Attempts: attempts, ProviderMsgID: db.Str(msgID),
 	}); err != nil {
 		logger.Error("notification worker: mark sent", "id", rawID, "error", err)

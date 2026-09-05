@@ -135,11 +135,10 @@ func RunOnce(ctx context.Context, q *sqlc.Queries, now time.Time, opt Options) (
 		if !opt.ForceHour && local.Hour() < set.SendHourLocal {
 			continue // the org's morning has not come round yet
 		}
-		today := local.Truncate(time.Hour * 24)
+		today := LocalDate(local)
 		if !opt.Date.IsZero() {
-			today = opt.Date
+			today = LocalDate(opt.Date)
 		}
-		today = time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
 
 		if err := runForOrg(ctx, q, org, set, today, opt, res); err != nil {
 			return *res, err
@@ -289,6 +288,17 @@ func queueOne(ctx context.Context, q *sqlc.Queries, res *Result, m Msg) {
 // contractLink builds the renter-facing link to a contract.
 func contractLink(baseURL, contractID string) string {
 	return strings.TrimRight(baseURL, "/") + "/enduser/contract/" + contractID
+}
+
+// LocalDate is the calendar day t names, as a UTC midnight.
+//
+// t must already be in the org's zone: the day a renter is living in is the
+// one on their own wall clock, so 02:30 EAT belongs to the day that has just
+// started and not to the UTC day still running behind it. Truncating the
+// instant would answer the second question, which at 23:30 UTC is the wrong
+// day by one.
+func LocalDate(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 // localZone resolves the org wall clock, falling back to a fixed UTC+3 when the

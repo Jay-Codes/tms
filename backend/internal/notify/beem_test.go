@@ -141,3 +141,27 @@ func TestBeemSendFailures(t *testing.T) {
 		})
 	}
 }
+
+// TestSourceAddrIsSanitised: the sender name reaches the provider as a legal
+// alphanumeric sender ID whatever is stored against the org.
+func TestSourceAddrIsSanitised(t *testing.T) {
+	p := &notify.BeemProvider{APIKey: "k", SecretKey: "s", SenderID: "PLATFORM"}
+	cases := map[string]string{
+		"JJNE":                 "JJNE",
+		" JJnE Rentals ":       "JJnERentals",
+		"JJnE Rentals Limited": "JJnERentals",
+		"BAD\nX-Header: y":     "BADXHeadery",
+		"!!!":                  "PLATFORM",
+		"":                     "PLATFORM",
+	}
+	for in, want := range cases {
+		if got := p.SourceAddr(in); got != want {
+			t.Errorf("SourceAddr(%q) = %q, want %q", in, got, want)
+		}
+	}
+	// With no platform default either, the provider's own fallback stands.
+	bare := &notify.BeemProvider{APIKey: "k", SecretKey: "s"}
+	if got := bare.SourceAddr("###"); got != notify.DefaultSenderID {
+		t.Errorf("SourceAddr with no usable name = %q, want %q", got, notify.DefaultSenderID)
+	}
+}

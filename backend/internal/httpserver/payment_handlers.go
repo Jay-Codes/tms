@@ -212,6 +212,7 @@ func (s *Server) handleRecordPayment(w http.ResponseWriter, r *http.Request) {
 			PaymentID: paymentID, Lang: settings.SMSLanguage,
 			Phone: db.StrVal(contract.RenterPhone), Vars: vars,
 			Overrides: settings.notifyOverrides(),
+			Enabled:   notificationSettingsOf(settings).Kinds.ThankYou.Enabled,
 		})
 		return err
 	})
@@ -741,11 +742,19 @@ type paymentMessage struct {
 	Phone     string
 	Vars      notify.Vars
 	Overrides notify.Overrides
+	// Enabled is the org's `kinds.thank_you.enabled` switch.
+	Enabled bool
 }
 
 // queuePaymentSMS writes the thank-you row inside the caller's transaction and
 // returns the id to push onto Redis after the commit.
 func (s *Server) queuePaymentSMS(ctx context.Context, q *sqlc.Queries, m paymentMessage) (string, error) {
+	// `kinds.thank_you.enabled` is a switch the landlord is offered on the
+	// notifications screen; an event-driven kind has to read it too, or turning
+	// it off would change the screen and nothing else.
+	if !m.Enabled {
+		return "", nil
+	}
 	if m.Phone == "" {
 		s.logger.Warn("thank-you notification skipped: renter has no phone number",
 			"payment_id", m.PaymentID)

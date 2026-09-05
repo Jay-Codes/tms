@@ -33,6 +33,13 @@ const (
 // template, an org override or a landlord's custom message alike (API.md).
 const BodyMaxLen = 320
 
+// RenderedMaxLen bounds a body after substitution. A template is capped at
+// BodyMaxLen, but its variables are not: a renter name, a unit name or an org
+// display name is data, and eight of them expanded into one 320-character
+// template is unbounded growth on the send path. Concatenated SMS is fine —
+// this is only a ceiling, well above any real message.
+const RenderedMaxLen = 1000
+
 // thankYouSettled is an internal template key, never a notification_log kind:
 // both wordings are logged as `thank_you`. It is selected when there is no next
 // instalment to name, so the message says everything is up to date rather than
@@ -184,7 +191,7 @@ func Render(kind, lang string, v Vars, overrides Overrides) string {
 	// A broadcast carries its own wording, so there is nothing to look up:
 	// the landlord's text is the template.
 	if kind == KindCustom {
-		return Substitute(v.Body, v)
+		return Clamp(Substitute(v.Body, v))
 	}
 
 	key := kind
@@ -203,12 +210,45 @@ func Render(kind, lang string, v Vars, overrides Overrides) string {
 		}
 		body = t.pick(lang)
 	}
-	return Substitute(body, v)
+	return Clamp(Substitute(body, v))
 }
 
 // Substitute replaces every `{{variable}}` a body names with its value.
+//
+// It is one pass of plain replacement, never a template evaluation: a value
+// that itself contains `{{link}}` is left standing as those nine characters,
+// because strings.Replacer does not rescan what it has written. A renter whose
+// name is `{{link}}` therefore cannot make the platform paste a signing link
+// into someone else's message.
 func Substitute(body string, v Vars) string {
 	return replacerFor(v).Replace(body)
+}
+
+// Clamp bounds a rendered body at RenderedMaxLen runes.
+func Clamp(body string) string {
+	r := []rune(body)
+	if len(r) <= RenderedMaxLen {
+		return body
+	}
+	return string(r[:RenderedMaxLen])
+}
+
+// HasControlChars reports whether s carries a control character.
+//
+// A body reaches the provider verbatim; a NUL, an escape or a stray carriage
+// return in it is either a mistake or an attempt to confuse something
+// downstream, and neither belongs in an SMS. Ordinary whitespace — space,
+// newline, tab — is allowed, since a landlord's notice may be two lines.
+func HasControlChars(s string) bool {
+	for _, r := range s {
+		if r == '\n' || r == '\t' || r == ' ' {
+			continue
+		}
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return true
+		}
+	}
+	return false
 }
 
 func replacerFor(v Vars) *strings.Replacer {

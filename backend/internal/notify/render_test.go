@@ -148,3 +148,53 @@ func TestUnknownVariables(t *testing.T) {
 		})
 	}
 }
+
+// TestRenderDoesNotReinterpretValues: a variable's value is data. A renter who
+// registers as `{{link}}` must not make the platform paste a signing link into
+// the message — one pass of replacement, never a second.
+func TestRenderDoesNotReinterpretValues(t *testing.T) {
+	v := fullVars()
+	v.Name = "{{link}} {{amount}}"
+	body := notify.Render(notify.KindReminderDue, notify.LangEnglish, v, nil)
+	if strings.Contains(body, "https://tms.test") {
+		t.Errorf("a renter name expanded into the link variable: %q", body)
+	}
+	if !strings.Contains(body, "{{link}} {{amount}}") {
+		t.Errorf("the name should survive verbatim: %q", body)
+	}
+
+	// The same holds for a broadcast, where the landlord's text is the template.
+	v.Body = "Hello {{name}}."
+	custom := notify.Render(notify.KindCustom, notify.LangEnglish, v, nil)
+	if custom != "Hello {{link}} {{amount}}." {
+		t.Errorf("custom body = %q, want the name left standing", custom)
+	}
+}
+
+// TestRenderClampsLongValues: the template is capped at 320 characters, but the
+// values are not — a body still cannot grow without bound.
+func TestRenderClampsLongValues(t *testing.T) {
+	v := fullVars()
+	v.Name = strings.Repeat("a", 5000)
+	body := notify.Render(notify.KindReminderDue, notify.LangEnglish, v, nil)
+	if n := len([]rune(body)); n != notify.RenderedMaxLen {
+		t.Errorf("rendered length = %d, want a clamp at %d", n, notify.RenderedMaxLen)
+	}
+}
+
+// TestHasControlChars: what may travel to the provider, and what may not.
+func TestHasControlChars(t *testing.T) {
+	cases := map[string]bool{
+		"Water is off on Sunday.": false,
+		"Two\nlines and a\ttab":   false,
+		"carriage\rreturn":        true,
+		"nul\x00byte":             true,
+		"escape\x1b[31m":          true,
+		"Kiswahili: mvua kubwa":   false,
+	}
+	for body, want := range cases {
+		if got := notify.HasControlChars(body); got != want {
+			t.Errorf("HasControlChars(%q) = %v, want %v", body, got, want)
+		}
+	}
+}
