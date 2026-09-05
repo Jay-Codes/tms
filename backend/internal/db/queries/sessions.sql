@@ -27,3 +27,13 @@ WHERE token_hash = sqlc.arg(token_hash) AND revoked_at IS NULL;
 
 -- name: DeleteExpiredSessions :exec
 DELETE FROM sessions WHERE expires_at < now() - INTERVAL '7 days';
+
+-- Removing a staff member must not leave their live session usable: the
+-- session rows for that (user, org) pair are revoked in the same transaction as
+-- the removal, and the returned hashes let the caller evict the Redis copies.
+-- name: RevokeSessionsForOrgUser :many
+UPDATE sessions SET revoked_at = now()
+WHERE user_id = sqlc.arg(user_id)
+  AND org_id = sqlc.arg(org_id)
+  AND revoked_at IS NULL
+RETURNING token_hash;

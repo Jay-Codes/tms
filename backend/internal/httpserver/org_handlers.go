@@ -516,10 +516,20 @@ func (s *Server) handleDeleteMember(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var revoked []string
 	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
 		if _, err := q.SoftDeleteOrgMember(r.Context(), sqlc.SoftDeleteOrgMemberParams{
 			OrgID: p.OrgID, ID: memberID,
 		}); err != nil {
+			return err
+		}
+		// A removed member must lose access immediately: revoke their live
+		// sessions for this org in the same transaction as the removal.
+		var err error
+		revoked, err = q.RevokeSessionsForOrgUser(r.Context(), sqlc.RevokeSessionsForOrgUserParams{
+			UserID: existing.UserID, OrgID: p.OrgID,
+		})
+		if err != nil {
 			return err
 		}
 		return audit.Record(r.Context(), q, audit.Entry{
@@ -536,5 +546,6 @@ func (s *Server) handleDeleteMember(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "members.delete.tx", err)
 		return
 	}
+	s.sessions.EvictCached(r.Context(), revoked)
 	NoContent(w)
 }

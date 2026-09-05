@@ -112,6 +112,10 @@ export function useMe(): AuthState {
 export function safeNext(raw: string | null | undefined): string | null {
   if (!raw) return null;
   let value = raw.trim();
+  // URL parsing normalises a backslash to '/', so '/\evil.test' would resolve
+  // to the protocol-relative '//evil.test'; control characters are stripped by
+  // the same parser and can hide one. Reject both before the '//' check.
+  if (/[\\\u0000-\u001f\u007f]/.test(value)) return null;
   if (!value.startsWith('/') || value.startsWith('//')) return null;
   if (value === BASE_PATH) return '/';
   if (value.startsWith(`${BASE_PATH}/`)) value = value.slice(BASE_PATH.length);

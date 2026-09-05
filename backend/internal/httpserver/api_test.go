@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"tms/backend/internal/config"
+	"tms/backend/internal/db"
 	"tms/backend/internal/httpserver"
 	"tms/backend/internal/testutil"
 )
@@ -20,6 +21,7 @@ type harness struct {
 	srv   *httpserver.Server
 	sms   *testutil.SMSCapture
 	email *testutil.EmailCapture
+	pool  *db.Pool
 }
 
 // newHarness builds a server against the real test Postgres and an in-process
@@ -42,7 +44,7 @@ func newHarness(t *testing.T) *harness {
 		DB: pool, Redis: redis, Pool: pool, Cache: redis, SMS: sms, Email: email,
 	}, testutil.Logger())
 
-	return &harness{t: t, srv: srv, sms: sms, email: email}
+	return &harness{t: t, srv: srv, sms: sms, email: email, pool: pool}
 }
 
 // client is one browser: it keeps the cookies the server sets.

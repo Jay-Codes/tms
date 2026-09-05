@@ -114,3 +114,39 @@ func (q *Queries) RevokeSession(ctx context.Context, tokenHash string) error {
 	_, err := q.db.Exec(ctx, revokeSession, tokenHash)
 	return err
 }
+
+const revokeSessionsForOrgUser = `-- name: RevokeSessionsForOrgUser :many
+UPDATE sessions SET revoked_at = now()
+WHERE user_id = $1
+  AND org_id = $2
+  AND revoked_at IS NULL
+RETURNING token_hash
+`
+
+type RevokeSessionsForOrgUserParams struct {
+	UserID pgtype.UUID `json:"user_id"`
+	OrgID  pgtype.UUID `json:"org_id"`
+}
+
+// Removing a staff member must not leave their live session usable: the
+// session rows for that (user, org) pair are revoked in the same transaction as
+// the removal, and the returned hashes let the caller evict the Redis copies.
+func (q *Queries) RevokeSessionsForOrgUser(ctx context.Context, arg RevokeSessionsForOrgUserParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, revokeSessionsForOrgUser, arg.UserID, arg.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var token_hash string
+		if err := rows.Scan(&token_hash); err != nil {
+			return nil, err
+		}
+		items = append(items, token_hash)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

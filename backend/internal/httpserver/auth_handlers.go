@@ -184,6 +184,11 @@ func (s *Server) handleOTPVerify(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteProblem(w, http.StatusForbidden, "forbidden", "this account signs in with email and password")
 			return
 		}
+		// The PIN path refuses suspended accounts; the OTP path must too.
+		if user.Status != "active" {
+			httpx.WriteProblem(w, http.StatusForbidden, "forbidden", "this account is not active")
+			return
+		}
 		s.finishLogin(w, r, user, "", "", nil)
 
 	default: // "sign" — the signing flow itself lands in Phase 4.

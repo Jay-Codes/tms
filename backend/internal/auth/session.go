@@ -249,6 +249,23 @@ func (m *Manager) Revoke(ctx context.Context, token string) {
 	}
 }
 
+// EvictCached drops cached copies of already-revoked sessions from Redis. The
+// Postgres rows are revoked by the caller's transaction (so the revocation
+// shares the fate of the mutation that caused it); this only clears the cache,
+// which would otherwise keep answering Lookup until the TTL expires.
+func (m *Manager) EvictCached(ctx context.Context, tokenHashes []string) {
+	if m.Redis == nil || len(tokenHashes) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(tokenHashes))
+	for _, h := range tokenHashes {
+		keys = append(keys, redisKey(h))
+	}
+	if err := m.Redis.Del(ctx, keys...).Err(); err != nil {
+		m.logger().Warn("session cache eviction failed", "error", err)
+	}
+}
+
 // SetCookie writes the audience cookie carrying the opaque token.
 func (m *Manager) SetCookie(w http.ResponseWriter, audience, token string) {
 	http.SetCookie(w, &http.Cookie{
