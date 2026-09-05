@@ -17,6 +17,7 @@ UPDATE notification_log n
 SET status = 'sending'
 FROM orgs o
 WHERE n.id = $1 AND n.status = 'queued' AND o.id = n.org_id
+  AND o.status = 'active'
 RETURNING n.id, n.org_id, n.user_id, n.kind, n.dedupe_key, n.to_phone, n.body,
           n.attempts, COALESCE(o.settings #>> '{notifications,sender_name}', '')::text AS sender_name
 `
@@ -42,6 +43,11 @@ type ClaimNotificationRow struct {
 // It resolves the org's sender ID at the same time, so the send path stays one
 // round trip: the org's own approved name if it has set one, else the platform
 // default the provider supplies.
+//
+// Phase 7: a suspended org's messages are not claimable. The row simply stays
+// `queued` — the claim finds nothing and the worker returns, exactly as it does
+// for an already-claimed id. Nothing is marked failed, so activating the org
+// lets the backlog go out on the next push rather than burying it in errors.
 // guard-exempt: the worker claims one notification by id and has no org context.
 func (q *Queries) ClaimNotification(ctx context.Context, id pgtype.UUID) (ClaimNotificationRow, error) {
 	row := q.db.QueryRow(ctx, claimNotification, id)

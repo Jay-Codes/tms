@@ -30,6 +30,7 @@ import {
 } from '../../lib/api';
 import { errorMessage, formatDate, money } from '../../lib/format';
 import { Protected } from '../../components/Protected';
+import { Money } from '../../components/Money';
 import { ScheduleMark } from '../../components/PaymentStatus';
 import { Notice, Screen, ScreenHeader } from '../../components/Screen';
 
@@ -229,12 +230,7 @@ function PaymentRow({ payment }: { payment: MyPayment }) {
         )}
       </td>
       <td className="num">
-        <span
-          className="amount"
-          style={{ textDecoration: reversed ? 'line-through' : 'none' }}
-        >
-          {money(payment.amount)}
-        </span>
+        <Money amount={payment.amount} struck={reversed} />
         <br />
         {reversed ? (
           <span className="stamp stamp-overdue">Reversed</span>
@@ -327,7 +323,7 @@ function PaymentsContent() {
                   </span>
                 </td>
                 <td className="num">
-                  <span className="amount">{money(scheduleOutstanding(nextDue))}</span>
+                  <Money amount={scheduleOutstanding(nextDue)} />
                   <br />
                   <ScheduleMark schedule={nextDue} />
                 </td>
@@ -385,7 +381,7 @@ function PaymentsContent() {
                     </span>
                   </td>
                   <td className="num">
-                    <span className="amount">{money(row.amount)}</span>
+                    <Money amount={row.amount} />
                     <br />
                     <ScheduleMark schedule={row} />
                   </td>

@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import { useRequireAuth } from '../lib/auth';
 import { BottomBar } from './BottomBar';
+import { OrgThemeSync } from './OrgThemeSync';
 import { Notice, Screen } from './Screen';
 
 /**
@@ -40,6 +41,7 @@ export function Protected({ children }: { children: ReactNode }) {
 
   return (
     <>
+      <OrgThemeSync />
       {children}
       <BottomBar />
     </>

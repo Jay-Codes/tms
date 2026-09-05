@@ -66,7 +66,7 @@ export const NAV: NavItem[] = [
   },
   { href: '/payments', label: 'Payments', icon: 'solar:wallet-money-linear' },
   { href: '/notifications', label: 'Messages', icon: 'solar:chat-round-line-linear' },
-  { href: '/reports', label: 'Reports', icon: 'solar:chart-square-linear', phase: 7 },
+  { href: '/reports', label: 'Reports', icon: 'solar:chart-square-linear' },
   {
     href: '/settings',
     label: 'Settings',

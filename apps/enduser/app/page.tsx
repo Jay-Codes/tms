@@ -30,6 +30,8 @@ import { useMe } from '../lib/auth';
 import { errorMessage, formatDate, money } from '../lib/format';
 import { forgetScannedUnit, readScannedUnit } from '../lib/scan';
 import { Protected } from '../components/Protected';
+import { InstallPrompt } from '../components/InstallPrompt';
+import { Money } from '../components/Money';
 import { NextDueChip } from '../components/PaymentStatus';
 import { Notice, Screen, ScreenHeader } from '../components/Screen';
 
@@ -179,6 +181,8 @@ function HomeContent() {
         title={`Habari, ${user ? firstName(user.full_name) : 'there'}.`}
       />
 
+      <InstallPrompt />
+
       {error && <Notice tone="error">{error}</Notice>}
 
       {toSign.length > 0 && (
@@ -310,7 +314,7 @@ function HomeContent() {
                   </span>
                 </td>
                 <td className="num">
-                  <span className="amount">{money(scheduleOutstanding(nextDue))}</span>
+                  <Money amount={scheduleOutstanding(nextDue)} />
                   <br />
                   <NextDueChip schedule={nextDue} />
                 </td>

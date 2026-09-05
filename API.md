@@ -264,3 +264,47 @@ Beem provider: POST `https://apisms.beem.africa/v1/send` basic auth (`api_key:se
 **Schema:** migration `000008_notifications` adds kind `unsigned_reminder` and status `sending` to `notification_log`, a `batch_id` column for custom broadcasts, an `(org_id, created_at DESC, id DESC)` index for the log listing and a partial index on claimed rows for the startup sweep.
 
 Phase 6 audit actions: `org.notification_settings_update`, `notification.custom`, `notification.retry`, `notification.scheduler_run`.
+
+## Phase 7 — reports, dashboard prefs, admin, PWA
+
+### Reports (audience org)
+| `GET /reports/summary?period=month|YYYY-MM` | → `{assets:{properties,units,occupied,vacant,maintenance,unlisted,occupancy_rate(0–1)}, renters:{active}, contracts:{active,expiring,pending_signature}, period:{from,to,expected,collected,outstanding,overdue_count,overdue_amount}, vacant_units:[{unit_id,name,property_name,days_vacant}] (≤20, longest first)}`. Expected = schedules with due_date in period (excl. waived); collected = non-reversed payments with paid_at in period. |
+| `GET /reports/payment-status?status=&property_id=&format=json|csv` | per renter with active/expiring contract: `{items:[{renter_user_id,renter_name,phone,unit_name,property_name,contract_id,status:"paid"|"pending"|"overdue"|"partial",next_due_date,next_due_amount,outstanding,overdue_amount,last_payment_at}]}`; `format=csv` → `text/csv` attachment `payment-status-{date}.csv`. Status = worst of the renter's unsettled schedules (overdue > partial > pending; paid when none unsettled). |
+| `GET /reports/collections?from&to&group=day|week|month` | → `{buckets:[{start,expected,collected}], totals:{expected,collected}}`. Defaults: `group=month`, and the twelve months ending today. `from`/`to` are `YYYY-MM-DD`, inclusive. Every bucket in the range is emitted, zeros included; `start` is the bucket's first day. At most 400 buckets — a longer range with a finer grouping is a 400 on `group`. |
+| `GET /reports/audit?...` | (already `GET /audit-log`) |
+
+Notes fixed in Phase 7 (implementation detail, same for all three reports):
+
+- **Occupancy** = `occupied / (occupied + vacant)`. `unlisted` and `maintenance` units are neither let nor a vacancy the landlord is failing to fill, so they are outside the ratio; `occupancy_rate` is `0` when nothing is lettable.
+- **Outstanding** = `sum(amount − paid_amount)` over the `pending`/`partial`/`overdue` schedules of the window; `overdue_amount` is the same sum restricted to `overdue`.
+- **`renters.active`** counts distinct renters holding an `active`/`expiring` contract.
+- **`days_vacant`** counts from the `end_date` of the unit's last `ended`/`terminated` contract, or from the unit's creation when it has never been let.
+- **Calendar boundaries** are Dar es Salaam wall clock: `period=month` is the month it is *there*, and the `paid_at` window is `[first day 00:00 EAT, last day + 1 00:00 EAT)`. Collections buckets truncate `paid_at` in EAT too. `due_date` is already a calendar date and needs no shift.
+- Every report runs the org-scoped overdue flip first, as `GET /schedules` does, so a status is never quoted stale.
+- `status=` on payment-status filters the *derived* status; an unknown value is a 400.
+
+### Dashboard prefs
+`PUT /org/branding {dashboard_prefs:{cards:["assets","renters","payment_status","collections","link_requests","overdue"], layout:"grid"|"list"}}` — free JSON validated to known card ids; frontend orders cards by it.
+
+Validation (400 with `errors.dashboard_prefs.*`): `cards` must be an array of ids drawn from that exact list, with no repeats; `layout` must be `grid` (default) or `list`; any other key in the object is refused rather than silently dropped. The stored blob is the canonical `{cards, layout}` shape, and `cards` keeps the order it was sent in — that order is the dashboard's.
+
+### Platform admin (audience admin `tms_a`)
+| `GET /admin/orgs?q=&status=&cursor=` | → `{items:[{id,name,slug,status,owner:{name,email},counts:{properties,units,renters,active_contracts},sms:{sent_30d,failed_30d},created_at}],next_cursor}` |
+| `GET /admin/orgs/{id}` | detail incl. settings summary, members |
+| `POST /admin/orgs/{id}/suspend {reason}` / `POST /admin/orgs/{id}/activate` | → `{org}`; suspended org: org users get 403 `org_suspended` on every org route, public unit endpoints 404, scheduler skips. Audited (org_id set, actor admin). |
+| `GET /admin/metrics` | → `{orgs:{total,active,suspended},renters:{total},units:{total,occupied},contracts:{active},sms:{sent_24h,failed_24h,queued},payments:{recorded_30d,amount_30d},db:{ok},redis:{ok},minio:{ok}}` |
+| `GET /admin/audit-log?org_id=&actor=&entity_type=&entity_id=&q=&from=&to=&cursor=` | cross-org audit search |
+| `GET /admin/jobs` | `{items:[{name,action,description,runnable,last_run_at,last_result}]}` — the three schedulers (`contract-lifecycle`, `overdue`, `notifications`), each with its last run read from the audit trail; existing `POST /admin/jobs/{contract-lifecycle|overdue|notifications}` |
+
+Notes fixed in Phase 7:
+
+- `GET /admin/orgs` also accepts `limit` (1–100, default 25) and pages by `(created_at, id)` descending with the same opaque cursor as the other listings. `q` matches the org name or slug, case-insensitively. Rows carry `suspended_at` and `suspended_reason` as well.
+- `POST /admin/orgs/{id}/suspend` **requires** a non-empty `reason` (≤500 chars); it is stored on the org and appears in the audit `after`. Activation clears both. An unknown or malformed org id is a 404.
+- **Suspension enforcement**: `RequireOrg` (and the org half of the contract-party routes) answers 403 with `type: "org_suspended"` for every org route. Backed by a Redis flag `org:suspended:{org_id}` written on suspend/activate, with a `SELECT status FROM orgs` fallback (cached 5 min) whenever the flag is cold — Redis is ephemeral, so the database always decides. Renters and platform admins are unaffected; a suspended landlord's renter can still read their own contracts and pay. Login itself still succeeds — the lockout is on the org routes, so the operator's own tooling can tell "wrong password" from "org closed".
+- **Notifications**: `ClaimNotification` will not claim a suspended org's message. The row stays `queued` (nothing is marked `failed`), so reactivating the org releases the backlog rather than leaving a trail of errors. The scheduler already skips suspended orgs, and the public endpoints already 404 for them.
+- `GET /admin/audit-log` also accepts `limit` (1–200, default 50); `q` is a case-insensitive substring of `action` or `entity_type`. Rows carry `org_name` beside `org_id`.
+- `GET /admin/metrics` reports `db`/`redis`/`minio` as `{ok: bool}` from the same probes as `/healthz`.
+- **No `job_runs` table.** `GET /admin/jobs` derives `last_run_at`/`last_result` from the newest audit row per job action (`contract.lifecycle_run`, `payment.overdue_run`, `notification.scheduler_run`), which the jobs already write. One store, one truth.
+
+### PWA
+Each app: `public/manifest.webmanifest` (name per app, `start_url` = basePath, display standalone, theme_color from core palette, icons 192/512 generated PNG), `<link rel=manifest>` in layout, service worker `public/sw.js` registered client-side: cache-first for app shell (`/_next/static/*`, manifest, icons), network-only for `/api/*` and presigned bucket paths, navigation fallback = cached shell; no offline writes. Registered only in production builds or when `NEXT_PUBLIC_ENABLE_SW=1` (avoid HMR interference in dev).

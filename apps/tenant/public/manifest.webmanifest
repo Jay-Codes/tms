@@ -1,0 +1,16 @@
+{
+  "name": "TMS Landlord",
+  "short_name": "TMS",
+  "description": "Properties, renters, contracts and rent collection.",
+  "start_url": "/tenant/",
+  "scope": "/tenant/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#fbfbf7",
+  "theme_color": "#2b4fd0",
+  "icons": [
+    { "src": "/tenant/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/tenant/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/tenant/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

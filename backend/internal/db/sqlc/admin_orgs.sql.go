@@ -22,7 +22,7 @@ func (q *Queries) AdminCountOrgs(ctx context.Context) (int64, error) {
 
 const adminListOrgs = `-- name: AdminListOrgs :many
 
-SELECT id, name, slug, status, settings, created_at, updated_at, deleted_at FROM orgs
+SELECT id, name, slug, status, settings, created_at, updated_at, deleted_at, suspended_at, suspended_reason FROM orgs
 WHERE deleted_at IS NULL
 ORDER BY created_at DESC
 LIMIT $1
@@ -49,6 +49,8 @@ func (q *Queries) AdminListOrgs(ctx context.Context, rowLimit int32) ([]Org, err
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.SuspendedAt,
+			&i.SuspendedReason,
 		); err != nil {
 			return nil, err
 		}

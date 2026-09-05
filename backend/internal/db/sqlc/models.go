@@ -98,14 +98,16 @@ type NotificationLog struct {
 }
 
 type Org struct {
-	ID        pgtype.UUID        `json:"id"`
-	Name      string             `json:"name"`
-	Slug      string             `json:"slug"`
-	Status    string             `json:"status"`
-	Settings  []byte             `json:"settings"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+	ID              pgtype.UUID        `json:"id"`
+	Name            string             `json:"name"`
+	Slug            string             `json:"slug"`
+	Status          string             `json:"status"`
+	Settings        []byte             `json:"settings"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	SuspendedAt     pgtype.Timestamptz `json:"suspended_at"`
+	SuspendedReason *string            `json:"suspended_reason"`
 }
 
 type OrgBranding struct {

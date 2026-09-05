@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +34,77 @@ const (
 //
 //nolint:gochecknoglobals // fixed vocabulary, read-only.
 var brandingFonts = []string{"bricolage", "archivo", "instrument", "hanken"}
+
+// dashboardCards is the vocabulary of dashboard card ids (API.md Phase 7). The
+// prefs blob orders the landlord's home screen, so an id the frontend cannot
+// render is refused at the edge rather than stored and silently dropped —
+// exactly as an unknown font id is.
+//
+//nolint:gochecknoglobals // fixed vocabulary, read-only.
+var dashboardCards = []string{
+	"assets", "renters", "payment_status", "collections", "link_requests", "overdue",
+}
+
+// dashboardLayouts is the layout enum.
+//
+//nolint:gochecknoglobals // fixed vocabulary, read-only.
+var dashboardLayouts = []string{"grid", "list"}
+
+// dashboardPrefs is the validated shape stored in org_branding.dashboard_prefs.
+type dashboardPrefs struct {
+	Cards  []string `json:"cards"`
+	Layout string   `json:"layout"`
+}
+
+// validateDashboardPrefs checks the free-JSON prefs blob against the known card
+// ids and layouts, returning the canonical shape. Unknown top-level keys are
+// refused too: silently discarding a setting a landlord thought they saved is
+// worse than telling them it does not exist.
+func validateDashboardPrefs(f *validate.Fields, raw map[string]any) (dashboardPrefs, bool) {
+	out := dashboardPrefs{Cards: []string{}, Layout: dashboardLayouts[0]}
+	for key := range raw {
+		if key != "cards" && key != "layout" {
+			f.Add("dashboard_prefs."+key, "unknown setting")
+		}
+	}
+	if v, ok := raw["cards"]; ok {
+		list, isList := v.([]any)
+		if !isList {
+			f.Add("dashboard_prefs.cards", "must be an array of card ids")
+		} else {
+			seen := map[string]bool{}
+			for _, item := range list {
+				id, isStr := item.(string)
+				if !isStr {
+					f.Add("dashboard_prefs.cards", "must be an array of card ids")
+					break
+				}
+				id = strings.ToLower(strings.TrimSpace(id))
+				if !slices.Contains(dashboardCards, id) {
+					f.Add("dashboard_prefs.cards", "unknown card id "+strconv.Quote(id)+
+						"; allowed: "+strings.Join(dashboardCards, ", "))
+					break
+				}
+				if seen[id] {
+					f.Add("dashboard_prefs.cards", "card "+strconv.Quote(id)+" is listed twice")
+					break
+				}
+				seen[id] = true
+				out.Cards = append(out.Cards, id)
+			}
+		}
+	}
+	if v, ok := raw["layout"]; ok {
+		layout, isStr := v.(string)
+		if !isStr {
+			f.Add("dashboard_prefs.layout", "must be one of: "+strings.Join(dashboardLayouts, ", "))
+		} else {
+			out.Layout = f.OneOf("dashboard_prefs.layout",
+				strings.ToLower(strings.TrimSpace(layout)), dashboardLayouts...)
+		}
+	}
+	return out, f.Empty()
+}
 
 // hexColor is a 6-digit CSS hex colour. Shorthand (#abc) and named colours are
 // refused: the theme is injected into CSS custom properties, and one canonical
@@ -165,11 +238,13 @@ func (s *Server) handlePutBranding(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if body.DashboardPrefs != nil {
-		raw, err := json.Marshal(body.DashboardPrefs)
-		if err != nil {
-			f.Add("dashboard_prefs", "must be a JSON object")
-		} else {
-			params.DashboardPrefs = raw
+		if prefs, ok := validateDashboardPrefs(&f, body.DashboardPrefs); ok {
+			raw, err := json.Marshal(prefs)
+			if err != nil {
+				f.Add("dashboard_prefs", "must be a JSON object")
+			} else {
+				params.DashboardPrefs = raw
+			}
 		}
 	}
 	if body.DocumentFooterText != nil {

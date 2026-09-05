@@ -348,9 +348,17 @@ export interface LinkRequestInput {
   accepted_terms: true;
 }
 
+/** `GET /public/orgs/{slug}/branding` — the same branding, without a unit. */
+export interface OrgBranding extends PublicBranding {
+  org: { id: string; name: string; slug: string };
+}
+
 export const publicApi = {
   unit: (unitCode: string, signal?: AbortSignal) =>
     api.get<PublicUnit>(`/public/units/${encodeURIComponent(unitCode)}`, { signal }),
+
+  branding: (slug: string, signal?: AbortSignal) =>
+    api.get<OrgBranding>(`/public/orgs/${encodeURIComponent(slug)}/branding`, { signal }),
 };
 
 export const renterApi = {

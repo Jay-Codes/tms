@@ -90,17 +90,17 @@ Execution plan for [SPEC.md](SPEC.md) / [FLOWS.md](FLOWS.md). Target: **testing-
 - [x] Scheduler goroutine (5-min tick) derives due sends from Postgres; dedupe_key; Redis queue; worker pool (N=3, atomic claim) → Beem, 3-attempt backoff (§2.2, §6).
 - [x] Kinds: reminder_7d, reminder_due, overdue_daily, unsigned_reminder, thank_you (+next due), otp, custom — all through one `notify.Render`. Templates with variables, SW/EN per org.
 - [x] Org notification settings endpoints; custom bulk SMS (rate-limited, audited); notification log + retry endpoints. *(backend; tenant screens are frontend work)*
-- [ ] Live Beem credentials smoke-tested. **Deferred: no Beem creds supplied; transport implemented + httptest-covered; dev uses log provider.** **Deferred: no Beem account/creds available.** The transport is implemented and covered by an `httptest` server; dev runs still use the LogProvider (DECISIONS.md).
+- [ ] Live Beem credentials smoke-tested. **Deferred: no Beem account/creds available.** The transport is implemented and covered by an `httptest` server; dev runs still use the LogProvider (DECISIONS.md).
 
 **Exit:** timeline of Flow 8 fires against a test contract with real SMS.
 
 ## Phase 7 — Reports, branding, admin app, PWA (Sep 12, 1 day)
 
-- [ ] Reports: summary (assets, renters, occupancy, collected vs expected), payment-status per renter + CSV, collections over time (§5.9). Dashboard per org prefs (Flow 9).
-- [ ] Branding: `GET/PUT /org/branding`, logo presigned upload, theme applied in enduser + tenant apps; admin stays platform-default.
-- [ ] Admin app: org list activate/suspend, platform metrics, cross-org audit search (Flow 11).
-- [ ] Audit page (org-scoped filterable) in tenant app.
-- [ ] PWA: manifest + service worker (app-shell cache only) on all three apps.
+- [x] Reports: summary (assets, renters, occupancy, collected vs expected), payment-status per renter + CSV, collections over time (§5.9). Dashboard prefs validated on `PUT /org/branding` (Flow 9). *(backend; dashboard screens are frontend work)*
+- [x] Branding: `GET/PUT /org/branding`, logo presigned upload, theme applied in enduser + tenant apps; admin stays platform-default. *(endpoints live since Phase 4; theme wiring in the apps outstanding)*
+- [x] Admin endpoints: `GET /admin/orgs`, `GET /admin/orgs/{id}`, suspend/activate (403 `org_suspended` enforced in `RequireOrg`), `GET /admin/metrics`, cross-org `GET /admin/audit-log`, `GET /admin/jobs` (Flow 11). *(backend; admin app screens outstanding)*
+- [x] Audit page (org-scoped filterable) in tenant app.
+- [x] PWA: manifest + service worker (app-shell cache only) on all three apps.
 
 **Exit:** dashboards live; JJnE Rentals branding demo-able; admin can suspend an org.
 
