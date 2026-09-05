@@ -1,13 +1,18 @@
 package httpserver_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"tms/backend/internal/config"
+	"tms/backend/internal/httpserver"
 	"tms/backend/internal/platform"
 	"tms/backend/internal/testutil"
 )
@@ -548,4 +553,245 @@ func TestScheduleAndPaymentFilters(t *testing.T) {
 	}
 	fix.owner.do(http.MethodGet, "/schedules?status=nonsense", nil).
 		mustStatus(t, http.StatusBadRequest, "bad status filter")
+}
+
+// ----------------------------------------------------------- concurrency --
+
+// postConcurrently fires the same request from n goroutines at once. It takes a
+// snapshot of the client's cookies rather than going through do(), which writes
+// back to the cookie jar and so cannot be shared between goroutines.
+func (c *client) postConcurrently(t *testing.T, n int, path string, body any) []response {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+	jar := make([]*http.Cookie, 0, len(c.cookies))
+	for _, ck := range c.cookies {
+		jar = append(jar, ck)
+	}
+
+	out := make([]response, n)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range out {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodPost, httpserver.APIPrefix+path, bytes.NewReader(raw))
+			req.Header.Set("Content-Type", "application/json")
+			for _, ck := range jar {
+				req.AddCookie(ck)
+			}
+			rec := httptest.NewRecorder()
+			<-start
+			c.h.srv.Handler().ServeHTTP(rec, req)
+			r := response{Code: rec.Code, Raw: rec.Body.String()}
+			if len(r.Raw) > 0 {
+				_ = json.Unmarshal([]byte(r.Raw), &r.Body)
+			}
+			out[i] = r
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	return out
+}
+
+// TestConcurrentRecordingCannotDoubleSettleASchedule is the money-integrity
+// case behind the `FOR UPDATE` on the contract's schedules (API.md Phase 5):
+// two clerks keying the same instalment at the same moment must not both
+// allocate against the same outstanding balance.
+func TestConcurrentRecordingCannotDoubleSettleASchedule(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newPaymentFixture(t, "Race", "0715000250", "+255715000251")
+
+	results := fix.owner.postConcurrently(t, 2, "/payments", map[string]any{
+		"contract_id": fix.contractID, "schedule_id": fix.scheduleIDs[0],
+		"amount": fix.amounts[0], "method": "cash",
+	})
+	created, refused := 0, 0
+	for _, r := range results {
+		switch r.Code {
+		case http.StatusCreated:
+			created++
+		case http.StatusConflict:
+			refused++
+			if got, _ := r.Body["type"].(string); got != "schedule_paid" {
+				t.Errorf("the losing request answered %q, want schedule_paid", got)
+			}
+		default:
+			t.Fatalf("unexpected status %d — %s", r.Code, r.Raw)
+		}
+	}
+	if created != 1 || refused != 1 {
+		t.Fatalf("two clerks on one instalment: %d recorded, %d refused, want 1 and 1", created, refused)
+	}
+
+	// The schedule holds exactly what it is owed, and the allocations add up to
+	// the one payment that was accepted.
+	var paid, amount, allocated, payments int64
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT s.paid_amount, s.amount,
+		        coalesce((SELECT sum(a.amount) FROM payment_allocations a WHERE a.schedule_id = s.id), 0),
+		        (SELECT count(*) FROM payments p WHERE p.contract_id = s.contract_id)
+		 FROM payment_schedules s WHERE s.id = $1`, fix.scheduleIDs[0],
+	).Scan(&paid, &amount, &allocated, &payments); err != nil {
+		t.Fatalf("read schedule: %v", err)
+	}
+	if paid != amount {
+		t.Errorf("paid_amount = %d, want exactly the instalment %d", paid, amount)
+	}
+	if allocated != amount {
+		t.Errorf("allocations sum to %d, want %d", allocated, amount)
+	}
+	if payments != 1 {
+		t.Errorf("%d payment rows written, want 1", payments)
+	}
+}
+
+// ------------------------------------------------------------ validation --
+
+// TestPaymentValidation pins the field bounds of API.md Phase 5. Every one of
+// these is a 400 before anything is read, let alone written.
+func TestPaymentValidation(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newPaymentFixture(t, "Valid", "0715000260", "+255715000261")
+
+	base := func(over map[string]any) map[string]any {
+		body := map[string]any{
+			"contract_id": fix.contractID, "amount": int64(10_000), "method": "cash",
+		}
+		for k, v := range over {
+			body[k] = v
+		}
+		return body
+	}
+	cases := []struct {
+		name string
+		body map[string]any
+	}{
+		{"amount of zero", base(map[string]any{"amount": 0})},
+		{"a negative amount", base(map[string]any{"amount": -1})},
+		{"an amount past the money ceiling", base(map[string]any{"amount": int64(1_000_000_000_000)})},
+		{"a method outside the enum", base(map[string]any{"method": "gateway"})},
+		{"no method at all", base(map[string]any{"method": ""})},
+		{"paid_at two days in the future", base(map[string]any{
+			"paid_at": time.Now().UTC().Add(48 * time.Hour).Format(time.RFC3339)})},
+		{"paid_at that is not a timestamp", base(map[string]any{"paid_at": "yesterday"})},
+		{"a reference over 80 characters", base(map[string]any{"reference": strings.Repeat("R", 81)})},
+		{"a note over 500 characters", base(map[string]any{"note": strings.Repeat("n", 501)})},
+		{"a contract id that is not an id", base(map[string]any{"contract_id": "not-a-uuid"})},
+		{"an unknown field", base(map[string]any{"amount_paid": 10_000})},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fix.owner.recordPayment(tc.body).mustStatus(t, http.StatusBadRequest, tc.name)
+		})
+	}
+	// paid_at a day ahead is inside the tolerance and is accepted.
+	fix.owner.recordPayment(base(map[string]any{
+		"paid_at": time.Now().UTC().Add(2 * time.Hour).Format(time.RFC3339),
+	})).mustStatus(t, http.StatusCreated, "paid_at just ahead of now")
+
+	// The reversal reason is required and bounded.
+	id := listOf(t, fix.owner.do(http.MethodGet, "/payments", nil).
+		mustStatus(t, http.StatusOK, "payments"))[0]["id"].(string)
+	fix.owner.do(http.MethodPost, "/payments/"+id+"/reverse", map[string]any{"reason": ""}).
+		mustStatus(t, http.StatusBadRequest, "empty reason")
+	fix.owner.do(http.MethodPost, "/payments/"+id+"/reverse",
+		map[string]any{"reason": strings.Repeat("x", 201)}).
+		mustStatus(t, http.StatusBadRequest, "reason over 200 characters")
+}
+
+// ------------------------------------------------- audit, SMS, days late --
+
+// TestRolloverThanksTheRenterOnce: an overpayment walks several schedules but
+// is still one payment, so it is one SMS, keyed to the payment id.
+func TestRolloverThanksTheRenterOnce(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newPaymentFixture(t, "Once", "0715000270", "+255715000271")
+
+	recorded := fix.owner.recordPayment(map[string]any{
+		"contract_id": fix.contractID, "amount": fix.amounts[0] + 150_000,
+		"method": "cash", "allow_overpay_rollover": true,
+	}).mustStatus(t, http.StatusCreated, "record with rollover")
+	paymentID := recorded.str(t, "payment", "id")
+
+	notes := ofKind(h.notifications(t), "thank_you")
+	if len(notes) != 1 {
+		t.Fatalf("thank_you messages = %d, want exactly one per payment", len(notes))
+	}
+	if notes[0].DedupeKey != "thank_you:"+paymentID {
+		t.Errorf("dedupe key = %q, want thank_you:%s", notes[0].DedupeKey, paymentID)
+	}
+	// A second payment is a second message: the key is per payment, not per day.
+	fix.owner.recordPayment(map[string]any{
+		"contract_id": fix.contractID, "amount": int64(10_000), "method": "cash",
+	}).mustStatus(t, http.StatusCreated, "second payment")
+	if got := len(ofKind(h.notifications(t), "thank_you")); got != 2 {
+		t.Errorf("thank_you messages after a second payment = %d, want 2", got)
+	}
+}
+
+// TestPaymentAuditCarriesTheAllocationsAndTheReason: the audit trail must be
+// able to explain where the money went and why it was taken back (SPEC §8).
+func TestPaymentAuditCarriesTheAllocationsAndTheReason(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newPaymentFixture(t, "Audit", "0715000280", "+255715000281")
+
+	recorded := fix.owner.recordPayment(map[string]any{
+		"contract_id": fix.contractID, "amount": fix.amounts[0] + 150_000,
+		"method": "cash", "allow_overpay_rollover": true, "note": "counted twice at the desk",
+	}).mustStatus(t, http.StatusCreated, "record")
+
+	rows := h.auditPayloads(t, "payment.record")
+	if len(rows) != 1 {
+		t.Fatalf("payment.record audit rows = %d, want 1", len(rows))
+	}
+	for _, want := range []string{`"applied"`, fix.scheduleIDs[0], fix.scheduleIDs[1], `"rollover"`} {
+		if !strings.Contains(rows[0], want) {
+			t.Errorf("payment.record audit does not carry %s: %s", want, rows[0])
+		}
+	}
+	// The note is the landlord's free text about a tenant; the trail records
+	// the movement of money, not that.
+	if strings.Contains(rows[0], "counted twice at the desk") {
+		t.Error("payment.record audit copies the free-text note")
+	}
+
+	fix.owner.do(http.MethodPost, "/payments/"+recorded.str(t, "payment", "id")+"/reverse",
+		map[string]any{"reason": "cheque bounced"}).mustStatus(t, http.StatusOK, "reverse")
+	rev := h.auditPayloads(t, "payment.reverse")
+	if len(rev) != 1 {
+		t.Fatalf("payment.reverse audit rows = %d, want 1", len(rev))
+	}
+	for _, want := range []string{"cheque bounced", `"unapplied"`, fix.scheduleIDs[1]} {
+		if !strings.Contains(rev[0], want) {
+			t.Errorf("payment.reverse audit does not carry %s: %s", want, rev[0])
+		}
+	}
+}
+
+// TestRenterScheduleCarriesDaysOverdue: the renter's own screen reports how
+// late an instalment is, the same field the landlord's board carries (API.md).
+func TestRenterScheduleCarriesDaysOverdue(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newPaymentFixture(t, "Late", "0715000290", "+255715000291")
+	fix.owner.setGraceDays(t, 0)
+	h.dueInThePast(t, fix.scheduleIDs[0], 9)
+
+	mine := fix.renter.do(http.MethodGet, "/me/schedules", nil).
+		mustStatus(t, http.StatusOK, "my schedules")
+	rows := listOf(t, mine)
+	if got := mustFloat(t, rows[0], "days_overdue"); got != 9 {
+		t.Errorf("days_overdue on the renter's screen = %v, want 9", got)
+	}
+	// A row that is not yet due is never negative days late.
+	if got := mustFloat(t, rows[1], "days_overdue"); got != 0 {
+		t.Errorf("days_overdue on a future instalment = %v, want 0", got)
+	}
+	if got := mustFloat(t, mine.Body["next_due"].(map[string]any), "days_overdue"); got != 9 {
+		t.Errorf("next_due.days_overdue = %v, want 9", got)
+	}
 }

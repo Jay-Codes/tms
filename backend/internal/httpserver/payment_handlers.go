@@ -59,9 +59,7 @@ func (s *Server) handleRecordPayment(w http.ResponseWriter, r *http.Request) {
 	f := validate.Fields{}
 	contractID := uuidField(f, "contract_id", body.ContractID, true)
 	scheduleID := uuidField(f, "schedule_id", body.ScheduleID, false)
-	if body.Amount <= 0 || body.Amount > paymentAmountMax {
-		f.Add("amount", "must be a whole number of TZS between 1 and 999,999,999,999")
-	}
+	checkAmount(f, "amount", body.Amount)
 	method := strings.TrimSpace(body.Method)
 	if !paymentMethods[method] {
 		f.Add("method", "must be cash, bank_transfer or mobile_money_manual")

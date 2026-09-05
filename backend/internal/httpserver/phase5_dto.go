@@ -32,8 +32,9 @@ const (
 	reversalReasonMax      = 200
 	bankInstructionsMax    = 300
 	bankFieldMax           = 120
-	paymentAmountMax       = 999_999_999_999
 	paidAtFutureToleranceH = 24 // paid_at may not be more than a day ahead
+	// A payment's amount uses the shared money bounds (checkAmount): 1 …
+	// 999,999,999,999 TZS, the same range a rent or a price plan accepts.
 )
 
 // scheduleStatuses are the values `GET /schedules?status=` accepts.
