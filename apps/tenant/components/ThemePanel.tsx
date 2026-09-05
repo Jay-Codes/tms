@@ -30,8 +30,10 @@ import {
   normalizeHex,
   themeContrastReport,
   themeStyle,
+  useT,
   validateTheme,
   type FontId,
+  type Translator,
   type ResolvedTheme,
   type ThemePreset,
   type ThemeTokens,
@@ -51,15 +53,53 @@ export interface ThemeDraft {
   customised: boolean;
 }
 
-const TOKEN_FIELDS: Array<{ key: keyof ThemeTokens; label: string; hint: string }> = [
-  { key: 'paper', label: 'Paper', hint: 'The page behind everything.' },
-  { key: 'surface', label: 'Sheet', hint: 'Dialogs, panels, inputs.' },
-  { key: 'ink', label: 'Ink', hint: 'Body text and strong rules.' },
-  { key: 'ink_muted', label: 'Soft ink', hint: 'Labels, hints, secondary text.' },
-  { key: 'rule', label: 'Rule', hint: 'The ledger lines and borders.' },
-  { key: 'primary', label: 'Primary', hint: 'Buttons and the main action.' },
-  { key: 'accent', label: 'Accent', hint: 'Link underlines and the active nav mark.' },
+const TOKEN_FIELDS: Array<{ key: keyof ThemeTokens; labelKey: string; hintKey: string }> = [
+  { key: 'paper', labelKey: 'theme.token.paper', hintKey: 'theme.token.paper.hint' },
+  { key: 'surface', labelKey: 'theme.token.surface', hintKey: 'theme.token.surface.hint' },
+  { key: 'ink', labelKey: 'theme.token.ink', hintKey: 'theme.token.ink.hint' },
+  { key: 'ink_muted', labelKey: 'theme.token.ink_muted', hintKey: 'theme.token.ink_muted.hint' },
+  { key: 'rule', labelKey: 'theme.token.rule', hintKey: 'theme.token.rule.hint' },
+  { key: 'primary', labelKey: 'theme.token.primary', hintKey: 'theme.token.primary.hint' },
+  { key: 'accent', labelKey: 'theme.token.accent', hintKey: 'theme.token.accent.hint' },
 ];
+
+/**
+ * The platform's own names for its presets and contrast pairs arrive in English
+ * (from `@tms/ui` or `GET /themes/presets`). Everything the platform ships is
+ * keyed here; anything unrecognised — a preset added server-side before this
+ * build knew about it — prints the name it came with.
+ */
+const PRESET_NAME_KEYS: Record<string, string> = {
+  ledger: 'theme.preset.ledger',
+  night_ledger: 'theme.preset.night_ledger',
+  warm_paper: 'theme.preset.warm_paper',
+  cool_slate: 'theme.preset.cool_slate',
+  forest: 'theme.preset.forest',
+  ocean: 'theme.preset.ocean',
+  high_contrast: 'theme.preset.high_contrast',
+  minimal_white: 'theme.preset.minimal_white',
+};
+
+const CONTRAST_PAIR_KEYS: Record<string, string> = {
+  'ink/paper': 'theme.contrast.pair.ink_paper',
+  'ink/surface': 'theme.contrast.pair.ink_surface',
+  'ink_muted/paper': 'theme.contrast.pair.ink_muted_paper',
+  'ink_muted/surface': 'theme.contrast.pair.ink_muted_surface',
+  'on_primary/primary': 'theme.contrast.pair.on_primary_primary',
+  'primary/paper': 'theme.contrast.pair.primary_paper',
+  'rule/paper': 'theme.contrast.pair.rule_paper',
+};
+
+function presetName(t: Translator, preset: { id: string; name: string } | null | undefined): string {
+  if (!preset) return t('theme.preset.ledger');
+  const key = PRESET_NAME_KEYS[preset.id];
+  return key ? t(key) : preset.name;
+}
+
+function pairLabel(t: Translator, pair: string, fallback: string): string {
+  const key = CONTRAST_PAIR_KEYS[pair];
+  return key ? t(key) : fallback;
+}
 
 /** A dark preset is one whose paper is dark; presets carry the flag themselves. */
 export const isDarkPaper = (paper: string) => luminance(paper) < 0.5;
@@ -119,6 +159,7 @@ export function ThemeMiniature({
   dark?: boolean;
   compact?: boolean;
 }) {
+  const t = useT();
   return (
     <div
       aria-hidden
@@ -137,8 +178,8 @@ export function ThemeMiniature({
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--ink-soft)' }}>
-        <span>Rent book</span>
-        <span>Aug</span>
+        <span>{t('theme.sample.rent_book')}</span>
+        <span>{t('theme.sample.month')}</span>
       </div>
       <div style={{ borderTop: '1px solid var(--ink)' }} />
       <div
@@ -152,13 +193,13 @@ export function ThemeMiniature({
           paddingBottom: 4,
         }}
       >
-        <span>Unit A1</span>
+        <span>{t('theme.sample.unit_a1')}</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span className="num" style={{ fontSize: 12 }}>
             450,000
           </span>
           <span className="stamp stamp-paid" style={{ fontSize: 8 }}>
-            Paid
+            {t('theme.sample.paid')}
           </span>
         </span>
       </div>
@@ -173,13 +214,13 @@ export function ThemeMiniature({
           paddingBottom: 4,
         }}
       >
-        <span>Unit A2</span>
+        <span>{t('theme.sample.unit_a2')}</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span className="num" style={{ fontSize: 12 }}>
             300,000
           </span>
           <span className="pencil" style={{ fontSize: 10 }}>
-            Due
+            {t('theme.sample.due')}
           </span>
         </span>
       </div>
@@ -194,7 +235,7 @@ export function ThemeMiniature({
             padding: '4px 10px',
           }}
         >
-          Record
+          {t('theme.sample.record')}
         </span>
         <span
           style={{
@@ -205,7 +246,7 @@ export function ThemeMiniature({
             color: 'var(--ink)',
           }}
         >
-          Receipt
+          {t('theme.sample.receipt')}
         </span>
       </div>
     </div>
@@ -223,6 +264,7 @@ export function ThemePanel({
   onChange: (next: ThemeDraft) => void;
   serverFailures?: ThemeContrastFailure[];
 }) {
+  const t = useT();
   const [presets, setPresets] = useState<ThemePreset[]>(PRESETS);
   /* Refs so the one-shot presets fetch never re-runs when the draft changes. */
   const draftRef = useRef(draft);
@@ -298,11 +340,8 @@ export function ThemePanel({
     <div style={{ display: 'grid', gap: 'var(--sp-5)' }}>
       {/* ------------------------------ gallery ------------------------------ */}
       <div className="field">
-        <label id="theme_gallery_label">Theme</label>
-        <span className="hint">
-          Eight ready-made sets, each checked for contrast. Picking one previews it on this page
-          straight away; nothing is kept until you save.
-        </span>
+        <label id="theme_gallery_label">{t('theme.gallery.label')}</label>
+        <span className="hint">{t('theme.gallery.hint')}</span>
         <div
           role="radiogroup"
           aria-labelledby="theme_gallery_label"
@@ -344,7 +383,7 @@ export function ThemePanel({
                     fontWeight: selected ? 600 : 500,
                   }}
                 >
-                  {p.name}
+                  {presetName(t, p)}
                   {selected ? <Icon icon="solar:check-circle-bold" width={18} /> : null}
                 </span>
               </button>
@@ -353,7 +392,9 @@ export function ThemePanel({
         </div>
         {draft.customised ? (
           <span className="hint" style={{ marginTop: 'var(--sp-2)' }}>
-            Customised{basePreset ? ` from ${basePreset.name}` : ''}. Pick a preset to start over.
+            {basePreset
+              ? t('theme.customised_from', { preset: presetName(t, basePreset) })
+              : t('theme.customised')}
           </span>
         ) : null}
       </div>
@@ -380,7 +421,7 @@ export function ThemePanel({
           }}
         >
           <Icon icon={advanced ? 'solar:alt-arrow-down-linear' : 'solar:alt-arrow-right-linear'} width={20} />
-          Advanced — set each colour yourself
+          {t('theme.advanced')}
         </button>
 
         {advanced ? (
@@ -397,10 +438,10 @@ export function ThemePanel({
                 const valid = normalizeHex(raw) !== null;
                 return (
                   <div className={valid ? 'field' : 'field invalid'} key={f.key}>
-                    <label htmlFor={`token_${f.key}`}>{f.label}</label>
+                    <label htmlFor={`token_${f.key}`}>{t(f.labelKey)}</label>
                     <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center' }}>
                       <input
-                        aria-label={`${f.label} colour picker`}
+                        aria-label={t('theme.token.picker_aria', { label: t(f.labelKey) })}
                         type="color"
                         value={draft.tokens[f.key]}
                         onChange={(e) => setToken(f.key, e.target.value)}
@@ -422,14 +463,14 @@ export function ThemePanel({
                         onChange={(e) => setToken(f.key, e.target.value.trim())}
                       />
                     </div>
-                    <span className="hint">{f.hint}</span>
-                    {valid ? null : <span className="error">Use a 6-digit hex colour.</span>}
+                    <span className="hint">{t(f.hintKey)}</span>
+                    {valid ? null : <span className="error">{t('theme.token.bad_hex')}</span>}
                   </div>
                 );
               })}
 
               <div className="field">
-                <label htmlFor="font_id">Typeface</label>
+                <label htmlFor="font_id">{t('theme.font.label')}</label>
                 <select
                   id="font_id"
                   className="input"
@@ -442,18 +483,21 @@ export function ThemePanel({
                     </option>
                   ))}
                 </select>
-                <span className="hint">Four faces are whitelisted so every screen stays legible offline.</span>
+                <span className="hint">{t('theme.font.hint')}</span>
               </div>
             </div>
 
             {/* Contrast badges — the same pairs the API re-checks on save. */}
             <div style={{ display: 'grid', gap: 'var(--sp-2)' }}>
-              <strong style={{ fontSize: 'var(--text-sm)' }}>Contrast</strong>
+              <strong style={{ fontSize: 'var(--text-sm)' }}>{t('theme.contrast.heading')}</strong>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
                 {report.map((r) => (
                   <span
                     key={r.pair}
-                    title={`${r.label} — needs ${r.minimum}:1`}
+                    title={t('theme.contrast.badge_title', {
+                      label: pairLabel(t, r.pair, r.label),
+                      minimum: r.minimum,
+                    })}
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
@@ -470,21 +514,20 @@ export function ThemePanel({
                       width={14}
                     />
                     {r.pair} {r.ratio.toFixed(2)}:1
-                    {r.ok ? '' : ` (needs ${r.minimum})`}
+                    {r.ok ? '' : ` ${t('theme.contrast.needs', { minimum: r.minimum })}`}
                   </span>
                 ))}
               </div>
               {failing.length ? (
                 <span role="alert" className="error">
-                  {failing.length === 1 ? 'One pair is' : `${failing.length} pairs are`} too low to
-                  read. Saving is blocked until they pass.
+                  {t.n('theme.contrast.failing', failing.length)}
                 </span>
               ) : null}
             </div>
 
             <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
               <button type="button" className="btn btn-secondary" onClick={resetToPreset}>
-                Reset to {basePreset?.name ?? 'Ledger'}
+                {t('theme.reset_to', { preset: presetName(t, basePreset) })}
               </button>
             </div>
           </div>
@@ -494,11 +537,17 @@ export function ThemePanel({
       {/* The server's own verdict, when it disagrees with ours. */}
       {serverFailures?.length ? (
         <div role="alert" className="error">
-          The server rejected this theme:{' '}
-          {serverFailures
-            .map((f) => `${f.pair} is ${Number(f.ratio).toFixed(2)}:1, needs ${f.minimum}:1`)
-            .join('; ')}
-          .
+          {t('theme.server_rejected', {
+            failures: serverFailures
+              .map((f) =>
+                t('theme.server_rejected.pair', {
+                  pair: f.pair,
+                  ratio: Number(f.ratio).toFixed(2),
+                  minimum: f.minimum,
+                }),
+              )
+              .join('; '),
+          })}
         </div>
       ) : null}
     </div>

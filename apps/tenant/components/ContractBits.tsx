@@ -15,18 +15,19 @@ import {
   type ScheduleRow,
 } from '../lib/api';
 import { Amount, fmtDate } from '../lib/format';
-import { TableScroll } from '@tms/ui';
+import { TableScroll, useT } from '@tms/ui';
 
 export function ContractStatusStamp({ status }: { status: ContractStatus | string | null | undefined }) {
-  if (status === 'active') return <span className="stamp stamp-paid">Active</span>;
-  if (status === 'terminated') return <span className="stamp stamp-overdue">Terminated</span>;
-  if (status === 'expiring') return <span className="pencil">expiring</span>;
-  if (status === 'pending_signature') return <span className="pencil">awaiting signature</span>;
-  if (status === 'draft') return <span className="pencil">draft</span>;
+  const t = useT();
+  if (status === 'active') return <span className="stamp stamp-paid">{t('contracts.status.active')}</span>;
+  if (status === 'terminated') return <span className="stamp stamp-overdue">{t('contracts.status.terminated')}</span>;
+  if (status === 'expiring') return <span className="pencil">{t('contracts.status.expiring')}</span>;
+  if (status === 'pending_signature') return <span className="pencil">{t('contracts.status.pending_signature')}</span>;
+  if (status === 'draft') return <span className="pencil">{t('contracts.status.draft')}</span>;
   if (status === 'ended') {
     return (
       <span className="stamp" style={{ color: 'var(--ink-soft)', borderColor: 'var(--ink-soft)' }}>
-        Ended
+        {t('contracts.status.ended')}
       </span>
     );
   }
@@ -38,11 +39,12 @@ export function ContractStatusStamp({ status }: { status: ContractStatus | strin
 }
 
 export function ScheduleStatusStamp({ status }: { status: ScheduleRow['status'] }) {
-  if (status === 'paid') return <span className="stamp stamp-paid">Paid</span>;
-  if (status === 'overdue') return <span className="stamp stamp-overdue">Overdue</span>;
-  if (status === 'partial') return <span className="pencil">part paid</span>;
-  if (status === 'waived') return <span className="pencil">waived</span>;
-  return <span className="pencil">pending</span>;
+  const t = useT();
+  if (status === 'paid') return <span className="stamp stamp-paid">{t('contracts.schedule.status.paid')}</span>;
+  if (status === 'overdue') return <span className="stamp stamp-overdue">{t('contracts.schedule.status.overdue')}</span>;
+  if (status === 'partial') return <span className="pencil">{t('contracts.schedule.status.partial')}</span>;
+  if (status === 'waived') return <span className="pencil">{t('contracts.schedule.status.waived')}</span>;
+  return <span className="pencil">{t('contracts.schedule.status.pending')}</span>;
 }
 
 /** True once the renter's signature row exists — the gate on Activate. */
@@ -91,7 +93,7 @@ export function useReadyToCountersign(): number | null {
 export function ContractsTable({
   items,
   loading,
-  emptyText = 'No contracts yet.',
+  emptyText,
   showRenter = true,
 }: {
   items: Contract[] | null;
@@ -99,25 +101,26 @@ export function ContractsTable({
   emptyText?: string;
   showRenter?: boolean;
 }) {
+  const t = useT();
   const cols = showRenter ? 6 : 5;
   return (
-    <TableScroll label="Contracts">
+    <TableScroll label={t('contracts.table.label')}>
     <table className="ledger">
       <thead>
         <tr>
-          <th>Unit</th>
-          {showRenter ? <th>Renter</th> : null}
-          <th>Status</th>
-          <th>Term</th>
-          <th className="num">Rent</th>
-          <th className="num">Next due</th>
+          <th>{t('common.unit')}</th>
+          {showRenter ? <th>{t('common.renter')}</th> : null}
+          <th>{t('common.status')}</th>
+          <th>{t('contracts.col.term')}</th>
+          <th className="num">{t('contracts.col.rent')}</th>
+          <th className="num">{t('contracts.col.next_due')}</th>
         </tr>
       </thead>
       <tbody>
         {items === null || loading ? (
           <tr>
             <td colSpan={cols} style={{ color: 'var(--ink-soft)' }}>
-              Loading…
+              {t('common.loading')}
             </td>
           </tr>
         ) : items.length === 0 ? (

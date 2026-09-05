@@ -18,7 +18,8 @@ import { NotificationsStep } from './steps/NotificationsStep';
 
 export interface WizardStep {
   id: string;
-  label: string;
+  /** i18n key for the step's name — resolved by the wizard, which has `t`. */
+  labelKey: string;
   /** Phase in which this step's body gets built. */
   phase: number;
   /** True once the body is a real, working screen. */
@@ -27,10 +28,10 @@ export interface WizardStep {
 }
 
 export const STEPS: WizardStep[] = [
-  { id: 'branding', label: 'Branding', phase: 4, built: true, Body: BrandingStep },
-  { id: 'property', label: 'First property', phase: 2, built: true, Body: FirstPropertyStep },
-  { id: 'periods', label: 'Payment periods', phase: 2, built: true, Body: PaymentPeriodsStep },
-  { id: 'units', label: 'Units', phase: 2, built: true, Body: UnitsStep },
-  { id: 'template', label: 'Contract template', phase: 4, built: true, Body: ContractTemplateStep },
-  { id: 'notifications', label: 'Notifications', phase: 6, built: true, Body: NotificationsStep },
+  { id: 'branding', labelKey: 'setup.step.branding', phase: 4, built: true, Body: BrandingStep },
+  { id: 'property', labelKey: 'setup.step.property', phase: 2, built: true, Body: FirstPropertyStep },
+  { id: 'periods', labelKey: 'setup.step.periods', phase: 2, built: true, Body: PaymentPeriodsStep },
+  { id: 'units', labelKey: 'setup.step.units', phase: 2, built: true, Body: UnitsStep },
+  { id: 'template', labelKey: 'setup.step.template', phase: 4, built: true, Body: ContractTemplateStep },
+  { id: 'notifications', labelKey: 'setup.step.notifications', phase: 6, built: true, Body: NotificationsStep },
 ];

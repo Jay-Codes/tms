@@ -6,6 +6,7 @@
  */
 
 import { useState } from 'react';
+import { useT } from '@tms/ui';
 import {
   ApiError,
   propertiesApi,
@@ -42,13 +43,18 @@ function PriceFields({
   error: ApiError | null;
   idPrefix: string;
 }) {
+  const t = useT();
   const preview = priceBody(amount, periodDays);
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: 'var(--sp-4)' }}>
       <Field
         id={`${idPrefix}_amount`}
-        label="Price (TZS)"
-        hint={preview ? `${fmtTZS(preview.amount)} / ${preview.period_days} days` : 'Whole shillings. Leave blank to set it later.'}
+        label={t('units.form.price_label')}
+        hint={
+          preview
+            ? t('units.form.price_preview', { amount: fmtTZS(preview.amount), days: preview.period_days })
+            : t('units.form.price_hint')
+        }
         error={error?.errors['price.amount'] ?? error?.errors.amount}
       >
         <input
@@ -65,7 +71,7 @@ function PriceFields({
       </Field>
       <Field
         id={`${idPrefix}_days`}
-        label="Per (days)"
+        label={t('units.per_days_label')}
         error={error?.errors['price.period_days'] ?? error?.errors.period_days}
       >
         <input
@@ -92,6 +98,7 @@ export function AddUnitForm({
   onAdded: (u: Unit) => void;
   onCancel?: () => void;
 }) {
+  const t = useT();
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [periodDays, setPeriodDays] = useState('30');
@@ -121,14 +128,19 @@ export function AddUnitForm({
   return (
     <form onSubmit={submit} style={{ display: 'grid', gap: 'var(--sp-4)' }} noValidate>
       <ProblemNote error={error} />
-      <Field id="unit_name" label="Unit name" hint='Your own name, e.g. "Room 1" or "House B".' error={error?.errors.name}>
+      <Field
+        id="unit_name"
+        label={t('units.name_label')}
+        hint={t('units.form.name_hint')}
+        error={error?.errors.name}
+      >
         <input
           id="unit_name"
           className="input"
           value={name}
           maxLength={60}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Room 1"
+          placeholder={t('units.form.name_ph')}
         />
       </Field>
       <PriceFields
@@ -142,11 +154,11 @@ export function AddUnitForm({
       <PeriodPicker periods={periods} value={allowed} onChange={setAllowed} idPrefix="add" />
       <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
         <button type="submit" className="btn btn-primary" disabled={busy || !name.trim()}>
-          {busy ? 'Adding…' : 'Add unit'}
+          {busy ? t('units.adding') : t('units.add')}
         </button>
         {onCancel ? (
           <button type="button" className="btn btn-quiet" onClick={onCancel}>
-            Cancel
+            {t('common.cancel')}
           </button>
         ) : null}
       </div>
@@ -163,6 +175,7 @@ export function AddManyUnitsForm({
   onAdded: (units: Unit[]) => void;
   onCancel?: () => void;
 }) {
+  const t = useT();
   const [text, setText] = useState('');
   const [amount, setAmount] = useState('');
   const [periodDays, setPeriodDays] = useState('30');
@@ -197,8 +210,8 @@ export function AddManyUnitsForm({
       <ProblemNote error={error} />
       <Field
         id="bulk_names"
-        label="Unit names"
-        hint="One per line (commas work too). Up to 200 at a time."
+        label={t('units.form.names_label')}
+        hint={t('units.form.names_hint')}
         error={error?.errors.names}
       >
         <textarea
@@ -207,7 +220,7 @@ export function AddManyUnitsForm({
           rows={8}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder={'Room 1\nRoom 2\nRoom 3'}
+          placeholder={[1, 2, 3].map((n) => t('units.form.names_ph_line', { n })).join('\n')}
           style={{ height: 'auto', paddingTop: 'var(--sp-2)', paddingBottom: 'var(--sp-2)' }}
         />
       </Field>
@@ -220,15 +233,15 @@ export function AddManyUnitsForm({
         idPrefix="bulk"
       />
       <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-        {names.length} unit{names.length === 1 ? '' : 's'} will be created, each with its own QR code.
+        {t.n('units.bulk_create_note', names.length)}
       </p>
       <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
         <button type="submit" className="btn btn-primary" disabled={busy || names.length === 0}>
-          {busy ? 'Adding…' : `Add ${names.length || ''} units`.trim()}
+          {busy ? t('units.adding') : names.length ? t.n('units.add_many_n', names.length) : t('units.add_many')}
         </button>
         {onCancel ? (
           <button type="button" className="btn btn-quiet" onClick={onCancel}>
-            Cancel
+            {t('common.cancel')}
           </button>
         ) : null}
       </div>

@@ -16,7 +16,7 @@
  */
 
 import { Icon } from '@iconify/react';
-import { validateTheme } from '@tms/ui';
+import { useT, validateTheme } from '@tms/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Field, Note, ProblemNote } from './FormBits';
 import {
@@ -49,6 +49,7 @@ function AssetField({
   url: string | null;
   onChanged: (b: OrgBranding) => void;
 }) {
+  const t = useT();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -56,11 +57,11 @@ function AssetField({
   const pick = async (file: File) => {
     setError(null);
     if (!['image/png', 'image/jpeg'].includes(file.type)) {
-      setError(new ApiError(0, { detail: 'Choose a PNG or JPEG image.' }));
+      setError(new ApiError(0, { detail: t('branding.upload.wrong_type') }));
       return;
     }
     if (file.size > MAX_BYTES) {
-      setError(new ApiError(0, { detail: 'That image is larger than 2 MB.' }));
+      setError(new ApiError(0, { detail: t('branding.upload.too_large') }));
       return;
     }
     setBusy(true);
@@ -106,7 +107,7 @@ function AssetField({
         >
           {url ? (
             /* eslint-disable-next-line @next/next/no-img-element -- presigned MinIO URL */
-            <img src={url} alt={`${label} preview`} style={{ maxWidth: '100%', maxHeight: '100%' }} />
+            <img src={url} alt={t('branding.asset.preview_alt', { label })} style={{ maxWidth: '100%', maxHeight: '100%' }} />
           ) : (
             <Icon icon="solar:gallery-linear" width={24} color="var(--ink-faint)" />
           )}
@@ -129,11 +130,12 @@ function AssetField({
             disabled={busy}
             onClick={() => inputRef.current?.click()}
           >
-            <Icon icon="solar:upload-linear" width={20} /> {busy ? 'Working…' : url ? 'Replace' : 'Upload'}
+            <Icon icon="solar:upload-linear" width={20} />{' '}
+            {busy ? t('branding.asset.working') : url ? t('branding.asset.replace') : t('branding.asset.upload')}
           </button>
           {url ? (
             <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => void remove()}>
-              Remove
+              {t('common.remove')}
             </button>
           ) : null}
         </div>
@@ -149,6 +151,7 @@ function AssetField({
 }
 
 export function BrandingForm({ onSaved }: { onSaved?: (b: OrgBranding) => void }) {
+  const t = useT();
   const [branding, setBranding] = useState<OrgBranding | null>(null);
   const [displayName, setDisplayName] = useState('');
   const [theme, setTheme] = useState<ThemeDraft>(LEDGER_DRAFT);
@@ -222,7 +225,7 @@ export function BrandingForm({ onSaved }: { onSaved?: (b: OrgBranding) => void }
   }
 
   if (!branding) {
-    return <p style={{ color: 'var(--ink-soft)' }}>Loading…</p>;
+    return <p style={{ color: 'var(--ink-soft)' }}>{t('common.loading')}</p>;
   }
 
   const contrastFailures = validateTheme(theme.tokens);
@@ -230,12 +233,12 @@ export function BrandingForm({ onSaved }: { onSaved?: (b: OrgBranding) => void }
   return (
     <form onSubmit={submit} style={{ display: 'grid', gap: 'var(--sp-5)', maxWidth: 720 }} noValidate>
       <ProblemNote error={error} />
-      {saved ? <Note>Branding saved. The portal is already using it.</Note> : null}
+      {saved ? <Note>{t('branding.saved')}</Note> : null}
 
       <Field
         id="display_name"
-        label="Display name"
-        hint="What renters see on the scan page and on contract documents."
+        label={t('branding.field.display_name')}
+        hint={t('branding.field.display_name.hint')}
         error={error?.errors.display_name}
       >
         <input
@@ -261,24 +264,24 @@ export function BrandingForm({ onSaved }: { onSaved?: (b: OrgBranding) => void }
 
       <AssetField
         asset="logo"
-        label="Logo"
-        hint="PNG or JPEG up to 2 MB. Shown on the renter's scan page and above contracts with no letterhead."
+        label={t('branding.field.logo')}
+        hint={t('branding.field.logo.hint')}
         url={branding.logo_url}
         onChanged={adopt}
       />
 
       <AssetField
         asset="letterhead"
-        label="Letterhead"
-        hint="A wide banner printed across the top of every contract document. PNG or JPEG up to 2 MB."
+        label={t('branding.field.letterhead')}
+        hint={t('branding.field.letterhead.hint')}
         url={branding.letterhead_url}
         onChanged={adopt}
       />
 
       <Field
         id="footer_text"
-        label="Document footer"
-        hint="Address, phone or signature line printed under every contract. Up to 500 characters."
+        label={t('branding.field.footer')}
+        hint={t('branding.field.footer.hint')}
         error={error?.errors.document_footer_text}
       >
         <textarea
@@ -296,13 +299,13 @@ export function BrandingForm({ onSaved }: { onSaved?: (b: OrgBranding) => void }
 
       <div>
         <button type="submit" className="btn btn-primary" disabled={busy || contrastFailures.length > 0}>
-          {busy ? 'Saving…' : 'Save branding'}
+          {busy ? t('common.saving') : t('branding.save')}
         </button>
         {contrastFailures.length ? (
           <p className="error" style={{ marginTop: 'var(--sp-2)' }}>
-            Fix the contrast on{' '}
-            {contrastFailures.map((f) => `${f.pair} (${f.ratio.toFixed(2)}:1)`).join(', ')} before
-            saving.
+            {t('branding.contrast.fix', {
+              pairs: contrastFailures.map((f) => `${f.pair} (${f.ratio.toFixed(2)}:1)`).join(', '),
+            })}
           </p>
         ) : null}
       </div>

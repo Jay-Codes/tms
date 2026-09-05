@@ -5,6 +5,7 @@
  * Empty selection = NULL = every active org period is offered (SPEC §4).
  */
 
+import { useT } from '@tms/ui';
 import type { PaymentPeriod } from '../lib/api';
 
 export function PeriodPicker({
@@ -19,6 +20,7 @@ export function PeriodPicker({
   onChange: (next: string[] | null) => void;
   idPrefix?: string;
 }) {
+  const t = useT();
   const selected = value ?? [];
   const all = selected.length === 0;
 
@@ -30,11 +32,11 @@ export function PeriodPicker({
   return (
     <div className="field">
       <span style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--ink-soft)' }}>
-        Payment periods offered
+        {t('period.offered_label')}
       </span>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-3)', margin: 'var(--sp-2) 0' }}>
         {periods.length === 0 ? (
-          <span className="pencil">No active periods. Add some in Settings first.</span>
+          <span className="pencil">{t('period.none_active')}</span>
         ) : (
           periods.map((p) => (
             <label
@@ -60,15 +62,13 @@ export function PeriodPicker({
                 onChange={() => toggle(p.id)}
                 style={{ width: 16, height: 16 }}
               />
-              {p.label} <span className="num">({p.days}d)</span>
+              {p.label} <span className="num">{t('period.days_short', { count: p.days })}</span>
             </label>
           ))
         )}
       </div>
       <span className="hint">
-        {all
-          ? 'None ticked — this unit offers every active period.'
-          : `Only the ${selected.length} ticked period${selected.length === 1 ? '' : 's'} will be offered.`}
+        {all ? t('period.all_hint') : t.n('period.picked_hint', selected.length)}
       </span>
     </div>
   );

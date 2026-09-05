@@ -19,16 +19,13 @@ import {
   type LinkRequestStatus,
 } from '../../../lib/api';
 import { Amount, fmtDate } from '../../../lib/format';
-import { TableScroll } from '@tms/ui';
+import { TableScroll, useT } from '@tms/ui';
 
-const TABS: { value: LinkRequestStatus; label: string }[] = [
-  { value: 'pending', label: 'Pending' },
-  { value: 'approved', label: 'Approved' },
-  { value: 'rejected', label: 'Rejected' },
-  { value: 'cancelled', label: 'Cancelled' },
-];
+/** Tab values with the key of their label — the words are picked at render. */
+const TABS: LinkRequestStatus[] = ['pending', 'approved', 'rejected', 'cancelled'];
 
 function InboxBody() {
+  const t = useT();
   const [status, setStatus] = useState<LinkRequestStatus>('pending');
   const [items, setItems] = useState<LinkRequest[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
@@ -57,13 +54,15 @@ function InboxBody() {
 
   return (
     <>
-      <PageHead
-        title="Link requests"
-        lead="Renters asking to be connected to one of your units. Open a request to read their KYC before deciding."
-      />
+      <PageHead title={t('nav.link_requests')} lead={t('linkreq.lead')} />
 
       <div style={{ marginBottom: 'var(--sp-4)' }}>
-        <FilterTabs<LinkRequestStatus> value={status} options={TABS} onChange={setStatus} label="Request status" />
+        <FilterTabs<LinkRequestStatus>
+          value={status}
+          options={TABS.map((v) => ({ value: v, label: t(`linkreq.status.${v}`) }))}
+          onChange={setStatus}
+          label={t('linkreq.filter_label')}
+        />
       </div>
 
       <hr className="rule rule-strong" />
@@ -71,31 +70,31 @@ function InboxBody() {
       <div style={{ paddingTop: 'var(--sp-4)', display: 'grid', gap: 'var(--sp-4)' }}>
         <ProblemNote error={error} />
 
-        <TableScroll label="Link requests">
+        <TableScroll label={t('nav.link_requests')}>
         <table className="ledger">
           <thead>
             <tr>
-              <th>Renter</th>
-              <th>Unit</th>
-              <th>Period</th>
-              <th className="num">Amount</th>
-              <th className="num">Term</th>
-              <th>Dates</th>
-              <th>Status</th>
-              <th>Requested</th>
+              <th>{t('common.renter')}</th>
+              <th>{t('common.unit')}</th>
+              <th>{t('linkreq.col.period')}</th>
+              <th className="num">{t('common.amount')}</th>
+              <th className="num">{t('linkreq.col.term')}</th>
+              <th>{t('linkreq.col.dates')}</th>
+              <th>{t('common.status')}</th>
+              <th>{t('linkreq.col.requested')}</th>
             </tr>
           </thead>
           <tbody>
             {items === null ? (
               <tr>
                 <td colSpan={8} style={{ color: 'var(--ink-soft)' }}>
-                  Loading…
+                  {t('common.loading')}
                 </td>
               </tr>
             ) : items.length === 0 ? (
               <tr>
                 <td colSpan={8} style={{ color: 'var(--ink-soft)' }}>
-                  {error ? 'Nothing to show.' : `No ${status} requests.`}
+                  {error ? t('common.no_results') : t(`linkreq.empty.${status}`)}
                 </td>
               </tr>
             ) : (
@@ -120,13 +119,13 @@ function InboxBody() {
                   <td>
                     {r.payment_period?.label ?? '—'}
                     <div style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>
-                      {r.payment_period?.days ? `${r.payment_period.days} days` : ''}
+                      {r.payment_period?.days ? t.n('common.day', r.payment_period.days) : ''}
                     </div>
                   </td>
                   <td className="num">
                     <Amount value={r.payment_period?.amount ?? null} />
                   </td>
-                  <td className="num">{r.term_days ? `${r.term_days} d` : '—'}</td>
+                  <td className="num">{r.term_days ? t('linkreq.term_short', { days: r.term_days }) : '—'}</td>
                   <td style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
                     {fmtDate(r.start_date)} → {fmtDate(r.end_date)}
                   </td>

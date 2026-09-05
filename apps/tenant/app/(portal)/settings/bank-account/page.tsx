@@ -14,6 +14,7 @@
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { useT } from '@tms/ui';
 import { Field, Note, ProblemNote } from '../../../../components/FormBits';
 import { PageHead } from '../../../../components/PageHead';
 import {
@@ -27,6 +28,7 @@ import {
 const EMPTY: BankAccount = { bank_name: '', account_name: '', account_number: '', instructions: '' };
 
 function BankAccountBody() {
+  const t = useT();
   const [form, setForm] = useState<BankAccount>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -79,11 +81,11 @@ function BankAccountBody() {
   return (
     <>
       <PageHead
-        title="Bank account"
-        lead="Where renters send their rent. This is shown to them on their payment screen."
+        title={t('bank.title')}
+        lead={t('bank.lead')}
         actions={
           <Link href="/settings" className="btn btn-quiet">
-            <Icon icon="solar:arrow-left-linear" width={20} /> Settings
+            <Icon icon="solar:arrow-left-linear" width={20} /> {t('nav.settings')}
           </Link>
         }
       />
@@ -91,7 +93,7 @@ function BankAccountBody() {
       <hr className="rule rule-strong" />
 
       {loading ? (
-        <p style={{ marginTop: 'var(--sp-5)', color: 'var(--ink-soft)' }}>Loading…</p>
+        <p style={{ marginTop: 'var(--sp-5)', color: 'var(--ink-soft)' }}>{t('common.loading')}</p>
       ) : (
         <div
           style={{
@@ -104,22 +106,22 @@ function BankAccountBody() {
         >
           <form onSubmit={submit} style={{ display: 'grid', gap: 'var(--sp-4)' }} noValidate>
             <ProblemNote error={error} />
-            {saved ? <Note>Saved. Renters see this on their payment screen.</Note> : null}
+            {saved ? <Note>{t('bank.saved')}</Note> : null}
 
-            <Field id="bank_name" label="Bank" error={error?.errors.bank_name}>
+            <Field id="bank_name" label={t('bank.field.bank')} error={error?.errors.bank_name}>
               <input
                 id="bank_name"
                 className="input"
                 value={form.bank_name}
                 onChange={(e) => set('bank_name', e.target.value)}
-                placeholder="e.g. CRDB Bank"
+                placeholder={t('bank.field.bank.placeholder')}
               />
             </Field>
 
             <Field
               id="account_name"
-              label="Account name"
-              hint="Exactly as the bank holds it — a mismatch can bounce the transfer."
+              label={t('bank.field.account_name')}
+              hint={t('bank.field.account_name.hint')}
               error={error?.errors.account_name}
             >
               <input
@@ -127,24 +129,24 @@ function BankAccountBody() {
                 className="input"
                 value={form.account_name}
                 onChange={(e) => set('account_name', e.target.value)}
-                placeholder="e.g. JJnE Rentals Ltd"
+                placeholder={t('bank.field.account_name.placeholder')}
               />
             </Field>
 
-            <Field id="account_number" label="Account number" error={error?.errors.account_number}>
+            <Field id="account_number" label={t('bank.field.account_number')} error={error?.errors.account_number}>
               <input
                 id="account_number"
                 className="input num"
                 value={form.account_number}
                 onChange={(e) => set('account_number', e.target.value)}
-                placeholder="e.g. 0150123456700"
+                placeholder={t('bank.field.account_number.placeholder')}
               />
             </Field>
 
             <Field
               id="instructions"
-              label="Payment instructions"
-              hint={`${form.instructions.length}/300 — tell the renter what reference to use.`}
+              label={t('bank.field.instructions')}
+              hint={t('bank.field.instructions.hint', { n: form.instructions.length })}
               error={error?.errors.instructions}
             >
               <textarea
@@ -154,33 +156,33 @@ function BankAccountBody() {
                 maxLength={300}
                 value={form.instructions}
                 onChange={(e) => set('instructions', e.target.value)}
-                placeholder="e.g. Use your unit name as the payment reference, then send the receipt to the office."
+                placeholder={t('bank.field.instructions.placeholder')}
               />
             </Field>
 
             <div>
               <button type="submit" className="btn btn-primary" disabled={busy}>
-                {busy ? 'Saving…' : 'Save bank account'}
+                {busy ? t('common.saving') : t('bank.save')}
               </button>
             </div>
           </form>
 
           {/* What the renter reads. Same words, their screen. */}
           <aside className="sheet" style={{ padding: 'var(--sp-5)', display: 'grid', gap: 'var(--sp-3)' }}>
-            <h2 style={{ fontSize: 'var(--text-md)' }}>What the renter sees</h2>
+            <h2 style={{ fontSize: 'var(--text-md)' }}>{t('bank.preview.heading')}</h2>
             <hr className="rule" />
             {filled ? (
               <>
                 <div>
-                  <div style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>Bank</div>
+                  <div style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>{t('bank.field.bank')}</div>
                   <div style={{ fontWeight: 600 }}>{form.bank_name || '—'}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>Account name</div>
+                  <div style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>{t('bank.field.account_name')}</div>
                   <div style={{ fontWeight: 600 }}>{form.account_name || '—'}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>Account number</div>
+                  <div style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>{t('bank.field.account_number')}</div>
                   <div className="num" style={{ fontWeight: 600, letterSpacing: '0.06em' }}>
                     {form.account_number || '—'}
                   </div>
@@ -191,7 +193,7 @@ function BankAccountBody() {
               </>
             ) : (
               <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-                Nothing set yet, so renters are shown no account to pay into.
+                {t('bank.preview.empty')}
               </p>
             )}
           </aside>

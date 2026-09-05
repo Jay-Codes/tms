@@ -28,8 +28,9 @@ import {
   unitsApi,
   unwrapExpense,
   uploadReceipt,
-  receiptFileProblem,
   RECEIPT_ACCEPT,
+  RECEIPT_MAX_BYTES,
+  RECEIPT_TYPES,
   type Expense,
   type ExpenseCategory,
   type ExpenseInput,
@@ -37,6 +38,7 @@ import {
   type Unit,
 } from '../lib/api';
 import { fmtAmount, isoPlusDays, todayISO } from '../lib/format';
+import { useT } from '@tms/ui';
 
 export interface ExpenseSheetProps {
   open: boolean;
@@ -57,6 +59,16 @@ function digitsOf(value: string): string {
 
 type ReceiptPlan = 'keep' | 'replace' | 'remove';
 
+/**
+ * The same rule `receiptFileProblem()` applies, but answered with a key so the
+ * refusal can be read in the landlord's own language.
+ */
+function receiptProblemKey(file: File): string | null {
+  if (!(RECEIPT_TYPES as readonly string[]).includes(file.type)) return 'expenses.receipt.bad_type';
+  if (file.size > RECEIPT_MAX_BYTES) return 'expenses.receipt.too_big';
+  return null;
+}
+
 export function ExpenseSheet({
   open,
   expense,
@@ -65,6 +77,7 @@ export function ExpenseSheet({
   onClose,
   onSaved,
 }: ExpenseSheetProps) {
+  const t = useT();
   const editing = !!expense;
 
   const [properties, setProperties] = useState<Property[] | null>(null);
@@ -153,10 +166,10 @@ export function ExpenseSheet({
       setFile(null);
       return;
     }
-    const problem = receiptFileProblem(chosen);
+    const problem = receiptProblemKey(chosen);
     if (problem) {
       setFile(null);
-      setFileError(problem);
+      setFileError(t(problem));
       return;
     }
     setFile(chosen);
@@ -185,14 +198,14 @@ export function ExpenseSheet({
         note: note.trim() || undefined,
       };
 
-      setStep(editing ? 'Saving the change…' : 'Writing the expense…');
+      setStep(editing ? t('expenses.step.saving') : t('expenses.step.writing'));
       const saved = unwrapExpense(
         editing && expense ? await expensesApi.update(expense.id, body) : await expensesApi.create(body),
       );
       let latest = saved;
 
       if (receiptPlan === 'remove' && expense?.receipt?.present) {
-        setStep('Removing the receipt…');
+        setStep(t('expenses.step.removing_receipt'));
         try {
           latest = unwrapExpense(await expensesApi.receiptRemove(saved.id));
         } catch (e) {
@@ -200,7 +213,7 @@ export function ExpenseSheet({
           setReceiptWarning(toApiError(e).detail);
         }
       } else if (file) {
-        setStep('Uploading the receipt…');
+        setStep(t('expenses.step.uploading_receipt'));
         try {
           const ticket = await expensesApi.receiptTicket(saved.id, file.type, file.size);
           await uploadReceipt(ticket, file);
@@ -210,7 +223,7 @@ export function ExpenseSheet({
           // uploading second. Say what happened and keep the sheet open.
           warned = true;
           setReceiptWarning(
-            `${toApiError(e).detail} The expense itself was saved; you can add the receipt from its page.`,
+            `${toApiError(e).detail} ${t('expenses.receipt.upload_failed')}`,
           );
         }
       }
@@ -236,6 +249,7 @@ export function ExpenseSheet({
     propertyId,
     receiptPlan,
     reference,
+    t,
     unitId,
     vendor,
   ]);
@@ -249,7 +263,7 @@ export function ExpenseSheet({
   return (
     <Sheet
       open={open}
-      title={editing ? 'Edit expense' : 'Record expense'}
+      title={editing ? t('expenses.edit') : t('expenses.record')}
       onClose={onClose}
       width={620}
     >
@@ -285,8 +299,8 @@ export function ExpenseSheet({
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 'var(--sp-4)' }}>
           <Field
             id="ex_property"
-            label="Property"
-            hint={lockedPropertyId ? 'Recording against this property.' : undefined}
+            label={t('common.property')}
+            hint={lockedPropertyId ? t('expenses.form.property_locked_hint') : undefined}
             error={error?.errors.property_id}
           >
             {lockedPropertyId ? (
@@ -299,7 +313,9 @@ export function ExpenseSheet({
                 disabled={properties === null}
                 onChange={(e) => setPropertyId(e.target.value)}
               >
-                <option value="">{properties === null ? 'Loading…' : 'Choose a property'}</option>
+                <option value="">
+                  {properties === null ? t('common.loading') : t('expenses.form.choose_property')}
+                </option>
                 {(properties ?? []).map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
@@ -311,8 +327,8 @@ export function ExpenseSheet({
 
           <Field
             id="ex_unit"
-            label="Unit"
-            hint="Optional — leave blank for a whole-property cost."
+            label={t('common.unit')}
+            hint={t('expenses.form.unit_hint')}
             error={error?.errors.unit_id}
           >
             <select
@@ -323,7 +339,11 @@ export function ExpenseSheet({
               onChange={(e) => setUnitId(e.target.value)}
             >
               <option value="">
-                {!propertyId ? 'Choose a property first' : units === null ? 'Loading…' : 'Whole property'}
+                {!propertyId
+                  ? t('expenses.form.choose_property_first')
+                  : units === null
+                    ? t('common.loading')
+                    : t('expenses.whole_property')}
               </option>
               {(units ?? []).map((u) => (
                 <option key={u.id} value={u.id}>
@@ -335,14 +355,14 @@ export function ExpenseSheet({
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 'var(--sp-4)' }}>
-          <Field id="ex_category" label="Category" error={error?.errors.category_id}>
+          <Field id="ex_category" label={t('expenses.category')} error={error?.errors.category_id}>
             <select
               id="ex_category"
               className="input"
               value={categoryId}
               onChange={(e) => setCategoryId(e.target.value)}
             >
-              <option value="">Uncategorised</option>
+              <option value="">{t('expenses.uncategorised')}</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -353,8 +373,8 @@ export function ExpenseSheet({
 
           <Field
             id="ex_amount"
-            label="Amount (TZS)"
-            hint={amountNum > 0 ? `TZS ${fmtAmount(amountNum)}` : 'Whole shillings.'}
+            label={t('expenses.form.amount_label')}
+            hint={amountNum > 0 ? `TZS ${fmtAmount(amountNum)}` : t('expenses.form.amount_hint')}
             error={error?.errors.amount}
           >
             <input
@@ -370,8 +390,8 @@ export function ExpenseSheet({
 
           <Field
             id="ex_date"
-            label="Date incurred"
-            hint="Today by default; tomorrow is the furthest ahead allowed."
+            label={t('expenses.incurred_on')}
+            hint={t('expenses.form.date_hint')}
             error={error?.errors.incurred_on}
           >
             <input
@@ -386,20 +406,25 @@ export function ExpenseSheet({
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 'var(--sp-4)' }}>
-          <Field id="ex_vendor" label="Vendor" hint="Who was paid, if it matters." error={error?.errors.vendor}>
+          <Field
+            id="ex_vendor"
+            label={t('expenses.vendor')}
+            hint={t('expenses.form.vendor_hint')}
+            error={error?.errors.vendor}
+          >
             <input
               id="ex_vendor"
               className="input"
               maxLength={120}
               value={vendor}
               onChange={(e) => setVendor(e.target.value)}
-              placeholder="e.g. Kariakoo Hardware"
+              placeholder={t('expenses.form.vendor_placeholder')}
             />
           </Field>
           <Field
             id="ex_reference"
-            label="Reference"
-            hint="Invoice or receipt number."
+            label={t('expenses.reference')}
+            hint={t('expenses.form.reference_hint')}
             error={error?.errors.reference}
           >
             <input
@@ -408,15 +433,15 @@ export function ExpenseSheet({
               maxLength={80}
               value={reference}
               onChange={(e) => setReference(e.target.value)}
-              placeholder="e.g. INV-2291"
+              placeholder={t('expenses.form.reference_placeholder')}
             />
           </Field>
         </div>
 
         <Field
           id="ex_note"
-          label="Note"
-          hint={`${note.length}/500 — for your own records.`}
+          label={t('common.note')}
+          hint={t('expenses.form.note_hint', { count: note.length })}
           error={error?.errors.note}
         >
           <textarea
@@ -431,7 +456,7 @@ export function ExpenseSheet({
 
         {/* ------------------------------ receipt ------------------------------ */}
         <div className={fileError ? 'field invalid' : 'field'}>
-          <label htmlFor="ex_receipt">Receipt</label>
+          <label htmlFor="ex_receipt">{t('expenses.receipt')}</label>
 
           {editing && expense?.receipt?.present && receiptPlan !== 'replace' ? (
             <div
@@ -446,8 +471,10 @@ export function ExpenseSheet({
               <Icon icon="solar:paperclip-linear" width={18} />
               <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>
                 {receiptPlan === 'remove'
-                  ? 'The receipt will be removed when you save.'
-                  : `A ${expense.receipt.content_type === 'application/pdf' ? 'PDF' : 'photo'} receipt is attached.`}
+                  ? t('expenses.receipt.will_remove')
+                  : expense.receipt.content_type === 'application/pdf'
+                    ? t('expenses.receipt.has_pdf')
+                    : t('expenses.receipt.has_photo')}
               </span>
               {receiptPlan === 'remove' ? (
                 <button
@@ -456,7 +483,7 @@ export function ExpenseSheet({
                   style={{ minHeight: 36 }}
                   onClick={() => setReceiptPlan('keep')}
                 >
-                  Keep it
+                  {t('expenses.receipt.keep')}
                 </button>
               ) : (
                 <button
@@ -465,7 +492,7 @@ export function ExpenseSheet({
                   style={{ minHeight: 36 }}
                   onClick={() => setReceiptPlan('remove')}
                 >
-                  Remove
+                  {t('common.remove')}
                 </button>
               )}
             </div>
@@ -488,18 +515,18 @@ export function ExpenseSheet({
               {file
                 ? `${file.name} · ${Math.max(1, Math.round(file.size / 1024))} KB`
                 : editing && expense?.receipt?.present
-                  ? 'Choose a file to replace the one attached.'
-                  : 'JPEG, PNG or PDF, up to 5 MB. Optional.'}
+                  ? t('expenses.receipt.replace_hint')
+                  : t('expenses.receipt.hint')}
             </span>
           )}
         </div>
 
         <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap' }}>
           <button type="submit" className="btn btn-primary" disabled={busy || !valid}>
-            {busy ? (step ?? 'Saving…') : editing ? 'Save changes' : 'Record expense'}
+            {busy ? (step ?? t('common.saving')) : editing ? t('expenses.save_changes') : t('expenses.record')}
           </button>
           <button type="button" className="btn btn-quiet" onClick={onClose} disabled={busy}>
-            {receiptWarning ? 'Done' : 'Cancel'}
+            {receiptWarning ? t('common.done') : t('common.cancel')}
           </button>
           {busy && step ? (
             <span aria-live="polite" style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>

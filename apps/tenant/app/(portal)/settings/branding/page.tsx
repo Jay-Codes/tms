@@ -9,18 +9,20 @@
  */
 
 import Link from 'next/link';
+import { useT } from '@tms/ui';
 import { BrandingForm } from '../../../../components/BrandingForm';
 import { PageHead } from '../../../../components/PageHead';
 
 function BrandingBody() {
+  const t = useT();
   return (
     <>
       <PageHead
-        title="Branding"
-        lead="How your business looks to renters — on the scan page, in the portal and on every printed contract."
+        title={t('branding.title')}
+        lead={t('branding.lead')}
         actions={
           <Link href="/settings" className="btn btn-quiet">
-            Settings
+            {t('nav.settings')}
           </Link>
         }
       />

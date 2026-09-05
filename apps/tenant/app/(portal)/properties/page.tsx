@@ -15,7 +15,7 @@ import { PropertyForm } from '../../../components/PropertyForm';
 import { PageHead } from '../../../components/PageHead';
 import { Sheet } from '../../../components/Sheet';
 import { ApiError, propertiesApi, toApiError, type Property } from '../../../lib/api';
-import { TableScroll } from '@tms/ui';
+import { TableScroll, useT } from '@tms/ui';
 
 function CountChip({ label, n, tone }: { label: string; n: number; tone?: 'ink' | 'faint' }) {
   if (!n) return null;
@@ -38,6 +38,7 @@ function CountChip({ label, n, tone }: { label: string; n: number; tone?: 'ink' 
 }
 
 function PropertiesBody() {
+  const t = useT();
   const router = useRouter();
   const [items, setItems] = useState<Property[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
@@ -64,15 +65,15 @@ function PropertiesBody() {
   return (
     <>
       <PageHead
-        title="Properties"
-        lead="Each property holds its units. Every unit carries a permanent QR code."
+        title={t('nav.properties')}
+        lead={t('properties.lead')}
         actions={
           <>
             <Link href="/units" className="btn btn-secondary">
-              <Icon icon="solar:widget-4-linear" width={20} /> Vacancy board
+              <Icon icon="solar:widget-4-linear" width={20} /> {t('properties.vacancy_board')}
             </Link>
             <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
-              <Icon icon="solar:add-circle-linear" width={20} /> Add property
+              <Icon icon="solar:add-circle-linear" width={20} /> {t('properties.add')}
             </button>
           </>
         }
@@ -82,27 +83,27 @@ function PropertiesBody() {
       <div style={{ paddingTop: 'var(--sp-5)', display: 'grid', gap: 'var(--sp-4)' }}>
         <ProblemNote error={error} />
 
-        <TableScroll label="Properties">
+        <TableScroll label={t('nav.properties')}>
         <table className="ledger">
           <thead>
             <tr>
-              <th>Property</th>
-              <th>Location</th>
-              <th>Units</th>
-              <th className="num">Total</th>
+              <th>{t('common.property')}</th>
+              <th>{t('properties.th.location')}</th>
+              <th>{t('nav.units')}</th>
+              <th className="num">{t('common.total')}</th>
             </tr>
           </thead>
           <tbody>
             {items === null ? (
               <tr>
                 <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
-                  Loading…
+                  {t('common.loading')}
                 </td>
               </tr>
             ) : items.length === 0 ? (
               <tr>
                 <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
-                  {error ? 'Nothing to show.' : 'No properties yet. Add your first one to start.'}
+                  {error ? t('common.no_results') : t('properties.empty')}
                 </td>
               </tr>
             ) : (
@@ -126,11 +127,11 @@ function PropertiesBody() {
                     <td style={{ color: 'var(--ink-soft)' }}>{p.location_text || '—'}</td>
                     <td>
                       <span style={{ display: 'inline-flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-                        <CountChip label="occupied" n={c.occupied} />
-                        <CountChip label="vacant" n={c.vacant} />
-                        <CountChip label="maintenance" n={c.maintenance} tone="faint" />
-                        <CountChip label="unlisted" n={c.unlisted} tone="faint" />
-                        {c.total === 0 ? <span className="pencil">no units yet</span> : null}
+                        <CountChip label={t('properties.chip.occupied')} n={c.occupied} />
+                        <CountChip label={t('properties.chip.vacant')} n={c.vacant} />
+                        <CountChip label={t('properties.chip.maintenance')} n={c.maintenance} tone="faint" />
+                        <CountChip label={t('properties.chip.unlisted')} n={c.unlisted} tone="faint" />
+                        {c.total === 0 ? <span className="pencil">{t('properties.no_units_yet')}</span> : null}
                       </span>
                     </td>
                     <td className="num">{c.total}</td>
@@ -143,7 +144,7 @@ function PropertiesBody() {
         </TableScroll>
       </div>
 
-      <Sheet open={adding} title="Add property" onClose={() => setAdding(false)}>
+      <Sheet open={adding} title={t('properties.add')} onClose={() => setAdding(false)}>
         <PropertyForm
           onSaved={(p) => {
             setAdding(false);

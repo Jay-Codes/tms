@@ -10,6 +10,7 @@
  */
 
 import { Icon } from '@iconify/react';
+import { useT, type Translator } from '@tms/ui';
 import { useCallback, useEffect, useState } from 'react';
 import { Field, Note, ProblemNote } from './FormBits';
 import {
@@ -20,13 +21,15 @@ import {
 } from '../lib/api';
 import { TableScroll } from '@tms/ui';
 
-/** The 409 the delete button must translate rather than shout. */
-const IN_USE = 'Category is in use; deactivate it instead.';
-
-function categoryError(e: unknown): ApiError {
+/** The 409 the delete button must put in plain words rather than shout. */
+function categoryError(t: Translator, e: unknown): ApiError {
   const err = toApiError(e);
   if (err.status === 409 && err.code === 'category_in_use') {
-    return new ApiError(409, { type: err.code, title: 'Category is in use', detail: IN_USE });
+    return new ApiError(409, {
+      type: err.code,
+      title: t('expcat.in_use.title'),
+      detail: t('expcat.in_use.detail'),
+    });
   }
   return err;
 }
@@ -44,6 +47,7 @@ function Row({
   onChanged: () => Promise<void>;
   onError: (e: ApiError | null) => void;
 }) {
+  const t = useT();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(category.name);
   const [busy, setBusy] = useState(false);
@@ -56,7 +60,7 @@ function Row({
       await onChanged();
       setEditing(false);
     } catch (e) {
-      onError(categoryError(e));
+      onError(categoryError(t, e));
     } finally {
       setBusy(false);
     }
@@ -73,7 +77,7 @@ function Row({
             }}
             style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}
           >
-            <Field id={`cat-${category.id}`} label="Name">
+            <Field id={`cat-${category.id}`} label={t('common.name')}>
               <input
                 id={`cat-${category.id}`}
                 className="input"
@@ -84,7 +88,7 @@ function Row({
               />
             </Field>
             <button type="submit" className="btn btn-primary" disabled={busy || !name.trim()} style={{ minHeight: 40 }}>
-              {busy ? 'Saving…' : 'Save'}
+              {busy ? t('common.saving') : t('common.save')}
             </button>
             <button
               type="button"
@@ -95,7 +99,7 @@ function Row({
               }}
               style={{ minHeight: 40 }}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           </form>
         </td>
@@ -109,9 +113,9 @@ function Row({
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
           {category.name}
           {category.is_default ? (
-            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-faint)' }}>seeded</span>
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-faint)' }}>{t('expcat.seeded')}</span>
           ) : null}
-          {category.active ? null : <span className="pencil">inactive</span>}
+          {category.active ? null : <span className="pencil">{t('expcat.inactive')}</span>}
         </span>
       </td>
       <td className="num" style={{ whiteSpace: 'nowrap' }}>
@@ -120,7 +124,7 @@ function Row({
             <button
               type="button"
               className="btn btn-quiet"
-              aria-label={`Move ${category.name} up`}
+              aria-label={t('expcat.move_up', { name: category.name })}
               disabled={first || busy}
               onClick={() =>
                 void run(() => expenseCategoriesApi.update(category.id, { sort_order: category.sort_order - 1 }))
@@ -132,7 +136,7 @@ function Row({
             <button
               type="button"
               className="btn btn-quiet"
-              aria-label={`Move ${category.name} down`}
+              aria-label={t('expcat.move_down', { name: category.name })}
               disabled={last || busy}
               onClick={() =>
                 void run(() => expenseCategoriesApi.update(category.id, { sort_order: category.sort_order + 1 }))
@@ -154,7 +158,7 @@ function Row({
               disabled={busy}
               style={{ minHeight: 32 }}
             >
-              Rename
+              {t('expcat.rename')}
             </button>
             <button
               type="button"
@@ -163,19 +167,19 @@ function Row({
               disabled={busy}
               style={{ minHeight: 32 }}
             >
-              Deactivate
+              {t('expcat.deactivate')}
             </button>
             <button
               type="button"
               className="btn btn-quiet"
               onClick={() => {
-                if (!window.confirm(`Delete "${category.name}"? Only a category never used can be deleted.`)) return;
+                if (!window.confirm(t('expcat.delete_confirm', { name: category.name }))) return;
                 void run(() => expenseCategoriesApi.remove(category.id));
               }}
               disabled={busy}
               style={{ minHeight: 32, color: 'var(--stamp-overdue)' }}
             >
-              Delete
+              {t('common.delete')}
             </button>
           </>
         ) : (
@@ -186,7 +190,7 @@ function Row({
             disabled={busy}
             style={{ minHeight: 32 }}
           >
-            Restore
+            {t('expcat.restore')}
           </button>
         )}
       </td>
@@ -195,6 +199,7 @@ function Row({
 }
 
 export function ExpenseCategoriesManager({ heading }: { heading?: string }) {
+  const t = useT();
   const [items, setItems] = useState<ExpenseCategory[] | null>(null);
   const [loadError, setLoadError] = useState<ApiError | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
@@ -232,14 +237,14 @@ export function ExpenseCategoriesManager({ heading }: { heading?: string }) {
     try {
       await expenseCategoriesApi.create({ name: name.trim() });
       setName('');
-      setNote('Category added.');
+      setNote(t('expcat.added'));
       await reload();
     } catch (err) {
       const asError = toApiError(err);
       setActionError(
         asError.status === 409 && asError.code === 'category_exists'
-          ? new ApiError(409, { type: asError.code, detail: 'You already have a category with that name.' })
-          : categoryError(err),
+          ? new ApiError(409, { type: asError.code, detail: t('expcat.exists') })
+          : categoryError(t, err),
       );
     } finally {
       setBusy(false);
@@ -255,12 +260,12 @@ export function ExpenseCategoriesManager({ heading }: { heading?: string }) {
       <ProblemNote error={actionError} />
       {note ? <Note>{note}</Note> : null}
 
-      <TableScroll label="Expense categories">
+      <TableScroll label={t('expcat.title')}>
         <table className="ledger">
           <thead>
             <tr>
-              <th>Category</th>
-              <th className="num">Order</th>
+              <th>{t('expcat.col.category')}</th>
+              <th className="num">{t('expcat.col.order')}</th>
               <th className="num" />
             </tr>
           </thead>
@@ -268,13 +273,13 @@ export function ExpenseCategoriesManager({ heading }: { heading?: string }) {
             {items === null ? (
               <tr>
                 <td colSpan={3} style={{ color: 'var(--ink-soft)' }}>
-                  Loading…
+                  {t('common.loading')}
                 </td>
               </tr>
             ) : items.length === 0 ? (
               <tr>
                 <td colSpan={3} style={{ color: 'var(--ink-soft)' }}>
-                  No categories yet. Add the first one below.
+                  {t('expcat.empty')}
                 </td>
               </tr>
             ) : (
@@ -293,16 +298,13 @@ export function ExpenseCategoriesManager({ heading }: { heading?: string }) {
         </table>
       </TableScroll>
 
-      <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-        A category that has already been used cannot be deleted — deactivate it instead, and the
-        expenses filed under it keep their history.
-      </p>
+      <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{t('expcat.note.deactivate')}</p>
 
       <form onSubmit={add} style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'flex-end', flexWrap: 'wrap' }} noValidate>
         <Field
           id="cat_name"
-          label="New category"
-          hint='What the money went on, e.g. "Generator fuel".'
+          label={t('expcat.new.label')}
+          hint={t('expcat.new.hint')}
           error={actionError?.errors.name}
         >
           <input
@@ -311,12 +313,12 @@ export function ExpenseCategoriesManager({ heading }: { heading?: string }) {
             value={name}
             maxLength={60}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Generator fuel"
+            placeholder={t('expcat.new.placeholder')}
             style={{ width: 260 }}
           />
         </Field>
         <button type="submit" className="btn btn-primary" disabled={busy || !name.trim()} style={{ minHeight: 40 }}>
-          <Icon icon="solar:add-circle-linear" width={20} /> Add category
+          <Icon icon="solar:add-circle-linear" width={20} /> {t('expcat.add')}
         </button>
       </form>
     </div>

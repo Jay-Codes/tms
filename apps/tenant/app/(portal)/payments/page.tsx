@@ -29,23 +29,25 @@ import {
   type Schedule,
 } from '../../../lib/api';
 import { fmtTZS, isoPlusDays, todayISO } from '../../../lib/format';
+import { useT } from '@tms/ui';
 
 type TabId = 'overdue' | 'due_soon' | 'partial' | 'all' | 'history';
 
-const TABS: { value: TabId; label: string }[] = [
-  { value: 'overdue', label: 'Overdue' },
-  { value: 'due_soon', label: 'Due soon' },
-  { value: 'partial', label: 'Partial' },
-  { value: 'all', label: 'All schedules' },
-  { value: 'history', label: 'Payment history' },
+/** Tab order is the order a landlord's morning goes; the labels are keys. */
+const TABS: { value: TabId; labelKey: string }[] = [
+  { value: 'overdue', labelKey: 'payments.tab.overdue' },
+  { value: 'due_soon', labelKey: 'payments.tab.due_soon' },
+  { value: 'partial', labelKey: 'payments.tab.partial' },
+  { value: 'all', labelKey: 'payments.tab.all' },
+  { value: 'history', labelKey: 'payments.tab.history' },
 ];
 
-const EMPTY: Record<TabId, string> = {
-  overdue: 'Nothing is overdue. Every due payment has been settled.',
-  due_soon: 'Nothing falls due in the next seven days.',
-  partial: 'No part-paid schedules.',
-  all: 'No payment schedules yet — they are written when a contract is activated.',
-  history: 'No payments recorded yet.',
+const EMPTY_KEY: Record<TabId, string> = {
+  overdue: 'payments.empty.overdue',
+  due_soon: 'payments.empty.due_soon',
+  partial: 'payments.empty.partial',
+  all: 'payments.empty.all',
+  history: 'payments.empty.history',
 };
 
 /** Each tab is one query against `GET /schedules`; "due soon" is the 7-day window. */
@@ -58,8 +60,9 @@ function scheduleQuery(tab: TabId) {
 }
 
 function PaymentsBody() {
+  const t = useT();
   const initial = (useSearchParams().get('tab') ?? '') as TabId;
-  const [tab, setTab] = useState<TabId>(TABS.some((t) => t.value === initial) ? initial : 'overdue');
+  const [tab, setTab] = useState<TabId>(TABS.some((x) => x.value === initial) ? initial : 'overdue');
 
   const [schedules, setSchedules] = useState<Schedule[] | null>(null);
   const [payments, setPayments] = useState<Payment[] | null>(null);
@@ -119,25 +122,26 @@ function PaymentsBody() {
   const outstanding =
     tab === 'history' || schedules === null
       ? null
-      : schedules.reduce((t, s) => t + Math.max(0, (s.amount ?? 0) - (s.paid_amount ?? 0)), 0);
+      : schedules.reduce((sum, s) => sum + Math.max(0, (s.amount ?? 0) - (s.paid_amount ?? 0)), 0);
 
   return (
     <>
-      <PageHead
-        title="Payments"
-        lead="Rent is paid outside the system — cash, bank transfer or mobile money. This is where it is written down."
-      />
+      <PageHead title={t('payments.title')} lead={t('payments.lead')} />
 
-      <div role="tablist" style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)', marginBottom: 'var(--sp-4)' }}>
-        {TABS.map((t) => {
-          const active = tab === t.value;
+      <div
+        role="tablist"
+        aria-label={t('payments.tablist_label')}
+        style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)', marginBottom: 'var(--sp-4)' }}
+      >
+        {TABS.map((x) => {
+          const active = tab === x.value;
           return (
             <button
-              key={t.value}
+              key={x.value}
               type="button"
               role="tab"
               aria-selected={active}
-              onClick={() => setTab(t.value)}
+              onClick={() => setTab(x.value)}
               style={{
                 minHeight: 'var(--touch-min)',
                 padding: '0 var(--sp-4)',
@@ -150,7 +154,7 @@ function PaymentsBody() {
                 cursor: 'pointer',
               }}
             >
-              {t.label}
+              {t(x.labelKey)}
             </button>
           );
         })}
@@ -165,8 +169,9 @@ function PaymentsBody() {
           <p style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', color: 'var(--ink-soft)' }}>
             <Icon icon="solar:wallet-money-linear" width={20} />
             <span>
-              {schedules?.length} schedule{schedules?.length === 1 ? '' : 's'} ·{' '}
-              <strong style={{ color: 'var(--ink)' }}>{fmtTZS(outstanding)}</strong> still owing
+              {t.n('payments.schedule_count', schedules?.length ?? 0)} ·{' '}
+              <strong style={{ color: 'var(--ink)' }}>{fmtTZS(outstanding)}</strong>{' '}
+              {t('payments.still_owing')}
             </span>
           </p>
         ) : null}
@@ -174,7 +179,7 @@ function PaymentsBody() {
         {tab === 'history' ? (
           <PaymentsTable
             items={payments}
-            emptyText={error ? 'Nothing to show.' : EMPTY.history}
+            emptyText={error ? t('common.no_results') : t(EMPTY_KEY.history)}
             onReverse={(p) => {
               setReverseError(null);
               setReversing(p);
@@ -183,7 +188,7 @@ function PaymentsBody() {
         ) : (
           <SchedulesTable
             items={schedules}
-            emptyText={error ? 'Nothing to show.' : EMPTY[tab]}
+            emptyText={error ? t('common.no_results') : t(EMPTY_KEY[tab])}
             onRecord={(s) =>
               setRecordTarget({
                 contractId: s.contract?.id ?? s.contract_id ?? '',

@@ -24,7 +24,7 @@ import {
 } from '../lib/api';
 import { fmtTZS } from '../lib/format';
 import { loadExpensePeriod, saveExpensePeriod } from '../lib/expensePeriod';
-import { PeriodPicker, periodLabel, type PeriodValue } from '@tms/ui';
+import { PeriodPicker, periodLabel, useT, type PeriodValue } from '@tms/ui';
 
 export function PropertyExpenses({
   propertyId,
@@ -33,6 +33,7 @@ export function PropertyExpenses({
   propertyId: string;
   propertyName?: string;
 }) {
+  const t = useT();
   const [period, setPeriod] = useState<PeriodValue>(loadExpensePeriod);
   const [items, setItems] = useState<Expense[] | null>(null);
   const [totals, setTotals] = useState<{ count: number; amount: number } | null>(null);
@@ -106,7 +107,7 @@ export function PropertyExpenses({
   };
 
   return (
-    <section aria-label="Expenses for this property" style={{ display: 'grid', gap: 'var(--sp-4)' }}>
+    <section aria-label={t('properties.expenses.section_label')} style={{ display: 'grid', gap: 'var(--sp-4)' }}>
       <div
         style={{
           display: 'flex',
@@ -117,22 +118,22 @@ export function PropertyExpenses({
         }}
       >
         <div>
-          <h2 style={{ fontSize: 'var(--text-lg)' }}>Expenses</h2>
+          <h2 style={{ fontSize: 'var(--text-lg)' }}>{t('nav.expenses')}</h2>
           <p style={{ marginTop: 'var(--sp-2)', color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-            What this property cost in {periodLabel(period)}.
+            {t('properties.expenses.lead', { period: periodLabel(period) })}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
           <Link href={`/expenses?property=${propertyId}`} className="btn btn-quiet">
-            All expenses
+            {t('properties.expenses.all')}
           </Link>
           <button type="button" className="btn btn-primary" onClick={() => setSheetOpen(true)}>
-            <Icon icon="solar:add-circle-linear" width={20} /> Record expense
+            <Icon icon="solar:add-circle-linear" width={20} /> {t('properties.expenses.record')}
           </button>
         </div>
       </div>
 
-      <PeriodPicker value={period} onChange={setPeriod} label="Expense period" />
+      <PeriodPicker value={period} onChange={setPeriod} label={t('properties.expenses.period_label')} />
 
       <p
         style={{
@@ -149,7 +150,7 @@ export function PropertyExpenses({
         </strong>
         <ChangeMark pct={summary?.change_pct} />
         <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-          vs {summary ? fmtTZS(summary.previous_total?.amount ?? 0) : '—'} in the period before
+          {t('properties.expenses.vs', { amount: summary ? fmtTZS(summary.previous_total?.amount ?? 0) : '—' })}
         </span>
       </p>
 
@@ -159,14 +160,14 @@ export function PropertyExpenses({
         items={items}
         totals={totals}
         showProperty={false}
-        label="Property expenses"
-        emptyText={error ? 'Nothing to show.' : 'Nothing recorded against this property in this period.'}
+        label={t('properties.expenses.table_label')}
+        emptyText={error ? t('common.no_results') : t('properties.expenses.empty')}
       />
 
       {cursor ? (
         <div>
           <button type="button" className="btn btn-secondary" onClick={() => void loadMore()} disabled={loadingMore}>
-            {loadingMore ? 'Loading…' : 'Load more'}
+            {loadingMore ? t('common.loading_more') : t('common.load_more')}
           </button>
         </div>
       ) : null}

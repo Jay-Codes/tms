@@ -40,7 +40,9 @@ import {
   compactNumber,
   pctLabel,
   periodLabel,
+  useT,
   type PeriodValue,
+  type Translator,
 } from '@tms/ui';
 import { Field, ProblemNote } from '../../../components/FormBits';
 import { PaymentStatusStampCell, SectionHead, TabBar, TileRow, type TabDef } from '../../../components/ReportBits';
@@ -67,22 +69,19 @@ import { loadReportPeriod, periodQuery, saveReportPeriod } from '../../../lib/re
 
 type TabId = 'overview' | 'revenue' | 'expenses' | 'occupancy' | 'payment_status' | 'collections';
 
-const TABS: readonly TabDef<TabId>[] = [
-  { value: 'overview', label: 'Overview' },
-  { value: 'revenue', label: 'Revenue' },
-  { value: 'expenses', label: 'Expenses' },
-  { value: 'occupancy', label: 'Occupancy' },
-  { value: 'payment_status', label: 'Payment status' },
-  { value: 'collections', label: 'Collections' },
+/** Tab ids in order; the strip labels them through `reports.tab.*`. */
+const TAB_IDS: readonly TabId[] = ['overview', 'revenue', 'expenses', 'occupancy', 'payment_status', 'collections'];
+
+const STATUS_OPTIONS: { value: PaymentStatusValue | ''; key: string }[] = [
+  { value: '', key: 'reports.status.all' },
+  { value: 'overdue', key: 'reports.status.overdue' },
+  { value: 'partial', key: 'reports.status.partial' },
+  { value: 'pending', key: 'reports.status.pending' },
+  { value: 'paid', key: 'reports.status.paid' },
 ];
 
-const STATUS_OPTIONS: { value: PaymentStatusValue | ''; label: string }[] = [
-  { value: '', label: 'All statuses' },
-  { value: 'overdue', label: 'Overdue' },
-  { value: 'partial', label: 'Part paid' },
-  { value: 'pending', label: 'Pending' },
-  { value: 'paid', label: 'Paid' },
-];
+/** `month` → the word a chart title puts after "by". */
+const bucketWord = (t: Translator, bucket: ReportBucket | CollectionsGroup) => t(`reports.bucket.${bucket}`);
 
 const asError = (e: unknown) => (e instanceof ApiError ? e : new ApiError(0, { detail: String(e) }));
 
@@ -182,6 +181,7 @@ function OverviewTab({ period, propertyId, previousLabel }: Scope) {
     [q.from, q.to, q.cadence, propertyId],
   );
   const summary = useRead<ReportSummary>((s) => reportsApi.summary({ ...q }, s), [q.from, q.to, q.cadence]);
+  const t9 = useT();
 
   const r = revenue.data;
   const t = r?.totals;
@@ -195,13 +195,13 @@ function OverviewTab({ period, propertyId, previousLabel }: Scope) {
       <div style={{ display: 'grid', gap: 'var(--sp-6)' }}>
         <ProblemNote error={revenue.error ?? occupancy.error} />
 
-        {nothing ? <EmptyNote>No activity in this period.</EmptyNote> : null}
+        {nothing ? <EmptyNote>{t9('reports.empty.no_activity')}</EmptyNote> : null}
 
         <section style={{ display: 'grid', gap: 'var(--sp-4)' }}>
-          <SectionHead icon="solar:wallet-money-linear" title="This period" />
+          <SectionHead icon="solar:wallet-money-linear" title={t9('reports.overview.this_period')} />
           <TileRow min={220}>
             <StatTile
-              label="Collected"
+              label={t9('reports.tile.collected')}
               value={fmtTZS(t?.collected ?? null)}
               change={change.collected ?? null}
               changeLabelText={previousLabel}
@@ -212,48 +212,61 @@ function OverviewTab({ period, propertyId, previousLabel }: Scope) {
                   <Sparkline
                     values={spark}
                     color={CHART_ROLES.collected}
-                    ariaLabel={`Collected across ${spark.length} ${r?.bucket ?? 'day'} buckets`}
+                    ariaLabel={t9('reports.spark.collected_aria', {
+                      count: spark.length,
+                      bucket: bucketWord(t9, r?.bucket ?? 'day'),
+                    })}
                   />
                 ) : undefined
               }
             />
             <StatTile
-              label="Expected"
+              label={t9('reports.tile.expected')}
               value={fmtTZS(t?.expected ?? null)}
               change={change.expected ?? null}
               changeLabelText={previousLabel}
               goodDirection="none"
-              sub="What the schedules said was due."
+              sub={t9('reports.tile.expected_sub')}
             />
             <StatTile
-              label="Expenses"
+              label={t9('reports.tile.expenses')}
               value={fmtTZS(t?.expenses ?? null)}
               change={change.expenses ?? null}
               changeLabelText={previousLabel}
               goodDirection="down"
             />
             <StatTile
-              label="Net"
+              label={t9('reports.tile.net')}
               value={fmtTZS(t?.net ?? null)}
               change={change.net ?? null}
               changeLabelText={previousLabel}
               goodDirection="up"
               tone={t && t.net < 0 ? 'overdue' : undefined}
-              sub="Collected less expenses."
+              sub={t9('reports.tile.net_sub')}
             />
             <StatTile
-              label="Collection rate"
+              label={t9('reports.tile.collection_rate')}
               value={pctLabel(r?.collection_rate ?? null)}
-              sub={t ? `${fmtTZS(t.collected)} of ${fmtTZS(t.expected)}` : undefined}
+              sub={
+                t
+                  ? t9('reports.tile.collection_rate_sub', {
+                      collected: fmtTZS(t.collected),
+                      expected: fmtTZS(t.expected),
+                    })
+                  : undefined
+              }
             />
             <StatTile
-              label="Occupancy"
+              label={t9('reports.tile.occupancy')}
               value={pctLabel(occupancy.data ? frac(occupancy.data.current.occupancy_pct) : (a?.occupancy_rate ?? null))}
               sub={
                 occupancy.data
-                  ? `${occupancy.data.current.units_occupied} of ${occupancy.data.current.units_total} units occupied`
+                  ? t9('reports.tile.occupancy_sub', {
+                      occupied: occupancy.data.current.units_occupied,
+                      total: occupancy.data.current.units_total,
+                    })
                   : a
-                    ? `${a.occupied} of ${a.units} units occupied`
+                    ? t9('reports.tile.occupancy_sub', { occupied: a.occupied, total: a.units })
                     : undefined
               }
             />
@@ -263,15 +276,26 @@ function OverviewTab({ period, propertyId, previousLabel }: Scope) {
         {summary.data && a ? (
           <>
             <section style={{ display: 'grid', gap: 'var(--sp-4)' }}>
-              <SectionHead icon="solar:buildings-2-linear" title="Assets and contracts" />
+              <SectionHead icon="solar:buildings-2-linear" title={t9('reports.overview.assets')} />
               <TileRow>
-                <StatTile label="Properties" value={a.properties} />
-                <StatTile label="Units" value={a.units} sub={`${a.vacant} vacant · ${a.maintenance} maintenance`} />
-                <StatTile label="Active renters" value={summary.data.renters.active} sub="On a live contract" />
+                <StatTile label={t9('reports.tile.properties')} value={a.properties} />
                 <StatTile
-                  label="Contracts"
+                  label={t9('reports.tile.units')}
+                  value={a.units}
+                  sub={t9('reports.tile.units_sub', { vacant: a.vacant, maintenance: a.maintenance })}
+                />
+                <StatTile
+                  label={t9('reports.tile.active_renters')}
+                  value={summary.data.renters.active}
+                  sub={t9('reports.tile.active_renters_sub')}
+                />
+                <StatTile
+                  label={t9('reports.tile.contracts')}
                   value={summary.data.contracts.active}
-                  sub={`${summary.data.contracts.expiring} expiring · ${summary.data.contracts.pending_signature} awaiting signature`}
+                  sub={t9('reports.tile.contracts_sub', {
+                    expiring: summary.data.contracts.expiring,
+                    pending: summary.data.contracts.pending_signature,
+                  })}
                 />
               </TileRow>
             </section>
@@ -279,27 +303,27 @@ function OverviewTab({ period, propertyId, previousLabel }: Scope) {
             <section style={{ display: 'grid', gap: 'var(--sp-4)' }}>
               <SectionHead
                 icon="solar:home-smile-linear"
-                title="Vacant units"
+                title={t9('reports.vacant.title')}
                 aside={
                   <Link href="/units?status=vacant" className="btn btn-quiet" style={{ minHeight: 36 }}>
-                    Vacancy board
+                    {t9('reports.vacant.board')}
                   </Link>
                 }
               />
-              <TableScroll label="Vacant units">
+              <TableScroll label={t9('reports.vacant.title')}>
                 <table className="ledger">
                   <thead>
                     <tr>
-                      <th>Unit</th>
-                      <th>Property</th>
-                      <th className="num">Days vacant</th>
+                      <th>{t9('common.unit')}</th>
+                      <th>{t9('common.property')}</th>
+                      <th className="num">{t9('reports.col.days_vacant')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(summary.data.vacant_units ?? []).length === 0 ? (
                       <tr>
                         <td colSpan={3} style={{ color: 'var(--ink-soft)' }}>
-                          Every unit is spoken for.
+                          {t9('reports.vacant.none')}
                         </td>
                       </tr>
                     ) : (
@@ -328,6 +352,7 @@ function OverviewTab({ period, propertyId, previousLabel }: Scope) {
 
 function RevenueTab({ period, propertyId, previousLabel }: Scope) {
   const q = periodQuery(period);
+  const t9 = useT();
   const [byProperty, setByProperty] = useState(false);
 
   const revenue = useRead<RevenueReport>(
@@ -357,22 +382,22 @@ function RevenueTab({ period, propertyId, previousLabel }: Scope) {
 
         <TileRow min={200}>
           <StatTile
-            label="Collected"
+            label={t9('reports.tile.collected')}
             value={fmtTZS(t?.collected ?? null)}
             change={change.collected ?? null}
             changeLabelText={previousLabel}
             tone="paid"
           />
-          <StatTile label="Expected" value={fmtTZS(t?.expected ?? null)} goodDirection="none" />
+          <StatTile label={t9('reports.tile.expected')} value={fmtTZS(t?.expected ?? null)} goodDirection="none" />
           <StatTile
-            label="Expenses"
+            label={t9('reports.tile.expenses')}
             value={fmtTZS(t?.expenses ?? null)}
             change={change.expenses ?? null}
             changeLabelText={previousLabel}
             goodDirection="down"
           />
           <StatTile
-            label="Net"
+            label={t9('reports.tile.net')}
             value={fmtTZS(t?.net ?? null)}
             change={change.net ?? null}
             changeLabelText={previousLabel}
@@ -381,41 +406,62 @@ function RevenueTab({ period, propertyId, previousLabel }: Scope) {
         </TileRow>
 
         <LineAreaChart
-          title={`Collected against expected, by ${bucket}. Expected is the reference line.`}
-          ariaLabel="Collected, expected and net over the period"
+          title={t9('reports.chart.revenue.title', { bucket: bucketWord(t9, bucket) })}
+          ariaLabel={t9('reports.chart.revenue.aria')}
           labels={labels}
           headings={headings}
           formatValue={fmtTZS}
           formatTick={money}
+          empty={t9('reports.empty.no_activity')}
           series={[
-            { id: 'collected', label: 'Collected', color: CHART_ROLES.collected, values: buckets.map((b) => b.collected), area: true },
-            { id: 'expected', label: 'Expected', color: CHART_ROLES.expected, values: buckets.map((b) => b.expected), dashed: true },
-            { id: 'net', label: 'Net', color: CHART_ROLES.net, values: buckets.map((b) => b.net) },
+            {
+              id: 'collected',
+              label: t9('reports.series.collected'),
+              color: CHART_ROLES.collected,
+              values: buckets.map((b) => b.collected),
+              area: true,
+            },
+            {
+              id: 'expected',
+              label: t9('reports.series.expected'),
+              color: CHART_ROLES.expected,
+              values: buckets.map((b) => b.expected),
+              dashed: true,
+            },
+            { id: 'net', label: t9('reports.series.net'), color: CHART_ROLES.net, values: buckets.map((b) => b.net) },
           ]}
         />
 
         <BarChart
-          title={`What was spent, by ${bucket}.`}
-          ariaLabel="Expenses over the period"
+          title={t9('reports.chart.expenses.title', { bucket: bucketWord(t9, bucket) })}
+          ariaLabel={t9('reports.chart.expenses.aria')}
           labels={labels}
           headings={headings}
           height={200}
           formatValue={fmtTZS}
           formatTick={money}
-          series={[{ id: 'expenses', label: 'Expenses', color: CHART_ROLES.expenses, values: buckets.map((b) => b.expenses) }]}
+          empty={t9('reports.empty.no_activity')}
+          series={[
+            {
+              id: 'expenses',
+              label: t9('reports.series.expenses'),
+              color: CHART_ROLES.expenses,
+              values: buckets.map((b) => b.expenses),
+            },
+          ]}
         />
 
         <section style={{ display: 'grid', gap: 'var(--sp-4)' }}>
           <SectionHead
             icon="solar:chart-2-linear"
-            title={byProperty ? 'By property' : 'By period'}
+            title={byProperty ? t9('reports.revenue.by_property') : t9('reports.revenue.by_period')}
             aside={
-              <div className="segmented" role="group" aria-label="Break the window down by">
+              <div className="segmented" role="group" aria-label={t9('reports.revenue.breakdown_aria')}>
                 <button type="button" aria-pressed={!byProperty} onClick={() => setByProperty(false)}>
-                  By period
+                  {t9('reports.revenue.by_period')}
                 </button>
                 <button type="button" aria-pressed={byProperty} onClick={() => setByProperty(true)}>
-                  By property
+                  {t9('reports.revenue.by_property')}
                 </button>
               </div>
             }
@@ -424,24 +470,24 @@ function RevenueTab({ period, propertyId, previousLabel }: Scope) {
           {byProperty ? (
             <>
               <ProblemNote error={groups.error} />
-              <TableScroll label="Revenue by property">
+              <TableScroll label={t9('reports.revenue.table_by_property')}>
                 <table className="ledger">
                   <thead>
                     <tr>
-                      <th>Property</th>
-                      <th className="num">Expected</th>
-                      <th className="num">Collected</th>
-                      <th className="num">Expenses</th>
-                      <th className="num">Net</th>
-                      <th>Net share</th>
-                      <th className="num">Collected</th>
+                      <th>{t9('common.property')}</th>
+                      <th className="num">{t9('reports.col.expected')}</th>
+                      <th className="num">{t9('reports.col.collected')}</th>
+                      <th className="num">{t9('reports.col.expenses')}</th>
+                      <th className="num">{t9('reports.col.net')}</th>
+                      <th>{t9('reports.col.net_share')}</th>
+                      <th className="num">{t9('reports.col.collected')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(groups.data?.groups ?? []).length === 0 ? (
                       <tr>
                         <td colSpan={7} style={{ color: 'var(--ink-soft)' }}>
-                          {groups.loading ? 'Loading…' : 'No activity in this period.'}
+                          {groups.loading ? t9('common.loading') : t9('reports.empty.no_activity')}
                         </td>
                       </tr>
                     ) : (
@@ -461,7 +507,7 @@ function RevenueTab({ period, propertyId, previousLabel }: Scope) {
                               value={g.net}
                               max={netMax}
                               color={CHART_ROLES.net}
-                              ariaLabel={`${g.name}: net ${fmtTZS(g.net)}`}
+                              ariaLabel={t9('reports.row_bar.net_aria', { name: g.name, amount: fmtTZS(g.net) })}
                             />
                           </td>
                           <td className="num">{pctLabel(g.collection_rate)}</td>
@@ -470,7 +516,7 @@ function RevenueTab({ period, propertyId, previousLabel }: Scope) {
                     )}
                     {groups.data && groups.data.groups.length > 0 ? (
                       <tr className="total">
-                        <td>Total</td>
+                        <td>{t9('common.total')}</td>
                         <td className="num">{fmtTZS(groups.data.totals.expected)}</td>
                         <td className="num">{fmtTZS(groups.data.totals.collected)}</td>
                         <td className="num">{fmtTZS(groups.data.totals.expenses)}</td>
@@ -484,22 +530,22 @@ function RevenueTab({ period, propertyId, previousLabel }: Scope) {
               </TableScroll>
             </>
           ) : (
-            <TableScroll label="Revenue by period">
+            <TableScroll label={t9('reports.revenue.table_by_period')}>
               <table className="ledger">
                 <thead>
                   <tr>
-                    <th>Period</th>
-                    <th className="num">Expected</th>
-                    <th className="num">Collected</th>
-                    <th className="num">Expenses</th>
-                    <th className="num">Net</th>
+                    <th>{t9('reports.col.period')}</th>
+                    <th className="num">{t9('reports.col.expected')}</th>
+                    <th className="num">{t9('reports.col.collected')}</th>
+                    <th className="num">{t9('reports.col.expenses')}</th>
+                    <th className="num">{t9('reports.col.net')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {buckets.length === 0 ? (
                     <tr>
                       <td colSpan={5} style={{ color: 'var(--ink-soft)' }}>
-                        No activity in this period.
+                        {t9('reports.empty.no_activity')}
                       </td>
                     </tr>
                   ) : (
@@ -517,7 +563,7 @@ function RevenueTab({ period, propertyId, previousLabel }: Scope) {
                   )}
                   {t && buckets.length > 0 ? (
                     <tr className="total">
-                      <td>Total</td>
+                      <td>{t9('common.total')}</td>
                       <td className="num">{fmtTZS(t.expected)}</td>
                       <td className="num">{fmtTZS(t.collected)}</td>
                       <td className="num">{fmtTZS(t.expenses)}</td>
@@ -538,6 +584,7 @@ function RevenueTab({ period, propertyId, previousLabel }: Scope) {
 
 function ExpensesTab({ period, propertyId, previousLabel }: Scope) {
   const q = periodQuery(period);
+  const t = useT();
   const summary = useRead<ExpenseSummary>(
     (s) => expensesApi.summary({ ...q, group_by: 'category', property_id: propertyId || undefined }, s),
     [q.from, q.to, q.cadence, propertyId],
@@ -565,36 +612,44 @@ function ExpensesTab({ period, propertyId, previousLabel }: Scope) {
 
         <TileRow min={220}>
           <StatTile
-            label="Spent this period"
+            label={t('reports.expenses.spent_this_period')}
             value={fmtTZS(total)}
             change={summary.data?.change_pct ?? null}
             changeLabelText={previousLabel}
             goodDirection="down"
             sub={
               summary.data
-                ? `${summary.data.total.count} expense${summary.data.total.count === 1 ? '' : 's'} · previously ${fmtTZS(
-                    summary.data.previous_total?.amount ?? 0,
-                  )}`
+                ? t('reports.expenses.spent_sub', {
+                    count: t.n('reports.expenses.count', summary.data.total.count),
+                    amount: fmtTZS(summary.data.previous_total?.amount ?? 0),
+                  })
                 : undefined
             }
           />
           <StatTile
-            label="Largest category"
+            label={t('reports.expenses.largest_category')}
             value={groups[0]?.name ?? '—'}
-            sub={groups[0] ? fmtTZS(groups[0].amount) : 'Nothing recorded in this window.'}
+            sub={groups[0] ? fmtTZS(groups[0].amount) : t('reports.expenses.nothing_recorded')}
           />
         </TileRow>
 
         <BarChart
-          title={`What was spent, by ${bucket}.`}
-          ariaLabel="Expenses over the period"
+          title={t('reports.chart.expenses.title', { bucket: bucketWord(t, bucket) })}
+          ariaLabel={t('reports.chart.expenses.aria')}
           labels={buckets.map((b) => bucketTick(b.start, bucket))}
           headings={buckets.map((b) => bucketHeading(b.start, bucket))}
           height={200}
           formatValue={fmtTZS}
           formatTick={money}
-          empty="Nothing was spent in this period."
-          series={[{ id: 'expenses', label: 'Expenses', color: CHART_ROLES.expenses, values: buckets.map((b) => b.expenses) }]}
+          empty={t('reports.expenses.chart_empty')}
+          series={[
+            {
+              id: 'expenses',
+              label: t('reports.series.expenses'),
+              color: CHART_ROLES.expenses,
+              values: buckets.map((b) => b.expenses),
+            },
+          ]}
         />
 
         {/*
@@ -605,38 +660,38 @@ function ExpensesTab({ period, propertyId, previousLabel }: Scope) {
           category, so colouring them differently would be colour by rank.
         */}
         <BarChart
-          title="Where the money went, over the whole window."
-          ariaLabel="Expenses by category"
+          title={t('reports.expenses.chart_categories_title')}
+          ariaLabel={t('reports.expenses.chart_categories_aria')}
           labels={groups.slice(0, 8).map((g) => g.name)}
           height={220}
           formatValue={fmtTZS}
           formatTick={money}
-          empty="Nothing was spent in this period."
+          empty={t('reports.expenses.chart_empty')}
           series={[
             {
               id: 'amount',
-              label: 'Spent',
+              label: t('reports.series.spent'),
               color: CHART_ROLES.expenses,
               values: groups.slice(0, 8).map((g) => g.amount),
             },
           ]}
         />
 
-        <TableScroll label="Expenses by category">
+        <TableScroll label={t('reports.expenses.table')}>
           <table className="ledger">
             <thead>
               <tr>
-                <th>Category</th>
-                <th className="num">Expenses</th>
-                <th className="num">Amount</th>
-                <th>Share</th>
+                <th>{t('reports.col.category')}</th>
+                <th className="num">{t('reports.col.expenses')}</th>
+                <th className="num">{t('common.amount')}</th>
+                <th>{t('reports.col.share')}</th>
               </tr>
             </thead>
             <tbody>
               {groups.length === 0 ? (
                 <tr>
                   <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
-                    No activity in this period.
+                    {t('reports.empty.no_activity')}
                   </td>
                 </tr>
               ) : (
@@ -650,7 +705,7 @@ function ExpensesTab({ period, propertyId, previousLabel }: Scope) {
                         value={g.amount}
                         max={max}
                         color={CHART_ROLES.expenses}
-                        ariaLabel={`${g.name}: ${fmtTZS(g.amount)}`}
+                        ariaLabel={t('reports.row_bar.aria', { name: g.name, amount: fmtTZS(g.amount) })}
                       />
                     </td>
                   </tr>
@@ -658,7 +713,7 @@ function ExpensesTab({ period, propertyId, previousLabel }: Scope) {
               )}
               {groups.length > 0 ? (
                 <tr className="total">
-                  <td>Total</td>
+                  <td>{t('common.total')}</td>
                   <td className="num">{summary.data?.total.count ?? 0}</td>
                   <td className="num">{fmtTZS(total)}</td>
                   <td />
@@ -670,7 +725,7 @@ function ExpensesTab({ period, propertyId, previousLabel }: Scope) {
 
         <p>
           <Link href="/expenses" className="btn btn-quiet" style={{ minHeight: 36 }}>
-            Open the expense ledger
+            {t('reports.expenses.open_ledger')}
           </Link>
         </p>
       </div>
@@ -682,6 +737,7 @@ function ExpensesTab({ period, propertyId, previousLabel }: Scope) {
 
 function OccupancyTab({ period, propertyId }: Scope) {
   const q = periodQuery(period);
+  const t = useT();
   const occ = useRead<OccupancyReport>(
     (s) => reportsApi.occupancy({ ...q, property_id: propertyId || undefined }, s),
     [q.from, q.to, q.cadence, propertyId],
@@ -697,28 +753,36 @@ function OccupancyTab({ period, propertyId }: Scope) {
         <ProblemNote error={occ.error} />
 
         <TileRow min={220}>
-          <StatTile label="Occupancy now" value={pctLabel(frac(current?.occupancy_pct))} />
+          <StatTile label={t('reports.occupancy.now')} value={pctLabel(frac(current?.occupancy_pct))} />
           <StatTile
-            label="Units occupied"
-            value={current ? `${current.units_occupied} of ${current.units_total}` : '—'}
-            sub={current ? `${current.units_total - current.units_occupied} standing empty` : undefined}
+            label={t('reports.occupancy.units_occupied')}
+            value={
+              current
+                ? t('reports.occupancy.of', { occupied: current.units_occupied, total: current.units_total })
+                : '—'
+            }
+            sub={
+              current
+                ? t('reports.occupancy.standing_empty', { count: current.units_total - current.units_occupied })
+                : undefined
+            }
           />
         </TileRow>
 
         {/* Two measures, two charts — the percentage and the count never share
             an axis (dataviz: never a second y-scale). */}
         <LineAreaChart
-          title={`How full the units were, by ${bucket}.`}
-          ariaLabel="Occupancy over the period"
+          title={t('reports.occupancy.chart_title', { bucket: bucketWord(t, bucket) })}
+          ariaLabel={t('reports.occupancy.chart_aria')}
           labels={buckets.map((b) => bucketTick(b.start, bucket))}
           headings={buckets.map((b) => bucketHeading(b.start, bucket))}
           formatValue={(v) => pctLabel(v, 1)}
           formatTick={(v) => pctLabel(v)}
-          empty="No units were on the books in this period."
+          empty={t('reports.occupancy.chart_empty')}
           series={[
             {
               id: 'occupancy',
-              label: 'Occupancy',
+              label: t('reports.series.occupancy'),
               color: CHART_ROLES.occupancy,
               values: buckets.map((b) => frac(b.occupancy_pct) ?? 0),
               area: true,
@@ -726,21 +790,21 @@ function OccupancyTab({ period, propertyId }: Scope) {
           ]}
         />
 
-        <TableScroll label="Occupancy by period">
+        <TableScroll label={t('reports.occupancy.table')}>
           <table className="ledger">
             <thead>
               <tr>
-                <th>Period</th>
-                <th className="num">Units</th>
-                <th className="num">Occupied</th>
-                <th className="num">Occupancy</th>
+                <th>{t('reports.col.period')}</th>
+                <th className="num">{t('reports.col.units')}</th>
+                <th className="num">{t('reports.col.occupied')}</th>
+                <th className="num">{t('reports.col.occupancy')}</th>
               </tr>
             </thead>
             <tbody>
               {buckets.length === 0 ? (
                 <tr>
                   <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
-                    No activity in this period.
+                    {t('reports.empty.no_activity')}
                   </td>
                 </tr>
               ) : (
@@ -765,6 +829,7 @@ function OccupancyTab({ period, propertyId }: Scope) {
 
 function PaymentStatusTab({ period, propertyId }: Scope) {
   const q = periodQuery(period);
+  const t = useT();
   const [status, setStatus] = useState<PaymentStatusValue | ''>('');
 
   const read = useRead<{ items: PaymentStatusRow[] }>(
@@ -779,7 +844,7 @@ function PaymentStatusTab({ period, propertyId }: Scope) {
     <Loading busy={read.loading}>
       <div style={{ display: 'grid', gap: 'var(--sp-4)' }}>
         <div style={{ display: 'flex', gap: 'var(--sp-4)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <Field id="status" label="Status">
+          <Field id="status" label={t('common.status')}>
             <select
               id="status"
               className="input"
@@ -789,7 +854,7 @@ function PaymentStatusTab({ period, propertyId }: Scope) {
             >
               {STATUS_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
-                  {o.label}
+                  {t(o.key)}
                 </option>
               ))}
             </select>
@@ -808,7 +873,7 @@ function PaymentStatusTab({ period, propertyId }: Scope) {
             target="_blank"
             rel="noreferrer"
           >
-            <Icon icon="solar:download-minimalistic-linear" width={18} /> Export CSV
+            <Icon icon="solar:download-minimalistic-linear" width={18} /> {t('common.export_csv')}
           </a>
         </div>
 
@@ -816,35 +881,36 @@ function PaymentStatusTab({ period, propertyId }: Scope) {
 
         {rows.length > 0 ? (
           <p style={{ color: 'var(--ink-soft)' }}>
-            {rows.length} renter{rows.length === 1 ? '' : 's'} ·{' '}
-            <strong style={{ color: 'var(--ink)' }}>{fmtTZS(outstanding)}</strong> outstanding
+            {t.n('reports.payment_status.renters', rows.length)} ·{' '}
+            <strong style={{ color: 'var(--ink)' }}>{fmtTZS(outstanding)}</strong>{' '}
+            {t('reports.payment_status.outstanding_suffix')}
           </p>
         ) : null}
 
-        <TableScroll label="Payment status by renter">
+        <TableScroll label={t('reports.payment_status.table')}>
           <table className="ledger">
             <thead>
               <tr>
-                <th>Renter</th>
-                <th>Unit</th>
-                <th>Status</th>
-                <th>Next due</th>
-                <th className="num">Outstanding</th>
-                <th className="num">Overdue</th>
-                <th>Last payment</th>
+                <th>{t('common.renter')}</th>
+                <th>{t('common.unit')}</th>
+                <th>{t('common.status')}</th>
+                <th>{t('reports.col.next_due')}</th>
+                <th className="num">{t('reports.col.outstanding')}</th>
+                <th className="num">{t('reports.col.overdue')}</th>
+                <th>{t('reports.col.last_payment')}</th>
               </tr>
             </thead>
             <tbody>
               {read.loading && rows.length === 0 ? (
                 <tr>
                   <td colSpan={7} style={{ color: 'var(--ink-soft)' }}>
-                    Loading…
+                    {t('common.loading')}
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={7} style={{ color: 'var(--ink-soft)' }}>
-                    {read.error ? 'Nothing to show.' : 'No renter matches these filters.'}
+                    {read.error ? t('common.no_results') : t('reports.payment_status.no_match')}
                   </td>
                 </tr>
               ) : (
@@ -874,7 +940,7 @@ function PaymentStatusTab({ period, propertyId }: Scope) {
                           </div>
                         </>
                       ) : (
-                        <span className="pencil">nothing due</span>
+                        <span className="pencil">{t('reports.payment_status.nothing_due')}</span>
                       )}
                     </td>
                     <td className="num">{fmtTZS(r.outstanding)}</td>
@@ -882,14 +948,18 @@ function PaymentStatusTab({ period, propertyId }: Scope) {
                       {fmtTZS(r.overdue_amount)}
                     </td>
                     <td style={{ color: 'var(--ink-soft)' }}>
-                      {r.last_payment_at ? fmtDateTime(r.last_payment_at) : <span className="pencil">never</span>}
+                      {r.last_payment_at ? (
+                        fmtDateTime(r.last_payment_at)
+                      ) : (
+                        <span className="pencil">{t('reports.payment_status.never')}</span>
+                      )}
                     </td>
                   </tr>
                 ))
               )}
               {rows.length > 0 ? (
                 <tr className="total">
-                  <td colSpan={4}>Total outstanding</td>
+                  <td colSpan={4}>{t('reports.payment_status.total_outstanding')}</td>
                   <td className="num">{fmtTZS(outstanding)}</td>
                   <td className="num">{fmtTZS(rows.reduce((t, r) => t + (r.overdue_amount ?? 0), 0))}</td>
                   <td />
@@ -907,6 +977,7 @@ function PaymentStatusTab({ period, propertyId }: Scope) {
 
 function CollectionsTab({ period, propertyId }: Scope) {
   const q = periodQuery(period);
+  const t = useT();
   const [group, setGroup] = useState<CollectionsGroup>('month');
 
   const read = useRead<CollectionsReport>(
@@ -922,10 +993,15 @@ function CollectionsTab({ period, propertyId }: Scope) {
   return (
     <Loading busy={read.loading}>
       <div style={{ display: 'grid', gap: 'var(--sp-5)' }}>
-        <div className="segmented" role="group" aria-label="Group collections by" style={{ alignSelf: 'start' }}>
+        <div
+          className="segmented"
+          role="group"
+          aria-label={t('reports.collections.group_aria')}
+          style={{ alignSelf: 'start' }}
+        >
           {(['day', 'week', 'month'] as CollectionsGroup[]).map((g) => (
             <button key={g} type="button" aria-pressed={group === g} onClick={() => setGroup(g)}>
-              {g === 'day' ? 'Day' : g === 'week' ? 'Week' : 'Month'}
+              {t(`reports.group.${g}`)}
             </button>
           ))}
         </div>
@@ -933,51 +1009,65 @@ function CollectionsTab({ period, propertyId }: Scope) {
         <ProblemNote error={read.error} />
 
         <TileRow>
-          <StatTile label="Expected" value={fmtTZS(data?.totals.expected ?? null)} goodDirection="none" />
           <StatTile
-            label="Collected"
+            label={t('reports.tile.expected')}
+            value={fmtTZS(data?.totals.expected ?? null)}
+            goodDirection="none"
+          />
+          <StatTile
+            label={t('reports.tile.collected')}
             value={fmtTZS(data?.totals.collected ?? null)}
             tone="paid"
             change={data?.change_pct?.collected ?? undefined}
-            changeLabelText={data?.change_pct ? 'vs previous period' : undefined}
+            changeLabelText={data?.change_pct ? t('reports.vs.period') : undefined}
           />
           <StatTile
-            label="Shortfall"
+            label={t('reports.collections.shortfall')}
             value={fmtTZS(data ? Math.max(0, data.totals.expected - data.totals.collected) : null)}
             tone={data && data.totals.collected < data.totals.expected ? 'overdue' : undefined}
-            sub="Expected less collected, for the window shown."
+            sub={t('reports.collections.shortfall_sub')}
           />
         </TileRow>
 
         <BarChart
-          title={`Expected against collected, by ${group}.`}
-          ariaLabel="Expected against collected"
+          title={t('reports.collections.chart_title', { bucket: bucketWord(t, group) })}
+          ariaLabel={t('reports.collections.chart_aria')}
           labels={labels}
           headings={headings}
           formatValue={fmtTZS}
           formatTick={money}
-          empty="Nothing was due or paid in this window."
+          empty={t('reports.collections.empty')}
           series={[
-            { id: 'expected', label: 'Expected', color: 'var(--chart-expected)', values: buckets.map((b) => b.expected) },
-            { id: 'collected', label: 'Collected', color: CHART_ROLES.collected, values: buckets.map((b) => b.collected) },
+            {
+              id: 'expected',
+              label: t('reports.series.expected'),
+              color: 'var(--chart-expected)',
+              values: buckets.map((b) => b.expected),
+            },
+            {
+              id: 'collected',
+              label: t('reports.series.collected'),
+              color: CHART_ROLES.collected,
+              values: buckets.map((b) => b.collected),
+            },
           ]}
         />
 
-        <TableScroll label="Collections by period">
+        <TableScroll label={t('reports.collections.table')}>
           <table className="ledger">
             <thead>
               <tr>
-                <th>Period</th>
-                <th className="num">Expected</th>
-                <th className="num">Collected</th>
-                <th className="num">Difference</th>
+                <th>{t('reports.col.period')}</th>
+                <th className="num">{t('reports.col.expected')}</th>
+                <th className="num">{t('reports.col.collected')}</th>
+                <th className="num">{t('reports.col.difference')}</th>
               </tr>
             </thead>
             <tbody>
               {buckets.length === 0 ? (
                 <tr>
                   <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
-                    Nothing was due or paid in this window.
+                    {t('reports.collections.empty')}
                   </td>
                 </tr>
               ) : (
@@ -997,7 +1087,7 @@ function CollectionsTab({ period, propertyId }: Scope) {
               )}
               {data && buckets.length > 0 ? (
                 <tr className="total">
-                  <td>Total</td>
+                  <td>{t('common.total')}</td>
                   <td className="num">{fmtTZS(data.totals.expected)}</td>
                   <td className="num">{fmtTZS(data.totals.collected)}</td>
                   <td className="num">{fmtTZS(data.totals.collected - data.totals.expected)}</td>
@@ -1014,15 +1104,16 @@ function CollectionsTab({ period, propertyId }: Scope) {
 /* --------------------------------- page ---------------------------------- */
 
 /** "vs previous quarter" — the comparison is always named, never just "Δ". */
-function previousLabelFor(p: PeriodValue): string {
-  if (p.cadence === 'month') return 'vs previous month';
-  if (p.cadence === 'quarter') return 'vs previous quarter';
-  if (p.cadence === 'half_year') return 'vs previous 6 months';
-  if (p.cadence === 'year') return 'vs previous year';
-  return 'vs the window before';
+function previousLabelFor(t: Translator, p: PeriodValue): string {
+  if (p.cadence === 'month') return t('reports.vs.month');
+  if (p.cadence === 'quarter') return t('reports.vs.quarter');
+  if (p.cadence === 'half_year') return t('reports.vs.half_year');
+  if (p.cadence === 'year') return t('reports.vs.year');
+  return t('reports.vs.custom');
 }
 
 function ReportsBody() {
+  const t = useT();
   const [tab, setTab] = useState<TabId>('overview');
   const [period, setPeriod] = useState<PeriodValue>(loadReportPeriod);
   const [propertyId, setPropertyId] = useState('');
@@ -1030,19 +1121,21 @@ function ReportsBody() {
 
   useEffect(() => saveReportPeriod(period), [period]);
 
+  const tabs: TabDef<TabId>[] = useMemo(
+    () => TAB_IDS.map((id) => ({ value: id, label: t(`reports.tab.${id}`) })),
+    [t],
+  );
+
   const scope: Scope = useMemo(
-    () => ({ period, propertyId, previousLabel: previousLabelFor(period) }),
-    [period, propertyId],
+    () => ({ period, propertyId, previousLabel: previousLabelFor(t, period) }),
+    [t, period, propertyId],
   );
 
   const onPeriod = useCallback((next: PeriodValue) => setPeriod(next), []);
 
   return (
     <>
-      <PageHead
-        title="Reports"
-        lead="What you own, who is in it, what has actually been paid — and what it cost."
-      />
+      <PageHead title={t('reports.title')} lead={t('reports.lead')} />
 
       {/* One filter row above everything: it scopes every tab below, so no two
           figures on the page can be answering different questions. */}
@@ -1055,16 +1148,16 @@ function ReportsBody() {
           paddingBottom: 'var(--sp-4)',
         }}
       >
-        <PeriodPicker value={period} onChange={onPeriod} label="Reporting period" />
+        <PeriodPicker value={period} onChange={onPeriod} label={t('reports.period_label')} />
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-          <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>Property</span>
+          <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>{t('common.property')}</span>
           <select
             className="input"
             value={propertyId}
             onChange={(e) => setPropertyId(e.target.value)}
             style={{ width: 'auto', minWidth: 180 }}
           >
-            <option value="">All properties</option>
+            <option value="">{t('reports.all_properties')}</option>
             {properties.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -1073,11 +1166,15 @@ function ReportsBody() {
           </select>
         </label>
         <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-          {periodLabel(period)} · {fmtDate(period.from)} to {fmtDate(period.to)} (exclusive)
+          {t('reports.window', {
+            label: periodLabel(period),
+            from: fmtDate(period.from),
+            to: fmtDate(period.to),
+          })}
         </span>
       </div>
 
-      <TabBar tabs={TABS} value={tab} onChange={setTab} />
+      <TabBar tabs={tabs} value={tab} onChange={setTab} />
 
       <hr className="rule rule-strong" />
 

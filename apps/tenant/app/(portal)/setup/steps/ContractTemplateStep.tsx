@@ -12,6 +12,7 @@
  */
 
 import Link from 'next/link';
+import { useT } from '@tms/ui';
 import { useEffect, useState } from 'react';
 import { Field, Note, ProblemNote } from '../../../../components/FormBits';
 import { TemplateEditor } from '../../../../components/TemplateEditor';
@@ -26,6 +27,7 @@ import {
 } from '../../../../lib/api';
 
 function DueDayForm() {
+  const t = useT();
   const [org, setOrg] = useState<Org | null>(null);
   const [dueDay, setDueDay] = useState('');
   const [graceDays, setGraceDays] = useState('');
@@ -72,17 +74,17 @@ function DueDayForm() {
     }
   };
 
-  if (!org && !error) return <p style={{ color: 'var(--ink-soft)' }}>Loading…</p>;
+  if (!org && !error) return <p style={{ color: 'var(--ink-soft)' }}>{t('common.loading')}</p>;
 
   return (
     <form onSubmit={submit} style={{ display: 'grid', gap: 'var(--sp-4)', maxWidth: 640 }} noValidate>
       <ProblemNote error={error} />
-      {saved ? <Note>Saved. New contracts use these dates.</Note> : null}
+      {saved ? <Note>{t('setup.template.dates_saved')}</Note> : null}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-4)' }}>
         <Field
           id="w_due_day"
-          label="Due day of month"
-          hint="1–28, or blank to use each contract's start date."
+          label={t('settings.field.due_day')}
+          hint={t('setup.template.due_day.hint')}
           error={error?.errors['settings.due_day']}
         >
           <input
@@ -100,8 +102,8 @@ function DueDayForm() {
         </Field>
         <Field
           id="w_grace_days"
-          label="Grace days"
-          hint="Days after the due date before rent counts as overdue."
+          label={t('settings.field.grace_days')}
+          hint={t('settings.field.grace_days.hint')}
           error={error?.errors['settings.grace_days']}
         >
           <input
@@ -119,7 +121,7 @@ function DueDayForm() {
       </div>
       <div>
         <button type="submit" className="btn btn-primary" disabled={busy}>
-          {busy ? 'Saving…' : 'Save payment dates'}
+          {busy ? t('common.saving') : t('setup.template.save_dates')}
         </button>
       </div>
     </form>
@@ -127,6 +129,7 @@ function DueDayForm() {
 }
 
 export function ContractTemplateStep() {
+  const t = useT();
   const [templates, setTemplates] = useState<ContractTemplateSummary[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
 
@@ -150,28 +153,25 @@ export function ContractTemplateStep() {
 
   return (
     <div style={{ display: 'grid', gap: 'var(--sp-6)' }}>
-      <p style={{ maxWidth: 'var(--measure)' }}>
-        The terms every new contract starts from. Editing the template never changes contracts that are
-        already active.
-      </p>
+      <p style={{ maxWidth: 'var(--measure)' }}>{t('setup.template.lead')}</p>
 
       <DueDayForm />
 
       <div>
         <hr className="rule rule-strong" />
         <h3 style={{ fontSize: 'var(--text-lg)', margin: 'var(--sp-4) 0' }}>
-          {target ? `Default template · ${target.name}` : 'Default template'}
+          {target ? t('setup.template.default_named', { name: target.name }) : t('setup.template.default')}
         </h3>
         <ProblemNote error={error} />
         {templates === null ? (
-          <p style={{ color: 'var(--ink-soft)' }}>Loading…</p>
+          <p style={{ color: 'var(--ink-soft)' }}>{t('common.loading')}</p>
         ) : target ? (
           <TemplateEditor templateId={target.id} />
         ) : error ? null : (
           <p style={{ color: 'var(--ink-soft)' }}>
-            You have no templates yet.{' '}
+            {t('setup.template.none')}{' '}
             <Link href="/contracts/templates" className="btn btn-quiet">
-              Create one
+              {t('setup.template.create_one')}
             </Link>
           </p>
         )}

@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useRef, type ReactNode } from 'react';
+import { useT } from '@tms/ui';
 
 export function Sheet({
   open,
@@ -21,6 +22,7 @@ export function Sheet({
   width?: number;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const t = useT();
 
   useEffect(() => {
     if (!open) return;
@@ -73,7 +75,7 @@ export function Sheet({
         >
           <h2 style={{ fontSize: 'var(--text-lg)' }}>{title}</h2>
           <button type="button" className="btn btn-quiet" onClick={onClose} style={{ minHeight: 32 }}>
-            Close
+            {t('common.close')}
           </button>
         </div>
         {children}

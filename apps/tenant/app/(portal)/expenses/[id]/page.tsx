@@ -27,6 +27,7 @@ import {
   type Expense,
 } from '../../../../lib/api';
 import { fmtDate, fmtDateTime, fmtTZS } from '../../../../lib/format';
+import { useT } from '@tms/ui';
 
 /** Label above, value below — the detail screen's whole vocabulary. */
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -52,6 +53,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
  * inline PDF on a phone is a worse experience than the OS viewer.
  */
 function ReceiptPanel({ expense }: { expense: Expense }) {
+  const t = useT();
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
 
@@ -73,7 +75,9 @@ function ReceiptPanel({ expense }: { expense: Expense }) {
   if (!expense.receipt?.present) {
     return (
       <p className="pencil" style={{ margin: 0 }}>
-        No receipt attached. Use <strong>Edit</strong> to add one.
+        {t('expenses.receipt.none_before')}
+        <strong>{t('common.edit')}</strong>
+        {t('expenses.receipt.none_after')}
       </p>
     );
   }
@@ -85,13 +89,13 @@ function ReceiptPanel({ expense }: { expense: Expense }) {
       <ProblemNote error={error} />
       {url === null && !error ? (
         <p className="pencil" style={{ margin: 0 }}>
-          Opening the receipt…
+          {t('expenses.receipt.opening')}
         </p>
       ) : null}
       {url && pdf ? (
         <div>
           <a className="btn btn-secondary" href={url} target="_blank" rel="noopener noreferrer">
-            <Icon icon="solar:file-text-linear" width={20} /> Open receipt
+            <Icon icon="solar:file-text-linear" width={20} /> {t('expenses.receipt.open')}
           </a>
         </div>
       ) : null}
@@ -100,7 +104,9 @@ function ReceiptPanel({ expense }: { expense: Expense }) {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={url}
-            alt={`Receipt for ${expense.vendor || expense.category?.name || 'this expense'}`}
+            alt={t('expenses.receipt.alt', {
+              what: expense.vendor || expense.category?.name || t('expenses.this_expense'),
+            })}
             style={{
               display: 'block',
               width: '100%',
@@ -113,13 +119,14 @@ function ReceiptPanel({ expense }: { expense: Expense }) {
       ) : null}
       <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)', margin: 0 }}>
         {expense.receipt.size ? `${Math.max(1, Math.round(expense.receipt.size / 1024))} KB · ` : ''}
-        {expense.receipt.content_type ?? 'file'} · the link expires shortly after it is opened.
+        {expense.receipt.content_type ?? t('expenses.receipt.file')} · {t('expenses.receipt.link_expires')}
       </p>
     </div>
   );
 }
 
 function ExpenseBody({ id }: { id: string }) {
+  const t = useT();
   const [expense, setExpense] = useState<Expense | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [editing, setEditing] = useState(false);
@@ -163,13 +170,13 @@ function ExpenseBody({ id }: { id: string }) {
   if (error && !expense) {
     return (
       <>
-        <PageHead title="Expense" />
+        <PageHead title={t('expenses.one')} />
         <hr className="rule rule-strong" />
         <div style={{ paddingTop: 'var(--sp-5)', display: 'grid', gap: 'var(--sp-4)', maxWidth: 640 }}>
           <ProblemNote error={error} />
           <div>
             <Link href="/expenses" className="btn btn-secondary">
-              Back to expenses
+              {t('expenses.back_to_list')}
             </Link>
           </div>
         </div>
@@ -182,10 +189,10 @@ function ExpenseBody({ id }: { id: string }) {
   return (
     <>
       <PageHead
-        title={expense ? fmtTZS(expense.amount) : 'Loading…'}
+        title={expense ? fmtTZS(expense.amount) : t('common.loading')}
         lead={
           expense
-            ? `${expense.category?.name ?? 'Uncategorised'} · ${expense.property?.name ?? ''}${
+            ? `${expense.category?.name ?? t('expenses.uncategorised')} · ${expense.property?.name ?? ''}${
                 expense.unit?.name ? ` · ${expense.unit.name}` : ''
               } · ${fmtDate(expense.incurred_on)}`
             : undefined
@@ -193,7 +200,7 @@ function ExpenseBody({ id }: { id: string }) {
         actions={
           <>
             <Link href="/expenses" className="btn btn-quiet">
-              Back
+              {t('common.back')}
             </Link>
             <button
               type="button"
@@ -201,7 +208,7 @@ function ExpenseBody({ id }: { id: string }) {
               onClick={() => setEditing(true)}
               disabled={!expense || voided}
             >
-              <Icon icon="solar:pen-linear" width={18} /> Edit
+              <Icon icon="solar:pen-linear" width={18} /> {t('common.edit')}
             </button>
             <button
               type="button"
@@ -212,7 +219,7 @@ function ExpenseBody({ id }: { id: string }) {
               }}
               disabled={!expense || voided}
             >
-              Void
+              {t('expenses.void.action')}
             </button>
           </>
         }
@@ -236,11 +243,16 @@ function ExpenseBody({ id }: { id: string }) {
           >
             <ExpenseStatusStamp status={expense.status} />
             <span style={{ minWidth: 0 }}>
-              <strong style={{ display: 'block' }}>{expense.void_reason || 'No reason recorded.'}</strong>
+              <strong style={{ display: 'block' }}>
+                {expense.void_reason || t('expenses.void.no_reason')}
+              </strong>
               <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-                Voided {fmtDateTime(expense.voided_at)}
-                {expense.recorded_by?.name ? ` · recorded by ${expense.recorded_by.name}` : ''}. It no
-                longer counts towards any total.
+                {expense.recorded_by?.name
+                  ? t('expenses.void.stamp_by', {
+                      when: fmtDateTime(expense.voided_at),
+                      who: expense.recorded_by.name,
+                    })
+                  : t('expenses.void.stamp', { when: fmtDateTime(expense.voided_at) })}
               </span>
             </span>
           </div>
@@ -255,50 +267,55 @@ function ExpenseBody({ id }: { id: string }) {
               alignItems: 'start',
             }}
           >
-            <section aria-label="Expense details">
-              <h2 style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--sp-2)' }}>Details</h2>
-              <Row label="Amount">
+            <section aria-label={t('expenses.details_label')}>
+              <h2 style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--sp-2)' }}>
+                {t('expenses.details')}
+              </h2>
+              <Row label={t('common.amount')}>
                 <strong className="num" style={{ fontSize: 'var(--text-xl)' }}>
                   {fmtTZS(expense.amount)}
                 </strong>
               </Row>
-              <Row label="Date incurred">{fmtDate(expense.incurred_on)}</Row>
-              <Row label="Property">
+              <Row label={t('expenses.incurred_on')}>{fmtDate(expense.incurred_on)}</Row>
+              <Row label={t('common.property')}>
                 {expense.property?.id ? (
                   <Link href={`/properties/${expense.property.id}`}>{expense.property.name}</Link>
                 ) : (
                   (expense.property?.name ?? '—')
                 )}
               </Row>
-              <Row label="Unit">{expense.unit?.name ?? <span className="pencil">whole property</span>}</Row>
-              <Row label="Category">
-                {expense.category?.name ?? <span className="pencil">uncategorised</span>}
+              <Row label={t('common.unit')}>
+                {expense.unit?.name ?? <span className="pencil">{t('expenses.whole_property')}</span>}
               </Row>
-              <Row label="Vendor">{expense.vendor || <span className="pencil">—</span>}</Row>
-              <Row label="Reference">
+              <Row label={t('expenses.category')}>
+                {expense.category?.name ?? <span className="pencil">{t('expenses.uncategorised')}</span>}
+              </Row>
+              <Row label={t('expenses.vendor')}>{expense.vendor || <span className="pencil">—</span>}</Row>
+              <Row label={t('expenses.reference')}>
                 {expense.reference ? <span className="num">{expense.reference}</span> : <span className="pencil">—</span>}
               </Row>
-              <Row label="Note">{expense.note || <span className="pencil">—</span>}</Row>
-              <Row label="Recorded by">
+              <Row label={t('common.note')}>{expense.note || <span className="pencil">—</span>}</Row>
+              <Row label={t('expenses.recorded_by')}>
                 {expense.recorded_by?.name ?? '—'} · {fmtDateTime(expense.created_at)}
               </Row>
               {expense.updated_at && expense.updated_at !== expense.created_at ? (
-                <Row label="Last changed">{fmtDateTime(expense.updated_at)}</Row>
+                <Row label={t('expenses.last_changed')}>{fmtDateTime(expense.updated_at)}</Row>
               ) : null}
             </section>
 
-            <section aria-label="Receipt">
-              <h2 style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--sp-3)' }}>Receipt</h2>
+            <section aria-label={t('expenses.receipt')}>
+              <h2 style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--sp-3)' }}>
+                {t('expenses.receipt')}
+              </h2>
               <ReceiptPanel expense={expense} />
             </section>
           </div>
         ) : (
-          <p style={{ color: 'var(--ink-soft)' }}>Loading…</p>
+          <p style={{ color: 'var(--ink-soft)' }}>{t('common.loading')}</p>
         )}
 
         <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-          Corrections are recorded, never erased. Editing keeps a before-and-after in the audit log;
-          voiding leaves the row in place with its reason.
+          {t('expenses.corrections_note_detail')}
         </p>
       </div>
 

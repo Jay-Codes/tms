@@ -12,6 +12,7 @@
 
 import { Icon } from '@iconify/react';
 import { useEffect, useState } from 'react';
+import { useT } from '@tms/ui';
 import { ProblemNote } from './FormBits';
 import { Sheet } from './Sheet';
 import {
@@ -24,16 +25,17 @@ import {
   type DashboardPrefs,
 } from '../lib/api';
 
-export const CARD_LABELS: Record<DashboardCard, string> = {
-  assets: 'Total assets',
-  renters: 'Total renters',
-  payment_status: 'Payment status',
-  collections: 'Collections this month',
-  link_requests: 'Link requests',
-  overdue: 'Overdue',
-  expenses: 'Expenses this month',
-  revenue: 'Revenue this month',
-  net_income: 'Net income',
+/** Dictionary keys for the card labels — translated where they are printed. */
+export const CARD_LABEL_KEYS: Record<DashboardCard, string> = {
+  assets: 'dash.card.assets',
+  renters: 'dash.card.renters',
+  payment_status: 'dash.card.payment_status',
+  collections: 'dash.card.collections',
+  link_requests: 'dash.card.link_requests',
+  overdue: 'dash.card.overdue',
+  expenses: 'dash.card.expenses',
+  revenue: 'dash.card.revenue',
+  net_income: 'dash.card.net_income',
 };
 
 export function DashboardCustomize({
@@ -47,6 +49,7 @@ export function DashboardCustomize({
   onClose: () => void;
   onSaved: (next: DashboardPrefs) => void;
 }) {
+  const t = useT();
   // Every card in one list: shown ones in their saved order, hidden ones after.
   const [order, setOrder] = useState<DashboardCard[]>([]);
   const [shown, setShown] = useState<Set<DashboardCard>>(new Set());
@@ -95,11 +98,10 @@ export function DashboardCustomize({
   };
 
   return (
-    <Sheet open={open} title="Customize dashboard" onClose={onClose} width={520}>
+    <Sheet open={open} title={t('dash.customize.title')} onClose={onClose} width={520}>
       <div style={{ display: 'grid', gap: 'var(--sp-4)' }}>
         <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-          Choose which cards appear and in what order. The arrangement is saved to your business, so
-          everyone on your team sees the same dashboard.
+          {t('dash.customize.lead')}
         </p>
 
         <ProblemNote error={error} />
@@ -119,13 +121,13 @@ export function DashboardCustomize({
               <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', flex: 1, cursor: 'pointer' }}>
                 <input type="checkbox" checked={shown.has(card)} onChange={() => toggle(card)} />
                 <span style={{ color: shown.has(card) ? 'var(--ink)' : 'var(--ink-faint)' }}>
-                  {CARD_LABELS[card]}
+                  {t(CARD_LABEL_KEYS[card])}
                 </span>
               </label>
               <button
                 type="button"
                 className="btn btn-quiet"
-                aria-label={`Move ${CARD_LABELS[card]} up`}
+                aria-label={t('dash.customize.move_up', { card: t(CARD_LABEL_KEYS[card]) })}
                 disabled={i === 0}
                 onClick={() => move(i, -1)}
                 style={{ minHeight: 36, padding: '0 var(--sp-2)' }}
@@ -135,7 +137,7 @@ export function DashboardCustomize({
               <button
                 type="button"
                 className="btn btn-quiet"
-                aria-label={`Move ${CARD_LABELS[card]} down`}
+                aria-label={t('dash.customize.move_down', { card: t(CARD_LABEL_KEYS[card]) })}
                 disabled={i === order.length - 1}
                 onClick={() => move(i, 1)}
                 style={{ minHeight: 36, padding: '0 var(--sp-2)' }}
@@ -148,7 +150,7 @@ export function DashboardCustomize({
 
         <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
           <button type="button" className="btn btn-primary" onClick={() => void save()} disabled={busy}>
-            {busy ? 'Saving…' : 'Save layout'}
+            {busy ? t('common.saving') : t('dash.customize.save')}
           </button>
           <button
             type="button"
@@ -159,10 +161,10 @@ export function DashboardCustomize({
               setShown(new Set(DEFAULT_DASHBOARD_CARDS));
             }}
           >
-            Reset to default
+            {t('dash.customize.reset')}
           </button>
           <button type="button" className="btn btn-quiet" onClick={onClose} disabled={busy}>
-            Cancel
+            {t('common.cancel')}
           </button>
         </div>
       </div>

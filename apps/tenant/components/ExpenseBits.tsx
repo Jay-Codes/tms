@@ -19,23 +19,25 @@ import { Field, ProblemNote } from './FormBits';
 import { Sheet } from './Sheet';
 import { type ApiError, type Expense, type ExpenseSummary } from '../lib/api';
 import { fmtDate, fmtTZS } from '../lib/format';
-import { TableScroll } from '@tms/ui';
+import { TableScroll, useT } from '@tms/ui';
 
 /** Voided is the only state loud enough to stamp. */
 export function ExpenseStatusStamp({ status }: { status: string }) {
-  if (status === 'voided') return <span className="stamp stamp-overdue">Voided</span>;
+  const t = useT();
+  if (status === 'voided') return <span className="stamp stamp-overdue">{t('expenses.status.voided')}</span>;
   return null;
 }
 
 /** A paperclip where there is a receipt, nothing where there is not. */
 export function ReceiptMark({ expense }: { expense: Expense }) {
+  const t = useT();
   if (!expense.receipt?.present) return <span className="pencil">—</span>;
   const pdf = expense.receipt.content_type === 'application/pdf';
   return (
     <Icon
       icon={pdf ? 'solar:file-text-linear' : 'solar:paperclip-linear'}
       width={18}
-      aria-label={pdf ? 'PDF receipt attached' : 'Receipt attached'}
+      aria-label={pdf ? t('expenses.receipt.attached_pdf') : t('expenses.receipt.attached')}
       role="img"
     />
   );
@@ -62,9 +64,9 @@ export function ExpensesTable({
   items,
   loading,
   totals,
-  emptyText = 'No expenses in this period.',
+  emptyText,
   showProperty = true,
-  label = 'Expenses',
+  label,
 }: {
   items: Expense[] | null;
   loading?: boolean;
@@ -78,33 +80,34 @@ export function ExpensesTable({
   showProperty?: boolean;
   label?: string;
 }) {
+  const t = useT();
   const rows = items ?? [];
   const cols = 6 + (showProperty ? 1 : 0);
   const fallback = {
     count: rows.filter((e) => e.status !== 'voided').length,
-    amount: rows.filter((e) => e.status !== 'voided').reduce((t, e) => t + (e.amount ?? 0), 0),
+    amount: rows.filter((e) => e.status !== 'voided').reduce((acc, e) => acc + (e.amount ?? 0), 0),
   };
   const sum = totals ?? fallback;
 
   return (
-    <TableScroll label={label}>
+    <TableScroll label={label ?? t('expenses.table_label')}>
       <table className="ledger">
         <thead>
           <tr>
-            <th>Date</th>
-            {showProperty ? <th>Where</th> : null}
-            <th>Category</th>
-            <th>Vendor</th>
-            <th className="num">Amount</th>
-            <th>Receipt</th>
+            <th>{t('common.date')}</th>
+            {showProperty ? <th>{t('expenses.col.where')}</th> : null}
+            <th>{t('expenses.category')}</th>
+            <th>{t('expenses.vendor')}</th>
+            <th className="num">{t('common.amount')}</th>
+            <th>{t('expenses.receipt')}</th>
             <th />
           </tr>
         </thead>
         <tbody>
           {items === null || loading ? (
-            <Loading cols={cols} text="Loading…" />
+            <Loading cols={cols} text={t('common.loading')} />
           ) : rows.length === 0 ? (
-            <Loading cols={cols} text={emptyText} />
+            <Loading cols={cols} text={emptyText ?? t('expenses.empty.period_short')} />
           ) : (
             <>
               {rows.map((e) => {
@@ -134,7 +137,7 @@ export function ExpensesTable({
                     ) : (
                       null
                     )}
-                    <td>{e.category?.name ?? <span className="pencil">uncategorised</span>}</td>
+                    <td>{e.category?.name ?? <span className="pencil">{t('expenses.uncategorised')}</span>}</td>
                     <td>
                       {e.vendor || <span className="pencil">—</span>}
                       {e.reference ? (
@@ -157,9 +160,9 @@ export function ExpensesTable({
               })}
               <tr className="total">
                 <td colSpan={cols - 3}>
-                  Total{' '}
+                  {t('common.total')}{' '}
                   <span style={{ fontWeight: 400, color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-                    ({sum.count} expense{sum.count === 1 ? '' : 's'})
+                    ({t.n('expenses.count', sum.count)})
                   </span>
                 </td>
                 <td className="num">{fmtTZS(sum.amount)}</td>
@@ -177,10 +180,11 @@ export function ExpensesTable({
 
 /** "+18%" / "−4%" / "—" when there is nothing to compare against. */
 export function ChangeMark({ pct }: { pct: number | null | undefined }) {
+  const t = useT();
   if (pct === null || pct === undefined || !Number.isFinite(pct)) {
     return (
-      <span className="pencil" title="Nothing was spent in the previous period.">
-        no comparison
+      <span className="pencil" title={t('expenses.summary.no_comparison_title')}>
+        {t('expenses.summary.no_comparison')}
       </span>
     );
   }
@@ -227,6 +231,7 @@ export function ExpenseSummaryStrip({
   onGroupBy: (g: 'category' | 'property') => void;
   loading?: boolean;
 }) {
+  const t = useT();
   const top = (summary?.groups ?? []).slice().sort((a, b) => b.amount - a.amount).slice(0, 5);
   const total = summary?.total?.amount ?? 0;
 
@@ -239,17 +244,21 @@ export function ExpenseSummaryStrip({
         borderTop: '1px solid var(--rule-strong)',
         paddingTop: 'var(--sp-4)',
       }}
-      aria-label="Expense summary"
+      aria-label={t('expenses.summary.label')}
     >
       <div style={{ display: 'grid', gap: 'var(--sp-2)', alignContent: 'start' }}>
-        <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>Spent this period</span>
+        <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+          {t('expenses.summary.spent')}
+        </span>
         <strong style={{ fontSize: 'var(--text-2xl)', fontVariantNumeric: 'tabular-nums lining-nums' }}>
           {loading && !summary ? '—' : fmtTZS(total)}
         </strong>
         <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
           <ChangeMark pct={summary?.change_pct} />
           <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-            vs {summary ? fmtTZS(summary.previous_total?.amount ?? 0) : '—'} previously
+            {t('expenses.summary.vs_previous', {
+              amount: summary ? fmtTZS(summary.previous_total?.amount ?? 0) : '—',
+            })}
           </span>
         </span>
       </div>
@@ -257,21 +266,21 @@ export function ExpenseSummaryStrip({
       <div style={{ display: 'grid', gap: 'var(--sp-3)', alignContent: 'start' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-3)' }}>
           <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-            {groupBy === 'category' ? 'By category' : 'By property'}
+            {groupBy === 'category' ? t('expenses.summary.by_category') : t('expenses.summary.by_property')}
           </span>
-          <div className="segmented" role="group" aria-label="Group the summary by">
+          <div className="segmented" role="group" aria-label={t('expenses.summary.group_by')}>
             <button type="button" aria-pressed={groupBy === 'category'} onClick={() => onGroupBy('category')}>
-              Category
+              {t('expenses.category')}
             </button>
             <button type="button" aria-pressed={groupBy === 'property'} onClick={() => onGroupBy('property')}>
-              Property
+              {t('common.property')}
             </button>
           </div>
         </div>
 
         {top.length === 0 ? (
           <p className="pencil" style={{ margin: 0 }}>
-            {loading && !summary ? 'Reading the summary…' : 'Nothing spent in this period.'}
+            {loading && !summary ? t('expenses.summary.loading') : t('expenses.summary.empty')}
           </p>
         ) : (
           <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 'var(--sp-2)' }}>
@@ -318,6 +327,7 @@ export function VoidExpenseForm({
   onSubmit: (reason: string) => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const [reason, setReason] = useState('');
 
   // A second void on a different row must not inherit the first one's words.
@@ -345,14 +355,15 @@ export function VoidExpenseForm({
       >
         <Icon icon="solar:danger-triangle-linear" width={20} />
         <span>
-          {fmtTZS(expense.amount)} on {fmtDate(expense.incurred_on)} stops counting towards your
-          totals and reports. The row is kept and marked voided — never deleted — and the reason is
-          written to the audit log.
+          {t('expenses.void.warning', {
+            amount: fmtTZS(expense.amount),
+            date: fmtDate(expense.incurred_on),
+          })}
         </span>
       </p>
       <Field
         id="void_reason"
-        label="Why is this being voided?"
+        label={t('expenses.void.reason_label')}
         hint={`${reason.length}/200`}
         error={error?.errors.reason}
       >
@@ -363,15 +374,15 @@ export function VoidExpenseForm({
           maxLength={200}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="e.g. Entered twice — this is the duplicate."
+          placeholder={t('expenses.void.reason_placeholder')}
         />
       </Field>
       <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
         <button type="submit" className="btn btn-danger" disabled={busy || reason.trim().length === 0}>
-          {busy ? 'Voiding…' : 'Void expense'}
+          {busy ? t('expenses.void.busy') : t('expenses.void.submit')}
         </button>
         <button type="button" className="btn btn-quiet" onClick={onCancel} disabled={busy}>
-          Cancel
+          {t('common.cancel')}
         </button>
       </div>
     </form>
@@ -391,8 +402,9 @@ export function VoidExpenseSheet({
   onClose: () => void;
   onSubmit: (reason: string) => void;
 }) {
+  const t = useT();
   return (
-    <Sheet open={expense !== null} title="Void this expense" onClose={onClose} width={520}>
+    <Sheet open={expense !== null} title={t('expenses.void.title')} onClose={onClose} width={520}>
       {expense ? (
         <VoidExpenseForm
           expense={expense}

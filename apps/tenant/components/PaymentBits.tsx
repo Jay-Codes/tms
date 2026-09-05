@@ -17,7 +17,6 @@ import { Field, ProblemNote } from './FormBits';
 import { Sheet } from './Sheet';
 import {
   type ApiError,
-  methodLabel,
   type Payment,
   paymentWho,
   type Schedule,
@@ -25,20 +24,33 @@ import {
   remainingOn,
 } from '../lib/api';
 import { fmtDate, fmtDateTime, fmtTZS } from '../lib/format';
-import { TableScroll } from '@tms/ui';
+import { TableScroll, useT, type Translator } from '@tms/ui';
+
+/**
+ * `methodLabel()` in lib/api is English-only, so the label is looked up here
+ * instead — an unknown method still prints as it arrived.
+ */
+export function methodText(t: Translator, m: string | null | undefined): string {
+  if (!m) return '—';
+  const key = `payments.method.${m}`;
+  const label = t(key);
+  return label === key ? String(m).replace(/_/g, ' ') : label;
+}
 
 /** A reversed payment is struck through in the ledger and stamped. */
 export function PaymentStatusStamp({ status }: { status: string }) {
-  if (status === 'reversed') return <span className="stamp stamp-overdue">Reversed</span>;
-  return <span className="stamp stamp-paid">Recorded</span>;
+  const t = useT();
+  if (status === 'reversed') return <span className="stamp stamp-overdue">{t('payments.status.reversed')}</span>;
+  return <span className="stamp stamp-paid">{t('payments.status.recorded')}</span>;
 }
 
 /** "12 days late" under an overdue row; nothing at all when it is not. */
 export function DaysOverdue({ days }: { days: number | null | undefined }) {
+  const t = useT();
   if (!days || days <= 0) return null;
   return (
     <div style={{ fontSize: 'var(--text-xs)', color: 'var(--stamp-overdue)' }}>
-      {days} day{days === 1 ? '' : 's'} late
+      {t.n('payments.days_late', days)}
     </div>
   );
 }
@@ -62,7 +74,7 @@ function Loading({ cols, text }: { cols: number; text: string }) {
 export function SchedulesTable({
   items,
   loading,
-  emptyText = 'Nothing outstanding.',
+  emptyText,
   onRecord,
 }: {
   items: Schedule[] | null;
@@ -70,27 +82,29 @@ export function SchedulesTable({
   emptyText?: string;
   onRecord?: (s: Schedule) => void;
 }) {
+  const t = useT();
   const cols = 7;
   const rows = items ?? [];
+  const empty = emptyText ?? t('payments.schedules.empty');
   return (
-    <TableScroll label="Schedules">
+    <TableScroll label={t('payments.schedules.table_label')}>
     <table className="ledger">
       <thead>
         <tr>
-          <th>Renter</th>
-          <th>Unit</th>
-          <th>Due</th>
-          <th className="num">Amount</th>
-          <th className="num">Paid</th>
-          <th>Status</th>
+          <th>{t('common.renter')}</th>
+          <th>{t('common.unit')}</th>
+          <th>{t('payments.col.due')}</th>
+          <th className="num">{t('common.amount')}</th>
+          <th className="num">{t('payments.col.paid')}</th>
+          <th>{t('common.status')}</th>
           <th />
         </tr>
       </thead>
       <tbody>
         {items === null || loading ? (
-          <Loading cols={cols} text="Loading…" />
+          <Loading cols={cols} text={t('common.loading')} />
         ) : rows.length === 0 ? (
-          <Loading cols={cols} text={emptyText} />
+          <Loading cols={cols} text={empty} />
         ) : (
           <>
             {rows.map((s) => (
@@ -128,7 +142,7 @@ export function SchedulesTable({
                   <ScheduleStatusStamp status={s.status} />
                   {s.status === 'partial' ? (
                     <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
-                      {fmtTZS(remainingOn(s))} still owing
+                      {t('payments.amount_still_owing', { amount: fmtTZS(remainingOn(s)) })}
                     </div>
                   ) : null}
                 </td>
@@ -140,16 +154,16 @@ export function SchedulesTable({
                       style={{ minHeight: 36 }}
                       onClick={() => onRecord(s)}
                     >
-                      Record payment
+                      {t('payments.record.action')}
                     </button>
                   ) : null}
                 </td>
               </tr>
             ))}
             <tr className="total">
-              <td colSpan={3}>Total</td>
-              <td className="num">{fmtTZS(rows.reduce((t, s) => t + (s.amount ?? 0), 0))}</td>
-              <td className="num">{fmtTZS(rows.reduce((t, s) => t + (s.paid_amount ?? 0), 0))}</td>
+              <td colSpan={3}>{t('common.total')}</td>
+              <td className="num">{fmtTZS(rows.reduce((sum, s) => sum + (s.amount ?? 0), 0))}</td>
+              <td className="num">{fmtTZS(rows.reduce((sum, s) => sum + (s.paid_amount ?? 0), 0))}</td>
               <td colSpan={2} />
             </tr>
           </>
@@ -175,6 +189,7 @@ export function ReverseForm({
   onSubmit: (reason: string) => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const [reason, setReason] = useState('');
   return (
     <form
@@ -197,12 +212,14 @@ export function ReverseForm({
         }}
       >
         <Icon icon="solar:danger-triangle-linear" width={20} />
-        <span>
-          {fmtTZS(payment.amount)} taken back off every schedule it was applied to. The payment is kept
-          and marked reversed — never deleted — and the reversal is written to the audit log.
-        </span>
+        <span>{t('payments.reverse.warning', { amount: fmtTZS(payment.amount) })}</span>
       </p>
-      <Field id="rev_reason" label="Why is this being reversed?" hint={`${reason.length}/200`} error={error?.errors.reason}>
+      <Field
+        id="rev_reason"
+        label={t('payments.reverse.reason_label')}
+        hint={`${reason.length}/200`}
+        error={error?.errors.reason}
+      >
         <textarea
           id="rev_reason"
           className="input"
@@ -210,15 +227,15 @@ export function ReverseForm({
           maxLength={200}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="e.g. Recorded against the wrong renter."
+          placeholder={t('payments.reverse.reason_placeholder')}
         />
       </Field>
       <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
         <button type="submit" className="btn btn-danger" disabled={busy || reason.trim().length === 0}>
-          {busy ? 'Reversing…' : 'Reverse payment'}
+          {busy ? t('payments.reverse.busy') : t('payments.reverse.submit')}
         </button>
         <button type="button" className="btn btn-quiet" onClick={onCancel} disabled={busy}>
-          Cancel
+          {t('common.cancel')}
         </button>
       </div>
     </form>
@@ -233,7 +250,7 @@ export function ReverseForm({
 export function PaymentsTable({
   items,
   loading,
-  emptyText = 'No payments recorded yet.',
+  emptyText,
   showRenter = true,
   showUnit = true,
   onReverse,
@@ -245,28 +262,30 @@ export function PaymentsTable({
   showUnit?: boolean;
   onReverse?: (p: Payment) => void;
 }) {
+  const t = useT();
   const cols = 6 + (showRenter ? 1 : 0) + (showUnit ? 1 : 0);
   const rows = items ?? [];
+  const empty = emptyText ?? t('payments.empty.history');
   return (
-    <TableScroll label="Payments">
+    <TableScroll label={t('payments.table_label')}>
     <table className="ledger">
       <thead>
         <tr>
-          <th>Paid</th>
-          {showRenter ? <th>Renter</th> : null}
-          {showUnit ? <th>Unit</th> : null}
-          <th className="num">Amount</th>
-          <th>Method</th>
-          <th>Recorded by</th>
-          <th>Status</th>
+          <th>{t('payments.col.paid_at')}</th>
+          {showRenter ? <th>{t('common.renter')}</th> : null}
+          {showUnit ? <th>{t('common.unit')}</th> : null}
+          <th className="num">{t('common.amount')}</th>
+          <th>{t('payments.col.method')}</th>
+          <th>{t('payments.col.recorded_by')}</th>
+          <th>{t('common.status')}</th>
           <th />
         </tr>
       </thead>
       <tbody>
         {items === null || loading ? (
-          <Loading cols={cols} text="Loading…" />
+          <Loading cols={cols} text={t('common.loading')} />
         ) : rows.length === 0 ? (
-          <Loading cols={cols} text={emptyText} />
+          <Loading cols={cols} text={empty} />
         ) : (
           <>
             {rows.map((p) => {
@@ -300,7 +319,7 @@ export function PaymentsTable({
                     {fmtTZS(p.amount)}
                   </td>
                   <td>
-                    {methodLabel(p.method)}
+                    {methodText(t, p.method)}
                     {p.reference ? (
                       <div className="num" style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
                         {p.reference}
@@ -326,7 +345,7 @@ export function PaymentsTable({
                         style={{ minHeight: 36 }}
                         onClick={() => onReverse(p)}
                       >
-                        Reverse
+                        {t('payments.reverse.action')}
                       </button>
                     ) : null}
                   </td>
@@ -334,9 +353,9 @@ export function PaymentsTable({
               );
             })}
             <tr className="total">
-              <td colSpan={cols - 5}>Total recorded</td>
+              <td colSpan={cols - 5}>{t('payments.total_recorded')}</td>
               <td className="num">
-                {fmtTZS(rows.filter((p) => p.status !== 'reversed').reduce((t, p) => t + (p.amount ?? 0), 0))}
+                {fmtTZS(rows.filter((p) => p.status !== 'reversed').reduce((sum, p) => sum + (p.amount ?? 0), 0))}
               </td>
               <td colSpan={4} />
             </tr>
@@ -362,8 +381,9 @@ export function ReverseSheet({
   onClose: () => void;
   onSubmit: (reason: string) => void;
 }) {
+  const t = useT();
   return (
-    <Sheet open={payment !== null} title="Reverse this payment" onClose={onClose} width={520}>
+    <Sheet open={payment !== null} title={t('payments.reverse.title')} onClose={onClose} width={520}>
       {payment ? (
         <ReverseForm payment={payment} busy={busy} error={error} onCancel={onClose} onSubmit={onSubmit} />
       ) : null}

@@ -10,9 +10,10 @@
  */
 
 import { Icon } from '@iconify/react';
+import { formatDateIntl, useT } from '@tms/ui';
 import type { ReactNode } from 'react';
 import type { CollectionsBucket, PaymentStatusValue } from '../lib/api';
-import { fmtTZS } from '../lib/format';
+import { fmtTZS, formatLocale } from '../lib/format';
 
 /* --------------------------------- tabs ---------------------------------- */
 
@@ -141,10 +142,11 @@ export function SectionHead({ icon, title, aside }: { icon: string; title: strin
  * two open states are only pencilled, because nothing has happened yet.
  */
 export function PaymentStatusStampCell({ status }: { status: PaymentStatusValue }) {
-  if (status === 'overdue') return <span className="stamp stamp-overdue">Overdue</span>;
-  if (status === 'paid') return <span className="stamp stamp-paid">Paid</span>;
-  if (status === 'partial') return <span className="pencil">part paid</span>;
-  return <span className="pencil">pending</span>;
+  const t = useT();
+  if (status === 'overdue') return <span className="stamp stamp-overdue">{t('reports.stamp.overdue')}</span>;
+  if (status === 'paid') return <span className="stamp stamp-paid">{t('reports.stamp.paid')}</span>;
+  if (status === 'partial') return <span className="pencil">{t('reports.stamp.partial')}</span>;
+  return <span className="pencil">{t('reports.stamp.pending')}</span>;
 }
 
 /* -------------------------------- chart ---------------------------------- */
@@ -156,12 +158,18 @@ const PAD_R = 8;
 const PAD_T = 8;
 const PAD_B = 34;
 
-/** `2026-09-01` → `Sep`, or `1 Sep` for a day/week bucket. */
+/**
+ * `2026-09-01` → `Sep`, or `1 Sep` for a day/week bucket — in the active
+ * portal language, through the shared `formatDateIntl` helper.
+ */
 function bucketLabel(start: string, group: 'day' | 'week' | 'month'): string {
   const d = new Date(start.length === 10 ? `${start}T00:00:00Z` : start);
   if (Number.isNaN(d.getTime())) return start;
-  if (group === 'month') return d.toLocaleDateString('en-GB', { month: 'short', timeZone: 'UTC' });
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+  const locale = formatLocale();
+  if (group === 'month') {
+    return formatDateIntl(locale, start, { day: undefined, month: 'short', year: undefined });
+  }
+  return formatDateIntl(locale, start, { day: 'numeric', month: 'short', year: undefined });
 }
 
 /**
@@ -177,6 +185,7 @@ export function CollectionsChart({
   buckets: CollectionsBucket[];
   group: 'day' | 'week' | 'month';
 }) {
+  const t = useT();
   if (buckets.length === 0) return null;
 
   const max = Math.max(1, ...buckets.map((b) => Math.max(b.expected, b.collected)));
@@ -196,7 +205,7 @@ export function CollectionsChart({
         width="100%"
         height={CHART_H}
         role="img"
-        aria-label={`Expected versus collected across ${buckets.length} periods`}
+        aria-label={t('reports.collections.chart_bars_aria', { count: buckets.length })}
         style={{ overflow: 'visible' }}
       >
         <line
@@ -213,9 +222,13 @@ export function CollectionsChart({
           const cxx = cx + gap / 2;
           return (
             <g key={b.start}>
-              <title>{`${bucketLabel(b.start, group)} — expected ${fmtTZS(b.expected)}, collected ${fmtTZS(
-                b.collected,
-              )}`}</title>
+              <title>
+                {t('reports.collections.chart_tooltip', {
+                  label: bucketLabel(b.start, group),
+                  expected: fmtTZS(b.expected),
+                  collected: fmtTZS(b.collected),
+                })}
+              </title>
               <rect
                 x={ex}
                 y={y(b.expected)}
@@ -260,11 +273,11 @@ export function CollectionsChart({
             aria-hidden
             style={{ width: 14, height: 14, border: '1px solid var(--ink-soft)', display: 'inline-block' }}
           />
-          Expected
+          {t('reports.series.expected')}
         </span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
           <span aria-hidden style={{ width: 14, height: 14, background: 'var(--primary)', display: 'inline-block' }} />
-          Collected
+          {t('reports.series.collected')}
         </span>
       </figcaption>
     </figure>

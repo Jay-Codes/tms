@@ -6,6 +6,7 @@
  */
 
 import Link from 'next/link';
+import { useT } from '@tms/ui';
 import { useCallback, useEffect, useState } from 'react';
 import { ProblemNote } from '../../../../components/FormBits';
 import { StatusMark } from '../../../../components/UnitStatus';
@@ -22,6 +23,7 @@ import {
 import { Amount } from '../../../../lib/format';
 
 export function UnitsStep() {
+  const t = useT();
   const [property, setProperty] = useState<Property | null>(null);
   const [units, setUnits] = useState<Unit[] | null>(null);
   const [periods, setPeriods] = useState<PaymentPeriod[]>([]);
@@ -60,32 +62,29 @@ export function UnitsStep() {
 
   return (
     <div style={{ display: 'grid', gap: 'var(--sp-4)', maxWidth: 720 }}>
-      <p style={{ maxWidth: 'var(--measure)' }}>
-        The rooms, houses or shops inside that property. Each one gets its own permanent QR code.
-      </p>
+      <p style={{ maxWidth: 'var(--measure)' }}>{t('setup.units.lead')}</p>
       <ProblemNote error={error} />
 
       {units === null ? (
-        <p style={{ color: 'var(--ink-soft)' }}>Loading…</p>
+        <p style={{ color: 'var(--ink-soft)' }}>{t('common.loading')}</p>
       ) : !property ? (
-        <p style={{ color: 'var(--ink-soft)' }}>
-          Add a property in the previous step first — units live inside a property.
-        </p>
+        <p style={{ color: 'var(--ink-soft)' }}>{t('setup.units.no_property')}</p>
       ) : (
         <>
           <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-            Adding to <strong>{property.name}</strong>.{' '}
-            <Link href={`/properties/${property.id}`}>Open the property</Link> to manage another one.
+            {t('setup.units.adding_to')} <strong>{property.name}</strong>.{' '}
+            <Link href={`/properties/${property.id}`}>{t('setup.units.open_property')}</Link>{' '}
+            {t('setup.units.open_property_tail')}
           </p>
 
           {units.length > 0 ? (
             <table className="ledger">
               <thead>
                 <tr>
-                  <th>Unit</th>
-                  <th>Status</th>
-                  <th className="num">Price</th>
-                  <th>Code</th>
+                  <th>{t('common.unit')}</th>
+                  <th>{t('common.status')}</th>
+                  <th className="num">{t('setup.units.col.price')}</th>
+                  <th>{t('setup.units.col.code')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -116,7 +115,7 @@ export function UnitsStep() {
               onClick={() => setMany(false)}
               aria-pressed={!many}
             >
-              One at a time
+              {t('setup.units.one_at_a_time')}
             </button>
             <button
               type="button"
@@ -124,7 +123,7 @@ export function UnitsStep() {
               onClick={() => setMany(true)}
               aria-pressed={many}
             >
-              Add many
+              {t('setup.units.add_many')}
             </button>
           </div>
 
@@ -140,8 +139,8 @@ export function UnitsStep() {
 
           {units.length > 0 ? (
             <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-              <Link href={`/properties/${property.id}/qr`}>Print the QR sheet</Link> once you have added
-              every unit.
+              <Link href={`/properties/${property.id}/qr`}>{t('setup.units.print_qr')}</Link>{' '}
+              {t('setup.units.print_qr_tail')}
             </p>
           ) : null}
         </>

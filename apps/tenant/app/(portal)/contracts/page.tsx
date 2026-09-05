@@ -19,30 +19,23 @@ import { NewContractForm } from '../../../components/NewContractForm';
 import { PageHead } from '../../../components/PageHead';
 import { Sheet } from '../../../components/Sheet';
 import { ApiError, contractsApi, toApiError, type Contract, type ContractStatus } from '../../../lib/api';
+import { useT } from '@tms/ui';
 
 type TabValue = '' | ContractStatus | 'ready';
 
-const TABS: { value: TabValue; label: string }[] = [
-  { value: '', label: 'All' },
-  { value: 'pending_signature', label: 'Awaiting signature' },
-  { value: 'ready', label: 'Ready to countersign' },
-  { value: 'active', label: 'Active' },
-  { value: 'expiring', label: 'Expiring' },
-  { value: 'ended', label: 'Ended' },
-  { value: 'terminated', label: 'Terminated' },
+/** Tab value → the dictionary keys for its label and its empty state. */
+const TABS: { value: TabValue; label: string; empty: string }[] = [
+  { value: '', label: 'common.all', empty: 'contracts.empty.all' },
+  { value: 'pending_signature', label: 'contracts.tab.pending', empty: 'contracts.empty.pending' },
+  { value: 'ready', label: 'contracts.tab.ready', empty: 'contracts.empty.ready' },
+  { value: 'active', label: 'contracts.tab.active', empty: 'contracts.empty.active' },
+  { value: 'expiring', label: 'contracts.tab.expiring', empty: 'contracts.empty.expiring' },
+  { value: 'ended', label: 'contracts.tab.ended', empty: 'contracts.empty.ended' },
+  { value: 'terminated', label: 'contracts.tab.terminated', empty: 'contracts.empty.terminated' },
 ];
 
-const EMPTY: Record<string, string> = {
-  '': 'No contracts yet. Approve a link request, or write one here.',
-  pending_signature: 'Nothing is waiting for a renter signature.',
-  ready: 'Nothing is waiting for your countersignature.',
-  active: 'No active contracts.',
-  expiring: 'Nothing is close to its end date.',
-  ended: 'No contracts have run their course yet.',
-  terminated: 'Nothing has been terminated.',
-};
-
 function ContractsBody() {
+  const t = useT();
   const router = useRouter();
   const [tab, setTab] = useState<TabValue>('');
   const [items, setItems] = useState<Contract[] | null>(null);
@@ -78,30 +71,30 @@ function ContractsBody() {
   return (
     <>
       <PageHead
-        title="Contracts"
-        lead="Every tenancy this business has issued, and what each one is waiting for."
+        title={t('nav.contracts')}
+        lead={t('contracts.lead')}
         actions={
           <>
             <Link href="/contracts/templates" className="btn btn-quiet">
-              <Icon icon="solar:documents-linear" width={20} /> Templates
+              <Icon icon="solar:documents-linear" width={20} /> {t('contracts.templates_link')}
             </Link>
             <button type="button" className="btn btn-primary" onClick={() => setOpen(true)}>
-              <Icon icon="solar:add-square-linear" width={20} /> New contract
+              <Icon icon="solar:add-square-linear" width={20} /> {t('contracts.new')}
             </button>
           </>
         }
       />
 
-      <div role="tablist" style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)', marginBottom: 'var(--sp-4)' }}>
-        {TABS.map((t) => {
-          const active = tab === t.value;
+      <div role="tablist" aria-label={t('contracts.filter_tabs')} style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)', marginBottom: 'var(--sp-4)' }}>
+        {TABS.map((item) => {
+          const active = tab === item.value;
           return (
             <button
-              key={t.value || 'all'}
+              key={item.value || 'all'}
               type="button"
               role="tab"
               aria-selected={active}
-              onClick={() => setTab(t.value)}
+              onClick={() => setTab(item.value)}
               style={{
                 minHeight: 'var(--touch-min)',
                 padding: '0 var(--sp-4)',
@@ -114,7 +107,7 @@ function ContractsBody() {
                 cursor: 'pointer',
               }}
             >
-              {t.label}
+              {t(item.label)}
             </button>
           );
         })}
@@ -124,10 +117,12 @@ function ContractsBody() {
 
       <div style={{ paddingTop: 'var(--sp-4)', display: 'grid', gap: 'var(--sp-4)' }}>
         <ProblemNote error={error} />
-        <ContractsTable items={items} emptyText={error ? 'Nothing to show.' : EMPTY[tab]} />
+        <ContractsTable items={items} emptyText={
+            error ? t('common.no_results') : t(TABS.find((x) => x.value === tab)?.empty ?? 'contracts.empty.all')
+          } />
       </div>
 
-      <Sheet open={open} title="New contract" onClose={() => setOpen(false)} width={640}>
+      <Sheet open={open} title={t('contracts.new')} onClose={() => setOpen(false)} width={640}>
         <NewContractForm onCreated={(c) => router.push(`/contracts/${c.id}`)} />
       </Sheet>
     </>

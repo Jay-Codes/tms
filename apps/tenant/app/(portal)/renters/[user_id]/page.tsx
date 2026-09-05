@@ -13,7 +13,7 @@ import { ContractsTable } from '../../../../components/ContractBits';
 import { ProblemNote } from '../../../../components/FormBits';
 import { NotificationLogTable } from '../../../../components/NotificationBits';
 import { PaymentsTable } from '../../../../components/PaymentBits';
-import { Facts, KycStamp, LinkStatusStamp, ViewIdDocButton } from '../../../../components/RenterBits';
+import { Facts, KycStamp, LinkStatusStamp, ViewIdDocButton, localeLabel } from '../../../../components/RenterBits';
 import { PageHead } from '../../../../components/PageHead';
 import {
   ApiError,
@@ -29,6 +29,7 @@ import {
   type RenterDetail,
 } from '../../../../lib/api';
 import { Amount, fmtDate } from '../../../../lib/format';
+import { useT } from '@tms/ui';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -41,6 +42,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 function RenterBody({ userId }: { userId: string }) {
+  const t = useT();
   const [data, setData] = useState<RenterDetail | null>(null);
   const [contractRows, setContractRows] = useState<Contract[] | null>(null);
   const [payments, setPayments] = useState<Payment[] | null>(null);
@@ -104,11 +106,11 @@ function RenterBody({ userId }: { userId: string }) {
   if (error && !data) {
     return (
       <>
-        <PageHead title="Renter" />
+        <PageHead title={t('common.renter')} />
         <ProblemNote error={error} />
         <p style={{ marginTop: 'var(--sp-4)' }}>
           <Link href="/renters" className="btn btn-quiet">
-            Back to the directory
+            {t('renters.back_to_directory')}
           </Link>
         </p>
       </>
@@ -118,8 +120,8 @@ function RenterBody({ userId }: { userId: string }) {
   if (!data) {
     return (
       <>
-        <PageHead title="Renter" />
-        <p style={{ color: 'var(--ink-soft)' }}>Loading…</p>
+        <PageHead title={t('common.renter')} />
+        <p style={{ color: 'var(--ink-soft)' }}>{t('common.loading')}</p>
       </>
     );
   }
@@ -135,11 +137,11 @@ function RenterBody({ userId }: { userId: string }) {
   return (
     <>
       <PageHead
-        title={profile?.full_name || renter?.full_name || 'Renter'}
+        title={profile?.full_name || renter?.full_name || t('common.renter')}
         lead={renter?.phone ?? undefined}
         actions={
           <Link href="/renters" className="btn btn-quiet">
-            <Icon icon="solar:arrow-left-linear" width={20} /> Directory
+            <Icon icon="solar:arrow-left-linear" width={20} /> {t('renters.directory')}
           </Link>
         }
       />
@@ -148,45 +150,46 @@ function RenterBody({ userId }: { userId: string }) {
         <KycStamp status={profile?.kyc_status ?? renter?.kyc_status} />
       </div>
 
-      <Section title="Profile">
+      <Section title={t('renters.section.profile')}>
         <div style={{ display: 'grid', gap: 'var(--sp-4)', maxWidth: 640 }}>
           <Facts
             rows={[
-              ['Full name', profile?.full_name ?? renter?.full_name ?? '—'],
-              ['Phone', renter?.phone ?? '—'],
-              ['Email', profile?.email ?? renter?.email ?? '—'],
+              [t('renters.field.full_name'), profile?.full_name ?? renter?.full_name ?? '—'],
+              [t('common.phone'), renter?.phone ?? '—'],
+              [t('common.email'), profile?.email ?? renter?.email ?? '—'],
+              [t('renters.locale'), localeLabel(t, renter?.locale)],
               [
-                'NIDA',
+                t('renters.field.nida'),
                 <span key="nida" className="num" style={{ letterSpacing: '0.08em' }}>
                   {profile?.nida_masked ?? '—'}
                 </span>,
               ],
-              ['Next of kin', profile?.next_of_kin_name ?? '—'],
-              ['Next of kin phone', profile?.next_of_kin_phone ?? '—'],
-              ['Known since', fmtDate(renter?.created_at)],
+              [t('renters.field.next_of_kin'), profile?.next_of_kin_name ?? '—'],
+              [t('renters.field.next_of_kin_phone'), profile?.next_of_kin_phone ?? '—'],
+              [t('renters.col.known_since'), fmtDate(renter?.created_at)],
             ]}
           />
           <ViewIdDocButton
             userId={userId}
             disabled={!docOnFile}
-            disabledReason={docOnFile ? undefined : 'No ID photo was uploaded.'}
+            disabledReason={docOnFile ? undefined : t('renters.kyc.no_doc')}
           />
           <p style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-faint)' }}>
-            The NIDA number is stored encrypted; only the last four digits are ever shown.
+            {t('renters.nida_note')}
           </p>
         </div>
       </Section>
 
-      <Section title="Units">
+      <Section title={t('nav.units')}>
         {(renter?.units ?? []).length === 0 ? (
-          <p style={{ color: 'var(--ink-soft)' }}>Not linked to any of your units yet.</p>
+          <p style={{ color: 'var(--ink-soft)' }}>{t('renters.units.empty')}</p>
         ) : (
           <table className="ledger">
             <thead>
               <tr>
-                <th>Unit</th>
-                <th>Property</th>
-                <th>Link status</th>
+                <th>{t('common.unit')}</th>
+                <th>{t('common.property')}</th>
+                <th>{t('renters.col.link_status')}</th>
               </tr>
             </thead>
             <tbody>
@@ -208,20 +211,20 @@ function RenterBody({ userId }: { userId: string }) {
         )}
       </Section>
 
-      <Section title="Link requests">
+      <Section title={t('nav.link_requests')}>
         {requests.length === 0 ? (
-          <p style={{ color: 'var(--ink-soft)' }}>No link requests from this renter.</p>
+          <p style={{ color: 'var(--ink-soft)' }}>{t('renters.requests.empty')}</p>
         ) : (
           <table className="ledger">
             <thead>
               <tr>
-                <th>Unit</th>
-                <th>Period</th>
-                <th className="num">Amount</th>
-                <th className="num">Term</th>
-                <th>Dates</th>
-                <th>Status</th>
-                <th>Requested</th>
+                <th>{t('common.unit')}</th>
+                <th>{t('linkreq.col.period')}</th>
+                <th className="num">{t('common.amount')}</th>
+                <th className="num">{t('linkreq.col.term')}</th>
+                <th>{t('linkreq.col.dates')}</th>
+                <th>{t('common.status')}</th>
+                <th>{t('linkreq.col.requested')}</th>
               </tr>
             </thead>
             <tbody>
@@ -239,7 +242,7 @@ function RenterBody({ userId }: { userId: string }) {
                   <td className="num">
                     <Amount value={r.payment_period?.amount ?? null} />
                   </td>
-                  <td className="num">{r.term_days ? `${r.term_days} d` : '—'}</td>
+                  <td className="num">{r.term_days ? t('linkreq.term_short', { days: r.term_days }) : '—'}</td>
                   <td style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
                     {fmtDate(r.start_date)} → {fmtDate(r.end_date)}
                   </td>
@@ -254,29 +257,29 @@ function RenterBody({ userId }: { userId: string }) {
         )}
       </Section>
 
-      <Section title="Contracts">
-        <ContractsTable items={contracts} showRenter={false} emptyText="No contracts with this renter yet." />
+      <Section title={t('nav.contracts')}>
+        <ContractsTable items={contracts} showRenter={false} emptyText={t('renters.contracts.empty')} />
       </Section>
 
-      <Section title="Payment history">
+      <Section title={t('renters.section.payments')}>
         <PaymentsTable
           items={payments}
           showRenter={false}
-          emptyText="No payments recorded from this renter yet."
+          emptyText={t('renters.payments.empty')}
         />
       </Section>
 
-      <Section title="Messages">
+      <Section title={t('nav.messages')}>
         <div style={{ display: 'grid', gap: 'var(--sp-3)' }}>
           <NotificationLogTable
             items={messages}
             showRenter={false}
-            emptyText="No SMS has been sent to this renter yet."
+            emptyText={t('renters.messages.empty')}
           />
           <p style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-faint)' }}>
-            The twenty most recent messages.{' '}
+            {t('renters.messages.note')}{' '}
             <Link href="/notifications" style={{ color: 'var(--primary)' }}>
-              See the full log
+              {t('renters.messages.full_log')}
             </Link>
             .
           </p>

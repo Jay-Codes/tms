@@ -2,6 +2,7 @@ import { Bricolage_Grotesque, Archivo, Instrument_Sans, Hanken_Grotesk } from 'n
 import '@tms/ui/tokens.css';
 import { RegisterSW } from '../components/RegisterSW';
 import { AuthProvider } from '../lib/auth';
+import { LocaleProvider } from '../lib/locale';
 
 // Landlord portal is org-themed like the enduser app: same whitelisted
 // fonts, org branding applied at runtime via applyOrgTheme().
@@ -35,7 +36,9 @@ export const viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
-      lang="en"
+      // The real language is set on the client by <LocaleProvider> as soon as
+      // the stored/account locale resolves; Swahili is the platform default.
+      lang="sw"
       className={`${bricolage.variable} ${archivo.variable} ${instrument.variable} ${hanken.variable}`}
     >
       <body>
@@ -50,7 +53,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             __html: `(function(){try{var e=JSON.parse(localStorage.getItem('tms.tenant.theme')||'null');if(!e||!e.vars)return;var r=document.documentElement;for(var k in e.vars)r.style.setProperty(k,e.vars[k]);if(e.theme&&e.theme.dark)r.setAttribute('data-theme','dark');}catch(_){}})();`,
           }}
         />
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <LocaleProvider>{children}</LocaleProvider>
+        </AuthProvider>
         <RegisterSW />
       </body>
     </html>

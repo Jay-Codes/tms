@@ -3,18 +3,20 @@
 /** Expense categories, on their own page so Settings stays short. */
 
 import Link from 'next/link';
+import { useT } from '@tms/ui';
 import { ExpenseCategoriesManager } from '../../../../components/ExpenseCategoriesManager';
 import { PageHead } from '../../../../components/PageHead';
 
 export default function ExpenseCategoriesPage() {
+  const t = useT();
   return (
     <>
       <PageHead
-        title="Expense categories"
-        lead="What your spending is filed under. Seeded with the usual eight; rename, reorder or add your own."
+        title={t('expcat.title')}
+        lead={t('expcat.lead')}
         actions={
           <Link href="/settings" className="btn btn-quiet">
-            Back to settings
+            {t('settings.back')}
           </Link>
         }
       />

@@ -36,6 +36,7 @@ import {
   type Schedule,
 } from '../lib/api';
 import { datetimeLocalToRfc3339, fmtDate, fmtTZS, nowDatetimeLocal } from '../lib/format';
+import { useT, type Translator } from '@tms/ui';
 
 export interface RecordPaymentTarget {
   contractId: string;
@@ -52,14 +53,15 @@ function earliestUnpaid(rows: Schedule[]): Schedule | null {
   return open.reduce((a, b) => (a.due_date <= b.due_date ? a : b));
 }
 
-function scheduleOptionLabel(s: Schedule): string {
+function scheduleOptionLabel(t: Translator, s: Schedule): string {
   const owing = remainingOn(s);
   return `${fmtDate(s.due_date)} — ${fmtTZS(s.amount)}${
-    s.paid_amount ? ` (${fmtTZS(owing)} still owing)` : ''
-  }${s.status === 'overdue' ? ' · overdue' : ''}`;
+    s.paid_amount ? ` (${t('payments.amount_still_owing', { amount: fmtTZS(owing) })})` : ''
+  }${s.status === 'overdue' ? ` · ${t('payments.schedule_status.overdue')}` : ''}`;
 }
 
 function AppliedRows({ result }: { result: PaymentResult }) {
+  const t = useT();
   const applied = result.payment?.applied ?? [];
   const byId = new Map((result.schedules ?? []).map((s) => [s.id, s]));
   return (
@@ -78,19 +80,16 @@ function AppliedRows({ result }: { result: PaymentResult }) {
         }}
       >
         <Icon icon="solar:check-circle-linear" width={20} />
-        <span>
-          {fmtTZS(result.payment?.amount)} recorded. The renter is sent a thank-you SMS with the next
-          amount due.
-        </span>
+        <span>{t('payments.record.done', { amount: fmtTZS(result.payment?.amount) })}</span>
       </p>
 
       {applied.length > 0 ? (
         <table className="ledger">
           <thead>
             <tr>
-              <th>Applied to</th>
-              <th className="num">Amount</th>
-              <th>Now</th>
+              <th>{t('payments.record.applied_to')}</th>
+              <th className="num">{t('common.amount')}</th>
+              <th>{t('payments.record.now')}</th>
             </tr>
           </thead>
           <tbody>
@@ -98,13 +97,19 @@ function AppliedRows({ result }: { result: PaymentResult }) {
               const s = byId.get(a.schedule_id);
               return (
                 <tr key={a.schedule_id}>
-                  <td>{s ? `Due ${fmtDate(s.due_date)}` : 'Schedule'}</td>
+                  <td>
+                    {s
+                      ? t('payments.record.due_on', { date: fmtDate(s.due_date) })
+                      : t('payments.record.schedule')}
+                  </td>
                   <td className="num">{fmtTZS(a.amount)}</td>
                   <td>
                     {s?.status === 'paid' ? (
-                      <span className="stamp stamp-paid">Paid</span>
+                      <span className="stamp stamp-paid">{t('payments.schedule_status.paid')}</span>
                     ) : (
-                      <span className="pencil">{s?.status ?? '—'}</span>
+                      <span className="pencil">
+                        {s?.status ? t(`payments.schedule_status.${s.status}`) : '—'}
+                      </span>
                     )}
                   </td>
                 </tr>
@@ -129,6 +134,7 @@ export function RecordPaymentSheet({
   /** Fired once the payment is written, so the caller can refresh its ledger. */
   onRecorded: (result: PaymentResult) => void;
 }) {
+  const t = useT();
   const [schedules, setSchedules] = useState<Schedule[] | null>(null);
   const [scheduleId, setScheduleId] = useState('');
   const [amount, setAmount] = useState('');
@@ -223,7 +229,7 @@ export function RecordPaymentSheet({
   const valid = contractId !== '' && Number.isFinite(amountNum) && amountNum > 0;
 
   return (
-    <Sheet open={open} title="Record payment" onClose={onClose} width={560}>
+    <Sheet open={open} title={t('payments.record.title')} onClose={onClose} width={560}>
       {target?.label ? (
         <p style={{ marginBottom: 'var(--sp-4)', color: 'var(--ink-soft)' }}>{target.label}</p>
       ) : null}
@@ -233,7 +239,7 @@ export function RecordPaymentSheet({
           <AppliedRows result={result} />
           <div>
             <button type="button" className="btn btn-secondary" onClick={onClose}>
-              Done
+              {t('common.done')}
             </button>
           </div>
         </div>
@@ -251,9 +257,12 @@ export function RecordPaymentSheet({
           >
             <Icon icon="solar:question-circle-linear" width={20} />
             <span>
-              Excess {fmtTZS(overpay.excess)} will be applied to the next payment
-              {overpay.next_schedule?.due_date ? ` due ${fmtDate(overpay.next_schedule.due_date)}` : ''}.
-              Continue?
+              {overpay.next_schedule?.due_date
+                ? t('payments.overpay.prompt_dated', {
+                    amount: fmtTZS(overpay.excess),
+                    date: fmtDate(overpay.next_schedule.due_date),
+                  })
+                : t('payments.overpay.prompt', { amount: fmtTZS(overpay.excess) })}
             </span>
           </p>
           <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
@@ -263,10 +272,10 @@ export function RecordPaymentSheet({
               disabled={busy}
               onClick={() => void send(true)}
             >
-              {busy ? 'Recording…' : 'Continue'}
+              {busy ? t('payments.record.busy') : t('payments.overpay.continue')}
             </button>
             <button type="button" className="btn btn-quiet" onClick={() => setOverpay(null)} disabled={busy}>
-              Change the amount
+              {t('payments.overpay.change_amount')}
             </button>
           </div>
         </div>
@@ -284,13 +293,13 @@ export function RecordPaymentSheet({
 
           <Field
             id="rp_schedule"
-            label="Which payment is this for?"
+            label={t('payments.record.schedule_label')}
             hint={
               schedules === null
-                ? 'Reading the schedule…'
+                ? t('payments.record.schedule_loading')
                 : selected
-                  ? `${fmtTZS(remainingOn(selected))} still owing on this one.`
-                  : 'This contract has no schedule yet.'
+                  ? t('payments.record.schedule_owing', { amount: fmtTZS(remainingOn(selected)) })
+                  : t('payments.record.schedule_none')
             }
             error={error?.errors.schedule_id}
           >
@@ -306,14 +315,14 @@ export function RecordPaymentSheet({
             >
               {(schedules ?? []).map((s) => (
                 <option key={s.id} value={s.id}>
-                  {scheduleOptionLabel(s)}
+                  {scheduleOptionLabel(t, s)}
                 </option>
               ))}
             </select>
           </Field>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-4)' }}>
-            <Field id="rp_amount" label="Amount received (TZS)" error={error?.errors.amount}>
+            <Field id="rp_amount" label={t('payments.record.amount_label')} error={error?.errors.amount}>
               <input
                 id="rp_amount"
                 className="input num"
@@ -327,7 +336,7 @@ export function RecordPaymentSheet({
                 }}
               />
             </Field>
-            <Field id="rp_method" label="How was it paid?" error={error?.errors.method}>
+            <Field id="rp_method" label={t('payments.record.method_label')} error={error?.errors.method}>
               <select
                 id="rp_method"
                 className="input"
@@ -336,7 +345,7 @@ export function RecordPaymentSheet({
               >
                 {PAYMENT_METHODS.map((m) => (
                   <option key={m.value} value={m.value}>
-                    {m.label}
+                    {t(`payments.method.${m.value}`)}
                   </option>
                 ))}
               </select>
@@ -346,8 +355,8 @@ export function RecordPaymentSheet({
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-4)' }}>
             <Field
               id="rp_reference"
-              label="Reference"
-              hint="Transaction or receipt number, if there is one."
+              label={t('payments.record.reference_label')}
+              hint={t('payments.record.reference_hint')}
               error={error?.errors.reference}
             >
               <input
@@ -356,10 +365,10 @@ export function RecordPaymentSheet({
                 maxLength={80}
                 value={reference}
                 onChange={(e) => setReference(e.target.value)}
-                placeholder="e.g. MPESA QJ84KD21"
+                placeholder={t('payments.record.reference_placeholder')}
               />
             </Field>
-            <Field id="rp_paid_at" label="When was it paid?" error={error?.errors.paid_at}>
+            <Field id="rp_paid_at" label={t('payments.record.paid_at_label')} error={error?.errors.paid_at}>
               <input
                 id="rp_paid_at"
                 className="input"
@@ -370,7 +379,12 @@ export function RecordPaymentSheet({
             </Field>
           </div>
 
-          <Field id="rp_note" label="Note" hint={`${note.length}/500 — for your own records.`} error={error?.errors.note}>
+          <Field
+            id="rp_note"
+            label={t('common.note')}
+            hint={t('payments.record.note_hint', { count: note.length })}
+            error={error?.errors.note}
+          >
             <textarea
               id="rp_note"
               className="input"
@@ -383,10 +397,10 @@ export function RecordPaymentSheet({
 
           <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
             <button type="submit" className="btn btn-primary" disabled={busy || !valid}>
-              {busy ? 'Recording…' : 'Record payment'}
+              {busy ? t('payments.record.busy') : t('payments.record.submit')}
             </button>
             <button type="button" className="btn btn-quiet" onClick={onClose} disabled={busy}>
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         </form>

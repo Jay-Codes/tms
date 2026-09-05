@@ -14,35 +14,29 @@ import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { useT } from '@tms/ui';
 import { ProblemNote } from '../../../components/FormBits';
-import { NotificationLogTable, SendMessageForm } from '../../../components/NotificationBits';
-import { PageHead } from '../../../components/PageHead';
 import {
-  ApiError,
-  KIND_LABELS,
-  notificationsApi,
-  toApiError,
-  type NotificationLogEntry,
-} from '../../../lib/api';
+  KIND_FILTER_IDS,
+  NotificationLogTable,
+  SendMessageForm,
+  kindLabelFor,
+} from '../../../components/NotificationBits';
+import { PageHead } from '../../../components/PageHead';
+import { ApiError, notificationsApi, toApiError, type NotificationLogEntry } from '../../../lib/api';
 
 type TabId = 'log' | 'send';
 
-/** Kinds worth filtering by; the value is what `?kind=` takes (API.md). */
-const KIND_OPTIONS = [
-  'reminder_7d',
-  'reminder_due',
-  'overdue_daily',
-  'thank_you',
-  'unsigned_reminder',
-  'custom',
-  'link_approved',
-  'link_rejected',
-  'otp',
-];
-
-const STATUS_OPTIONS = ['queued', 'sent', 'failed'];
+/** The three delivery states the log lets a landlord filter on. */
+const STATUS_OPTIONS = ['queued', 'sent', 'failed'] as const;
+const STATUS_KEYS: Record<(typeof STATUS_OPTIONS)[number], string> = {
+  queued: 'msg.status.queued',
+  sent: 'msg.status.sent',
+  failed: 'msg.status.failed',
+};
 
 function LogTab() {
+  const t = useT();
   const [items, setItems] = useState<NotificationLogEntry[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [filters, setFilters] = useState({ kind: '', status: '', from: '', to: '' });
@@ -89,37 +83,37 @@ function LogTab() {
     <div style={{ display: 'grid', gap: 'var(--sp-4)' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-4)', alignItems: 'flex-end' }}>
         <div className="field" style={{ width: 220 }}>
-          <label htmlFor="f_kind">Kind</label>
+          <label htmlFor="f_kind">{t('msg.col.kind')}</label>
           <select id="f_kind" className="input" value={filters.kind} onChange={(e) => set('kind', e.target.value)}>
-            <option value="">All kinds</option>
-            {KIND_OPTIONS.map((k) => (
+            <option value="">{t('msg.filter.all_kinds')}</option>
+            {KIND_FILTER_IDS.map((k) => (
               <option key={k} value={k}>
-                {KIND_LABELS[k] ?? k}
+                {kindLabelFor(t, k)}
               </option>
             ))}
           </select>
         </div>
         <div className="field" style={{ width: 170 }}>
-          <label htmlFor="f_status">Status</label>
+          <label htmlFor="f_status">{t('common.status')}</label>
           <select id="f_status" className="input" value={filters.status} onChange={(e) => set('status', e.target.value)}>
-            <option value="">Any status</option>
+            <option value="">{t('msg.filter.any_status')}</option>
             {STATUS_OPTIONS.map((s) => (
               <option key={s} value={s}>
-                {s[0].toUpperCase() + s.slice(1)}
+                {t(STATUS_KEYS[s])}
               </option>
             ))}
           </select>
         </div>
         <div className="field" style={{ width: 170 }}>
-          <label htmlFor="f_from">From</label>
+          <label htmlFor="f_from">{t('common.from')}</label>
           <input id="f_from" className="input" type="date" value={filters.from} onChange={(e) => set('from', e.target.value)} />
         </div>
         <div className="field" style={{ width: 170 }}>
-          <label htmlFor="f_to">To</label>
+          <label htmlFor="f_to">{t('common.to')}</label>
           <input id="f_to" className="input" type="date" value={filters.to} onChange={(e) => set('to', e.target.value)} />
         </div>
         <button type="button" className="btn btn-quiet" onClick={() => void load()} style={{ minHeight: 40 }}>
-          <Icon icon="solar:refresh-linear" width={18} /> Refresh
+          <Icon icon="solar:refresh-linear" width={18} /> {t('common.refresh')}
         </button>
       </div>
 
@@ -127,7 +121,7 @@ function LogTab() {
 
       <NotificationLogTable
         items={items}
-        emptyText={error ? 'Nothing to show.' : 'No messages have been sent yet.'}
+        emptyText={error ? t('common.no_results') : t('msg.log.empty')}
         onRetry={(n) => void retry(n)}
         retryingId={retrying}
       />
@@ -136,6 +130,7 @@ function LogTab() {
 }
 
 function NotificationsBody() {
+  const t = useT();
   const initial = (useSearchParams().get('tab') ?? '') as TabId;
   const [tab, setTab] = useState<TabId>(initial === 'send' ? 'send' : 'log');
   // Bumped after a send so the log refetches when the reader flips back to it.
@@ -144,11 +139,11 @@ function NotificationsBody() {
   return (
     <>
       <PageHead
-        title="Messages"
-        lead="Every SMS this business has sent, and the one place to send your own."
+        title={t('nav.messages')}
+        lead={t('msg.lead')}
         actions={
           <Link href="/settings/notifications" className="btn btn-secondary">
-            <Icon icon="solar:settings-linear" width={20} /> Notification settings
+            <Icon icon="solar:settings-linear" width={20} /> {t('msg.settings_link')}
           </Link>
         }
       />
@@ -156,18 +151,18 @@ function NotificationsBody() {
       <div role="tablist" style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)', marginBottom: 'var(--sp-4)' }}>
         {(
           [
-            { value: 'log', label: 'Log' },
-            { value: 'send', label: 'Send message' },
+            { value: 'log', label: t('msg.tab.log') },
+            { value: 'send', label: t('msg.tab.send') },
           ] as { value: TabId; label: string }[]
-        ).map((t) => {
-          const active = tab === t.value;
+        ).map((item) => {
+          const active = tab === item.value;
           return (
             <button
-              key={t.value}
+              key={item.value}
               type="button"
               role="tab"
               aria-selected={active}
-              onClick={() => setTab(t.value)}
+              onClick={() => setTab(item.value)}
               style={{
                 minHeight: 'var(--touch-min)',
                 padding: '0 var(--sp-4)',
@@ -180,7 +175,7 @@ function NotificationsBody() {
                 cursor: 'pointer',
               }}
             >
-              {t.label}
+              {item.label}
             </button>
           );
         })}
@@ -202,7 +197,7 @@ function NotificationsBody() {
 export default function NotificationsPage() {
   return (
     <>
-      <Suspense fallback={<p style={{ color: 'var(--ink-soft)' }}>Loading…</p>}>
+      <Suspense fallback={<p style={{ color: 'var(--ink-soft)' }}>…</p>}>
         <NotificationsBody />
       </Suspense>
     </>

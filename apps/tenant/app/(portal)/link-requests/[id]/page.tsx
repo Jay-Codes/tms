@@ -11,7 +11,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { Field, Note, ProblemNote } from '../../../../components/FormBits';
-import { Facts, KycStamp, LinkStatusStamp, ViewIdDocButton } from '../../../../components/RenterBits';
+import { Facts, KycStamp, LinkStatusStamp, ViewIdDocButton, localeLabel } from '../../../../components/RenterBits';
 import { PageHead } from '../../../../components/PageHead';
 import { Sheet } from '../../../../components/Sheet';
 import {
@@ -26,6 +26,7 @@ import {
   type RenterProfile,
 } from '../../../../lib/api';
 import { Amount, fmtDate, fmtTZS } from '../../../../lib/format';
+import { useT } from '@tms/ui';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -50,6 +51,7 @@ function RejectForm({
   error: ApiError | null;
   busy: boolean;
 }) {
+  const t = useT();
   const [reason, setReason] = useState('');
   return (
     <form
@@ -61,12 +63,10 @@ function RejectForm({
       noValidate
     >
       <ProblemNote error={error} />
-      <p style={{ color: 'var(--ink-soft)' }}>
-        The renter is sent this reason by SMS. Keep it short and plain.
-      </p>
+      <p style={{ color: 'var(--ink-soft)' }}>{t('linkreq.reject.lead')}</p>
       <Field
         id="reject_reason"
-        label="Reason"
+        label={t('linkreq.reject.reason')}
         hint={`${reason.length}/200`}
         error={error?.errors.reason}
       >
@@ -77,15 +77,15 @@ function RejectForm({
           maxLength={200}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="e.g. The unit is already promised to another renter."
+          placeholder={t('linkreq.reject.placeholder')}
         />
       </Field>
       <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
         <button type="submit" className="btn btn-danger" disabled={busy || reason.trim().length === 0}>
-          {busy ? 'Rejecting…' : 'Reject request'}
+          {busy ? t('linkreq.reject.busy') : t('linkreq.reject.submit')}
         </button>
         <button type="button" className="btn btn-quiet" onClick={onCancel} disabled={busy}>
-          Cancel
+          {t('common.cancel')}
         </button>
       </div>
     </form>
@@ -95,6 +95,7 @@ function RejectForm({
 /* --------------------------------- page ---------------------------------- */
 
 function RequestBody({ id }: { id: string }) {
+  const t = useT();
   const [request, setRequest] = useState<LinkRequest | null>(null);
   const [profile, setProfile] = useState<RenterProfile | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
@@ -160,11 +161,11 @@ function RequestBody({ id }: { id: string }) {
   if (error && !request) {
     return (
       <>
-        <PageHead title="Link request" />
+        <PageHead title={t('linkreq.title')} />
         <ProblemNote error={error} />
         <p style={{ marginTop: 'var(--sp-4)' }}>
           <Link href="/link-requests" className="btn btn-quiet">
-            Back to the inbox
+            {t('linkreq.back_to_inbox')}
           </Link>
         </p>
       </>
@@ -174,8 +175,8 @@ function RequestBody({ id }: { id: string }) {
   if (!request) {
     return (
       <>
-        <PageHead title="Link request" />
-        <p style={{ color: 'var(--ink-soft)' }}>Loading…</p>
+        <PageHead title={t('linkreq.title')} />
+        <p style={{ color: 'var(--ink-soft)' }}>{t('common.loading')}</p>
       </>
     );
   }
@@ -189,11 +190,11 @@ function RequestBody({ id }: { id: string }) {
   return (
     <>
       <PageHead
-        title={request.renter?.full_name ?? 'Link request'}
+        title={request.renter?.full_name ?? t('linkreq.title')}
         lead={`${request.unit?.name ?? '—'} · ${request.unit?.property_name ?? ''}`}
         actions={
           <Link href="/link-requests" className="btn btn-quiet">
-            <Icon icon="solar:arrow-left-linear" width={20} /> Inbox
+            <Icon icon="solar:arrow-left-linear" width={20} /> {t('linkreq.inbox')}
           </Link>
         }
       />
@@ -201,13 +202,15 @@ function RequestBody({ id }: { id: string }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', marginBottom: 'var(--sp-4)' }}>
         <LinkStatusStamp status={request.status} />
         <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-          requested {fmtDate(request.created_at)}
-          {request.decided_at ? ` · decided ${fmtDate(request.decided_at)}` : ''}
+          {t('linkreq.requested_at', { date: fmtDate(request.created_at) })}
+          {request.decided_at ? ` · ${t('linkreq.decided_at', { date: fmtDate(request.decided_at) })}` : ''}
         </span>
       </div>
 
       {request.rejection_reason ? (
-        <p style={{ color: 'var(--ink-soft)' }}>Reason given: {request.rejection_reason}</p>
+        <p style={{ color: 'var(--ink-soft)' }}>
+          {t('linkreq.reason_given', { reason: request.rejection_reason })}
+        </p>
       ) : null}
 
       <div style={{ display: 'grid', gap: 'var(--sp-3)', marginTop: 'var(--sp-4)' }}>
@@ -215,55 +218,56 @@ function RequestBody({ id }: { id: string }) {
         {actionError ? <ProblemNote error={actionError} /> : null}
         {contract ? (
           <p style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
-            <span>Contract created — it is waiting for the renter&apos;s signature.</span>
+            <span>{t('linkreq.contract_created')}</span>
             <Link href={`/contracts/${contract.id}`} className="btn btn-secondary">
-              Open contract
+              {t('linkreq.open_contract')}
             </Link>
           </p>
         ) : null}
       </div>
 
-      <Section title="Renter">
+      <Section title={t('common.renter')}>
         <div style={{ display: 'grid', gap: 'var(--sp-4)', maxWidth: 640 }}>
           <Facts
             rows={[
-              ['Full name', profile?.full_name ?? request.renter?.full_name ?? '—'],
-              ['Phone', request.renter?.phone ?? '—'],
-              ['Email', profile?.email ?? '—'],
+              [t('renters.field.full_name'), profile?.full_name ?? request.renter?.full_name ?? '—'],
+              [t('common.phone'), request.renter?.phone ?? '—'],
+              [t('common.email'), profile?.email ?? '—'],
+              [t('renters.locale'), localeLabel(t, request.renter?.locale)],
               [
-                'NIDA',
+                t('renters.field.nida'),
                 <span key="nida" className="num" style={{ letterSpacing: '0.08em' }}>
                   {profile?.nida_masked ?? '—'}
                 </span>,
               ],
-              ['Next of kin', profile?.next_of_kin_name ?? '—'],
-              ['Next of kin phone', profile?.next_of_kin_phone ?? '—'],
-              ['KYC', <KycStamp key="kyc" status={kycStatus} />],
+              [t('renters.field.next_of_kin'), profile?.next_of_kin_name ?? '—'],
+              [t('renters.field.next_of_kin_phone'), profile?.next_of_kin_phone ?? '—'],
+              [t('renters.col.kyc'), <KycStamp key="kyc" status={kycStatus} />],
             ]}
           />
           {renterId ? (
             <ViewIdDocButton
               userId={renterId}
               disabled={!docOnFile}
-              disabledReason={docOnFile ? undefined : 'No ID photo was uploaded.'}
+              disabledReason={docOnFile ? undefined : t('renters.kyc.no_doc')}
             />
           ) : null}
           {renterId ? (
             <div>
               <Link href={`/renters/${renterId}`} className="btn btn-quiet">
-                Open renter record
+                {t('linkreq.open_renter')}
               </Link>
             </div>
           ) : null}
         </div>
       </Section>
 
-      <Section title="Requested terms">
+      <Section title={t('linkreq.section.terms')}>
         <div style={{ maxWidth: 640 }}>
           <Facts
             rows={[
               [
-                'Unit',
+                t('common.unit'),
                 request.unit?.id ? (
                   <Link key="u" href={`/units/${request.unit.id}`} style={{ color: 'inherit' }}>
                     {request.unit.name} · {request.unit.property_name}
@@ -273,96 +277,102 @@ function RequestBody({ id }: { id: string }) {
                 ),
               ],
               [
-                'Payment period',
+                t('linkreq.field.period'),
                 `${request.payment_period?.label ?? '—'}${
-                  request.payment_period?.days ? ` · ${request.payment_period.days} days` : ''
+                  request.payment_period?.days ? ` · ${t.n('common.day', request.payment_period.days)}` : ''
                 }`,
               ],
               [
-                'Amount per period',
+                t('linkreq.field.amount'),
                 <Amount key="amt" value={request.payment_period?.amount ?? null} />,
               ],
-              ['Tenancy length', request.term_days ? `${request.term_days} days` : '—'],
-              ['Starts', fmtDate(request.start_date)],
-              ['Ends', fmtDate(request.end_date)],
+              [t('linkreq.field.term'), request.term_days ? t.n('common.day', request.term_days) : '—'],
+              [t('linkreq.field.starts'), fmtDate(request.start_date)],
+              [t('linkreq.field.ends'), fmtDate(request.end_date)],
             ]}
           />
 
           {preview ? (
             <div style={{ marginTop: 'var(--sp-5)' }}>
-              <h3 style={{ fontSize: 'var(--text-base)', marginBottom: 'var(--sp-3)' }}>Schedule preview</h3>
+              <h3 style={{ fontSize: 'var(--text-base)', marginBottom: 'var(--sp-3)' }}>{t('linkreq.preview.title')}</h3>
               <Facts
                 rows={[
-                  ['Payments', String(preview.count)],
-                  ['First due', fmtDate(preview.first_due)],
-                  ['First payment', fmtTZS(preview.amount_first)],
-                  ['Last payment', fmtTZS(preview.amount_last)],
-                  ['Total', fmtTZS(preview.total)],
+                  [t('linkreq.preview.count'), String(preview.count)],
+                  [t('linkreq.preview.first_due'), fmtDate(preview.first_due)],
+                  [t('linkreq.preview.amount_first'), fmtTZS(preview.amount_first)],
+                  [t('linkreq.preview.amount_last'), fmtTZS(preview.amount_last)],
+                  [t('common.total'), fmtTZS(preview.total)],
                 ]}
               />
               <p style={{ marginTop: 'var(--sp-3)', color: 'var(--ink-faint)', fontSize: 'var(--text-sm)' }}>
-                A preview only. The schedule is generated when the contract is activated.
+                {t('linkreq.preview.note')}
               </p>
             </div>
           ) : null}
         </div>
       </Section>
 
-      <Section title="Decision">
+      <Section title={t('linkreq.section.decision')}>
         {pending ? (
           <div style={{ display: 'grid', gap: 'var(--sp-3)', maxWidth: 640 }}>
-            <p style={{ color: 'var(--ink-soft)' }}>
-              Approving tells the renter their contract is on the way. The unit stays vacant until the
-              contract is signed and activated.
-            </p>
+            <p style={{ color: 'var(--ink-soft)' }}>{t('linkreq.decide.lead')}</p>
             <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
               <button type="button" className="btn btn-primary" onClick={() => setConfirmOpen(true)} disabled={busy}>
-                <Icon icon="solar:check-circle-linear" width={20} /> Approve
+                <Icon icon="solar:check-circle-linear" width={20} /> {t('linkreq.approve')}
               </button>
               <button type="button" className="btn btn-danger" onClick={() => setRejectOpen(true)} disabled={busy}>
-                <Icon icon="solar:close-circle-linear" width={20} /> Reject
+                <Icon icon="solar:close-circle-linear" width={20} /> {t('linkreq.reject')}
               </button>
             </div>
           </div>
         ) : (
           <p style={{ color: 'var(--ink-soft)' }}>
-            This request was already {request.status}
-            {request.decided_at ? ` on ${fmtDate(request.decided_at)}` : ''}. Decisions are not undone —
-            a renter can send a new request.
+            {request.decided_at
+              ? t('linkreq.already.on', {
+                  date: fmtDate(request.decided_at),
+                  status: t(`linkreq.status.${request.status}`).toLowerCase(),
+                })
+              : t('linkreq.already', { status: t(`linkreq.status.${request.status}`).toLowerCase() })}{' '}
+            {t('linkreq.no_undo')}
           </p>
         )}
       </Section>
 
-      <Sheet open={confirmOpen} title="Approve this request?" onClose={() => setConfirmOpen(false)} width={480}>
+      <Sheet open={confirmOpen} title={t('linkreq.approve.confirm_title')} onClose={() => setConfirmOpen(false)} width={480}>
         <div style={{ display: 'grid', gap: 'var(--sp-4)' }}>
           <ProblemNote error={actionError} />
           <p>
-            {request.renter?.full_name} will be linked to {request.unit?.name} for {request.term_days} days
-            from {fmtDate(request.start_date)}, paying {request.payment_period?.label?.toLowerCase()}.
+            {t('linkreq.approve.confirm_body', {
+              name: request.renter?.full_name ?? '—',
+              unit: request.unit?.name ?? '—',
+              days: request.term_days,
+              date: fmtDate(request.start_date),
+              period: request.payment_period?.label?.toLowerCase() ?? '—',
+            })}
           </p>
           <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
             <button
               type="button"
               className="btn btn-primary"
               disabled={busy}
-              onClick={() => void decide(() => linkRequestsApi.approve(request.id), 'Approved. The renter has been notified.')}
+              onClick={() => void decide(() => linkRequestsApi.approve(request.id), t('linkreq.approve.done'))}
             >
-              {busy ? 'Approving…' : 'Yes, approve'}
+              {busy ? t('linkreq.approve.busy') : t('linkreq.approve.yes')}
             </button>
             <button type="button" className="btn btn-quiet" onClick={() => setConfirmOpen(false)} disabled={busy}>
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         </div>
       </Sheet>
 
-      <Sheet open={rejectOpen} title="Reject this request" onClose={() => setRejectOpen(false)} width={480}>
+      <Sheet open={rejectOpen} title={t('linkreq.reject.title')} onClose={() => setRejectOpen(false)} width={480}>
         <RejectForm
           busy={busy}
           error={actionError}
           onCancel={() => setRejectOpen(false)}
           onSubmit={(reason) =>
-            void decide(() => linkRequestsApi.reject(request.id, reason), 'Rejected. The renter has been notified.')
+            void decide(() => linkRequestsApi.reject(request.id, reason), t('linkreq.reject.done'))
           }
         />
       </Sheet>

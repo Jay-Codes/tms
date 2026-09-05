@@ -6,21 +6,23 @@ import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
+import { useT } from '@tms/ui';
 import { PageHead } from '../../../../../components/PageHead';
 import { TemplateEditor } from '../../../../../components/TemplateEditor';
 import type { ContractTemplate } from '../../../../../lib/api';
 
 function TemplateBody({ id }: { id: string }) {
+  const t = useT();
   const [template, setTemplate] = useState<ContractTemplate | null>(null);
 
   return (
     <>
       <PageHead
-        title={template?.name || 'Template'}
-        lead="Headings, lists and emphasis only — a contract is a document, not a web page."
+        title={template?.name || t('tpl.one')}
+        lead={t('tpl.detail.lead')}
         actions={
           <Link href="/contracts/templates" className="btn btn-quiet">
-            <Icon icon="solar:arrow-left-linear" width={20} /> Templates
+            <Icon icon="solar:arrow-left-linear" width={20} /> {t('nav.templates')}
           </Link>
         }
       />

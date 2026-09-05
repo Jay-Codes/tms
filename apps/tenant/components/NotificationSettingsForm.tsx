@@ -10,6 +10,7 @@
  */
 
 import { Icon } from '@iconify/react';
+import { useT } from '@tms/ui';
 import { useCallback, useEffect, useState } from 'react';
 import { Field, Note, ProblemNote } from './FormBits';
 import {
@@ -28,24 +29,12 @@ import {
 } from '../lib/api';
 
 /** What each kind does, said the way a landlord would say it. */
-const KIND_COPY: Record<ScheduledKind, { label: string; hint: string }> = {
-  reminder_7d: {
-    label: 'Reminder before the due date',
-    hint: 'One nudge ahead of time, so rent is not a surprise.',
-  },
-  reminder_due: { label: 'Reminder on the due date', hint: 'Sent the morning rent falls due.' },
-  overdue_daily: {
-    label: 'Daily overdue reminder',
-    hint: 'Repeats every day until the schedule is paid or waived.',
-  },
-  thank_you: {
-    label: 'Thank you after a payment',
-    hint: 'Sent immediately when you record a payment; names the next amount due.',
-  },
-  unsigned_reminder: {
-    label: 'Unsigned contract reminder',
-    hint: 'Nudges a renter whose contract is still waiting for their signature.',
-  },
+const KIND_KEYS: Record<ScheduledKind, string> = {
+  reminder_7d: 'notifysettings.kind.reminder_7d',
+  reminder_due: 'notifysettings.kind.reminder_due',
+  overdue_daily: 'notifysettings.kind.overdue_daily',
+  thank_you: 'notifysettings.kind.thank_you',
+  unsigned_reminder: 'notifysettings.kind.unsigned_reminder',
 };
 
 /** `0` → `00:00 EAT`. The scheduler works in Africa/Dar_es_Salaam (API.md). */
@@ -128,6 +117,8 @@ function TemplateBox({
   error?: string;
 }) {
   const [el, setEl] = useState<HTMLTextAreaElement | null>(null);
+  /* The two boxes are labelled with the language they hold — each stays written
+     in its own language whatever the portal is set to. */
   const id = `tpl_${kind}_${lang}`;
   return (
     <div className={error ? 'field invalid' : 'field'}>
@@ -168,6 +159,7 @@ export interface NotificationSettingsFormProps {
 }
 
 export function NotificationSettingsForm({ compact, onSaved, saveLabel }: NotificationSettingsFormProps) {
+  const t = useT();
   const [settings, setSettings] = useState<NotificationSettings | null>(null);
   const [loadError, setLoadError] = useState<ApiError | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
@@ -246,27 +238,27 @@ export function NotificationSettingsForm({ compact, onSaved, saveLabel }: Notifi
         <ProblemNote error={loadError} />
         <div>
           <button type="button" className="btn btn-secondary" onClick={() => void load()}>
-            Try again
+            {t('common.retry')}
           </button>
         </div>
       </div>
     );
   }
 
-  if (!settings) return <p style={{ color: 'var(--ink-soft)' }}>Loading…</p>;
+  if (!settings) return <p style={{ color: 'var(--ink-soft)' }}>{t('common.loading')}</p>;
 
   const gap = compact ? 'var(--sp-4)' : 'var(--sp-5)';
 
   return (
     <form onSubmit={submit} style={{ display: 'grid', gap, maxWidth: 720 }} noValidate>
       <ProblemNote error={error} />
-      {saved ? <Note>Notification settings saved.</Note> : null}
+      {saved ? <Note>{t('notifysettings.saved')}</Note> : null}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--sp-4)' }}>
         <Field
           id="sender_name"
-          label="Sender name"
-          hint="Up to 11 characters; requires Beem approval. Blank = platform default."
+          label={t('notifysettings.sender.label')}
+          hint={t('notifysettings.sender.hint')}
           error={fieldError(error, 'sender_name')}
         >
           <input
@@ -274,12 +266,17 @@ export function NotificationSettingsForm({ compact, onSaved, saveLabel }: Notifi
             className="input"
             maxLength={11}
             value={settings.sender_name ?? ''}
-            placeholder="Platform default"
+            placeholder={t('notifysettings.sender.placeholder')}
             onChange={(e) => set('sender_name', e.target.value)}
           />
         </Field>
 
-        <Field id="language" label="SMS language" error={fieldError(error, 'language')}>
+        <Field
+          id="language"
+          label={t('notifysettings.language.label')}
+          hint={t('notifysettings.language.hint')}
+          error={fieldError(error, 'language')}
+        >
           <select
             id="language"
             className="input"
@@ -293,8 +290,8 @@ export function NotificationSettingsForm({ compact, onSaved, saveLabel }: Notifi
 
         <Field
           id="send_hour_local"
-          label="Send hour"
-          hint="Reminders go out at this hour, East Africa Time."
+          label={t('notifysettings.send_hour.label')}
+          hint={t('notifysettings.send_hour.hint')}
           error={fieldError(error, 'send_hour_local')}
         >
           <select
@@ -313,7 +310,7 @@ export function NotificationSettingsForm({ compact, onSaved, saveLabel }: Notifi
       </div>
 
       <div style={{ display: 'grid', gap: 'var(--sp-3)' }}>
-        <h3 style={{ fontSize: 'var(--text-lg)' }}>Which messages go out</h3>
+        <h3 style={{ fontSize: 'var(--text-lg)' }}>{t('notifysettings.kinds.heading')}</h3>
         {SCHEDULED_KINDS.map((kind) => {
           const cfg = settings.kinds[kind] ?? { enabled: false };
           const tpl = settings.templates[kind] ?? null;
@@ -349,16 +346,16 @@ export function NotificationSettingsForm({ compact, onSaved, saveLabel }: Notifi
                     style={{ width: 18, height: 18, flexShrink: 0 }}
                   />
                   <span>
-                    <span style={{ fontWeight: 500 }}>{KIND_COPY[kind].label}</span>
+                    <span style={{ fontWeight: 500 }}>{t(KIND_KEYS[kind])}</span>
                     <span style={{ display: 'block', fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>
-                      {KIND_COPY[kind].hint}
+                      {t(`${KIND_KEYS[kind]}.hint`)}
                     </span>
                   </span>
                 </label>
 
                 {kind === 'reminder_7d' ? (
                   <div className={fieldError(error, 'kinds.reminder_7d.offset_days') ? 'field invalid' : 'field'} style={{ width: 150 }}>
-                    <label htmlFor="offset_days">Days before</label>
+                    <label htmlFor="offset_days">{t('notifysettings.days_before')}</label>
                     <input
                       id="offset_days"
                       className="input num"
@@ -379,7 +376,7 @@ export function NotificationSettingsForm({ compact, onSaved, saveLabel }: Notifi
                     className={fieldError(error, 'kinds.unsigned_reminder.after_days') ? 'field invalid' : 'field'}
                     style={{ width: 150 }}
                   >
-                    <label htmlFor="after_days">Days after</label>
+                    <label htmlFor="after_days">{t('notifysettings.days_after')}</label>
                     <input
                       id="after_days"
                       className="input num"
@@ -403,7 +400,7 @@ export function NotificationSettingsForm({ compact, onSaved, saveLabel }: Notifi
                   aria-expanded={open}
                 >
                   <Icon icon={open ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'} width={18} />
-                  {tpl ? 'Custom wording' : 'Default wording'}
+                  {tpl ? t('notifysettings.wording.custom') : t('notifysettings.wording.default')}
                 </button>
               </div>
 
@@ -412,7 +409,9 @@ export function NotificationSettingsForm({ compact, onSaved, saveLabel }: Notifi
                   {tpl === null ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
                       <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)', margin: 0 }}>
-                        Using the platform wording in {settings.language === 'sw' ? 'Kiswahili' : 'English'}.
+                        {t('notifysettings.wording.platform', {
+                          language: settings.language === 'sw' ? 'Kiswahili' : 'English',
+                        })}
                       </p>
                       <button
                         type="button"
@@ -420,7 +419,7 @@ export function NotificationSettingsForm({ compact, onSaved, saveLabel }: Notifi
                         onClick={() => setTemplate(kind, { sw: '', en: '' })}
                         style={{ minHeight: 32 }}
                       >
-                        Write my own
+                        {t('notifysettings.wording.write_own')}
                       </button>
                     </div>
                   ) : (
@@ -446,7 +445,7 @@ export function NotificationSettingsForm({ compact, onSaved, saveLabel }: Notifi
                           onClick={() => setTemplate(kind, null)}
                           style={{ minHeight: 32 }}
                         >
-                          <Icon icon="solar:restart-linear" width={18} /> Reset to default
+                          <Icon icon="solar:restart-linear" width={18} /> {t('notifysettings.wording.reset')}
                         </button>
                       </div>
                     </>
@@ -460,7 +459,7 @@ export function NotificationSettingsForm({ compact, onSaved, saveLabel }: Notifi
 
       <div>
         <button type="submit" className="btn btn-primary" disabled={busy}>
-          {busy ? 'Saving…' : (saveLabel ?? 'Save notification settings')}
+          {busy ? t('common.saving') : (saveLabel ?? t('notifysettings.save'))}
         </button>
       </div>
     </form>

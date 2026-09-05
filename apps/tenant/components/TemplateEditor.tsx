@@ -12,12 +12,19 @@
  * Editing produces HTML the backend sanitizes on write (API.md: p, br, h1-h3,
  * lists, strong/em/u, tables, blockquote; every attribute except `class` is
  * stripped), so the toolbar deliberately offers nothing outside that set.
+ *
+ * Phase 13: a template carries two bodies — `body_html` (English) and
+ * `body_html_sw`. Each gets its own editor behind a language tab, and the
+ * preview renders whichever language is on screen. A template with only an
+ * English body still works: the backend falls back to it for a Swahili
+ * contract, and the editor says so rather than leaving the tab silently empty.
  */
 
 import { Icon } from '@iconify/react';
 import { EditorContent, useEditor, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { LOCALE_LABELS, useT, type Locale, type Translator } from '@tms/ui';
 import { Field, Note, ProblemNote } from './FormBits';
 import { DocumentPaper } from './DocumentPaper';
 import {
@@ -31,21 +38,21 @@ import {
   type TemplatePreview,
 } from '../lib/api';
 
-export const SNAPSHOT_BANNER =
-  'Editing a template never changes contracts already issued — each contract keeps the terms it was signed with.';
+/** The two bodies a template carries, in the order the tabs show them. */
+export const TEMPLATE_LANGS: readonly Locale[] = ['en', 'sw'] as const;
 
-/** Variable labels read as English so the dropdown is usable by a landlord. */
-const VARIABLE_LABELS: Record<string, string> = {
-  renter_name: "Renter's name",
-  unit: 'Unit name',
-  property: 'Property name',
-  rent: 'Rent amount',
-  start_date: 'Start date',
-  end_date: 'End date',
-  payment_period: 'Payment period',
-  org_name: 'Business name',
-  term_days: 'Term in days',
-  due_day: 'Due day ("day 5")',
+/** Dictionary keys for the variable dropdown, keyed by the API's variable id. */
+const VARIABLE_KEYS: Record<string, string> = {
+  renter_name: 'tpl.var.renter_name',
+  unit: 'tpl.var.unit',
+  property: 'tpl.var.property',
+  rent: 'tpl.var.rent',
+  start_date: 'tpl.var.start_date',
+  end_date: 'tpl.var.end_date',
+  payment_period: 'tpl.var.payment_period',
+  org_name: 'tpl.var.org_name',
+  term_days: 'tpl.var.term_days',
+  due_day: 'tpl.var.due_day',
 };
 
 const EDITOR_STYLE = `
@@ -102,6 +109,7 @@ function ToolButton({
 }
 
 function Toolbar({ editor }: { editor: Editor }) {
+  const t = useT();
   return (
     <div
       style={{
@@ -115,75 +123,75 @@ function Toolbar({ editor }: { editor: Editor }) {
       }}
     >
       <ToolButton
-        label="Heading 1"
+        label={t('tpl.tool.h1')}
         icon="solar:text-bold-square-linear"
         active={editor.isActive('heading', { level: 1 })}
         onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
       />
       <ToolButton
-        label="Heading 2"
+        label={t('tpl.tool.h2')}
         icon="solar:text-square-linear"
         active={editor.isActive('heading', { level: 2 })}
         onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
       />
       <ToolButton
-        label="Heading 3"
+        label={t('tpl.tool.h3')}
         icon="solar:text-circle-linear"
         active={editor.isActive('heading', { level: 3 })}
         onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
       />
       <span style={{ width: 1, height: 24, background: 'var(--rule)', margin: '0 var(--sp-2)' }} />
       <ToolButton
-        label="Bold"
+        label={t('tpl.tool.bold')}
         icon="solar:text-bold-linear"
         active={editor.isActive('bold')}
         onClick={() => editor.chain().focus().toggleBold().run()}
       />
       <ToolButton
-        label="Italic"
+        label={t('tpl.tool.italic')}
         icon="solar:text-italic-linear"
         active={editor.isActive('italic')}
         onClick={() => editor.chain().focus().toggleItalic().run()}
       />
       <ToolButton
-        label="Underline"
+        label={t('tpl.tool.underline')}
         icon="solar:text-underline-linear"
         active={editor.isActive('underline')}
         onClick={() => editor.chain().focus().toggleUnderline().run()}
       />
       <span style={{ width: 1, height: 24, background: 'var(--rule)', margin: '0 var(--sp-2)' }} />
       <ToolButton
-        label="Bulleted list"
+        label={t('tpl.tool.bullets')}
         icon="solar:list-linear"
         active={editor.isActive('bulletList')}
         onClick={() => editor.chain().focus().toggleBulletList().run()}
       />
       <ToolButton
-        label="Numbered list"
+        label={t('tpl.tool.numbers')}
         icon="solar:list-check-linear"
         active={editor.isActive('orderedList')}
         onClick={() => editor.chain().focus().toggleOrderedList().run()}
       />
       <ToolButton
-        label="Quote"
+        label={t('tpl.tool.quote')}
         icon="solar:quote-up-linear"
         active={editor.isActive('blockquote')}
         onClick={() => editor.chain().focus().toggleBlockquote().run()}
       />
       <span style={{ width: 1, height: 24, background: 'var(--rule)', margin: '0 var(--sp-2)' }} />
       <ToolButton
-        label="Undo"
+        label={t('tpl.tool.undo')}
         icon="solar:undo-left-linear"
         onClick={() => editor.chain().focus().undo().run()}
       />
       <ToolButton
-        label="Redo"
+        label={t('tpl.tool.redo')}
         icon="solar:undo-right-linear"
         onClick={() => editor.chain().focus().redo().run()}
       />
 
       <label htmlFor="tpl_var" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-        <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>Insert variable</span>
+        <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>{t('tpl.insert_variable')}</span>
         <select
           id="tpl_var"
           className="input"
@@ -196,10 +204,10 @@ function Toolbar({ editor }: { editor: Editor }) {
             e.target.value = '';
           }}
         >
-          <option value="">Choose…</option>
+          <option value="">{t('tpl.choose')}</option>
           {TEMPLATE_VARIABLES.map((v) => (
             <option key={v} value={v}>
-              {VARIABLE_LABELS[v] ?? v} {`{{${v}}}`}
+              {VARIABLE_KEYS[v] ? t(VARIABLE_KEYS[v]) : v} {`{{${v}}}`}
             </option>
           ))}
         </select>
@@ -215,6 +223,9 @@ export interface TemplateEditorProps {
 }
 
 export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
+  const t: Translator = useT();
+  /** Which of the two bodies is being written — and previewed. */
+  const [lang, setLang] = useState<Locale>('en');
   const [template, setTemplate] = useState<ContractTemplate | null>(null);
   const [name, setName] = useState('');
   const [isDefault, setIsDefault] = useState(false);
@@ -231,70 +242,94 @@ export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
   const onSavedRef = useRef(onSaved);
   onSavedRef.current = onSaved;
 
-  const editor = useEditor({
+  // One editor per language. Both are created up front (hooks cannot be
+  // conditional) and only the active one is mounted into the page.
+  const editorEn = useEditor({
     extensions: [StarterKit],
     content: '',
     immediatelyRender: false,
-    editorProps: { attributes: { 'aria-label': 'Template body' } },
+    editorProps: { attributes: { 'aria-label': 'Template body (English)' } },
     onUpdate: () => setSaved(false),
   });
+  const editorSw = useEditor({
+    extensions: [StarterKit],
+    content: '',
+    immediatelyRender: false,
+    editorProps: { attributes: { 'aria-label': 'Template body (Kiswahili)' } },
+    onUpdate: () => setSaved(false),
+  });
+  const editors: Record<Locale, Editor | null> = { en: editorEn, sw: editorSw };
+  const editor = editors[lang];
 
-  const runPreview = useCallback(async () => {
-    setPreviewing(true);
-    setPreviewError(null);
-    try {
-      setPreview(unwrapTemplatePreview(await templatesApi.preview(templateId)));
-    } catch (e) {
-      setPreviewError(toApiError(e));
-    } finally {
-      setPreviewing(false);
-    }
-  }, [templateId]);
+  const runPreview = useCallback(
+    async (previewLang: Locale) => {
+      setPreviewing(true);
+      setPreviewError(null);
+      try {
+        setPreview(unwrapTemplatePreview(await templatesApi.preview(templateId, true, previewLang)));
+      } catch (e) {
+        setPreviewError(toApiError(e));
+      } finally {
+        setPreviewing(false);
+      }
+    },
+    [templateId],
+  );
 
   useEffect(() => {
     const ac = new AbortController();
     templatesApi
       .get(templateId, ac.signal)
       .then((res) => {
-        const t = unwrapTemplate(res);
-        setTemplate(t);
-        setName(t.name ?? '');
-        setIsDefault(Boolean(t.is_default));
-        editor?.commands.setContent(t.body_html ?? '');
+        const tpl = unwrapTemplate(res);
+        setTemplate(tpl);
+        setName(tpl.name ?? '');
+        setIsDefault(Boolean(tpl.is_default));
+        editorEn?.commands.setContent(tpl.body_html ?? '');
+        editorSw?.commands.setContent(tpl.body_html_sw ?? '');
         setLoadError(null);
-        onSavedRef.current?.(t);
+        onSavedRef.current?.(tpl);
       })
       .catch((e) => {
         if (e instanceof DOMException && e.name === 'AbortError') return;
         setLoadError(toApiError(e));
       });
     return () => ac.abort();
-  }, [templateId, editor]);
+  }, [templateId, editorEn, editorSw]);
 
-  // First preview once the template is on screen; refreshed after every save.
+  // First preview once the template is on screen, and again whenever the
+  // reader switches language or a save changes the stored body.
   useEffect(() => {
-    if (template) void runPreview();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one preview per template load
-  }, [template?.id]);
+    if (template) void runPreview(lang);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one preview per template/language
+  }, [template?.id, lang]);
+
+  /** An untouched TipTap document is `<p></p>`; that is not a body. */
+  const bodyOf = (e: Editor | null): string | null => (!e || e.isEmpty ? null : e.getHTML());
+
+  const swWritten = Boolean(editorSw && !editorSw.isEmpty);
 
   const save = async () => {
-    if (!editor) return;
+    if (!editorEn) return;
     setBusy(true);
     setSaveError(null);
     setSaved(false);
     try {
       const res = await templatesApi.update(templateId, {
         name: name.trim(),
-        body_html: editor.getHTML(),
+        body_html: editorEn.getHTML(),
+        // Clearing the Swahili tab clears the stored Swahili body, which puts
+        // the template back on the English fallback.
+        body_html_sw: bodyOf(editorSw),
         is_default: isDefault,
       });
-      const t = unwrapTemplate(res);
-      setTemplate(t);
-      setName(t.name ?? name);
-      setIsDefault(Boolean(t.is_default));
+      const tpl = unwrapTemplate(res);
+      setTemplate(tpl);
+      setName(tpl.name ?? name);
+      setIsDefault(Boolean(tpl.is_default));
       setSaved(true);
-      onSavedRef.current?.(t);
-      await runPreview();
+      onSavedRef.current?.(tpl);
+      await runPreview(lang);
     } catch (e) {
       setSaveError(toApiError(e));
     } finally {
@@ -324,16 +359,16 @@ export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
         }}
       >
         <Icon icon="solar:lock-keyhole-minimalistic-linear" width={20} />
-        <span>{SNAPSHOT_BANNER}</span>
+        <span>{t('tpl.snapshot_banner')}</span>
       </p>
 
       <ProblemNote error={saveError} />
-      {saved ? <Note>Template saved. New contracts use these terms.</Note> : null}
+      {saved ? <Note>{t('tpl.saved')}</Note> : null}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 'var(--sp-5)' }}>
         {/* ------------------------------ editor ------------------------------ */}
         <div style={{ display: 'grid', gap: 'var(--sp-4)', alignContent: 'start', minWidth: 0 }}>
-          <Field id="tpl_name" label="Template name" error={saveError?.errors.name}>
+          <Field id="tpl_name" label={t('tpl.name')} error={saveError?.errors.name}>
             <input
               id="tpl_name"
               className="input"
@@ -347,7 +382,7 @@ export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
           </Field>
 
           <div className="field">
-            <label htmlFor="tpl_default">Default</label>
+            <label htmlFor="tpl_default">{t('tpl.default')}</label>
             <label
               htmlFor="tpl_default"
               style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', minHeight: 'var(--touch-min)', fontWeight: 400 }}
@@ -362,40 +397,93 @@ export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
                 }}
                 style={{ width: 18, height: 18 }}
               />
-              Set as default — new contracts start from this template
+              {t('tpl.default_hint')}
             </label>
+          </div>
+
+          {/* ------------------------ language tabs ------------------------ */}
+          <div role="tablist" aria-label={t('tpl.body_tablist')} style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+            {TEMPLATE_LANGS.map((l) => {
+              const active = lang === l;
+              const written = l === 'en' ? true : swWritten;
+              return (
+                <button
+                  key={l}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setLang(l)}
+                  style={{
+                    minHeight: 'var(--touch-min)',
+                    padding: '0 var(--sp-4)',
+                    border: `1px solid ${active ? 'var(--primary)' : 'var(--rule)'}`,
+                    borderBottom: 'none',
+                    borderRadius: 'var(--radius-sm) var(--radius-sm) 0 0',
+                    background: active ? 'var(--primary-soft)' : 'transparent',
+                    color: 'var(--ink)',
+                    fontWeight: active ? 600 : 400,
+                    fontSize: 'var(--text-sm)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {LOCALE_LABELS[l]}
+                  {written ? null : (
+                    <span style={{ marginLeft: 'var(--sp-2)', color: 'var(--ink-faint)', fontWeight: 400 }}>
+                      · {t('tpl.body.empty')}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
 
           <div
             className="tpl-editor"
-            style={{ border: '1px solid var(--rule)', borderRadius: 'var(--radius-sm)', background: 'var(--sheet)' }}
+            role="tabpanel"
+            style={{
+              border: '1px solid var(--rule)',
+              borderRadius: '0 var(--radius-sm) var(--radius-sm) var(--radius-sm)',
+              background: 'var(--sheet)',
+              marginTop: 'calc(-1 * var(--sp-4))',
+            }}
           >
             {editor ? <Toolbar editor={editor} /> : null}
             <EditorContent editor={editor} />
           </div>
 
+          {lang === 'sw' && !swWritten ? (
+            <p style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>{t('tpl.sw_fallback')}</p>
+          ) : null}
+
           <p style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-faint)' }}>
-            Variables in double braces are replaced when a contract is written — {'{{renter_name}}'} becomes the
-            renter&apos;s name on that contract.
+            {t('tpl.variables_note', { example: '{{renter_name}}' })}
           </p>
 
           <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
             <button type="button" className="btn btn-primary" onClick={() => void save()} disabled={busy || !editor}>
-              <Icon icon="solar:diskette-linear" width={20} /> {busy ? 'Saving…' : 'Save template'}
+              <Icon icon="solar:diskette-linear" width={20} /> {busy ? t('common.saving') : t('tpl.save')}
             </button>
-            <button type="button" className="btn btn-secondary" onClick={() => void runPreview()} disabled={previewing}>
-              <Icon icon="solar:eye-linear" width={20} /> {previewing ? 'Loading…' : 'Preview'}
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => void runPreview(lang)}
+              disabled={previewing}
+            >
+              <Icon icon="solar:eye-linear" width={20} />{' '}
+              {previewing ? t('common.loading') : t('tpl.preview')}
             </button>
           </div>
         </div>
 
         {/* ------------------------------ preview ----------------------------- */}
         <div style={{ display: 'grid', gap: 'var(--sp-3)', alignContent: 'start', minWidth: 0 }}>
-          <h3 style={{ fontSize: 'var(--text-md)' }}>Preview</h3>
+          <h3 style={{ fontSize: 'var(--text-md)' }}>
+            {t('tpl.preview_in', { language: LOCALE_LABELS[lang] })}
+          </h3>
           <ProblemNote error={previewError} />
           {preview ? (
             <DocumentPaper
-              caption="Sample values on your letterhead. The saved template is what is previewed."
+              caption={t('tpl.preview_caption')}
               html={preview.html}
               logoUrl={preview.logo_url}
               letterheadUrl={preview.letterhead_url}
@@ -403,7 +491,7 @@ export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
               footerText={preview.footer_text}
             />
           ) : previewError ? null : (
-            <p style={{ color: 'var(--ink-soft)' }}>Loading preview…</p>
+            <p style={{ color: 'var(--ink-soft)' }}>{t('tpl.preview_loading')}</p>
           )}
         </div>
       </div>

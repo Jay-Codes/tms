@@ -19,7 +19,8 @@ import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Field, ProblemNote } from '../../../components/FormBits';
 import { PageHead } from '../../../components/PageHead';
 import { ApiError, orgApi, type AuditEntry, type Member } from '../../../lib/api';
-import { TableScroll } from '@tms/ui';
+import { fmtDateTime } from '../../../lib/format';
+import { TableScroll, useT, type Translator } from '@tms/ui';
 
 const PAGE_SIZE = 50;
 
@@ -54,9 +55,85 @@ interface Filters {
 
 const EMPTY: Filters = { actor: '', entity_type: '', entity_id: '', from: '', to: '' };
 
-function formatAt(at: string): string {
-  const d = new Date(at);
-  return Number.isNaN(d.getTime()) ? at : d.toLocaleString();
+/**
+ * Every action string `internal/audit` writes. A row whose action is not in
+ * this set (an older or newer build) prints the raw value rather than a key.
+ */
+const KNOWN_ACTIONS = new Set([
+  'auth.login',
+  'auth.login_failed',
+  'auth.logout',
+  'auth.otp_send',
+  'auth.otp_verify',
+  'auth.register_renter',
+  'auth.verify_email',
+  'auth.invite_accept',
+  'user.locale_update',
+  'org.create',
+  'org.update',
+  'org.member_invite',
+  'org.member_remove',
+  'org.suspend',
+  'org.activate',
+  'org.branding_update',
+  'org.branding_asset',
+  'org.bank_account_update',
+  'org.notification_settings_update',
+  'branding.theme_update',
+  'property.create',
+  'property.update',
+  'property.delete',
+  'unit.create',
+  'unit.update',
+  'unit.delete',
+  'unit.qr_generate',
+  'price.create',
+  'price.bulk_update',
+  'payment_period.create',
+  'payment_period.update',
+  'payment_period.delete',
+  'payment_period.restore_recommended',
+  'payment_period.recommend',
+  'renter_profile.update',
+  'kyc.upload',
+  'kyc.view',
+  'link_request.create',
+  'link_request.cancel',
+  'link_request.approve',
+  'link_request.reject',
+  'contract_template.create',
+  'contract_template.update',
+  'contract_template.delete',
+  'contract.create',
+  'contract.sign',
+  'contract.activate',
+  'contract.activate_landlord_recorded',
+  'contract.terminate',
+  'contract.lifecycle_run',
+  'payment.record',
+  'payment.reverse',
+  'payment.overdue_run',
+  'notification.custom',
+  'notification.retry',
+  'notification.scheduler_run',
+  'expense_category.create',
+  'expense_category.update',
+  'expense_category.delete',
+  'expense.create',
+  'expense.update',
+  'expense.void',
+  'expense.receipt_attach',
+  'expense.receipt_remove',
+]);
+
+/** Human name for an action; unknown actions keep their stable machine string. */
+function actionLabel(t: Translator, action: string): string {
+  return KNOWN_ACTIONS.has(action) ? t(`audit.action.${action}`) : action;
+}
+
+/** Human name for an entity type; unknown types keep their machine string. */
+function entityLabel(t: Translator, entity: string): string {
+  return ENTITY_TYPES.includes(entity) ? t(`audit.entity.${entity}`) : entity;
 }
 
 /** `2026-09-05` → start of that day, RFC3339 in the reader's zone. */
@@ -127,6 +204,7 @@ function Pre({ label, value, tone }: { label: string; value: unknown; tone: 'bef
 }
 
 function DiffRow({ row, cols }: { row: AuditEntry; cols: number }) {
+  const t = useT();
   const changed = changedKeys(row.before, row.after);
   return (
     <tr>
@@ -135,16 +213,18 @@ function DiffRow({ row, cols }: { row: AuditEntry; cols: number }) {
           <div style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>
             {row.entity_id ? (
               <>
-                <strong style={{ color: 'var(--ink)' }}>{row.entity_type}</strong> {row.entity_id}
+                <strong style={{ color: 'var(--ink)' }}>{entityLabel(t, row.entity_type)}</strong> {row.entity_id}
               </>
             ) : (
-              row.entity_type
+              entityLabel(t, row.entity_type)
             )}
-            {changed.length ? ` · changed: ${changed.join(', ')}` : ' · no field-level change recorded'}
+            {changed.length
+              ? ` · ${t('audit.changed', { fields: changed.join(', ') })}`
+              : ` · ${t('audit.no_change')}`}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 'var(--sp-4)' }}>
-            <Pre label="Before" value={row.before} tone="before" />
-            <Pre label="After" value={row.after} tone="after" />
+            <Pre label={t('audit.before')} value={row.before} tone="before" />
+            <Pre label={t('audit.after')} value={row.after} tone="after" />
           </div>
         </div>
       </td>
@@ -153,6 +233,7 @@ function DiffRow({ row, cols }: { row: AuditEntry; cols: number }) {
 }
 
 function AuditBody() {
+  const t = useT();
   const [filters, setFilters] = useState<Filters>(EMPTY);
   const [applied, setApplied] = useState<Filters>(EMPTY);
   const [items, setItems] = useState<AuditEntry[]>([]);
@@ -205,7 +286,7 @@ function AuditBody() {
 
   return (
     <>
-      <PageHead title="Audit log" lead="Every action taken in your business, newest first. Append-only." />
+      <PageHead title={t('audit.title')} lead={t('audit.lead')} />
 
       <form
         onSubmit={(e) => {
@@ -214,7 +295,7 @@ function AuditBody() {
         }}
         style={{ display: 'flex', gap: 'var(--sp-4)', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 'var(--sp-5)' }}
       >
-        <Field id="actor" label="Actor">
+        <Field id="actor" label={t('audit.actor')}>
           <select
             id="actor"
             className="input"
@@ -222,7 +303,7 @@ function AuditBody() {
             onChange={(e) => setFilters((f) => ({ ...f, actor: e.target.value }))}
             style={{ minWidth: 200 }}
           >
-            <option value="">Anyone</option>
+            <option value="">{t('audit.actor.anyone')}</option>
             {members.map((m) => (
               <option key={m.user_id} value={m.user_id}>
                 {m.full_name || m.email}
@@ -230,7 +311,7 @@ function AuditBody() {
             ))}
           </select>
         </Field>
-        <Field id="entity_type" label="Entity">
+        <Field id="entity_type" label={t('audit.entity')}>
           <select
             id="entity_type"
             className="input"
@@ -238,25 +319,25 @@ function AuditBody() {
             onChange={(e) => setFilters((f) => ({ ...f, entity_type: e.target.value }))}
             style={{ minWidth: 180 }}
           >
-            <option value="">All</option>
-            {ENTITY_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
+            <option value="">{t('common.all')}</option>
+            {ENTITY_TYPES.map((e) => (
+              <option key={e} value={e}>
+                {entityLabel(t, e)}
               </option>
             ))}
           </select>
         </Field>
-        <Field id="entity_id" label="Entity id" hint="Narrows the rows loaded below.">
+        <Field id="entity_id" label={t('audit.entity_id')} hint={t('audit.entity_id.hint')}>
           <input
             id="entity_id"
             className="input"
             value={filters.entity_id}
-            placeholder="Paste an id"
+            placeholder={t('audit.entity_id.placeholder')}
             onChange={(e) => setFilters((f) => ({ ...f, entity_id: e.target.value }))}
             style={{ minWidth: 220 }}
           />
         </Field>
-        <Field id="from" label="From">
+        <Field id="from" label={t('common.from')}>
           <input
             id="from"
             className="input"
@@ -265,7 +346,7 @@ function AuditBody() {
             onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))}
           />
         </Field>
-        <Field id="to" label="To">
+        <Field id="to" label={t('common.to')}>
           <input
             id="to"
             className="input"
@@ -275,7 +356,7 @@ function AuditBody() {
           />
         </Field>
         <button type="submit" className="btn btn-secondary">
-          Apply
+          {t('common.apply')}
         </button>
         <button
           type="button"
@@ -285,29 +366,29 @@ function AuditBody() {
             setApplied(EMPTY);
           }}
         >
-          Clear
+          {t('common.clear')}
         </button>
       </form>
 
       <ProblemNote error={error} />
 
-      <TableScroll label="Audit trail">
+      <TableScroll label={t('audit.table_label')}>
       <table className="ledger" style={{ marginTop: 'var(--sp-4)' }}>
         <thead>
           <tr>
             <th style={{ width: 40 }} />
-            <th>When</th>
-            <th>Who</th>
-            <th>Action</th>
-            <th>Entity</th>
-            <th>IP</th>
+            <th>{t('audit.col.when')}</th>
+            <th>{t('audit.col.who')}</th>
+            <th>{t('audit.col.action')}</th>
+            <th>{t('audit.entity')}</th>
+            <th>{t('audit.col.ip')}</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 && !loading ? (
             <tr>
               <td colSpan={6} style={{ color: 'var(--ink-soft)' }}>
-                Nothing recorded for these filters.
+                {t('audit.empty')}
               </td>
             </tr>
           ) : (
@@ -321,18 +402,18 @@ function AuditBody() {
                         type="button"
                         className="btn btn-quiet"
                         aria-expanded={expanded}
-                        aria-label={expanded ? 'Hide changes' : 'Show changes'}
+                        aria-label={expanded ? t('audit.toggle.hide') : t('audit.toggle.show')}
                         onClick={() => setOpen(expanded ? null : row.id)}
                         style={{ minHeight: 32, padding: '0 var(--sp-2)' }}
                       >
                         <Icon icon={expanded ? 'solar:alt-arrow-down-linear' : 'solar:alt-arrow-right-linear'} width={18} />
                       </button>
                     </td>
-                    <td style={{ whiteSpace: 'nowrap' }}>{formatAt(row.at)}</td>
-                    <td style={{ fontWeight: 500 }}>{row.actor_name || 'System'}</td>
-                    <td>{row.action}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(row.at)}</td>
+                    <td style={{ fontWeight: 500 }}>{row.actor_name || t('audit.system')}</td>
+                    <td>{actionLabel(t, row.action)}</td>
                     <td style={{ color: 'var(--ink-soft)' }}>
-                      {row.entity_type}
+                      {entityLabel(t, row.entity_type)}
                       {row.entity_id ? ` · ${row.entity_id.slice(0, 8)}` : ''}
                     </td>
                     <td style={{ color: 'var(--ink-soft)' }}>{row.ip ?? '—'}</td>
@@ -345,7 +426,7 @@ function AuditBody() {
           {loading ? (
             <tr>
               <td colSpan={6} style={{ color: 'var(--ink-soft)' }}>
-                Loading…
+                {t('common.loading')}
               </td>
             </tr>
           ) : null}
@@ -356,7 +437,7 @@ function AuditBody() {
       {cursor ? (
         <div style={{ marginTop: 'var(--sp-4)' }}>
           <button type="button" className="btn btn-secondary" disabled={loading} onClick={() => void fetchPage(applied, cursor)}>
-            {loading ? 'Loading…' : 'Load more'}
+            {loading ? t('common.loading_more') : t('common.load_more')}
           </button>
         </div>
       ) : null}
