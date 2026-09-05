@@ -75,15 +75,15 @@ expenses            org_id, property_id, unit_id NULLABLE, category_id, amount (
 
 **Exit:** Reports show revenue vs expected vs expenses vs net over any cadence incl. custom range, with % change vs previous period; per-property breakdown; seed data produces a visibly correct chart.
 
-## Phase 12 — Theming v2: presets + advanced override (1 day)
+## Phase 12 — Theming v2: presets + advanced override (1 day) — ✅ done 5 Sep 2026
 
-- [ ] **Token model** (`packages/ui`): expose the themable set — `paper` (background), `surface` (sheets/cards), `ink` (text), `ink-muted`, `rule` (ledger lines), `primary` (+ derived pressed/tint/on-primary), `accent`, `font`. Fixed forever: stamp colors, focus ring, spacing, radii, type scale.
-- [ ] **Presets** (8): Ledger (current default), Night ledger (dark), Warm paper, Cool slate, Forest, Ocean, High-contrast, Minimal white — each a full token set validated for WCAG AA.
-- [ ] **Contrast guard**: `packages/ui/theme` `validateTheme(tokens)` → list of failing pairs (text/paper, muted/paper, on-primary/primary, ink/surface) with ratios; backend re-validates on save and rejects < 4.5:1 for body text (400 with the failing pairs).
-- [ ] API: `GET/PUT /org/branding` gains `theme: {preset_id|null, tokens:{...}|null, font_id}`; `/public/orgs/{slug}/branding` and `/public/units/{code}` return the resolved token set; `GET /themes/presets` (public) lists presets.
-- [ ] Tenant **Branding** screen: preset gallery with live preview (renders a mini ledger + stamp + button with the candidate theme), "Advanced" panel (color inputs per token, live contrast badges, reset to preset), applies immediately to the tenant app; enduser app applies the same resolved theme on org pages (QR landing, connect, contract, rent book).
-- [ ] `applyOrgTheme()` v2 sets all tokens; falls back to preset "Ledger" when the org has none; admin app never themed.
-- [ ] Tests: validator table (passing/failing pairs), backend rejection, presets all pass AA, public endpoints resolve tokens; visual check of each preset on the design-system page in light + dark system settings.
+- [x] **Token model** (`packages/ui`): expose the themable set — `paper` (background), `surface` (sheets/cards), `ink` (text), `ink-muted`, `rule` (ledger lines), `primary` (+ derived pressed/tint/on-primary), `accent`, `font`. Fixed forever: stamp colors, focus ring, spacing, radii, type scale.
+- [x] **Presets** (8): Ledger (current default), Night ledger (dark), Warm paper, Cool slate, Forest, Ocean, High-contrast, Minimal white — each a full token set validated for WCAG AA.
+- [x] **Contrast guard**: `packages/ui/theme` `validateTheme(tokens)` → list of failing pairs (text/paper, muted/paper, on-primary/primary, ink/surface) with ratios; backend re-validates on save and rejects < 4.5:1 for body text (400 with the failing pairs).
+- [x] API: `GET/PUT /org/branding` gains `theme: {preset_id|null, tokens:{...}|null, font_id}`; `/public/orgs/{slug}/branding` and `/public/units/{code}` return the resolved token set; `GET /themes/presets` (public) lists presets.
+- [x] Tenant **Branding** screen: preset gallery with live preview (renders a mini ledger + stamp + button with the candidate theme), "Advanced" panel (color inputs per token, live contrast badges, reset to preset), applies immediately to the tenant app; enduser app applies the same resolved theme on org pages (QR landing, connect, contract, rent book).
+- [x] `applyOrgTheme()` v2 sets all tokens; falls back to preset "Ledger" when the org has none; admin app never themed.
+- [x] Tests: validator table (passing/failing pairs), backend rejection, presets all pass AA, public endpoints resolve tokens; visual check of each preset on the design-system page in light + dark system settings.
 
 **Exit:** JJnE picks "Night ledger", tweaks accent in advanced, saves; tenant app + renter QR landing reflect it; a low-contrast choice is blocked with a clear message.
 
