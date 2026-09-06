@@ -63,6 +63,15 @@ function OrgsBody() {
     void fetchPage({ status, q }, null);
   }, [status, q, fetchPage]);
 
+  /**
+   * Phase 14 credits ride along with the list row when the backend sends them.
+   * If they do not, the column is simply not drawn — a per-row fetch would be
+   * fifty requests to fill one column, so the balance stays on the detail page
+   * (Organizations → org → SMS credits) instead.
+   */
+  const hasCredits = items.some((o) => o.credits != null);
+  const cols = hasCredits ? 10 : 9;
+
   return (
     <>
       <PageHead title="Organizations" lead="Every landlord business on the platform." />
@@ -141,6 +150,7 @@ function OrgsBody() {
             <th className="num">Renters</th>
             <th className="num">Contracts</th>
             <th className="num">SMS 30d</th>
+            {hasCredits ? <th className="num">Credits</th> : null}
             <th>Status</th>
             <th>Created</th>
           </tr>
@@ -148,7 +158,7 @@ function OrgsBody() {
         <tbody>
           {items.length === 0 && !loading ? (
             <tr>
-              <td colSpan={9} style={{ color: 'var(--ink-soft)' }}>
+              <td colSpan={cols} style={{ color: 'var(--ink-soft)' }}>
                 No organizations match these filters.
               </td>
             </tr>
@@ -183,6 +193,20 @@ function OrgsBody() {
                     <span style={{ color: 'var(--stamp-overdue)' }}> · {fmtNum(org.sms.failed_30d)} failed</span>
                   ) : null}
                 </td>
+                {hasCredits ? (
+                  <td className="num">
+                    {org.credits ? (
+                      <>
+                        {fmtNum(org.credits.balance)}
+                        {org.credits.balance < org.credits.low_watermark ? (
+                          <span className="pencil"> low</span>
+                        ) : null}
+                      </>
+                    ) : (
+                      <span className="pencil">—</span>
+                    )}
+                  </td>
+                ) : null}
                 <td>
                   <StatusStamp status={org.status} />
                 </td>
@@ -192,7 +216,7 @@ function OrgsBody() {
           )}
           {loading ? (
             <tr>
-              <td colSpan={9} style={{ color: 'var(--ink-soft)' }}>
+              <td colSpan={cols} style={{ color: 'var(--ink-soft)' }}>
                 Loading…
               </td>
             </tr>

@@ -12,6 +12,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { Field, Note, ProblemNote, StatusStamp } from '../../../../components/FormBits';
+import { OrgSms } from '../../../../components/OrgSms';
 import { Sheet } from '../../../../components/Sheet';
 import { PageHead } from '../../../../components/PageHead';
 import {
@@ -62,6 +63,9 @@ function OrgDetailBody({ id }: { id: string }) {
   const [detail, setDetail] = useState<AdminOrgDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
+
+  /** Overview and the credit wallet are separate reads; keep them separate views. */
+  const [tab, setTab] = useState<'overview' | 'sms'>('overview');
 
   const [suspendOpen, setSuspendOpen] = useState(false);
   const [activateOpen, setActivateOpen] = useState(false);
@@ -161,6 +165,36 @@ function OrgDetailBody({ id }: { id: string }) {
       {done ? <Note>{done}</Note> : null}
 
       {org ? (
+        <div
+          className="tabs"
+          role="tablist"
+          aria-label="Organization sections"
+          style={{ gridAutoFlow: 'column', justifyContent: 'start', marginTop: 'var(--sp-4)' }}
+        >
+          {(
+            [
+              { value: 'overview', label: 'Overview' },
+              { value: 'sms', label: 'SMS credits' },
+            ] as const
+          ).map((t) => (
+            <button
+              key={t.value}
+              type="button"
+              role="tab"
+              className="tab"
+              aria-selected={tab === t.value}
+              aria-current={tab === t.value ? 'page' : undefined}
+              onClick={() => setTab(t.value)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {org && tab === 'sms' ? <OrgSms orgId={org.id} orgName={org.name} /> : null}
+
+      {org && tab === 'overview' ? (
         <>
           <section style={{ marginTop: 'var(--sp-5)', maxWidth: 720 }}>
             <h2 style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--sp-3)' }}>Organization</h2>
@@ -185,6 +219,28 @@ function OrgDetailBody({ id }: { id: string }) {
             <Row
               label="SMS (30 days)"
               value={`${fmtNum(org.sms?.sent_30d)} sent · ${fmtNum(org.sms?.failed_30d)} failed`}
+            />
+            <Row
+              label="SMS credits"
+              value={
+                org.credits ? (
+                  <>
+                    <span className="num">{fmtNum(org.credits.balance)}</span>
+                    {org.credits.balance < org.credits.low_watermark ? (
+                      <span className="pencil"> · under the {fmtNum(org.credits.low_watermark)} watermark</span>
+                    ) : null}
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-quiet"
+                    style={{ minHeight: 28, padding: '0 var(--sp-2)', fontSize: 'var(--text-sm)' }}
+                    onClick={() => setTab('sms')}
+                  >
+                    Open the SMS credits tab
+                  </button>
+                )
+              }
             />
           </section>
 
