@@ -882,3 +882,173 @@ as described above) and `contracts.language` (`NOT NULL DEFAULT 'en'`, checked
 ### Audit actions
 
 `user.locale_update` joins the Part 2 action list.
+
+## Part 2 — Phase 14 (shipped)
+
+Prepaid SMS credit per organisation, and the platform SMS catalogue an admin
+edits (SPEC §4, §5.12, FLOWS 13, PLAN2 Phase 14). Two audiences: the credit
+movements and the whole catalogue are platform-admin (`tms_a`, `RequireAdmin`);
+the landlord gets one read-only view of their own balance and a read-only half
+of the notification-settings screen.
+
+### The credit unit
+
+One credit per **SMS segment**, not per message: 160 characters in the GSM 03.38
+alphabet, 70 in UCS-2, dropping to 153 / 67 once a body is long enough to be
+concatenated. `notify.Segments(body)` is the single definition, and both the
+bulk pre-check and the worker's debit call it, so the shortfall a landlord is
+quoted is the amount that is actually taken.
+
+Swahili is written in the Latin alphabet with no diacritics, so a Swahili
+reminder costs exactly what its English twin does. An emoji or a diacritic
+outside the alphabet pushes the *whole* message to UCS-2 and roughly doubles
+its price; the admin template editor reports `segments` and `encoding` on every
+save and preview so that is visible before anybody is texted.
+
+Credits have **no expiry and no monthly reset** (confirmed with the client).
+
+### When the debit happens
+
+At **send time**, inside the worker's claim transaction: the row moves `queued`
+→ `sending` and the balance drops by the message's segment count together, or
+neither happens. The debit is one conditional statement —
+
+```sql
+UPDATE org_sms_credits SET balance = balance - $n
+WHERE org_id = $1 AND balance >= $n RETURNING balance
+```
+
+— which is the whole of the concurrency story. Three workers racing the last
+two credits serialise on the row lock and exactly one comes back with a row, so
+a balance never goes negative and no message is sent that was not paid for.
+
+Two consequences are deliberate:
+
+- a queued message that is never sent (an org suspended before its backlog
+  drains) **costs nothing**; and
+- a send the provider then rejects **has** consumed the credit. The platform
+  was billed for the attempt; refunding one is an `adjust` an admin makes, not
+  something the worker guesses at.
+
+`org_sms_credits` is created lazily — balance 0, `low_watermark` 50 — on the
+first read or the first send, so an org that has never been topped up still has
+a balance rather than a missing row every caller special-cases.
+
+**Exempt kinds** send without a debit: `otp` by default, overridable with
+`SMS_CREDIT_EXEMPT_KINDS` (comma-separated; the literal `none` charges for
+everything). A renter locked out of their own account because their landlord
+ran out of credit would be the product punishing the wrong person.
+
+**Insufficient balance** → the row's status becomes `held_no_credit`. It is not
+`failed`: nothing went wrong with the message, the retry loop leaves it alone,
+`POST /notifications/log/{id}/retry` answers **409 `not_failed`**, and it goes
+out unchanged on the next top-up.
+
+Every movement writes an append-only `sms_credit_ledger` row carrying `delta`,
+`balance_after`, `reason` and — for a debit — the `notification_id` it paid
+for, so the balance reconciles from its movements. `UPDATE` and `DELETE` on the
+ledger raise (trigger, migration 000012).
+
+### Credits — admin (`tms_a`)
+
+| `GET /admin/orgs/{id}/sms` | → `{balance, low_watermark, used_30d, held_count, ledger:[{delta, balance_after, reason:"topup"\|"adjust"\|"debit"\|"refund", notification_id\|null, note, admin_name, created_at}]}` — the newest **100** movements. An org id that does not exist is a 404 and creates no credit row. |
+| `POST /admin/orgs/{id}/sms/topup` | `{credits(1–1000000), note(≤500)}` → `200 {balance, released}`. Writes a `topup` ledger row, then releases the org's `held_no_credit` rows **oldest first** and pushes them back onto the queue. Audited `sms_credits.topup`. |
+| `POST /admin/orgs/{id}/sms/adjust` | `{delta(≠0, ±1000000), note}` → `200 {balance, released}`. A delta that would take the balance below zero is a **400** naming the current balance — a prepaid balance has no overdraft. A positive adjustment releases held rows like a top-up. Audited `sms_credits.adjust`. |
+| `PATCH /admin/orgs/{id}/sms` | `{low_watermark(0–1000000)}` → `200 {low_watermark}`. Audited `sms_credits.watermark_update`. |
+
+**Release policy:** a top-up releases **every** held row, not only the ones the
+new balance covers. The debit happens at send time, so releasing more than the
+org can pay for costs nothing — the worker holds the surplus again, in the same
+order, on the next attempt. Releasing only the affordable prefix would mean
+deciding here what a message will cost (a second, drifting copy of the segment
+count) and would strand a message even when a later top-up arrived first.
+
+All three movements carry the **target org** as `org_id` and the admin as
+actor, exactly as `org.suspend` does, so the landlord reads "credits added by
+platform" in their own audit page and the platform reads it in theirs.
+
+### Credits — landlord (`tms_o`)
+
+| `GET /org/sms-credits` | → `{balance, low_watermark, held_count, low:bool}`. Read-only: credits are sold by the platform. `low` is the banner's condition (`balance < low_watermark`), computed once server-side so the three apps cannot disagree at the boundary. |
+| `POST /notifications/custom` | Pre-checks credit **before** queuing: `needed` is the sum of `Segments(body)` over every recipient's *rendered* body — `{{name}}` expands differently per renter and Swahili runs longer than English — and a shortfall is **409 `insufficient_sms_credits`** carrying `{needed, balance}` as top-level members of the problem document. Nothing is queued. The check is advisory, not a reservation: two broadcasts racing one balance can both pass it and the second one's tail is held, which is what the held state is for. |
+| `GET /notifications/log?status=` | accepts `held_no_credit` alongside `queued\|sending\|sent\|failed`. |
+
+When a debit takes a balance from at-or-above the watermark to below it, the
+org's owner is emailed **once** — the crossing test is what stops an org
+running at zero from mailing its owner forty times a day. In dev that is the
+log email provider (`.dev/api.log`).
+
+### Platform templates — admin (`tms_a`)
+
+`platform_templates` is the source of truth for the platform's wording, seeded
+by migration `000016_platform_templates_seed` from the Go catalogue in
+`internal/notify/templates.go` and re-seeded (`ON CONFLICT DO NOTHING`) on every
+API startup, so a kind added in a later phase reaches the table without another
+migration.
+
+`notify.Render` resolution is **org override → `platform_templates` row → the
+built-in Go default**. The Go map stays as the last fallback rather than being
+deleted: it is what a fresh database is seeded from, and it is what renders a
+message when Postgres is unreachable at the moment a send goes out — a renter
+should not miss a rent reminder because the wording table could not be read.
+
+Resolved wording is cached in Redis under `tmpl:{kind}` for **5 minutes** and in
+process for the same window; both are invalidated on every save, lock and
+revert, so the next render reads the new wording rather than waiting out the
+TTL.
+
+`thank_you_settled` is deliberately **not** in the table. It is a second wording
+of `thank_you` — the sentence used when there is no next instalment to name —
+not a notification kind, and there is one row per kind on the wire. It stays a
+code default: an admin editing `thank_you` changes the instalment wording, and
+the settled sentence keeps the platform's.
+
+| `GET /admin/templates` | → `{items:[{kind, sw, en, variables:[…], locked, version, updated_by, updated_at, segments:{sw,en}}]}`, ordered by kind. |
+| `PUT /admin/templates/{kind}` | `{sw, en}` — **both required** (a kind worded in one language would send half the platform's renters a blank message). > **480** characters → 400; a placeholder outside the kind's `variables` → 400 naming it; control characters → 400. → `200 {template, segments:{sw,en}, warnings?}`; `warnings` appears when either language runs past three segments. Writes the **previous** body to `platform_template_versions` and bumps `version`. Audited `platform_template.update`. |
+| `PATCH /admin/templates/{kind}` | `{locked:bool}` → `200 {template}`. Audited `platform_template.lock`. |
+| `POST /admin/templates/{kind}/preview` | `{language:"sw"\|"en", sample?:{var:value}, sw?, en?}` → `200 {kind, language, body, segments, encoding:"gsm"\|"ucs2"}`. `sw`/`en` preview wording that has not been saved yet, so the editor can price a sentence as it is typed; `sample` fills placeholders, defaulting to a representative Tanzanian tenancy. |
+| `GET /admin/templates/{kind}/versions` | → `{items:[{version, sw, en, admin_name, created_at}]}`, newest first. History holds the bodies that were **replaced**, so version *N* reads "this is what version N said". |
+| `POST /admin/templates/{kind}/revert` | `{version}` → `200 {template, restored_from}`. The old wording comes back as a **new** version rather than by rewinding the counter: "we went back to what version 2 said" is a fact worth keeping, and a version number that can go backwards is one nobody can cite. An unknown version is a 404. |
+
+An unknown `{kind}` is a **404** on every route above: the caller is naming a
+template, and one the catalogue does not carry does not exist.
+
+`variables` is derived from the kind's own sentence plus the eight an org may
+use anywhere. `otp` is the exception — `{{code}}` is the only placeholder it
+offers, because an admin given `{{amount}}` there would write a sentence the
+auth path cannot fill in.
+
+### The lock
+
+`platform_templates.locked` freezes a kind against org overrides. **`otp` ships
+locked**: a landlord rewording the message that lets somebody into their account
+is a phishing surface.
+
+| `GET /org/notification-settings` | gains `locked_kinds:[…]` and `platform_templates:{kind:{sw,en}}` — the wording every kind falls back to, so the screen can show a locked kind read-only rather than offering an editor whose save will be refused. `otp` appears in neither: it is not an org's to see an editor for at all. |
+| `PUT /org/notification-settings` | an override of a locked kind → **409 `template_locked`**, refused before anything is merged so the save is never half-applied. **Clearing** an override (a null value, or two blank bodies) is always allowed: it moves the org *back* to the platform's wording, which is what the lock protects. |
+
+### `GET /admin/metrics`
+
+The `sms` block gains `credits_used_today` (debited credits since midnight),
+`orgs_under_watermark` and `held_total`, beside the existing `sent_24h`,
+`failed_24h` and `queued`.
+
+### Audit actions
+
+`sms_credits.topup`, `sms_credits.adjust`, `sms_credits.watermark_update`
+(entity `org_sms_credits`, carrying the target org), and
+`platform_template.update`, `platform_template.lock`,
+`platform_template.revert` (entity `platform_template`, no `org_id` — the
+wording belongs to the platform and an edit changes it for every tenant at
+once).
+
+### Migration `000016_platform_templates_seed`
+
+Inserts the eleven code-catalogue kinds — `contract_ready`,
+`contract_terminated`, `link_approved`, `link_rejected`, `otp` (locked),
+`overdue_daily`, `reminder_7d`, `reminder_due`, `thank_you`,
+`unsigned_reminder`, `welcome` — byte-identical to their Go defaults, each with
+the placeholders its sentence may name. `ON CONFLICT DO NOTHING` throughout, so
+re-running it never overwrites wording an admin has since edited. The tables
+themselves, and `notification_log.status = 'held_no_credit'`, came with
+migration `000012_part2_foundations`.

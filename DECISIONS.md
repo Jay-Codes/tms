@@ -59,3 +59,6 @@
 | 2026-09-06 | Invalid `locale` → 400 (codebase-wide validation convention), not 422; bulk send keeps scalar `queued` and adds `by_language:{sw,en}` | Keep Phase 6 shapes stable |
 | 2026-09-06 | i18n: apps own flat `en.ts`/`sw.ts` dictionaries; `make lint` runs `i18n-check` (key parity + placeholder parity); server-provided data (period labels, unit names, template HTML) is never translated client-side | Data vs chrome |
 | 2026-09-06 | OTP became a platform template kind `otp` (`{{code}}`) rendered in the recipient's locale; excluded from landlord-editable kinds | Locale-aware security text |
+| 2026-09-06 | SMS credits: debit happens at the send attempt inside the worker's claim transaction (a provider failure still consumes the credit); top-up releases **all** held rows oldest-first and the surplus is simply held again | One place counts segments |
+| 2026-09-06 | `otp` is not org-overridable at all, so it never appears in a landlord's `locked_kinds`/`platform_templates`; the admin UI shows it locked | Locked-by-default kind is invisible to landlords rather than read-only |
+| 2026-09-06 | Platform template body cap 480 chars (org override cap stays 320); `SMS_CREDIT_EXEMPT_KINDS` env (default `otp`, `none` = charge everything) | Ops knob for exemptions |

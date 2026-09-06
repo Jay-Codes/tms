@@ -180,6 +180,16 @@ type Worker struct {
 	// Sleep waits out a backoff pause. Tests inject a no-op so a 3-attempt
 	// failure does not take six seconds of wall clock.
 	Sleep func(ctx context.Context, d time.Duration)
+
+	// Pool lets the claim and the credit debit share one transaction
+	// (Phase 14). Without it the worker sends without debiting — the shape a
+	// deployment that has not enabled credits, and most unit tests, run in.
+	Pool *db.Pool
+	// Exempt is the set of kinds that send without a debit; nil means the
+	// default (`otp`). Config supplies it from SMS_CREDIT_EXEMPT_KINDS.
+	Exempt map[string]bool
+	// Email carries the low-watermark warning to the org's owner. Optional.
+	Email EmailProvider
 }
 
 // RunWorker starts the notification worker pool and blocks until ctx is
@@ -268,13 +278,21 @@ func (w Worker) deliver(ctx context.Context, logger *slog.Logger, rawID string) 
 		return
 	}
 
-	row, err := w.Q.ClaimNotification(ctx, id)
+	row, held, err := w.claim(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Already claimed, already sent, or deleted between push and pop.
 		return
 	}
 	if err != nil {
 		logger.Error("notification worker: claim failed", "id", rawID, "error", err)
+		return
+	}
+	if held {
+		// The org cannot pay for this message. It is held, not failed: it
+		// leaves unchanged on the next top-up (API.md Phase 14).
+		logger.Info("notification held: no sms credit",
+			"id", rawID, "kind", row.Kind, "org_id", db.UUIDString(row.OrgID),
+			"segments", Segments(row.Body))
 		return
 	}
 
@@ -309,6 +327,80 @@ func (w Worker) deliver(ctx context.Context, logger *slog.Logger, rawID string) 
 	}
 	logger.Info("notification sent",
 		"id", rawID, "kind", row.Kind, "attempts", attempts, "provider_msg_id", msgID)
+}
+
+// claim takes one notification and pays for it.
+//
+// The claim and the credit debit are one transaction (PLAN2 Phase 14): the row
+// moves `queued` → `sending` and the org's balance drops by the message's
+// segment count together, or neither happens. A worker that wins the claim but
+// cannot pay writes `held_no_credit` in the same transaction and reports
+// held=true, so nothing is sent and nothing is charged.
+//
+// The debit is taken at send time rather than at queue time, which is the only
+// moment the message is actually going out: a queued reminder an admin
+// cancels, or an org suspended before its backlog drains, costs nothing. The
+// corollary is that a send the provider then rejects has still consumed the
+// credit — the platform was billed for the attempt, and refunding a provider
+// failure is an `adjust` the admin makes, not something the worker guesses at.
+//
+// Without a Pool the worker claims exactly as it did before Phase 14 and
+// debits nothing: that is the shape a deployment which has not enabled credits
+// (and most unit tests) runs in.
+func (w Worker) claim(ctx context.Context, id pgtype.UUID) (sqlc.ClaimNotificationRow, bool, error) {
+	if w.Pool == nil {
+		row, err := w.Q.ClaimNotification(ctx, id)
+		return row, false, err
+	}
+
+	tx, err := w.Pool.Begin(ctx)
+	if err != nil {
+		return sqlc.ClaimNotificationRow{}, false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := w.Q.WithTx(tx)
+
+	row, err := q.ClaimNotification(ctx, id)
+	if err != nil {
+		return sqlc.ClaimNotificationRow{}, false, err
+	}
+
+	exempt := w.Exempt
+	if exempt == nil {
+		exempt = ParseExemptKinds("")
+	}
+	if exempt[row.Kind] {
+		// A verification code is the platform's cost, not the landlord's: a
+		// renter locked out of their own account for want of the org's credit
+		// would be the product punishing the wrong person.
+		return row, false, tx.Commit(ctx)
+	}
+
+	before, err := EnsureCredits(ctx, q, row.OrgID)
+	if err != nil {
+		return sqlc.ClaimNotificationRow{}, false, err
+	}
+	balance, err := Debit(ctx, q, row.OrgID, id, Segments(row.Body), row.Kind)
+	if errors.Is(err, ErrNoCredit) {
+		if holdErr := q.HoldNotificationNoCredit(ctx, id); holdErr != nil {
+			return sqlc.ClaimNotificationRow{}, false, holdErr
+		}
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			return sqlc.ClaimNotificationRow{}, false, commitErr
+		}
+		return row, true, nil
+	}
+	if err != nil {
+		return sqlc.ClaimNotificationRow{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return sqlc.ClaimNotificationRow{}, false, err
+	}
+	// The warning goes out after the commit, and off the send path's critical
+	// section: a mail server that is slow must not delay the SMS it is warning
+	// about.
+	LowWatermarkNotice(ctx, w.Q, w.Email, w.Logger, row.OrgID, before.Balance, balance, before.LowWatermark)
+	return row, false, nil
 }
 
 // send tries one message up to MaxAttempts times, pausing between attempts,

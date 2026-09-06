@@ -21,6 +21,8 @@ import (
 
 	"tms/backend/internal/cache"
 	"tms/backend/internal/db"
+	"tms/backend/internal/db/sqlc"
+	"tms/backend/internal/notify"
 	"tms/backend/internal/storage"
 )
 
@@ -94,6 +96,16 @@ func Truncate(t *testing.T, pool *db.Pool) {
 	if _, err := pool.Exec(context.Background(), stmt); err != nil {
 		t.Fatalf("truncate test tables: %v", err)
 	}
+	// platform_templates is not in the list above, but CASCADE reaches it
+	// through its `updated_by_admin_id` reference to `users`. Re-seeding it is
+	// exactly what cmd/api does on startup, so every test begins with the same
+	// catalogue a fresh deployment has (Phase 14).
+	if err := notify.SeedPlatformTemplates(context.Background(), sqlc.New(pool)); err != nil {
+		t.Fatalf("re-seed platform templates: %v", err)
+	}
+	// The process-wide cache outlives the rows it describes, so one test's
+	// edit would otherwise be visible to the next.
+	notify.ActivePlatformStore().Reset()
 }
 
 // Redis starts an in-process Redis (miniredis) and returns a client wired to

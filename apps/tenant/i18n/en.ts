@@ -210,6 +210,7 @@ const messages: Messages = {
   'msg.status.failed': 'Failed',
   'msg.status.sending': 'sending…',
   'msg.status.queued': 'queued',
+  'msg.status.held': 'Held — no credits',
   'msg.kind.reminder_7d': 'Reminder before due',
   'msg.kind.reminder_due': 'Reminder on the due date',
   'msg.kind.overdue_daily': 'Daily overdue reminder',
@@ -264,6 +265,25 @@ const messages: Messages = {
   'msg.result.by_language': '{sw} in Kiswahili, {en} in English.',
   'msg.result.skipped': 'Skipped {count} (no phone number on file or no active contract).',
   'msg.result.tail': 'They appear in the log as they are delivered.',
+
+  /* ---------------------------------------------------------------- */
+  /* SMS credits — the prepaid balance the platform tops up (Phase 14) */
+  /* ---------------------------------------------------------------- */
+  'credits.title': 'SMS credits',
+  'credits.balance_sub.one': '{count} credit left.',
+  'credits.balance_sub.other': '{count} credits left.',
+  'credits.held.one': '{count} message held',
+  'credits.held.other': '{count} messages held',
+  'credits.held_note': 'They go out on their own once the platform adds credits.',
+  'credits.low.title': 'Only {balance} credits left.',
+  'credits.low.body': 'Contact the platform to top up — credits cannot be bought from this screen.',
+  'credits.needed.one': 'This send needs about {count} credit.',
+  'credits.needed.other': 'This send needs about {count} credits.',
+  'credits.insufficient': 'Not enough credits: this send needs {needed} and only {balance} are left, so nothing was sent.',
+  'credits.banner.low': 'SMS credits are low — {balance} left.',
+  'credits.banner.held.one': '{count} message is held until the platform adds credits.',
+  'credits.banner.held.other': '{count} messages are held until the platform adds credits.',
+  'credits.banner.link': 'Open Messages',
 
   /* ---------------------------------------------------------------- */
   /* contract templates — two bodies, one per language (FLOWS 6)       */
@@ -1021,6 +1041,14 @@ const messages: Messages = {
   'notifysettings.wording.platform': 'Using the platform wording in {language}.',
   'notifysettings.wording.write_own': 'Write my own',
   'notifysettings.wording.reset': 'Reset to default',
+  'notifysettings.wording.show_platform': 'Show platform wording',
+  'notifysettings.wording.hide_platform': 'Hide platform wording',
+  'notifysettings.wording.locked': 'Platform wording',
+  'notifysettings.wording.platform_unavailable': 'The platform wording is not available right now.',
+  'notifysettings.locked.note': 'Set by the platform — this wording cannot be changed here.',
+  'notifysettings.locked.heading': 'Set by the platform',
+  'notifysettings.locked.lead': 'The platform writes these messages. You can read them here, but not replace them.',
+  'notifysettings.locked.rejected': 'The platform locked this wording, so your version was not saved.',
   'expcat.title': 'Expense categories',
   'expcat.lead': 'What your spending is filed under. Seeded with the usual eight; rename, reorder or add your own.',
   'expcat.col.category': 'Category',

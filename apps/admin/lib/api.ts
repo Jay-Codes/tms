@@ -206,6 +206,16 @@ export interface AdminOrgSms {
   failed_30d: number;
 }
 
+/**
+ * Phase 14 — the SMS credit wallet an org spends at send time. `balance` is
+ * whole credits (one per 160-char GSM segment, 70 for UCS-2); `low_watermark`
+ * is the line under which the landlord sees a low-balance banner.
+ */
+export interface AdminOrgCredits {
+  balance: number;
+  low_watermark: number;
+}
+
 export interface AdminOrgOwner {
   name: string;
   email: string;
@@ -219,6 +229,12 @@ export interface AdminOrgSummary {
   owner: AdminOrgOwner | null;
   counts: AdminOrgCounts | null;
   sms: AdminOrgSms | null;
+  /**
+   * Phase 14. Present only when the list/detail payload carries it — the
+   * Credits column on the directory renders itself away when it does not,
+   * rather than firing one request per row (see orgs/page.tsx).
+   */
+  credits?: AdminOrgCredits | null;
   created_at: string;
   /** Set once an org has been suspended; shown in the detail header. */
   suspended_at?: string | null;
@@ -251,7 +267,15 @@ export interface AdminMetrics {
   renters: { total: number };
   units: { total: number; occupied: number };
   contracts: { active: number };
-  sms: { sent_24h: number; failed_24h: number; queued: number };
+  sms: {
+    sent_24h: number;
+    failed_24h: number;
+    queued: number;
+    /** Phase 14 — absent until the credits backend lands; the tiles say so. */
+    credits_used_today?: number;
+    orgs_under_watermark?: number;
+    held_total?: number;
+  };
   payments: { recorded_30d: number; amount_30d: number };
   db: { ok: boolean };
   redis: { ok: boolean };
@@ -292,6 +316,75 @@ export interface AdminJob {
 
 export function jobKey(job: AdminJob): string {
   return job.key ?? job.name ?? '';
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 14 — SMS credits & platform templates (API.md Part 2)          */
+/* ------------------------------------------------------------------ */
+
+export type SmsLedgerReason = 'topup' | 'adjust' | 'debit' | 'refund' | string;
+
+/** One append-only row of `sms_credit_ledger`. */
+export interface AdminSmsLedgerEntry {
+  id?: string;
+  delta: number;
+  balance_after: number;
+  reason: SmsLedgerReason;
+  note: string | null;
+  admin_name: string | null;
+  notification_id?: string | null;
+  created_at: string;
+}
+
+/** `GET /admin/orgs/{id}/sms`. The ledger is capped at the newest 100 rows. */
+export interface AdminOrgSmsCredits {
+  balance: number;
+  low_watermark: number;
+  used_30d: number;
+  held_count: number;
+  ledger: AdminSmsLedgerEntry[];
+  /** Only sent if the backend ever pages the ledger; the UI honours it. */
+  next_cursor?: string | null;
+}
+
+/** Every notification kind the platform can word. */
+export interface AdminTemplate {
+  kind: string;
+  sw: string;
+  en: string;
+  variables: string[];
+  locked: boolean;
+  version: number;
+  updated_by: string | null;
+  updated_at: string | null;
+}
+
+export interface AdminTemplateVersion {
+  version: number;
+  sw: string;
+  en: string;
+  admin_name: string | null;
+  created_at: string;
+}
+
+/** `PUT /admin/templates/{kind}` — the saved row plus its segment cost. */
+export interface AdminTemplateSaveResult {
+  item?: AdminTemplate;
+  template?: AdminTemplate;
+  segments?: { sw: number; en: number };
+  warnings?: string[];
+}
+
+export interface AdminTemplatePreview {
+  body: string;
+  segments: number;
+  encoding?: 'gsm' | 'ucs2' | string;
+}
+
+/** Both `{item}` and `{template}` are accepted; the wire has used each. */
+export function unwrapTemplate(res: AdminTemplateSaveResult | AdminTemplate): AdminTemplate {
+  const o = res as Record<string, unknown>;
+  return (o.item ?? o.template ?? res) as AdminTemplate;
 }
 
 /* ------------------------------------------------------------------ */
@@ -347,6 +440,42 @@ export const adminApi = {
   /** `{queued:{kind:n}}`; `force_hour` ignores each org's send hour (Phase 6). */
   runNotifications: (body: { date?: string; force_hour?: boolean } = {}) =>
     api.post<Record<string, unknown>>('/admin/jobs/notifications', body),
+
+  /* ---------------- Phase 14 — SMS credits ---------------- */
+
+  orgSms: (id: string, query: { cursor?: string } = {}, signal?: AbortSignal) =>
+    api.get<AdminOrgSmsCredits>(`/admin/orgs/${id}/sms`, { query, signal }),
+
+  /** `{credits>0, note}` → `{balance}`; also releases held rows in queue order. */
+  smsTopup: (id: string, body: { credits: number; note: string }) =>
+    api.post<{ balance: number }>(`/admin/orgs/${id}/sms/topup`, body),
+
+  /** `{delta≠0, note}` → `{balance}`; 400 when it would take the org below 0. */
+  smsAdjust: (id: string, body: { delta: number; note: string }) =>
+    api.post<{ balance: number }>(`/admin/orgs/${id}/sms/adjust`, body),
+
+  smsWatermark: (id: string, low_watermark: number) =>
+    api.patch<{ low_watermark: number }>(`/admin/orgs/${id}/sms`, { low_watermark }),
+
+  /* ---------------- Phase 14 — platform templates ---------------- */
+
+  templates: (signal?: AbortSignal) =>
+    api.get<{ items: AdminTemplate[] }>('/admin/templates', { signal }),
+
+  saveTemplate: (kind: string, body: { sw: string; en: string }) =>
+    api.put<AdminTemplateSaveResult>(`/admin/templates/${kind}`, body),
+
+  lockTemplate: (kind: string, locked: boolean) =>
+    api.patch<AdminTemplateSaveResult>(`/admin/templates/${kind}`, { locked }),
+
+  previewTemplate: (kind: string, body: { language: 'sw' | 'en'; sample?: boolean }) =>
+    api.post<AdminTemplatePreview>(`/admin/templates/${kind}/preview`, body),
+
+  templateVersions: (kind: string, signal?: AbortSignal) =>
+    api.get<{ items: AdminTemplateVersion[] }>(`/admin/templates/${kind}/versions`, { signal }),
+
+  revertTemplate: (kind: string, version: number) =>
+    api.post<AdminTemplateSaveResult>(`/admin/templates/${kind}/revert`, { version }),
 };
 
 export const unwrapAdminOrg = (res: { org: AdminOrgSummary } | AdminOrgSummary) =>

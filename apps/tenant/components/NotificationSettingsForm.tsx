@@ -16,6 +16,8 @@ import { Field, Note, ProblemNote } from './FormBits';
 import {
   ApiError,
   SCHEDULED_KINDS,
+  isKindLocked,
+  platformTemplateFor,
   SMS_MAX_CHARS,
   SMS_VARIABLES,
   notificationsApi,
@@ -103,6 +105,75 @@ function insertAt(el: HTMLTextAreaElement | null, current: string, token: string
   return next;
 }
 
+/**
+ * The platform's own wording for a kind, read-only (API.md Phase 14).
+ *
+ * Shown two ways: as the whole story for a **locked** kind, and behind a
+ * "Show platform wording" toggle for an unlocked one, so a landlord writing an
+ * override can see what they are replacing. Both languages always, because the
+ * message goes out in the renter's language, not the landlord's.
+ */
+function PlatformWording({ tpl }: { tpl: NotificationTemplate | null }) {
+  const t = useT();
+  if (!tpl || (!tpl.sw && !tpl.en)) {
+    return (
+      <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)', margin: 0 }}>
+        {t('notifysettings.wording.platform_unavailable')}
+      </p>
+    );
+  }
+  return (
+    <div style={{ display: 'grid', gap: 'var(--sp-3)' }}>
+      {(['sw', 'en'] as const).map((lang) => (
+        <div key={lang}>
+          <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>
+            {lang === 'sw' ? 'Kiswahili' : 'English'}
+          </span>
+          <p
+            style={{
+              margin: 'var(--sp-2) 0 0',
+              whiteSpace: 'pre-wrap',
+              border: '1px solid var(--rule)',
+              borderRadius: 'var(--radius-sm)',
+              padding: 'var(--sp-2) var(--sp-3)',
+              background: 'var(--paper)',
+            }}
+          >
+            {tpl[lang] || '—'}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** A label for a locked kind outside the schedulable five (`otp`). */
+function lockedKindLabel(t: ReturnType<typeof useT>, kind: string): string {
+  const key = `msg.kind.${kind}`;
+  const label = t(key);
+  return label === key ? kind.replace(/_/g, ' ') : label;
+}
+
+/** "Set by the platform" — why there is nothing to edit here. */
+function LockNote() {
+  const t = useT();
+  return (
+    <p
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--sp-2)',
+        margin: 0,
+        color: 'var(--ink-soft)',
+        fontSize: 'var(--text-sm)',
+      }}
+    >
+      <Icon icon="solar:lock-keyhole-minimalistic-linear" width={16} />
+      {t('notifysettings.locked.note')}
+    </p>
+  );
+}
+
 function TemplateBox({
   kind,
   lang,
@@ -166,6 +237,8 @@ export function NotificationSettingsForm({ compact, onSaved, saveLabel }: Notifi
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [openTemplate, setOpenTemplate] = useState<ScheduledKind | null>(null);
+  /** Which kinds have the platform's own wording unfolded (Phase 14). */
+  const [showPlatform, setShowPlatform] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -213,13 +286,18 @@ export function NotificationSettingsForm({ compact, onSaved, saveLabel }: Notifi
     setSaved(false);
     try {
       const name = (settings.sender_name ?? '').trim();
+      // A locked kind's wording belongs to the platform: never send an override
+      // for one, or the PUT comes back 409 `template_locked`.
+      const templates = Object.fromEntries(
+        Object.entries(settings.templates).filter(([kind]) => !isKindLocked(settings, kind)),
+      ) as NotificationSettings['templates'];
       const res = await notificationsApi.saveSettings({
         // Blank means "use the platform sender ID", which the API stores as null.
         sender_name: name === '' ? null : name,
         language: settings.language,
         send_hour_local: settings.send_hour_local,
         kinds: settings.kinds,
-        templates: settings.templates,
+        templates,
       });
       const next = withSettingsDefaults(unwrapNotificationSettings(res));
       setSettings(next);
@@ -248,10 +326,32 @@ export function NotificationSettingsForm({ compact, onSaved, saveLabel }: Notifi
   if (!settings) return <p style={{ color: 'var(--ink-soft)' }}>{t('common.loading')}</p>;
 
   const gap = compact ? 'var(--sp-4)' : 'var(--sp-5)';
+  /** Locked kinds this screen does not already list among the schedulable five. */
+  const otherLocked = (settings.locked_kinds ?? []).filter(
+    (k) => !(SCHEDULED_KINDS as readonly string[]).includes(k),
+  );
 
   return (
     <form onSubmit={submit} style={{ display: 'grid', gap, maxWidth: 720 }} noValidate>
       <ProblemNote error={error} />
+      {/* 409 template_locked — the platform took this kind's wording over
+          between loading this screen and saving it. Nothing was written. */}
+      {error?.code === 'template_locked' ? (
+        <p style={{ color: 'var(--stamp-overdue)', fontSize: 'var(--text-sm)', margin: 0 }}>
+          {t('notifysettings.locked.rejected')}{' '}
+          <button
+            type="button"
+            className="btn btn-quiet"
+            onClick={() => {
+              setError(null);
+              void load();
+            }}
+            style={{ minHeight: 32 }}
+          >
+            {t('common.refresh')}
+          </button>
+        </p>
+      ) : null}
       {saved ? <Note>{t('notifysettings.saved')}</Note> : null}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--sp-4)' }}>
@@ -315,6 +415,10 @@ export function NotificationSettingsForm({ compact, onSaved, saveLabel }: Notifi
           const cfg = settings.kinds[kind] ?? { enabled: false };
           const tpl = settings.templates[kind] ?? null;
           const open = openTemplate === kind;
+          // Phase 14: a locked kind still switches on and off — only its
+          // wording is the platform's, and it is shown rather than edited.
+          const locked = isKindLocked(settings, kind);
+          const platform = platformTemplateFor(settings, kind);
           return (
             <div
               key={kind}
@@ -346,7 +450,17 @@ export function NotificationSettingsForm({ compact, onSaved, saveLabel }: Notifi
                     style={{ width: 18, height: 18, flexShrink: 0 }}
                   />
                   <span>
-                    <span style={{ fontWeight: 500 }}>{t(KIND_KEYS[kind])}</span>
+                    <span style={{ fontWeight: 500 }}>
+                      {t(KIND_KEYS[kind])}
+                      {locked ? (
+                        <Icon
+                          icon="solar:lock-keyhole-minimalistic-linear"
+                          width={15}
+                          aria-label={t('notifysettings.locked.note')}
+                          style={{ verticalAlign: '-2px', marginLeft: 'var(--sp-2)', color: 'var(--ink-soft)' }}
+                        />
+                      ) : null}
+                    </span>
                     <span style={{ display: 'block', fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>
                       {t(`${KIND_KEYS[kind]}.hint`)}
                     </span>
@@ -400,13 +514,51 @@ export function NotificationSettingsForm({ compact, onSaved, saveLabel }: Notifi
                   aria-expanded={open}
                 >
                   <Icon icon={open ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'} width={18} />
-                  {tpl ? t('notifysettings.wording.custom') : t('notifysettings.wording.default')}
+                  {locked
+                    ? t('notifysettings.wording.locked')
+                    : tpl
+                      ? t('notifysettings.wording.custom')
+                      : t('notifysettings.wording.default')}
                 </button>
               </div>
 
               {open ? (
                 <div style={{ display: 'grid', gap: 'var(--sp-3)', borderTop: '1px solid var(--rule)', paddingTop: 'var(--sp-3)' }}>
-                  {tpl === null ? (
+                  {locked ? (
+                    <>
+                      <LockNote />
+                      <PlatformWording tpl={platform} />
+                    </>
+                  ) : (
+                    <>
+                      {/* What an override would replace, folded away until asked for. */}
+                      <div>
+                        <button
+                          type="button"
+                          className="btn btn-quiet"
+                          onClick={() =>
+                            setShowPlatform((m) => ({ ...m, [kind]: !m[kind] }))
+                          }
+                          style={{ minHeight: 32 }}
+                          aria-expanded={Boolean(showPlatform[kind])}
+                        >
+                          <Icon
+                            icon={
+                              showPlatform[kind]
+                                ? 'solar:alt-arrow-up-linear'
+                                : 'solar:alt-arrow-down-linear'
+                            }
+                            width={18}
+                          />
+                          {showPlatform[kind]
+                            ? t('notifysettings.wording.hide_platform')
+                            : t('notifysettings.wording.show_platform')}
+                        </button>
+                      </div>
+                      {showPlatform[kind] ? <PlatformWording tpl={platform} /> : null}
+                    </>
+                  )}
+                  {locked ? null : tpl === null ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
                       <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)', margin: 0 }}>
                         {t('notifysettings.wording.platform', {
@@ -456,6 +608,37 @@ export function NotificationSettingsForm({ compact, onSaved, saveLabel }: Notifi
           );
         })}
       </div>
+
+      {/* Kinds the platform locked that this screen does not otherwise list —
+          `otp` above all, which no landlord may reword. Read-only, and only
+          rendered once the backend actually names them. */}
+      {otherLocked.length > 0 ? (
+        <div style={{ display: 'grid', gap: 'var(--sp-3)' }}>
+          <h3 style={{ fontSize: 'var(--text-lg)' }}>{t('notifysettings.locked.heading')}</h3>
+          <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)', margin: 0 }}>
+            {t('notifysettings.locked.lead')}
+          </p>
+          {otherLocked.map((kind) => (
+            <div
+              key={kind}
+              style={{
+                border: '1px solid var(--rule)',
+                borderRadius: 'var(--radius-md)',
+                padding: 'var(--sp-3) var(--sp-4)',
+                display: 'grid',
+                gap: 'var(--sp-3)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
+                <Icon icon="solar:lock-keyhole-minimalistic-linear" width={16} />
+                <span style={{ fontWeight: 500 }}>{lockedKindLabel(t, kind)}</span>
+              </div>
+              <LockNote />
+              <PlatformWording tpl={platformTemplateFor(settings, kind)} />
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div>
         <button type="submit" className="btn btn-primary" disabled={busy}>

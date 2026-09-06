@@ -255,7 +255,31 @@ export const orgApi = {
     },
     signal?: AbortSignal,
   ) => api.get<{ items: AuditEntry[]; next_cursor: string | null }>('/audit-log', { query, signal }),
+  /**
+   * Phase 14: the org's prepaid SMS balance. Read-only here — only the platform
+   * admin can move it, so this screen never offers a purchase.
+   */
+  smsCredits: (signal?: AbortSignal) => api.get<SmsCredits>('/org/sms-credits', { signal }),
 };
+
+/**
+ * `GET /org/sms-credits` (API.md Phase 14). `low` is the backend's own verdict
+ * on `balance <= low_watermark`; the frontend does not re-decide it, it only
+ * falls back to the comparison when an older payload omits the flag.
+ */
+export interface SmsCredits {
+  balance: number;
+  low_watermark: number;
+  /** Messages parked as `held_no_credit`, waiting for the next top-up. */
+  held_count: number;
+  low?: boolean;
+}
+
+/** True when the balance sits at or under the watermark. */
+export function creditsAreLow(c: SmsCredits | null): boolean {
+  if (!c) return false;
+  return typeof c.low === 'boolean' ? c.low : c.balance <= c.low_watermark;
+}
 
 /**
  * The signed-in org user's own record. Phase 13 adds `PATCH /org/members/me`
@@ -1198,7 +1222,18 @@ export type ScheduledKind = (typeof SCHEDULED_KINDS)[number];
 /** Every kind that can appear in the log — the scheduled five plus the rest. */
 export type NotificationKind = ScheduledKind | 'otp' | 'custom' | 'link_approved' | 'link_rejected' | string;
 
-export type NotificationStatus = 'queued' | 'sending' | 'sent' | 'failed' | string;
+/**
+ * Phase 14 adds `held_no_credit`: the org ran out of SMS credit, so the row is
+ * parked rather than failed. It is not retryable — the platform's next top-up
+ * releases it in queue order.
+ */
+export type NotificationStatus =
+  | 'queued'
+  | 'sending'
+  | 'sent'
+  | 'failed'
+  | 'held_no_credit'
+  | string;
 
 /** What each kind is for, and the SMS language, in the landlord's words. */
 export const KIND_LABELS: Record<string, string> = {
@@ -1257,6 +1292,18 @@ export interface NotificationSettings {
   kinds: Partial<Record<ScheduledKind, NotificationKindConfig>>;
   /** null for a kind = platform default copy. */
   templates: Partial<Record<ScheduledKind, NotificationTemplate | null>>;
+  /**
+   * Phase 14. Kinds the platform has locked: the landlord reads the wording but
+   * cannot replace it, and a PUT carrying an override answers 409
+   * `template_locked`. `otp` ships locked.
+   */
+  locked_kinds?: string[];
+  /**
+   * Phase 14. The platform's own wording per kind, in both languages — shown so
+   * a landlord can see what an override would be replacing. Keyed by kind, and
+   * carries kinds outside the schedulable five (`otp`).
+   */
+  platform_templates?: Record<string, NotificationTemplate>;
 }
 
 export interface NotificationLogEntry {
@@ -1388,7 +1435,24 @@ export function withSettingsDefaults(s: Partial<NotificationSettings> | null): N
       unsigned_reminder: { enabled: false, after_days: 7, ...(kinds.unsigned_reminder ?? {}) },
     },
     templates: s?.templates ?? {},
+    // Phase 14 — absent until the backend lands, which reads as "nothing locked
+    // and no platform wording to show", i.e. exactly the Phase 13 screen.
+    locked_kinds: Array.isArray(s?.locked_kinds) ? s.locked_kinds : [],
+    platform_templates: s?.platform_templates ?? {},
   };
+}
+
+/** Whether the platform has locked this kind's wording (Phase 14). */
+export function isKindLocked(s: NotificationSettings | null, kind: string): boolean {
+  return Boolean(s?.locked_kinds?.includes(kind));
+}
+
+/** The platform's own wording for a kind, when the backend sends it. */
+export function platformTemplateFor(
+  s: NotificationSettings | null,
+  kind: string,
+): NotificationTemplate | null {
+  return s?.platform_templates?.[kind] ?? null;
 }
 
 /**

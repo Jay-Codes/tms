@@ -124,3 +124,18 @@ ORDER BY a.action, a.at DESC, a.id DESC;
 -- is cold: one primary-key lookup, cached for a few minutes afterwards.
 -- name: AdminGetOrgStatus :one
 SELECT status FROM orgs WHERE id = sqlc.arg(id) AND deleted_at IS NULL;
+
+
+-- AdminSMSMetrics is the Phase 14 block of GET /admin/metrics: what the
+-- platform's orgs have spent today, how many are under their own watermark,
+-- and how much mail is held for want of credit.
+-- name: AdminSMSMetrics :one
+SELECT
+    (SELECT COALESCE(-sum(delta), 0) FROM sms_credit_ledger
+      WHERE reason = 'debit' AND created_at >= date_trunc('day', now()))::bigint
+      AS credits_used_today,
+    (SELECT count(*) FROM org_sms_credits c
+      JOIN orgs o ON o.id = c.org_id AND o.deleted_at IS NULL
+      WHERE c.balance < c.low_watermark)::bigint AS orgs_under_watermark,
+    (SELECT count(*) FROM notification_log
+      WHERE status = 'held_no_credit')::bigint AS held_total;

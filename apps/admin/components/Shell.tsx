@@ -27,6 +27,7 @@ export interface NavItem {
 export const NAV: NavItem[] = [
   { href: '/', label: 'Dashboard', icon: 'solar:chart-square-linear' },
   { href: '/orgs', label: 'Organizations', icon: 'solar:buildings-2-linear' },
+  { href: '/templates', label: 'Templates', icon: 'solar:chat-square-code-linear' },
   { href: '/audit', label: 'Audit', icon: 'solar:history-linear' },
   { href: '/jobs', label: 'Jobs', icon: 'solar:refresh-circle-linear' },
 ];
@@ -167,7 +168,8 @@ function BottomBar({ onMore }: { onMore: () => void }) {
   const pathname = usePathname();
   return (
     <nav className="bottom-bar shell-bottom" aria-label="Main sections">
-      {NAV.map((item) => (
+      {/* Four fit across a 375 px phone beside "More"; the drawer has them all. */}
+      {NAV.slice(0, 4).map((item) => (
         <Link
           key={item.href}
           href={item.href}

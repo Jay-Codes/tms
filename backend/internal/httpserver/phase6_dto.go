@@ -139,6 +139,12 @@ type notificationSettingsResponse struct {
 	SendHour   int                         `json:"send_hour_local"`
 	Kinds      notificationKinds           `json:"kinds"`
 	Templates  map[string]*notify.Template `json:"templates"`
+	// LockedKinds and PlatformTemplates are the Phase 14 read-only half: the
+	// kinds the platform has frozen, and the wording every kind falls back to
+	// when the org has no override. Both are filled in by the handler, which
+	// is the only layer with the catalogue to hand.
+	LockedKinds       []string                   `json:"locked_kinds"`
+	PlatformTemplates map[string]notify.Template `json:"platform_templates"`
 }
 
 func toNotificationSettings(base OrgSettings) notificationSettingsResponse {
@@ -426,4 +432,8 @@ func toNotificationLogItem(r sqlc.ListOrgNotificationsRow) notificationLogItem {
 //nolint:gochecknoglobals // fixed value set, read-only.
 var notificationStatuses = map[string]bool{
 	"queued": true, "sending": true, "sent": true, "failed": true,
+	// Phase 14: a message the org could not pay for. It is not `failed` —
+	// nothing went wrong with it — and it is not retryable: it leaves on the
+	// platform's next top-up, unchanged.
+	notify.StatusHeldNoCredit: true,
 }

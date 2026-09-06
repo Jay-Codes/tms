@@ -407,6 +407,34 @@ func (q *Queries) AdminMetrics(ctx context.Context) (AdminMetricsRow, error) {
 	return i, err
 }
 
+const adminSMSMetrics = `-- name: AdminSMSMetrics :one
+SELECT
+    (SELECT COALESCE(-sum(delta), 0) FROM sms_credit_ledger
+      WHERE reason = 'debit' AND created_at >= date_trunc('day', now()))::bigint
+      AS credits_used_today,
+    (SELECT count(*) FROM org_sms_credits c
+      JOIN orgs o ON o.id = c.org_id AND o.deleted_at IS NULL
+      WHERE c.balance < c.low_watermark)::bigint AS orgs_under_watermark,
+    (SELECT count(*) FROM notification_log
+      WHERE status = 'held_no_credit')::bigint AS held_total
+`
+
+type AdminSMSMetricsRow struct {
+	CreditsUsedToday   int64 `json:"credits_used_today"`
+	OrgsUnderWatermark int64 `json:"orgs_under_watermark"`
+	HeldTotal          int64 `json:"held_total"`
+}
+
+// AdminSMSMetrics is the Phase 14 block of GET /admin/metrics: what the
+// platform's orgs have spent today, how many are under their own watermark,
+// and how much mail is held for want of credit.
+func (q *Queries) AdminSMSMetrics(ctx context.Context) (AdminSMSMetricsRow, error) {
+	row := q.db.QueryRow(ctx, adminSMSMetrics)
+	var i AdminSMSMetricsRow
+	err := row.Scan(&i.CreditsUsedToday, &i.OrgsUnderWatermark, &i.HeldTotal)
+	return i, err
+}
+
 const adminSuspendOrg = `-- name: AdminSuspendOrg :one
 UPDATE orgs
 SET status = 'suspended', suspended_at = now(), suspended_reason = $1

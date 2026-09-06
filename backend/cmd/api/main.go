@@ -143,6 +143,13 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 		if seedErr := platform.SeedAdmin(ctx, pool, cfg, logger); seedErr != nil {
 			logger.Error("platform admin seeding failed", "error", seedErr)
 		}
+		// Phase 14: the platform SMS catalogue. Migration 000016 seeds it, and
+		// this re-applies the code defaults for any kind the table does not
+		// carry — how a kind added in a later phase reaches the table without
+		// another migration. Existing rows are never overwritten.
+		if seedErr := notify.SeedPlatformTemplates(ctx, sqlc.New(pool)); seedErr != nil {
+			logger.Error("platform template seeding failed", "error", seedErr)
+		}
 	}
 
 	redisClient, err := cache.Open(cfg.RedisURL)
@@ -179,6 +186,12 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 			SMS:     deps.SMS,
 			Logger:  logger,
 			Workers: cfg.NotifyWorkers,
+			// Phase 14: the claim and the credit debit share one transaction,
+			// so a message is never sent without being paid for and never
+			// charged without being claimed.
+			Pool:   deps.Pool,
+			Exempt: notify.ParseExemptKinds(cfg.SMSCreditExemptKinds),
+			Email:  deps.Email,
 		})
 	} else {
 		logger.Warn("notification worker not started: postgres or redis unavailable")

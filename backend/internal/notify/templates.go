@@ -235,11 +235,14 @@ func Render(kind, lang string, v Vars, overrides Overrides) string {
 
 	body := overrides.lookup(kind, lang)
 	if body == "" {
-		t, ok := platformTemplates[key]
-		if !ok {
+		// Phase 14: the platform's own wording lives in platform_templates,
+		// which an admin edits. The Go catalogue is the fallback beneath it —
+		// what a fresh install is seeded from, and what renders when the table
+		// cannot be read.
+		body = platformBody(key, lang)
+		if body == "" {
 			return ""
 		}
-		body = t.pick(lang)
 	}
 	return Clamp(Substitute(body, v))
 }
@@ -360,3 +363,8 @@ func TemplateKinds() []string {
 	sort.Strings(out)
 	return out
 }
+
+// Pick returns the wording for a language, falling back to Swahili. It is the
+// exported form of the internal selector, used by the admin template editor's
+// preview (Phase 14).
+func (t Template) Pick(lang string) string { return t.pick(lang) }

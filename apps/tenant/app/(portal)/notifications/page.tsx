@@ -20,19 +20,22 @@ import {
   KIND_FILTER_IDS,
   NotificationLogTable,
   SendMessageForm,
+  SmsCreditsCard,
   kindLabelFor,
+  useSmsCredits,
 } from '../../../components/NotificationBits';
 import { PageHead } from '../../../components/PageHead';
 import { ApiError, notificationsApi, toApiError, type NotificationLogEntry } from '../../../lib/api';
 
 type TabId = 'log' | 'send';
 
-/** The three delivery states the log lets a landlord filter on. */
-const STATUS_OPTIONS = ['queued', 'sent', 'failed'] as const;
+/** The delivery states the log lets a landlord filter on (held is Phase 14). */
+const STATUS_OPTIONS = ['queued', 'sent', 'failed', 'held_no_credit'] as const;
 const STATUS_KEYS: Record<(typeof STATUS_OPTIONS)[number], string> = {
   queued: 'msg.status.queued',
   sent: 'msg.status.sent',
   failed: 'msg.status.failed',
+  held_no_credit: 'msg.status.held',
 };
 
 function LogTab() {
@@ -135,6 +138,8 @@ function NotificationsBody() {
   const [tab, setTab] = useState<TabId>(initial === 'send' ? 'send' : 'log');
   // Bumped after a send so the log refetches when the reader flips back to it.
   const [nonce, setNonce] = useState(0);
+  // The balance moves with every send, so it is re-read on the same signal.
+  const { credits, reload: reloadCredits } = useSmsCredits();
 
   return (
     <>
@@ -147,6 +152,8 @@ function NotificationsBody() {
           </Link>
         }
       />
+
+      <SmsCreditsCard credits={credits} />
 
       <div role="tablist" style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)', marginBottom: 'var(--sp-4)' }}>
         {(
@@ -187,7 +194,12 @@ function NotificationsBody() {
         {tab === 'log' ? (
           <LogTab key={nonce} />
         ) : (
-          <SendMessageForm onSent={() => setNonce((n) => n + 1)} />
+          <SendMessageForm
+            onSent={() => {
+              setNonce((n) => n + 1);
+              reloadCredits();
+            }}
+          />
         )}
       </div>
     </>

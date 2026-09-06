@@ -2,6 +2,7 @@ package httpserver_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -187,7 +188,45 @@ func (h *harness) createOrg(orgName, ownerName, email, phone, password string) (
 		"org_name": orgName, "owner_name": ownerName,
 		"email": email, "phone": phone, "password": password,
 	}).mustStatus(h.t, http.StatusCreated, "create org")
+	// Phase 14: every org in the suite starts with a stock of SMS credits, so
+	// the tests that predate prepaid credit go on exercising what they were
+	// written to exercise rather than all failing the pre-check at once. A
+	// test that is *about* credits sets the balance it wants explicitly.
+	h.grantCredits(created(resp), testStartingCredits)
 	return c, resp
+}
+
+// testStartingCredits is the stock every org in the suite is created with:
+// comfortably more than any single test sends, and a round number so a
+// balance in a failure message is recognisable.
+const testStartingCredits = 10_000
+
+// created reads the org id out of a POST /orgs response.
+func created(resp response) string {
+	if resp.Body == nil {
+		return ""
+	}
+	org, ok := resp.Body["org"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	id, _ := org["id"].(string)
+	return id
+}
+
+// grantCredits sets an org's balance directly, without a ledger row: it is a
+// fixture, not a movement anybody made.
+func (h *harness) grantCredits(orgID string, balance int) {
+	h.t.Helper()
+	if orgID == "" || h.pool == nil {
+		return
+	}
+	if _, err := h.pool.Exec(context.Background(),
+		`INSERT INTO org_sms_credits (org_id, balance) VALUES ($1, $2)
+		 ON CONFLICT (org_id) DO UPDATE SET balance = EXCLUDED.balance`,
+		orgID, balance); err != nil {
+		h.t.Fatalf("grant sms credits: %v", err)
+	}
 }
 
 // ------------------------------------------------------- renter onboarding --

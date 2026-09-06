@@ -74,6 +74,12 @@ type Config struct {
 	// NotifyWorkers is the size of the SMS sending pool (API.md Phase 6: 3).
 	NotifyWorkers int
 
+	// SMSCreditExemptKinds is the comma-separated list of notification kinds
+	// that send without debiting a credit (Phase 14). Empty means the default,
+	// `otp`: the platform absorbs the cost of letting somebody into their own
+	// account. The literal "none" charges for everything.
+	SMSCreditExemptKinds string
+
 	// TrustedProxyCIDRs is the comma-separated set of networks whose requests
 	// may carry X-Forwarded-For / X-Real-IP on a caller's behalf.
 	TrustedProxyCIDRs string
@@ -108,7 +114,8 @@ func Load() Config {
 		BeemSecretKey: getenv("BEEM_SECRET_KEY", ""),
 		BeemSenderID:  getenv("BEEM_SENDER_ID", ""),
 
-		NotifyWorkers: getint("NOTIFY_WORKERS", DefaultNotifyWorkers),
+		NotifyWorkers:        getint("NOTIFY_WORKERS", DefaultNotifyWorkers),
+		SMSCreditExemptKinds: getenv("SMS_CREDIT_EXEMPT_KINDS", ""),
 
 		TrustedProxyCIDRs: getenv("TRUSTED_PROXY_CIDRS", DefaultTrustedProxyCIDRs),
 	}

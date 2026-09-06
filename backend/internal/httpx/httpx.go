@@ -168,3 +168,30 @@ func (t ProxyTrust) ClientIP(r *http.Request) string {
 	}
 	return peer
 }
+
+// WriteProblemExtra writes a coded RFC 7807 error carrying extra top-level
+// members alongside the standard ones.
+//
+// RFC 7807 allows a problem document to carry its own extension members, and
+// two of the API's errors are only actionable with them: a landlord refused a
+// broadcast for want of credit needs the shortfall in numbers
+// (`insufficient_sms_credits {needed, balance}`, API.md Phase 14), not a
+// sentence they have to parse. A reserved key in extras never displaces the
+// standard member of the same name.
+func WriteProblemExtra(w http.ResponseWriter, status int, code, title, detail string, extras map[string]any) {
+	doc := map[string]any{}
+	for k, v := range extras {
+		doc[k] = v
+	}
+	doc["type"] = code
+	doc["title"] = title
+	doc["status"] = status
+	if detail != "" {
+		doc["detail"] = detail
+	}
+	w.Header().Set("Content-Type", ProblemContentType)
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(doc); err != nil {
+		slog.Error("write problem response", "error", err)
+	}
+}

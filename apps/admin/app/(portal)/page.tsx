@@ -8,6 +8,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
+import { StatTile } from '@tms/ui';
 import { ProblemNote } from '../../components/FormBits';
 import { PageHead } from '../../components/PageHead';
 import { ApiError, adminApi, toApiError, type AdminMetrics } from '../../lib/api';
@@ -170,6 +171,50 @@ function DashboardBody() {
             <Stat label="Failed" value={fmtNum(metrics.sms?.failed_24h)} />
             <Stat label="Queued" value={fmtNum(metrics.sms?.queued)} sub="waiting on the worker" />
           </Section>
+
+          {/*
+            Credits (Phase 14). Tiles rather than the Stat card above because
+            these three carry a judgement: an org under its watermark and a
+            held message are both "someone must act", where a 24-hour send
+            count is only a number. `metrics.sms` gains them when the credits
+            backend lands; until then they read as em dashes.
+          */}
+          <section style={{ marginTop: 'var(--sp-6)' }}>
+            <h2 style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--sp-3)' }}>SMS credits</h2>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+                gap: 'var(--sp-5)',
+              }}
+            >
+              <StatTile
+                label="Credits used today"
+                value={fmtNum(metrics.sms?.credits_used_today)}
+                change={null}
+                goodDirection="none"
+                sub="one credit per message segment"
+              />
+              <StatTile
+                label="Orgs under watermark"
+                value={fmtNum(metrics.sms?.orgs_under_watermark)}
+                tone={metrics.sms?.orgs_under_watermark ? 'overdue' : undefined}
+                sub={
+                  metrics.sms?.orgs_under_watermark ? (
+                    <Link href="/orgs">Review organizations →</Link>
+                  ) : (
+                    'every organization is above its low watermark'
+                  )
+                }
+              />
+              <StatTile
+                label="Messages held"
+                value={fmtNum(metrics.sms?.held_total)}
+                tone={metrics.sms?.held_total ? 'overdue' : undefined}
+                sub="held until credits are added — not failed"
+              />
+            </div>
+          </section>
 
           <Section title="Payments — last 30 days">
             <Stat label="Recorded" value={fmtNum(metrics.payments?.recorded_30d)} />

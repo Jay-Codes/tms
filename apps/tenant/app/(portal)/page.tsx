@@ -19,6 +19,7 @@ import { StatTile, TileRow } from '../../components/ReportBits';
 import { CHART_ROLES, ChangeMark as DeltaMark, Sparkline, formatDateIntl, useLocale, useT } from '@tms/ui';
 import { PageHead } from '../../components/PageHead';
 import { pendingLabel, usePendingLinkRequests } from '../../components/NavBadges';
+import { SmsCreditsBanner } from '../../components/NotificationBits';
 import {
   brandingApi,
   expensesApi,
@@ -454,6 +455,10 @@ function DashboardBody() {
       />
 
       <hr className="rule rule-strong" />
+
+      {/* Phase 14 — a persistent strip, not a card: it says nothing at all
+          unless the balance is low or messages are being held. */}
+      <SmsCreditsBanner />
 
       {prefs.cards.length === 0 ? (
         <p style={{ marginTop: 'var(--sp-5)', color: 'var(--ink-soft)' }}>
