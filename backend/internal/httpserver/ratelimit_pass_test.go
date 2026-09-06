@@ -240,6 +240,100 @@ func TestRateLimitPassAuthenticated(t *testing.T) {
 	})
 }
 
+// TestRateLimitPassPart2 covers the Part 2 write paths (PLAN2 Phase 15). Each
+// one is keyed by the principal that owns the thing being changed — the org
+// for a receipt or a theme, the user for a language, the admin for the
+// platform catalogue — so each fixture drives its own bucket and no case can
+// spend another's budget.
+func TestRateLimitPassPart2(t *testing.T) {
+	t.Run("POST /expenses/{id}/receipt", func(t *testing.T) {
+		h := newHarness(t)
+		fix := h.newExpenseFixture(t, "RateReceipt", "0716003000")
+		id := fix.record(t, map[string]any{
+			"property_id": fix.propertyID, "amount": 12_000, "incurred_on": today(),
+		})
+		body := map[string]any{"content_type": "image/png", "size": 2048}
+		for i := 0; i < 30; i++ {
+			got := rlDo(fix.client, http.MethodPost, "/expenses/"+id+"/receipt", body)
+			if got.Code == http.StatusTooManyRequests {
+				t.Fatalf("receipt presign %d was already limited: %s", i+1, got.Raw)
+			}
+		}
+		assertLimited(t, "receipt upload presign (30 / hour per org)",
+			rlDo(fix.client, http.MethodPost, "/expenses/"+id+"/receipt", body))
+	})
+
+	t.Run("PUT /org/branding (theme)", func(t *testing.T) {
+		h := newHarness(t)
+		fix := h.newOrgWithUnits("RateTheme", "ratetheme@jjne.test", "0716003010",
+			[]string{"T1"}, testUnitAmount)
+		presets := []string{"ledger", "cool_slate", "forest", "ocean"}
+		body := func(i int) map[string]any {
+			return map[string]any{"theme": map[string]any{"preset_id": presets[i%len(presets)]}}
+		}
+		for i := 0; i < 30; i++ {
+			got := rlDo(fix.client, http.MethodPut, "/org/branding", body(i))
+			if got.Code == http.StatusTooManyRequests {
+				t.Fatalf("theme save %d was already limited: %s", i+1, got.Raw)
+			}
+			if got.Code != http.StatusOK {
+				t.Fatalf("theme save %d: status = %d, want 200 — %s", i+1, got.Code, got.Raw)
+			}
+		}
+		assertLimited(t, "theme save (30 / hour per org)",
+			rlDo(fix.client, http.MethodPut, "/org/branding", body(30)))
+
+		// The counter is on the theme, not on the branding endpoint: a save
+		// that carries no theme is never charged for one, so a landlord who
+		// has spent the budget can still rename their org.
+		name := rlDo(fix.client, http.MethodPut, "/org/branding",
+			map[string]any{"display_name": "Rate Theme Rentals"})
+		if name.Code != http.StatusOK {
+			t.Errorf("a themeless branding save was limited too: status = %d, body %s",
+				name.Code, name.Raw)
+		}
+	})
+
+	t.Run("PATCH /org/members/me", func(t *testing.T) {
+		h := newHarness(t)
+		fix := h.newOrgWithUnits("RateLocale", "ratelocale@jjne.test", "0716003020",
+			[]string{"L1"}, testUnitAmount)
+		locales := []string{"sw", "en"}
+		for i := 0; i < 20; i++ {
+			got := rlDo(fix.client, http.MethodPatch, "/org/members/me",
+				map[string]any{"locale": locales[i%2]})
+			if got.Code == http.StatusTooManyRequests {
+				t.Fatalf("locale switch %d was already limited: %s", i+1, got.Raw)
+			}
+		}
+		assertLimited(t, "locale switch (20 / hour per user)",
+			rlDo(fix.client, http.MethodPatch, "/org/members/me", map[string]any{"locale": "en"}))
+	})
+
+	t.Run("PUT /admin/templates/{kind}", func(t *testing.T) {
+		h := newHarness(t)
+		admin := h.adminClient(t)
+		body := map[string]any{
+			"sw": "Habari {{name}}, kodi yako ni {{amount}}.",
+			"en": "Hello {{name}}, your rent is {{amount}}.",
+		}
+		for i := 0; i < 60; i++ {
+			got := rlDo(admin, http.MethodPut, "/admin/templates/reminder_due", body)
+			if got.Code == http.StatusTooManyRequests {
+				t.Fatalf("template save %d was already limited: %s", i+1, got.Raw)
+			}
+			if got.Code != http.StatusOK {
+				t.Fatalf("template save %d: status = %d, want 200 — %s", i+1, got.Code, got.Raw)
+			}
+		}
+		// The lock and revert paths share the counter, so the 61st call is
+		// refused whichever of the three it is.
+		assertLimited(t, "admin template edit (60 / hour per admin)",
+			rlDo(admin, http.MethodPatch, "/admin/templates/reminder_due",
+				map[string]any{"locked": true}))
+	})
+}
+
 // assertLimited is the shared expectation: 429 with a Retry-After a client can
 // actually wait on. A 429 without one tells the caller to guess, which in
 // practice means retrying immediately.

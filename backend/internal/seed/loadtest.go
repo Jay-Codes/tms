@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"tms/backend/internal/audit"
+	"tms/backend/internal/contract"
 	"tms/backend/internal/db"
 	"tms/backend/internal/db/sqlc"
 	"tms/backend/internal/notify"
@@ -60,6 +61,33 @@ var firstNames = []string{
 var lastNames = []string{
 	"Mwakalinga", "Kimaro", "Shirima", "Mushi", "Ngassa", "Mbwana", "Lyimo",
 	"Nyerere", "Kileo", "Massawe", "Mrema", "Sanga", "Chuwa", "Kessy",
+}
+
+// The start spread for the load-test tenancies (PLAN2 Phase 15). 35 contracts
+// stepping 11 days apart from 380 days ago put the first start just over a
+// year back and the last inside the current month.
+const (
+	loadTestStartSpreadDays = 380
+	loadTestStartStepDays   = 11
+)
+
+// renterLocale splits a seeded org's renters roughly 60/40 Swahili/English —
+// the mix a Dar es Salaam landlord actually has, and enough English speakers
+// that a bulk send has to render both languages.
+func renterLocale(i int) string {
+	if i%5 < 3 {
+		return "sw"
+	}
+	return "en"
+}
+
+// live is one tenancy the run created, kept so the payment, lifecycle and
+// termination passes below can find it again without a re-query.
+type live struct {
+	contractID pgtype.UUID
+	renter     sqlc.User
+	unit       seededUnit
+	schedules  []sqlc.PaymentSchedule
 }
 
 // LoadTest seeds (or tops up) the load-pass org.
@@ -119,7 +147,7 @@ func (s *Seeder) LoadTest(ctx context.Context, opts LoadTestOptions) (*Summary, 
 		nida := fmt.Sprintf("19900101%08d", i+1)
 		kinPhone := fmt.Sprintf("+25577%07d", i+1)
 		u, created, err := s.ensureRenter(ctx, orgID, phone, name, "1234", nida,
-			lastNames[(i+5)%len(lastNames)]+" (next of kin)", kinPhone)
+			lastNames[(i+5)%len(lastNames)]+" (next of kin)", kinPhone, renterLocale(i))
 		if err != nil {
 			return sum, fmt.Errorf("seed: renter %s: %w", phone, err)
 		}
@@ -134,13 +162,19 @@ func (s *Seeder) LoadTest(ctx context.Context, opts LoadTestOptions) (*Summary, 
 	// fixture holds paid, partial, overdue and pending schedules at once.
 	cadences := []int32{30, 90, 180}
 	terms := []int32{360, 180, 365}
+	// Starts walk back a full year rather than the 120 days Part 1 needed
+	// (PLAN2 Phase 15). Two things follow, and both are the point:
+	//
+	//   - the payments the loop below records land on their schedules' due
+	//     dates, so the money is spread across twelve months and the revenue
+	//     series has twelve buckets with something in them rather than four;
+	//   - the earliest 180-day tenancies have already run out, so the fixture
+	//     carries `ended` contracts and freed units — the states the occupancy
+	//     series and the vacancy board are read for.
+	//
+	// The step is chosen so the last contract starts within the current month
+	// and the first a little over a year ago.
 
-	type live struct {
-		contractID pgtype.UUID
-		renter     sqlc.User
-		unit       seededUnit
-		schedules  []sqlc.PaymentSchedule
-	}
 	var actives []live
 
 	n := opts.Contracts
@@ -156,7 +190,7 @@ func (s *Seeder) LoadTest(ctx context.Context, opts LoadTestOptions) (*Summary, 
 		if !ok {
 			return sum, fmt.Errorf("seed: org has no %d-day payment period", cadence)
 		}
-		start := s.now.AddDate(0, 0, -(120 - i*3))
+		start := s.now.AddDate(0, 0, -(loadTestStartSpreadDays - i*loadTestStartStepDays))
 		res, err := s.ensureContract(ctx, contractSpec{
 			orgID: orgID, orgName: boot.org.Name, actor: actor, templateID: boot.tplID,
 			unit: units[i], renter: renters[i], period: period,
@@ -187,10 +221,11 @@ func (s *Seeder) LoadTest(ctx context.Context, opts LoadTestOptions) (*Summary, 
 			break
 		}
 		period := boot.periods[30]
-		if err := s.ensureLinkRequest(ctx, orgID, units[unitIdx], renters[i], period, 180); err != nil {
+		made, err := s.ensureLinkRequest(ctx, orgID, units[unitIdx], renters[i], period, 180)
+		if err != nil {
 			return sum, fmt.Errorf("seed: link request for renter %d: %w", i, err)
 		}
-		sum.LinkRequests++
+		sum.LinkRequests += boolInt(made)
 	}
 
 	// --------------------------------------------------------- payments --
@@ -212,6 +247,28 @@ func (s *Seeder) LoadTest(ctx context.Context, opts LoadTestOptions) (*Summary, 
 			}
 			sum.Reversed++
 		}
+	}
+
+	// ---------------------------------------------- contract lifecycle --
+	//
+	// The backdated starts mean some tenancies have already run their term.
+	// The same hourly sweep the API runs is what turns those into `ended` and
+	// hands their units back to the vacancy board — running it here rather
+	// than writing the status directly keeps the fixture in a state the
+	// product could actually have reached. It is a platform-wide sweep by
+	// design (the dates it acts on are the same in every org).
+	life, err := contract.RunLifecycle(ctx, s.pool)
+	if err != nil {
+		return sum, fmt.Errorf("seed: contract lifecycle: %w", err)
+	}
+	sum.note("lifecycle sweep: %d ended, %d expiring, %d unit(s) freed",
+		life.Ended, life.Expiring, life.Freed)
+
+	// One tenancy ended early by the landlord rather than by the calendar.
+	// `terminated` is a status no sweep produces, and the reports and the
+	// contract list both have a branch for it.
+	if err := s.terminateOne(ctx, orgID, actor, actives, sum); err != nil {
+		return sum, err
 	}
 
 	// ------------------------------------------------- overdue + notices --
@@ -236,8 +293,71 @@ func (s *Seeder) LoadTest(ctx context.Context, opts LoadTestOptions) (*Summary, 
 		}
 	}
 
+	// ------------------------------------------------- Part 2 fixture --
+	//
+	// Twelve months of expenses, a credit balance with a ledger row to explain
+	// it, and a couple of held messages: what the Part 2 screens and the
+	// reports load pass read (PLAN2 Phase 15).
+	if err := s.ensureExpenses(ctx, orgID, actor, props, sum); err != nil {
+		return sum, err
+	}
+	if err := s.ensureSMSCredits(ctx, orgID, s.platformAdminID(ctx), SeededCredits, sum); err != nil {
+		return sum, err
+	}
+	if err := s.ensureHeldMessages(ctx, orgID, lang, boot.org.Name, sum); err != nil {
+		return sum, err
+	}
+
 	sum.UnitCodes = collectCodes(units, 6)
 	return sum, nil
+}
+
+// terminateOne ends one seeded tenancy the way POST /contracts/{id}/terminate
+// does: a reason, an effective date, an audit row. It picks a contract that is
+// still live and skips silently when there is none — a re-run finds them all
+// dealt with, which is the idempotent answer.
+func (s *Seeder) terminateOne(ctx context.Context, orgID, actor pgtype.UUID,
+	actives []live, sum *Summary,
+) error {
+	if len(actives) < 3 {
+		return nil
+	}
+	target := actives[2]
+	reason := "Mpangaji alihama kabla ya muda — makubaliano ya pande zote"
+	effective := s.now.AddDate(0, 0, -14)
+
+	err := s.inTx(ctx, func(q *sqlc.Queries) error {
+		row, err := q.TerminateContract(ctx, sqlc.TerminateContractParams{
+			TerminationReason: &reason, TerminationEffectiveDate: Date(effective),
+			OrgID: orgID, ID: target.contractID,
+		})
+		if isNoRows(err) {
+			return nil // already ended or terminated by an earlier run
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := q.SetUnitStatusDerived(ctx, sqlc.SetUnitStatusDerivedParams{
+			Status: unitVacant, OrgID: orgID, ID: target.unit.unit.ID,
+		}); err != nil {
+			return err
+		}
+		sum.note("contract on %s terminated (%s)", target.unit.unit.Name, effective.Format(DateLayout))
+		return audit.Record(ctx, q, audit.Entry{
+			OrgID: db.UUIDString(orgID), ActorUserID: db.UUIDString(actor),
+			Action: audit.ActionContractTerminate, EntityType: audit.EntityContract,
+			EntityID: db.UUIDString(target.contractID),
+			Before:   map[string]any{"status": contractActive},
+			After: map[string]any{
+				"status": row.Status, "reason": reason,
+				"effective_date": effective.Format(DateLayout), "seeded": true,
+			},
+		})
+	})
+	if err != nil {
+		return fmt.Errorf("seed: terminate contract: %w", err)
+	}
+	return nil
 }
 
 // payDueSchedules records payments against the schedules whose due date has

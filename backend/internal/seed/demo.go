@@ -18,6 +18,11 @@ import (
 // DemoSlug is the demo org `make seed-demo` tops up.
 const DemoSlug = "jjne-rentals"
 
+// DemoCredits is the SMS balance the demo org is kept at — a little above the
+// load-test orgs, because the UAT script sends bulk messages from it and a
+// demo that runs out mid-script demonstrates the wrong thing.
+const DemoCredits = 600
+
 // demoRenter is one renter the demo needs, with the state their tenancy is in.
 type demoRenter struct {
 	phone    string
@@ -40,6 +45,16 @@ type demoRenter struct {
 	// payFirst settles the first schedule, so the demo has a thank-you SMS and
 	// a `paid` chip as well as an overdue one.
 	payFirst bool
+	// payHistory settles the due schedules of a backdated tenancy — roughly
+	// three in five of them, the same proportion the load-test fixture uses —
+	// so the demo's revenue chart has a year of collections behind it rather
+	// than a single bar (PLAN2 Phase 15).
+	payHistory bool
+	// locale is the language this renter reads (PLAN2 Phase 13). The five are
+	// split so the demo has both: a Swahili bulk send and an English one
+	// render different bodies from the same compose box, which is the thing
+	// the language work is for.
+	locale string
 }
 
 const (
@@ -56,35 +71,60 @@ var demoRenters = []demoRenter{
 		kinName: "Joseph Kileo", kinPhone: "+255766100001",
 		property: "Mbezi Beach Block A", unit: "Room 4", price: 250_000,
 		cadence: 30, termDays: 360, startOffsetDays: 45,
-		state: demoStateActive, // first schedule due 45 days ago → overdue
+		state: demoStateActive, locale: "sw", // first schedule due 45 days ago → overdue
 	},
 	{
 		phone: "+255766000002", name: "Baraka Mushi", nida: "19910822000000102",
 		kinName: "Rose Mushi", kinPhone: "+255766100002",
 		property: "Mbezi Beach Block A", unit: "Room 5", price: 300_000,
 		cadence: 30, termDays: 360, startOffsetDays: 40,
-		state: demoStateActive, payFirst: true, // paid → thank-you SMS
+		state: demoStateActive, payFirst: true, locale: "en", // paid → thank-you SMS
 	},
 	{
 		phone: "+255766000003", name: "Upendo Sanga", nida: "19950203000000103",
 		kinName: "Frank Sanga", kinPhone: "+255766100003",
 		property: "Kigamboni Court", unit: "Room 4", price: 180_000,
 		cadence: 90, termDays: 360, startOffsetDays: 0,
-		state: demoStateActive, // starts today → everything pending
+		state: demoStateActive, locale: "sw", // starts today → everything pending
 	},
 	{
 		phone: "+255766000004", name: "Hamisi Ngassa", nida: "19930517000000104",
 		kinName: "Zainabu Ngassa", kinPhone: "+255766100004",
 		property: "Kigamboni Court", unit: "Shop B", price: 450_000,
 		cadence: 30, termDays: 180, startOffsetDays: -7,
-		state: demoStateUnsigned, // waiting on the renter's signature
+		state: demoStateUnsigned, locale: "en", // waiting on the renter's signature
 	},
 	{
 		phone: "+255766000005", name: "Cecilia Mrema", nida: "19970930000000105",
 		kinName: "Peter Mrema", kinPhone: "+255766100005",
 		property: "Mbezi Beach Block A", unit: "Room 1", price: 0,
 		cadence: 30, termDays: 180, startOffsetDays: -14,
-		state: demoStateLink, // pending link request in the landlord's inbox
+		state: demoStateLink, locale: "sw", // pending link request in the landlord's inbox
+	},
+	// The two tenancies the Part 2 charts are drawn from (PLAN2 Phase 15).
+	// They are new renters on new units rather than backdated versions of the
+	// five above, because the seeder never edits a row it did not create and
+	// the five above may already exist in a demo that has been topped up
+	// before: a year of history has to arrive as new rows or not at all.
+	{
+		phone: "+255766000006", name: "Salum Mbwana", nida: "19860714000000106",
+		kinName: "Halima Mbwana", kinPhone: "+255766100006",
+		property: "Mbezi Beach Block A", unit: "Room 6", price: 280_000,
+		cadence: 30, termDays: 360, startOffsetDays: 330,
+		// Eleven months in: ten schedules behind it, most of them settled and
+		// the tail still open. This is the tenancy the revenue chart has a
+		// year of collections from.
+		state: demoStateActive, payHistory: true, locale: "sw",
+	},
+	{
+		phone: "+255766000007", name: "Editha Chuwa", nida: "19920308000000107",
+		kinName: "Elias Chuwa", kinPhone: "+255766100007",
+		property: "Kigamboni Court", unit: "Room 6", price: 210_000,
+		cadence: 90, termDays: 365, startOffsetDays: 300,
+		// A quarterly cadence over the same window, so the chart is not one
+		// tenancy's shape repeated and the expected-vs-collected lines part
+		// company in the months between its due dates.
+		state: demoStateActive, payHistory: true, locale: "en",
 	},
 }
 
@@ -186,7 +226,7 @@ func (s *Seeder) Demo(ctx context.Context) (*Summary, error) {
 			return sum, fmt.Errorf("seed: demo org has no %d-day payment period", d.cadence)
 		}
 
-		renter, created, err := s.ensureRenter(ctx, org.ID, d.phone, d.name, "1234", d.nida, d.kinName, d.kinPhone)
+		renter, created, err := s.ensureRenter(ctx, org.ID, d.phone, d.name, "1234", d.nida, d.kinName, d.kinPhone, d.locale)
 		if err != nil {
 			return sum, fmt.Errorf("seed: demo renter %s: %w", d.phone, err)
 		}
@@ -217,10 +257,11 @@ func (s *Seeder) Demo(ctx context.Context) (*Summary, error) {
 		start := s.now.AddDate(0, 0, -d.startOffsetDays)
 
 		if d.state == demoStateLink {
-			if err := s.ensureLinkRequest(ctx, org.ID, unit, renter, period, d.termDays); err != nil {
+			made, err := s.ensureLinkRequest(ctx, org.ID, unit, renter, period, d.termDays)
+			if err != nil {
 				return sum, fmt.Errorf("seed: demo link request: %w", err)
 			}
-			sum.LinkRequests++
+			sum.LinkRequests += boolInt(made)
 			continue
 		}
 
@@ -238,10 +279,17 @@ func (s *Seeder) Demo(ctx context.Context) (*Summary, error) {
 		sum.Contracts++
 		sum.Schedules += len(res.schedules)
 
-		if d.payFirst && len(res.schedules) > 0 {
-			counter := 1 // 1 % 5 == 1 → the helper records this one
+		if (d.payFirst || d.payHistory) && len(res.schedules) > 0 {
+			counter := 1 // 1 % 5 == 1 → the helper records the first one
+			due := res.schedules[:1]
+			if d.payHistory {
+				// Every schedule; payDueSchedules stops of its own accord at
+				// the first one that is not due yet, and leaves ~40% unpaid so
+				// the ledger has pending and overdue rows too.
+				due = res.schedules
+			}
 			ids, err := s.payDueSchedules(ctx, org.ID, actor, res.contractID,
-				res.schedules[:1], renter, unit, org.Name, lang, &counter)
+				due, renter, unit, org.Name, lang, &counter)
 			if err != nil {
 				return sum, fmt.Errorf("seed: demo payment: %w", err)
 			}
@@ -262,6 +310,32 @@ func (s *Seeder) Demo(ctx context.Context) (*Summary, error) {
 		return sum, err
 	}
 	sum.Notifications = sent
+
+	// -------------------------------------------------- Part 2 fixture --
+	//
+	// Twelve months of expenses on both blocks, a saved theme, a platform
+	// template with a version history, and credit to send with (PLAN2
+	// Phase 15). Each is idempotent on what is already there, so the demo can
+	// be topped up as often as the UAT script needs.
+	propList := make([]sqlc.Property, 0, len(propByName))
+	for _, p := range props {
+		propList = append(propList, sqlc.Property{
+			ID: p.ID, OrgID: org.ID, Name: p.Name, LocationText: p.LocationText,
+		})
+	}
+	if err := s.ensureExpenses(ctx, org.ID, actor, propList, sum); err != nil {
+		return sum, err
+	}
+	if err := s.ensureDemoTheme(ctx, org.ID, actor, sum); err != nil {
+		return sum, err
+	}
+	adminID := s.platformAdminID(ctx)
+	if err := s.ensureTemplateHistory(ctx, adminID, sum); err != nil {
+		return sum, err
+	}
+	if err := s.ensureSMSCredits(ctx, org.ID, adminID, DemoCredits, sum); err != nil {
+		return sum, err
+	}
 
 	// Every unit the demo org still has free, so the UAT script has somewhere
 	// to run the scan-and-register flow.
@@ -409,20 +483,22 @@ func (s *Seeder) demoSettings(ctx context.Context, org *sqlc.Org, actor pgtype.U
 
 // ensureLinkRequest leaves one undecided application in the landlord's inbox
 // (FLOWS 3.1), skipping if this renter already has one on the unit.
-func (s *Seeder) ensureLinkRequest(ctx context.Context, orgID pgtype.UUID, unit seededUnit, renter sqlc.User, period sqlc.PaymentPeriod, termDays int32) error {
+// It reports whether it created one, so a re-run's summary says "0 link
+// requests" rather than counting the ones it found and left alone.
+func (s *Seeder) ensureLinkRequest(ctx context.Context, orgID pgtype.UUID, unit seededUnit, renter sqlc.User, period sqlc.PaymentPeriod, termDays int32) (bool, error) {
 	pending, err := s.q.CountPendingLinkRequest(ctx, sqlc.CountPendingLinkRequestParams{
 		UnitID: unit.unit.ID, RenterUserID: renter.ID,
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 	if pending > 0 {
-		return nil
+		return false, nil
 	}
 	startDate := s.now.AddDate(0, 0, 14)
 	endDate := startDate.AddDate(0, 0, int(termDays))
 
-	return s.inTx(ctx, func(q *sqlc.Queries) error {
+	err = s.inTx(ctx, func(q *sqlc.Queries) error {
 		req, err := q.CreateLinkRequest(ctx, sqlc.CreateLinkRequestParams{
 			OrgID: orgID, UnitID: unit.unit.ID, RenterUserID: renter.ID,
 			Status: linkPending, PaymentPeriodID: period.ID, TermDays: &termDays,
@@ -440,4 +516,5 @@ func (s *Seeder) ensureLinkRequest(ctx context.Context, orgID pgtype.UUID, unit 
 			},
 		})
 	})
+	return err == nil, err
 }

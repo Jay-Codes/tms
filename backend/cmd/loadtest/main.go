@@ -41,6 +41,10 @@ type endpoint struct {
 	path string
 	// public endpoints are called without the session cookie.
 	public bool
+	// admin endpoints are called with the platform admin's session instead of
+	// the org owner's. They are a different audience, not a stronger role, so
+	// they need their own cookie jar.
+	admin bool
 }
 
 // stats accumulates one endpoint's latencies. Every worker keeps its own and
@@ -102,6 +106,11 @@ func main() {
 		duration = flag.Duration("duration", 20*time.Second, "how long to run")
 		workers  = flag.Int("workers", 20, "concurrent workers")
 		target   = flag.Duration("target-p95", 300*time.Millisecond, "p95 budget; a breach exits non-zero")
+		// The platform admin is a separate audience. Without credentials the
+		// pass simply drops the two admin endpoints rather than reporting a
+		// wall of 401s as if they were latency.
+		adminEmail    = flag.String("admin-email", envOr("ADMIN_EMAIL", ""), "platform admin email (skips the admin endpoints when empty)")
+		adminPassword = flag.String("admin-password", envOr("ADMIN_PASSWORD", ""), "platform admin password")
 	)
 	flag.Parse()
 
@@ -122,15 +131,58 @@ func main() {
 		fail("could not resolve a unit code for the public endpoint: %v", err)
 	}
 
+	// The platform admin, if there is one to log in as.
+	adminJar, err := cookiejar.New(nil)
+	if err != nil {
+		fail("admin cookie jar: %v", err)
+	}
+	adminOK := false
+	if *adminEmail != "" && *adminPassword != "" {
+		adminLogin := &http.Client{Jar: adminJar, Timeout: 15 * time.Second}
+		if err := doLogin(adminLogin, prefix, *adminEmail, *adminPassword); err != nil {
+			fmt.Fprintf(os.Stderr, "loadtest: admin login as %s failed (%v) — "+
+				"the admin endpoints are skipped\n", *adminEmail, err)
+		} else {
+			adminOK = true
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "loadtest: no ADMIN_EMAIL/ADMIN_PASSWORD — "+
+			"the admin endpoints are skipped")
+	}
+
+	orgID, err := currentOrgID(login, prefix)
+	if err != nil && adminOK {
+		fail("could not resolve the org id for the admin endpoints: %v", err)
+	}
+
 	endpoints := []endpoint{
+		// Part 1: the hot reads the Phase 8 pass established.
 		{name: "GET /units?status=vacant", path: "/units?status=vacant&limit=50"},
 		{name: "GET /schedules?status=overdue", path: "/schedules?status=overdue&limit=50"},
 		{name: "GET /reports/summary", path: "/reports/summary"},
-		{name: "GET /reports/revenue", path: "/reports/revenue?cadence=year"},
-		{name: "GET /reports/revenue by property", path: "/reports/revenue?cadence=year&group_by=property"},
-		{name: "GET /reports/occupancy", path: "/reports/occupancy?cadence=year"},
 		{name: "GET /public/units/{code}", path: "/public/units/" + unitCode, public: true},
 		{name: "GET /contracts", path: "/contracts?limit=50"},
+
+		// Part 2 (PLAN2 Phase 15). The reports are the ones with a budget on
+		// them: each is a range scan over a year of the seeded org, bucketed
+		// in Go, and each is what the landlord's Reports tab opens on.
+		{name: "GET /reports/revenue (month)", path: "/reports/revenue?cadence=month"},
+		{name: "GET /reports/revenue (year)", path: "/reports/revenue?cadence=year"},
+		{name: "GET /reports/revenue by property", path: "/reports/revenue?cadence=year&group_by=property"},
+		{name: "GET /reports/occupancy", path: "/reports/occupancy?cadence=year"},
+		{name: "GET /expenses", path: "/expenses?limit=50"},
+		{name: "GET /expenses/summary", path: "/expenses/summary?cadence=year&group_by=property"},
+		{name: "GET /org/sms-credits", path: "/org/sms-credits"},
+		{name: "GET /org/notification-settings", path: "/org/notification-settings"},
+		// Public, cacheable, and read by every login page: cheap, and worth
+		// knowing it stays cheap.
+		{name: "GET /themes/presets", path: "/themes/presets", public: true},
+	}
+	if adminOK {
+		endpoints = append(endpoints,
+			endpoint{name: "GET /admin/templates", path: "/admin/templates", admin: true},
+			endpoint{name: "GET /admin/orgs/{id}/sms", path: "/admin/orgs/" + orgID + "/sms", admin: true},
+		)
 	}
 
 	// One shared transport (so connection reuse is realistic) behind two
@@ -144,6 +196,7 @@ func main() {
 	}
 	client := &http.Client{Jar: jar, Timeout: 20 * time.Second, Transport: transport}
 	anon := &http.Client{Timeout: 20 * time.Second, Transport: transport}
+	adminClient := &http.Client{Jar: adminJar, Timeout: 20 * time.Second, Transport: transport}
 
 	fmt.Printf("load pass: %s, %d workers, %s, unit %s\n", prefix, *workers, *duration, unitCode)
 
@@ -179,8 +232,11 @@ func main() {
 				i := rng.Intn(len(endpoints))
 				e := endpoints[i]
 				hc := client
-				if e.public {
+				switch {
+				case e.public:
 					hc = anon
+				case e.admin:
+					hc = adminClient
 				}
 				seq++
 				clientIP := fmt.Sprintf("10.%d.%d.%d", 1+(seq/65000)%200, (seq/250)%256, 1+seq%250)
@@ -227,7 +283,7 @@ func hit(ctx context.Context, c *http.Client, url, clientIP string) (time.Durati
 
 func report(endpoints []endpoint, merged []*stats, elapsed time.Duration, target time.Duration) {
 	fmt.Printf("\nelapsed %s\n\n", elapsed.Round(time.Millisecond))
-	header := fmt.Sprintf("%-32s %8s %9s %9s %9s %9s %8s %8s %6s",
+	header := fmt.Sprintf("%-34s %8s %9s %9s %9s %9s %8s %8s %6s",
 		"endpoint", "reqs", "p50", "p95", "p99", "max", "rps", "errors", "429s")
 	fmt.Println(header)
 	fmt.Println(strings.Repeat("-", len(header)))
@@ -246,7 +302,7 @@ func report(endpoints []endpoint, merged []*stats, elapsed time.Duration, target
 			flag = "  <-- over budget"
 			breached = true
 		}
-		fmt.Printf("%-32s %8d %9s %9s %9s %9s %8.1f %8d %6d%s\n",
+		fmt.Printf("%-34s %8d %9s %9s %9s %9s %8.1f %8d %6d%s\n",
 			e.name, n,
 			ms(s.percentile(0.50)), ms(p95), ms(s.percentile(0.99)), ms(s.percentile(1.0)),
 			rps, s.errs, s.throttled, flag)
@@ -308,6 +364,31 @@ func firstUnitCode(c *http.Client, prefix string) (string, error) {
 		return "", fmt.Errorf("the org has no units — run `make seed` first")
 	}
 	return out.Items[0].UnitCode, nil
+}
+
+// currentOrgID reads the authenticated org's id, so the admin endpoints have a
+// real org to be pointed at rather than a made-up uuid (which would measure the
+// 404 path instead of the handler).
+func currentOrgID(c *http.Client, prefix string) (string, error) {
+	resp, err := c.Get(prefix + "/org")
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GET /org → %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	var out struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", err
+	}
+	if out.ID == "" {
+		return "", fmt.Errorf("GET /org carried no id")
+	}
+	return out.ID, nil
 }
 
 func envOr(key, def string) string {

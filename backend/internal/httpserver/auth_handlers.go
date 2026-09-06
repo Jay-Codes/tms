@@ -52,6 +52,32 @@ const (
 	linkCreateWindow = time.Hour
 )
 
+// Phase 15 rate limits (PLAN2 Phase 15). The Part 2 write paths that were
+// still unmetered: each one is cheap for the caller and expensive for someone
+// else — a theme every tenant's browser then re-renders, a platform template
+// every org's SMS is written from, a locale that rewrites the language of a
+// person's whole account. All three are keyed by the principal that owns the
+// thing being changed, not by IP.
+const (
+	// themePutLimit caps theme saves per org per hour. Picking a preset,
+	// nudging an accent and looking again is a handful of saves; thirty an
+	// hour is a landlord who has been playing with it all afternoon, and three
+	// hundred is a script.
+	themePutLimit  = 30
+	themePutWindow = time.Hour
+	// adminTemplateEditLimit caps platform template writes (PUT, PATCH and
+	// revert) per admin per hour. One admin rewording the catalogue works
+	// through a dozen kinds; sixty an hour leaves room for that and for the
+	// revert that follows a mistake.
+	adminTemplateEditLimit  = 60
+	adminTemplateEditWindow = time.Hour
+	// localePatchLimit caps language switches per user per hour. Flipping
+	// between Swahili and English to compare wording is real; twenty an hour
+	// is well past it, and every switch writes an audit row.
+	localePatchLimit  = 20
+	localePatchWindow = time.Hour
+)
+
 // otpResendAfterSeconds mirrors auth.OTPResendCooldown for the API response.
 const otpResendAfterSeconds = 60
 

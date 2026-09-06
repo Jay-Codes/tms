@@ -230,6 +230,15 @@ func (s *Server) handlePutBranding(w http.ResponseWriter, r *http.Request) {
 		before   themeBlock
 	)
 	if body.Theme != nil {
+		// Counted before the theme is parsed: the limit is on how often an org
+		// may save a theme, and a rejected save still cost the validator a
+		// run. Only a request that actually carries a theme is counted, so
+		// renaming the org or moving a dashboard card is never charged for it.
+		if res := s.limiter.Allow(r.Context(), "theme:put:"+p.OrgIDString(),
+			themePutLimit, themePutWindow); !res.Allowed {
+			tooMany(w, res, "too many theme changes; try again shortly")
+			return
+		}
 		before = s.resolveTheme(r.Context(), p.OrgID, nil)
 		if row, err := s.q.GetOrgBranding(r.Context(), p.OrgID); err == nil {
 			before = s.resolveTheme(r.Context(), p.OrgID, row.Theme)
