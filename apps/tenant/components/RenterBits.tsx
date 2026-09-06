@@ -122,6 +122,9 @@ export function ViewIdDocButton({
 export function Facts({ rows }: { rows: [string, React.ReactNode][] }) {
   return (
     <dl
+      // `facts` is the hook the phone rules use to pad a link in a value cell
+      // up to a real touch target (tokens.css, Phase 15).
+      className="facts"
       style={{
         display: 'grid',
         gridTemplateColumns: 'max-content 1fr',
@@ -152,7 +155,7 @@ export function FilterTabs<T extends string>({
   label: string;
 }) {
   return (
-    <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }} role="tablist" aria-label={label}>
+    <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }} role="tablist" aria-label={label}>
       {options.map((t) => {
         const active = value === t.value;
         return (

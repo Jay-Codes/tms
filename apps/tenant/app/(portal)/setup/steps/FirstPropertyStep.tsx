@@ -3,7 +3,7 @@
 /** Wizard step 2 (FLOWS flow 1 step 3.2): the first property. */
 
 import Link from 'next/link';
-import { useT } from '@tms/ui';
+import { TableScroll, useT } from '@tms/ui';
 import { useEffect, useState } from 'react';
 import { ProblemNote } from '../../../../components/FormBits';
 import { PropertyForm } from '../../../../components/PropertyForm';
@@ -39,7 +39,8 @@ export function FirstPropertyStep() {
         <p style={{ color: 'var(--ink-soft)' }}>{t('common.loading')}</p>
       ) : has && !adding ? (
         <>
-          <table className="ledger">
+          <TableScroll label={t('nav.properties')}>
+<table className="ledger">
             <thead>
               <tr>
                 <th>{t('common.property')}</th>
@@ -61,6 +62,7 @@ export function FirstPropertyStep() {
               ))}
             </tbody>
           </table>
+</TableScroll>
           <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{t('setup.property.done')}</p>
           <div>
             <button type="button" className="btn btn-secondary" onClick={() => setAdding(true)}>

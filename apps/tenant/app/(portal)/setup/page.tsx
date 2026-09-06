@@ -119,7 +119,7 @@ function SetupBody() {
         )}
       </section>
 
-      <div style={{ display: 'flex', gap: 'var(--sp-2)', marginTop: 'var(--sp-6)' }}>
+      <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', marginTop: 'var(--sp-6)' }}>
         <button
           type="button"
           className="btn btn-secondary"

@@ -88,7 +88,7 @@ export function PropertyForm({
           style={{ height: 'auto', paddingTop: 'var(--sp-2)', paddingBottom: 'var(--sp-2)' }}
         />
       </Field>
-      <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+      <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
         <button type="submit" className="btn btn-primary" disabled={busy || !name.trim()}>
           {busy ? t('common.saving') : t(submitLabelKey)}
         </button>

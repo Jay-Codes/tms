@@ -49,7 +49,7 @@ import {
   type ScheduleRow,
 } from '../../../../lib/api';
 import { Amount, fmtDate, fmtTZS, todayISO } from '../../../../lib/format';
-import { LOCALE_LABELS, isLocale, useT } from '@tms/ui';
+import { LOCALE_LABELS, TableScroll, isLocale, useT } from '@tms/ui';
 
 /* ----------------------------- signature block ---------------------------- */
 
@@ -138,7 +138,7 @@ function RecordOnBehalfForm({
           placeholder={t('contracts.behalf.reason_placeholder')}
         />
       </Field>
-      <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+      <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
         <button type="submit" className="btn btn-danger" disabled={busy || reason.trim().length === 0}>
           {busy ? t('contracts.behalf.submitting') : t('contracts.behalf.submit')}
         </button>
@@ -194,7 +194,7 @@ function TerminateForm({
       <Field id="t_date" label={t('contracts.terminate.effective_date')} error={error?.errors.effective_date}>
         <input id="t_date" className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
       </Field>
-      <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+      <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
         <button type="submit" className="btn btn-danger" disabled={busy || reason.trim().length === 0}>
           {busy ? t('contracts.terminate.submitting') : t('contracts.terminate.submit')}
         </button>
@@ -451,7 +451,7 @@ function ContractBody({ id }: { id: string }) {
         {/* ------------------------------ decisions ----------------------------- */}
         {contract.status === 'pending_signature' || canTerminate ? (
           <section style={{ marginTop: 'var(--sp-5)' }}>
-            <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+            <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center' }}>
               {contract.status === 'pending_signature' ? (
                 <button
                   type="button"
@@ -560,6 +560,7 @@ function ContractBody({ id }: { id: string }) {
             </button>
           </div>
 
+          <TableScroll label={t('contracts.schedule.table_label')}>
           <table className="ledger">
             <thead>
               <tr>
@@ -629,6 +630,7 @@ function ContractBody({ id }: { id: string }) {
               )}
             </tbody>
           </table>
+          </TableScroll>
         </section>
 
         {/* ------------------------------ payments ------------------------------ */}
@@ -683,6 +685,7 @@ function ContractBody({ id }: { id: string }) {
           {(doc.schedule ?? []).length > 0 ? (
             <section style={{ marginTop: 'var(--sp-5)' }}>
               <h3 style={{ fontSize: 'var(--text-md)', marginBottom: 'var(--sp-3)' }}>{t('contracts.doc.payments')}</h3>
+              <div className="doc-scroll-x">
               <table className="ledger">
                 <thead>
                   <tr>
@@ -707,6 +710,7 @@ function ContractBody({ id }: { id: string }) {
                   </tr>
                 </tbody>
               </table>
+              </div>
             </section>
           ) : null}
 
@@ -728,7 +732,7 @@ function ContractBody({ id }: { id: string }) {
             <hr className="rule" />
             <p style={{ marginTop: 'var(--sp-3)', fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>
               {t('contracts.verify.hash')}{' '}
-              <span className="num" style={{ wordBreak: 'break-all' }}>
+              <span className="num" style={{ wordBreak: 'break-all', whiteSpace: 'normal' }}>
                 {doc.snapshot_hash ?? contract.snapshot_hash}
               </span>
             </p>

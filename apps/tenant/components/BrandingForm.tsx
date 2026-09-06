@@ -112,7 +112,7 @@ function AssetField({
             <Icon icon="solar:gallery-linear" width={24} color="var(--ink-faint)" />
           )}
         </div>
-        <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+        <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
           <input
             ref={inputRef}
             id={`asset_${asset}`}

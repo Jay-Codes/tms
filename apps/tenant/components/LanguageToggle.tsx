@@ -39,6 +39,7 @@ export function LanguageToggle({ compact = true }: { compact?: boolean }) {
     <div
       role="group"
       aria-label={t('common.language')}
+      className="lang-toggle"
       style={{ display: 'inline-flex', gap: 2, border: '1px solid var(--rule)', borderRadius: 999, padding: 2 }}
     >
       {LOCALES.map((l) => {

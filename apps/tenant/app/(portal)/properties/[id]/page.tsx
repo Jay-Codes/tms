@@ -141,7 +141,7 @@ function PropertyBody({ id }: { id: string }) {
           <h2 style={{ fontSize: 'var(--text-lg)' }}>
             {t('nav.units')} {units ? <span className="num">({units.length})</span> : null}
           </h2>
-          <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+          <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
             <button type="button" className="btn btn-secondary" onClick={() => setSheet('many')}>
               {t('properties.add_many')}
             </button>

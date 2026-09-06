@@ -29,7 +29,7 @@ import {
   type RenterDetail,
 } from '../../../../lib/api';
 import { Amount, fmtDate } from '../../../../lib/format';
-import { useT } from '@tms/ui';
+import { TableScroll, useT } from '@tms/ui';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -184,6 +184,7 @@ function RenterBody({ userId }: { userId: string }) {
         {(renter?.units ?? []).length === 0 ? (
           <p style={{ color: 'var(--ink-soft)' }}>{t('renters.units.empty')}</p>
         ) : (
+          <TableScroll label={t('renters.units.table_label')}>
           <table className="ledger">
             <thead>
               <tr>
@@ -208,6 +209,7 @@ function RenterBody({ userId }: { userId: string }) {
               ))}
             </tbody>
           </table>
+          </TableScroll>
         )}
       </Section>
 
@@ -215,6 +217,7 @@ function RenterBody({ userId }: { userId: string }) {
         {requests.length === 0 ? (
           <p style={{ color: 'var(--ink-soft)' }}>{t('renters.requests.empty')}</p>
         ) : (
+          <TableScroll label={t('nav.link_requests')}>
           <table className="ledger">
             <thead>
               <tr>
@@ -254,6 +257,7 @@ function RenterBody({ userId }: { userId: string }) {
               ))}
             </tbody>
           </table>
+          </TableScroll>
         )}
       </Section>
 

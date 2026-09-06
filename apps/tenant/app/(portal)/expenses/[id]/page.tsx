@@ -42,7 +42,10 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
       }}
     >
       <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{label}</span>
-      <span style={{ overflowWrap: 'anywhere' }}>{children}</span>
+      {/* `facts` earns the value's link a phone-sized target (tokens.css). */}
+      <span className="facts" style={{ overflowWrap: 'anywhere' }}>
+        {children}
+      </span>
     </div>
   );
 }

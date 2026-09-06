@@ -521,7 +521,10 @@ export function ExpenseSheet({
           )}
         </div>
 
-        <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* The form runs past a phone screen (nine fields plus the receipt
+            picker), so on a phone this row sticks to the bottom of the sheet
+            above the safe area — `.action-bar`, tokens.css. */}
+        <div className="action-bar" style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap' }}>
           <button type="submit" className="btn btn-primary" disabled={busy || !valid}>
             {busy ? (step ?? t('common.saving')) : editing ? t('expenses.save_changes') : t('expenses.record')}
           </button>

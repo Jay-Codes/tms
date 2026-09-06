@@ -377,7 +377,7 @@ export function VoidExpenseForm({
           placeholder={t('expenses.void.reason_placeholder')}
         />
       </Field>
-      <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+      <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
         <button type="submit" className="btn btn-danger" disabled={busy || reason.trim().length === 0}>
           {busy ? t('expenses.void.busy') : t('expenses.void.submit')}
         </button>

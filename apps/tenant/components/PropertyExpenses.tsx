@@ -123,7 +123,7 @@ export function PropertyExpenses({
             {t('properties.expenses.lead', { period: periodLabel(period) })}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+        <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
           <Link href={`/expenses?property=${propertyId}`} className="btn btn-quiet">
             {t('properties.expenses.all')}
           </Link>

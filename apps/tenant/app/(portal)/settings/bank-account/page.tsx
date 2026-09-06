@@ -98,7 +98,9 @@ function BankAccountBody() {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'minmax(320px, 520px) minmax(260px, 1fr)',
+            // Form and "what the renter sees" sit side by side only where both
+            // fit; a phone and a portrait tablet get one column.
+            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
             gap: 'var(--sp-7)',
             alignItems: 'start',
             marginTop: 'var(--sp-5)',

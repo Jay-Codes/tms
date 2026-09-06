@@ -46,7 +46,7 @@ function PriceFields({
   const t = useT();
   const preview = priceBody(amount, periodDays);
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: 'var(--sp-4)' }}>
+    <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: 'var(--sp-4)' }}>
       <Field
         id={`${idPrefix}_amount`}
         label={t('units.form.price_label')}
@@ -152,7 +152,7 @@ export function AddUnitForm({
         idPrefix="unit"
       />
       <PeriodPicker periods={periods} value={allowed} onChange={setAllowed} idPrefix="add" />
-      <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+      <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
         <button type="submit" className="btn btn-primary" disabled={busy || !name.trim()}>
           {busy ? t('units.adding') : t('units.add')}
         </button>
@@ -235,7 +235,7 @@ export function AddManyUnitsForm({
       <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
         {t.n('units.bulk_create_note', names.length)}
       </p>
-      <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+      <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
         <button type="submit" className="btn btn-primary" disabled={busy || names.length === 0}>
           {busy ? t('units.adding') : names.length ? t.n('units.add_many_n', names.length) : t('units.add_many')}
         </button>
