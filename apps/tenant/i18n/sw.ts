@@ -208,6 +208,7 @@ const messages: Messages = {
   'msg.status.failed': 'Imeshindikana',
   'msg.status.sending': 'inatumwa…',
   'msg.status.queued': 'foleni',
+  'msg.status.held': 'imezuiliwa — hakuna salio',
   'msg.kind.reminder_7d': 'Kumbusho kabla ya tarehe ya kulipa',
   'msg.kind.reminder_due': 'Kumbusho siku ya kulipa',
   'msg.kind.overdue_daily': 'Kumbusho la kila siku la kuchelewa',
@@ -262,6 +263,25 @@ const messages: Messages = {
   'msg.result.by_language': '{sw} kwa Kiswahili, {en} kwa Kiingereza.',
   'msg.result.skipped': 'Umeruka {count} (hakuna namba ya simu au hakuna mkataba amilifu).',
   'msg.result.tail': 'Utaonekana kwenye kumbukumbu unapotumwa.',
+
+  /* ---------------------------------------------------------------- */
+  /* salio la SMS — linaloongezwa na mfumo (Awamu 14)                  */
+  /* ---------------------------------------------------------------- */
+  'credits.title': 'Salio la SMS',
+  'credits.balance_sub.one': 'Imebaki SMS {count}.',
+  'credits.balance_sub.other': 'Imebaki SMS {count}.',
+  'credits.held.one': 'Ujumbe {count} umezuiliwa',
+  'credits.held.other': 'Ujumbe {count} umezuiliwa',
+  'credits.held_note': 'Utatumwa wenyewe mara mfumo utakapoongeza salio.',
+  'credits.low.title': 'Imebaki SMS {balance} tu.',
+  'credits.low.body': 'Wasiliana na mfumo ili kuongeza salio — salio haliwezi kununuliwa kwenye skrini hii.',
+  'credits.needed.one': 'Utumaji huu unahitaji takriban SMS {count}.',
+  'credits.needed.other': 'Utumaji huu unahitaji takriban SMS {count}.',
+  'credits.insufficient': 'Salio halitoshi: utumaji huu unahitaji {needed} lakini limebaki {balance} tu, hivyo hakuna ujumbe uliotumwa.',
+  'credits.banner.low': 'Salio la SMS limepungua — limebaki {balance}.',
+  'credits.banner.held.one': 'Ujumbe {count} umezuiliwa hadi mfumo utakapoongeza salio.',
+  'credits.banner.held.other': 'Ujumbe {count} umezuiliwa hadi mfumo utakapoongeza salio.',
+  'credits.banner.link': 'Fungua Ujumbe',
 
   /* ---------------------------------------------------------------- */
   /* violezo vya mikataba — miili miwili, mmoja kwa kila lugha         */
@@ -1019,6 +1039,14 @@ const messages: Messages = {
   'notifysettings.wording.platform': 'Inatumia maneno ya mfumo kwa {language}.',
   'notifysettings.wording.write_own': 'Andika yangu mwenyewe',
   'notifysettings.wording.reset': 'Rudisha ya kawaida',
+  'notifysettings.wording.show_platform': 'Onyesha maneno ya mfumo',
+  'notifysettings.wording.hide_platform': 'Ficha maneno ya mfumo',
+  'notifysettings.wording.locked': 'Maneno ya mfumo',
+  'notifysettings.wording.platform_unavailable': 'Maneno ya mfumo hayapatikani kwa sasa.',
+  'notifysettings.locked.note': 'Yamewekwa na mfumo — maneno haya hayabadiliki hapa.',
+  'notifysettings.locked.heading': 'Yaliyowekwa na mfumo',
+  'notifysettings.locked.lead': 'Mfumo ndio unaandika ujumbe huu. Unaweza kuusoma hapa, lakini huwezi kuubadilisha.',
+  'notifysettings.locked.rejected': 'Mfumo umefunga maneno haya, hivyo toleo lako halikuhifadhiwa.',
   'expcat.title': 'Aina za matumizi',
   'expcat.lead': 'Matumizi yako yanawekwa chini ya nini. Huanza na zile nane za kawaida; badilisha jina, panga upya au ongeza zako.',
   'expcat.col.category': 'Aina',

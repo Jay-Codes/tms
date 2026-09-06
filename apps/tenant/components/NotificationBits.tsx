@@ -24,7 +24,9 @@ import {
   ApiError,
   CUSTOM_SMS_VARIABLES,
   SMS_MAX_CHARS,
+  creditsAreLow,
   notificationsApi,
+  orgApi,
   rentersApi,
   resolveVariables,
   toApiError,
@@ -33,6 +35,7 @@ import {
   type NotificationLogEntry,
   type RecipientsPreview,
   type RenterSummary,
+  type SmsCredits,
 } from '../lib/api';
 import { fmtDateTime } from '../lib/format';
 import { useMe } from '../lib/auth';
@@ -65,7 +68,167 @@ export function DeliveryStamp({ status }: { status: string }) {
   if (status === 'sent') return <span className="stamp stamp-paid">{t('msg.status.sent')}</span>;
   if (status === 'failed') return <span className="stamp stamp-overdue">{t('msg.status.failed')}</span>;
   if (status === 'sending') return <span className="pencil">{t('msg.status.sending')}</span>;
+  // Held is not failed: the message is intact and leaves on the next top-up,
+  // so it is pencilled like a queued row rather than stamped like a loss.
+  if (status === 'held_no_credit') return <span className="pencil">{t('msg.status.held')}</span>;
   return <span className="pencil">{t('msg.status.queued')}</span>;
+}
+
+/* ------------------------------ SMS credits ------------------------------ */
+
+/**
+ * The org's prepaid SMS balance (API.md Phase 14, `GET /org/sms-credits`).
+ *
+ * Read-only everywhere in this app: only the platform admin tops an org up, so
+ * nothing here offers a purchase. A 404 (or any read failure) leaves `credits`
+ * null and every credits element simply does not render — the screens below
+ * are the Phase 13 screens until the endpoint answers.
+ */
+export function useSmsCredits(): { credits: SmsCredits | null; reload: () => void } {
+  const [credits, setCredits] = useState<SmsCredits | null>(null);
+  const [nonce, setNonce] = useState(0);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    orgApi
+      .smsCredits(ac.signal)
+      .then(setCredits)
+      .catch(() => setCredits(null));
+    return () => ac.abort();
+  }, [nonce]);
+
+  return { credits, reload: useCallback(() => setNonce((n) => n + 1), []) };
+}
+
+/** The band shown when the balance is at or under the platform's watermark. */
+function LowCreditWarning({ balance }: { balance: number }) {
+  const t = useT();
+  return (
+    <p
+      role="status"
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 'var(--sp-2)',
+        margin: 0,
+        color: 'var(--stamp-overdue)',
+        fontSize: 'var(--text-sm)',
+        border: '1px solid var(--stamp-overdue)',
+        borderRadius: 'var(--radius-sm)',
+        padding: 'var(--sp-2) var(--sp-3)',
+      }}
+    >
+      <Icon icon="solar:danger-triangle-linear" width={18} style={{ flexShrink: 0, marginTop: 2 }} />
+      <span>
+        <strong style={{ fontWeight: 600 }}>{t('credits.low.title', { balance })}</strong>{' '}
+        {t('credits.low.body')}
+      </span>
+    </p>
+  );
+}
+
+/**
+ * The Messages header card: what is left, what is held, and — when the balance
+ * is low — who to ask. There is no self-serve top-up, by design.
+ */
+export function SmsCreditsCard({ credits }: { credits: SmsCredits | null }) {
+  const t = useT();
+  if (!credits) return null;
+  const low = creditsAreLow(credits);
+  const held = credits.held_count ?? 0;
+  return (
+    <section
+      aria-label={t('credits.title')}
+      className="sheet"
+      style={{
+        padding: 'var(--sp-4) var(--sp-5)',
+        marginBottom: 'var(--sp-5)',
+        display: 'grid',
+        gap: 'var(--sp-3)',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          gap: 'var(--sp-4)',
+          flexWrap: 'wrap',
+        }}
+      >
+        <span
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--sp-2)',
+            color: 'var(--ink-soft)',
+            fontSize: 'var(--text-sm)',
+          }}
+        >
+          <Icon icon="solar:wallet-money-linear" width={18} /> {t('credits.title')}
+        </span>
+        <span
+          className="amount"
+          style={{ fontSize: 'var(--text-2xl)', color: low ? 'var(--stamp-overdue)' : 'var(--ink)' }}
+        >
+          {credits.balance}
+        </span>
+      </div>
+
+      <p style={{ margin: 0, color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+        {t.n('credits.balance_sub', credits.balance)}
+      </p>
+
+      {held > 0 ? (
+        <p style={{ margin: 0, fontSize: 'var(--text-sm)' }}>
+          <span className="pencil">{t.n('credits.held', held)}</span>{' '}
+          <span style={{ color: 'var(--ink-soft)' }}>{t('credits.held_note')}</span>
+        </p>
+      ) : null}
+
+      {low ? <LowCreditWarning balance={credits.balance} /> : null}
+    </section>
+  );
+}
+
+/**
+ * The dashboard's one-line version: a persistent strip, not a card, shown only
+ * when there is something to act on (low balance or held messages).
+ */
+export function SmsCreditsBanner() {
+  const t = useT();
+  const { credits } = useSmsCredits();
+  if (!credits) return null;
+  const low = creditsAreLow(credits);
+  const held = credits.held_count ?? 0;
+  if (!low && held === 0) return null;
+  return (
+    <p
+      role="status"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--sp-2)',
+        flexWrap: 'wrap',
+        margin: 'var(--sp-4) 0 0',
+        padding: 'var(--sp-2) var(--sp-3)',
+        border: `1px solid ${low ? 'var(--stamp-overdue)' : 'var(--rule-strong)'}`,
+        borderRadius: 'var(--radius-sm)',
+        fontSize: 'var(--text-sm)',
+        color: low ? 'var(--stamp-overdue)' : 'var(--ink)',
+      }}
+    >
+      <Icon icon="solar:wallet-money-linear" width={18} style={{ flexShrink: 0 }} />
+      <span>
+        {low ? t('credits.banner.low', { balance: credits.balance }) : null}
+        {low && held > 0 ? ' ' : null}
+        {held > 0 ? t.n('credits.banner.held', held) : null}
+      </span>
+      <Link href="/notifications" style={{ color: 'inherit' }}>
+        {t('credits.banner.link')}
+      </Link>
+    </p>
+  );
 }
 
 /** The body, clamped to one line until the reader asks for the rest. */
@@ -421,6 +584,26 @@ export function SendMessageForm({ onSent }: { onSent?: () => void }) {
   const canSend =
     filled.length > 0 && !tooLong && (recipients === 'all_active' || selected.length > 0);
 
+  /**
+   * What this send would cost, in credits: one credit per SMS segment per
+   * recipient (API.md Phase 14). An estimate, and said as one — the backend
+   * debits at send time against the bodies it actually renders, and a renter
+   * whose number is missing is skipped without spending anything.
+   */
+  const needed = useMemo(() => {
+    if (filled.length === 0) return null;
+    const reach = audience?.count ?? (recipients === 'selected' ? selected.length : null);
+    if (onlyOne) {
+      if (reach === null) return null;
+      return smsSegments(bodies[onlyOne].trim()).segments * reach;
+    }
+    if (!audience) return null;
+    return COMPOSE_LANGS.reduce(
+      (sum, l) => sum + smsSegments(bodies[l].trim()).segments * (audience.by_language?.[l] ?? 0),
+      0,
+    );
+  }, [audience, bodies, filled.length, onlyOne, recipients, selected.length]);
+
   const insert = (lang: Locale, token: string) => {
     const el = areas.current[lang];
     const current = bodies[lang];
@@ -466,6 +649,17 @@ export function SendMessageForm({ onSent }: { onSent?: () => void }) {
       <ProblemNote error={error} />
       {error?.status === 429 ? (
         <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{t('msg.rate_limited')}</p>
+      ) : null}
+      {/* 409 insufficient_sms_credits — nothing was queued, so this says the
+          shortfall plainly and points at the one party who can fix it. */}
+      {error?.code === 'insufficient_sms_credits' ? (
+        <p style={{ color: 'var(--stamp-overdue)', fontSize: 'var(--text-sm)' }}>
+          {t('credits.insufficient', {
+            needed: Number(error.body.needed ?? needed ?? 0),
+            balance: Number(error.body.balance ?? 0),
+          })}{' '}
+          <span style={{ color: 'var(--ink-soft)' }}>{t('credits.low.body')}</span>
+        </p>
       ) : null}
       {result ? (
         <Note>
@@ -586,7 +780,7 @@ export function SendMessageForm({ onSent }: { onSent?: () => void }) {
         ) : null}
       </div>
 
-      <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
         <button
           type="button"
           className="btn btn-primary"
@@ -599,6 +793,11 @@ export function SendMessageForm({ onSent }: { onSent?: () => void }) {
         >
           <Icon icon="solar:plain-2-linear" width={20} /> {t('msg.send')}
         </button>
+        {canSend && needed !== null ? (
+          <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>
+            {t.n('credits.needed', needed)}
+          </span>
+        ) : null}
       </div>
 
       <Sheet
@@ -616,7 +815,10 @@ export function SendMessageForm({ onSent }: { onSent?: () => void }) {
               <p style={{ marginTop: 'var(--sp-2)', whiteSpace: 'pre-wrap' }}>{previewFor(l)}</p>
             </div>
           ))}
-          <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{t('msg.confirm.warning')}</p>
+          <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+            {t('msg.confirm.warning')}
+            {needed !== null ? ` ${t.n('credits.needed', needed)}` : ''}
+          </p>
           <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
             <button type="button" className="btn btn-primary" onClick={() => void send()} disabled={busy}>
               {busy ? t('msg.sending') : t('msg.send_now')}
