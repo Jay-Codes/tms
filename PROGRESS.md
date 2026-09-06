@@ -154,3 +154,14 @@
 **Verified**: `make build/test/lint` (incl. i18n-check) green; curl: locale round-trip, invalid → 400, bulk `by_language {sw:3,en:1}` with per-recipient bodies confirmed in Postgres, SW/EN template preview; browser: landlord app fully Swahili (nav, reports cadence "Mwezi/Robo mwaka/Miezi 6/Mwaka/Maalum", tiles), renter app Swahili with Swahili month names, 375 px bottom bars fit. Owner and renter restored to their previous locales.
 
 **Open for the user**: `.env` now carries real Beem credentials and every send fails upstream with `API_INVALID_PARAMETER: Invalid Sender ID` — the sender name must be one Beem has approved for the account. Dev OTP reading via `grep sms_body .dev/api.log` no longer works while the real provider is configured.
+
+## Phase 14 — Admin: SMS credits + platform templates (6 Sep 2026) — branch `phase-14-admin-credits-templates`
+
+**Shipped**
+- Backend: GSM-7/UCS-2 `Segments`, `org_sms_credits` lazily created, send-time conditional debit inside the worker claim tx with append-only ledger, `held_no_credit` status + release on top-up, OTP exempt, bulk pre-check `409 insufficient_sms_credits {needed,balance}`, admin credit routes (get/topup/adjust/watermark) with both audit trails, landlord `GET /org/sms-credits {…, low}`, low-watermark email on crossing; platform templates seeded by migration 000016 (`otp` locked), `PlatformStore` (Redis 5 min + DB + code fallback) in `notify.Render`, admin template routes (list/put/lock/preview/versions/revert), landlord `locked_kinds` + `platform_templates`, `409 template_locked`; `GET /admin/metrics.sms` extended. Race-tested debit (12 msgs / 3 workers / balance 5 → 5 sent, 7 held).
+- Admin app: org detail SMS tab (balance, watermark, used 30d, held, top-up/adjust sheets with review step, ledger), Templates list + editor (SW/EN side by side, variable chips, segment counters, preview, save with per-field errors, lock/unlock, version history + restore), dashboard SMS tiles.
+- Tenant: credits card on Messages (balance, held, low band), dashboard banner, needed-credit estimate on compose, 409 handling, held stamp, locked platform wording read-only + "Show platform wording" toggle in Settings → Notifications (28 keys × 2 languages).
+
+**Verified**: `make build/test/lint` green (+ `-race` on notify/httpserver); curl: 409 → top-up → debits per segment → watermark `low` → held/release → templates PUT/preview/versions/revert → landlord 409 on locked; browser (admin): templates list with locked `otp`, editor for `reminder_due` v3, JJnE SMS tab with ledger (balance 600). Tenant credits card live.
+
+**Notes**: Beem still rejects the configured sender ID, so real sends fail after debiting (`.env` needs an approved `BEEM_SENDER_ID`). Messages log table lacks a scroll wrapper at 375 px and every tenant page logs a hydration mismatch from the branding style on `<html>` — both for Phase 15.
