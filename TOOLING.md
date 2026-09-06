@@ -13,6 +13,7 @@ Authoritative developer tooling for this project. Any automation, scripts, or wo
   - `make test` — run all tests
   - `make lint` — lint frontend and backend
   - `make migrate` — apply database migrations
+- **Never run `next build` by hand.** `make build` sets `NEXT_DIST_DIR=.next-build` for every workspace; a plain `next build` writes into `.next` and clobbers the running dev servers (404 chunks, 500s). Recovering from that is `make apps-restart`, which restarts only the three Next.js dev servers and leaves the proxy, ngrok and the API alone.
 - Prefer one root Makefile that delegates into `apps/*` and `proxy/` over per-directory Makefiles.
 
 ## Git
