@@ -129,7 +129,7 @@ function Dashboard() {
               Seven of ten renters have paid. Three are overdue; reminders went out this morning at 09:00.
             </p>
           </div>
-          <div style={{ display: 'flex', gap: 'var(--sp-2)', flexShrink: 0 }}>
+          <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', flexShrink: 0 }}>
             <button className="btn btn-secondary">
               <Icon icon="solar:chat-round-dots-linear" width={20} /> Send reminders
             </button>

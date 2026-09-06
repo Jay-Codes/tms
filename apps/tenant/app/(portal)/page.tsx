@@ -15,6 +15,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useReadyToCountersign } from '../../components/ContractBits';
 import { CARD_LABEL_KEYS, DashboardCustomize } from '../../components/DashboardCustomize';
 import { ChangeMark } from '../../components/ExpenseBits';
+import { InstallPrompt } from '../../components/InstallPrompt';
 import { StatTile, TileRow } from '../../components/ReportBits';
 import { CHART_ROLES, ChangeMark as DeltaMark, Sparkline, formatDateIntl, useLocale, useT } from '@tms/ui';
 import { PageHead } from '../../components/PageHead';
@@ -459,6 +460,10 @@ function DashboardBody() {
       {/* Phase 14 — a persistent strip, not a card: it says nothing at all
           unless the balance is low or messages are being held. */}
       <SmsCreditsBanner />
+
+      {/* Phase 15 — offered only where the browser says the app is
+          installable; silent everywhere else. */}
+      <InstallPrompt />
 
       {prefs.cards.length === 0 ? (
         <p style={{ marginTop: 'var(--sp-5)', color: 'var(--ink-soft)' }}>

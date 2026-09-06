@@ -50,6 +50,22 @@ func toPlatformTemplateRow(kind, sw, en string, vars []string, locked bool,
 	}
 }
 
+// adminTemplateEditAllowed meters the three write paths on the platform
+// catalogue — save, lock and revert — against one counter per admin.
+//
+// They share a bucket on purpose: what the limit protects is the wording every
+// tenant's SMS is rendered from, and a caller who cannot rewrite a kind sixty
+// times an hour should not be able to lock and revert it sixty more.
+func (s *Server) adminTemplateEditAllowed(w http.ResponseWriter, r *http.Request) bool {
+	p := auth.MustFromContext(r.Context())
+	if res := s.limiter.Allow(r.Context(), "admin:template:edit:"+p.UserIDString(),
+		adminTemplateEditLimit, adminTemplateEditWindow); !res.Allowed {
+		tooMany(w, res, "too many template changes; try again shortly")
+		return false
+	}
+	return true
+}
+
 // ------------------------------------------------------ GET /admin/templates --
 
 func (s *Server) handleAdminListTemplates(w http.ResponseWriter, r *http.Request) {
@@ -73,6 +89,9 @@ func (s *Server) handleAdminListTemplates(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handleAdminPutTemplate(w http.ResponseWriter, r *http.Request) {
 	if s.dbUnavailable(w) {
+		return
+	}
+	if !s.adminTemplateEditAllowed(w, r) {
 		return
 	}
 	p := auth.MustFromContext(r.Context())
@@ -145,6 +164,9 @@ func (s *Server) handleAdminPutTemplate(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleAdminPatchTemplate(w http.ResponseWriter, r *http.Request) {
 	if s.dbUnavailable(w) {
+		return
+	}
+	if !s.adminTemplateEditAllowed(w, r) {
 		return
 	}
 	p := auth.MustFromContext(r.Context())
@@ -273,6 +295,9 @@ func (s *Server) handleAdminTemplateVersions(w http.ResponseWriter, r *http.Requ
 // keeping, and a version number that can go backwards is one nobody can cite.
 func (s *Server) handleAdminRevertTemplate(w http.ResponseWriter, r *http.Request) {
 	if s.dbUnavailable(w) {
+		return
+	}
+	if !s.adminTemplateEditAllowed(w, r) {
 		return
 	}
 	p := auth.MustFromContext(r.Context())

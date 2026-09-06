@@ -75,7 +75,11 @@ Base design system lives in `packages/ui` (`@tms/ui`), used by all three apps. P
 
 Everything else is **fixed platform-wide and never themed**: stamp colors (Paid / Overdue), the focus ring, the 4px spacing grid, the stationery radii (3–6px) and the 16px-base type scale. Eight curated **presets** ship with the platform — Ledger (default), Night ledger, Warm paper, Cool slate, Forest, Ocean, High-contrast, Minimal white — each a complete, AA-validated token set. The advanced panel exposes the individual tokens with live contrast badges.
 
-**Contrast guard.** `validateTheme(tokens)` in `packages/ui/theme` returns the failing pairs (`ink`/`paper`, `ink-muted`/`paper`, `on-primary`/`primary`, `ink`/`surface`) with their ratios; the client warns live and the backend **re-validates on save**, rejecting any body-text pair below **WCAG AA 4.5:1** with `400` and the failing pairs listed. The same resolved token set is served to the renter app, so **one theme covers both the landlord and the renter apps**; an org with no theme resolves to preset `ledger`.
+**Source of truth.** The presets and the validator live in the **backend** (`backend/internal/theme/presets.json`, `go:embed`-ed, served by `GET /themes/presets` as `{presets:[…]}`). `packages/ui` keeps a *generated* offline copy so the apps can paint before the API answers; `TestPresetsMatchUICopy` fails the build if the two drift, and `ledger` is byte-identical to `packages/ui/src/tokens.css`.
+
+**Contrast guard.** `validateTheme(tokens)` in `packages/ui/theme` returns the failing pairs with their ratios; the client warns live and the backend **re-validates on save** with the same seven rules — `ink`/`paper`, `ink`/`surface`, `ink-muted`/`paper`, `ink-muted`/`surface` and `on-primary`/`primary` at **4.5:1**, `primary`/`paper` at 3.0, `rule`/`paper` at 1.2 — rejecting a failure with `400` and a top-level `failures[]` array. The same resolved token set is served to the renter app, so **one theme covers both the landlord and the renter apps**; an org with no theme resolves to preset `ledger`.
+
+**Stamps in the dark.** Stamp inks stay off the themable set, but they take a fixed dark step (`#4ec07f` paid, `#ff8a80` overdue) under `data-theme="dark"`, as the chart palette does: the fixed light inks measured 2.8–3.4:1 on dark paper. Print output is pinned to light paper whatever the theme.
 
 ### 2.1 Multi-tenancy model
 
@@ -109,6 +113,10 @@ Scan flow: resolve `unit_code` → public endpoint returns org branding + unit s
 Every user carries a locale — `users.locale`, `sw` or `en`, default `sw` — **chosen at registration/signup** and changeable afterwards (renter Profile, landlord Settings → Preferences). The locale drives both the screen language and every SMS sent to that person, including bulk sends. `orgs.settings.sms_language` survives only as the **fallback for renters with no preference** (pre-existing users), and is relabelled accordingly in the UI.
 
 Public pages seen before sign-in (QR landing, connect, org login) default to the **org language** and show a visible **SW/EN toggle**; the visitor's choice persists locally and is carried into registration as the initial `locale`. The admin app stays English-only.
+
+An invalid `locale` is a **400** with `errors.locale`, like every other closed-set field on the platform.
+
+**UI i18n runtime.** `packages/ui/src/i18n` ships the runtime — `I18nProvider`, `useT()`, and plural / `Intl` date+number helpers pinned to EAT and TZS. The **dictionaries live in the apps**, not in the package: `apps/enduser/i18n/{en,sw}.ts` and `apps/tenant/i18n/{en,sw}.ts`, flat key maps. `make lint` runs `packages/ui/scripts/i18n-check.mjs` over both (`make i18n-check` on its own), which fails on a key present in one language and missing in the other, or on placeholders that differ between the two. Server-provided **data** — period labels, unit and property names, rendered template HTML — is never translated client-side; only chrome is.
 
 ---
 
@@ -329,6 +337,12 @@ GET /audit-log?entity=&actor=&from=&to=      (org-scoped; admin sees all)
 
 **Cadence (Part 2).** `/reports/summary`, `/reports/payment-status`, `/reports/collections`, `/reports/revenue`, `/reports/occupancy` and `/expenses/summary` all accept the same window parameters: `cadence=month|quarter|half_year|year|custom` with `from` / `to` (required for `custom`) and an optional `anchor` date. Windows resolve on the Dar es Salaam wall clock (`internal/period`), and every response **echoes the resolved `{from, to, cadence}` plus the equivalent `previous` window**, so period-over-period comparisons are computed from one place. Series endpoints add `bucket=day|week|month` (auto: `day` for ≤ 62 days, `week` for ≤ 26 weeks, `month` otherwise), zero-filled, capped at 400 buckets, and accept `property_id` / `group_by=property`.
 
+**Window semantics.** The echoed window is **half-open**: `from` inclusive, `to` **exclusive**. Wire `from`/`to` on input are read as **inclusive** dates. `anchor` names the calendar unit (any day in May selects May) and defaults to today; a custom range needs both dates and may not exceed five years. `previous` is the previous calendar unit for a calendar cadence and an equal-length span for a custom range. Buckets are computed in Go over day-grain aggregates, and the **first bucket starts on the window's own first day** rather than snapping back to a calendar boundary; occupancy buckets are measured on the **last day inside** the bucket.
+
+**Refusals.** A malformed value (unknown `cadence`/`bucket`, unparseable date) is a **400**; a window that parses but cannot be satisfied — `from` after `to`, a range beyond five years, a missing custom date — is a **422**, as is a window needing more than 400 buckets (`type:"too_many_buckets"`). `GET /expenses` (the ledger listing, not the summary) keeps its Phase 10 behaviour of answering 400 for every window refusal.
+
+**Ratios are not interchangeable.** `occupancy_pct` on `/reports/occupancy` is a **percentage, 0–100**; `collection_rate` on `/reports/revenue` and `occupancy_rate` on the Phase 7 `/reports/summary` are **fractions, 0–1**. `change_pct` members are percentages to one decimal and are **null** when the previous figure was zero.
+
 ### 5.10 Platform admin
 ```
 GET /admin/orgs                   list/suspend/activate orgs
@@ -348,6 +362,7 @@ GET  /expenses?property_id=&unit_id=&category_id=&from=&to=&cursor=   (+ format=
 POST /expenses/{id}/receipt       presigned upload into bucket `receipts` + complete/view
 GET  /expenses/summary?cadence=&from=&to=&group_by=property|category  → totals per group + grand total
 ```
+Categories are seeded lazily on first read, so an org created before Part 2 never sees an empty picker; a category in use cannot be deleted (**409 `category_in_use`** — deactivate it instead) and a duplicate name is **409 `category_exists`**. A `unit_id` outside the chosen property, or an inactive `category_id`, is a **422** naming the field (a cross-org id stays a 404). The summary is **zero-filled from the org's own properties/active categories**, not from the spend, so a chart keeps its bars month to month; uncategorised rows appear as one extra group only when non-empty, and `change_pct` is null against an empty previous window.
 
 ### 5.12 Platform admin: templates & SMS credits
 ```
@@ -364,6 +379,8 @@ PATCH /admin/orgs/{id}/sms                 {low_watermark}
 ```
 All four credit routes are audited twice: the platform audit trail and the org's own log (visible to the landlord as "credits added by platform").
 
+Shipped shapes: `topup` and `adjust` answer **`{balance, released}`** (`released` = held messages re-queued — a top-up releases *every* held row, and the worker holds any surplus again at send time); `PUT /admin/templates/{kind}` answers **`{template, segments, warnings?}`** (`warnings` past three segments; body cap **480** characters, against 320 for an org override); `POST …/revert` answers `{template, restored_from}` and restores the old wording as a **new** version. `otp` is **not org-overridable at all**, so it appears in neither `locked_kinds` nor `platform_templates` on `GET /org/notification-settings` — a landlord has nothing to see read-only. `thank_you_settled` is a second wording of `thank_you`, not a kind, and stays a code default.
+
 ### 5.13 Locale
 ```
 PATCH /me                         renter: {locale:"sw"|"en"} (audited)
@@ -371,13 +388,18 @@ PATCH /org/members/me             org user: {locale:"sw"|"en"} (audited)
 POST  /auth/register/renter       accepts locale (from the public SW/EN toggle)
 POST  /orgs                       owner signup accepts locale
 GET   /auth/me, GET /me           return `locale` in the session payload
+POST  /org/members                accepts locale for the invited member
+POST  /auth/otp/send              accepts locale as a *hint* for a phone with no account yet
 ```
+`locale` is **required** on the two PATCH routes (they exist to set it) and neither names a user id — a member can only ever move their own. An unknown value is a **400**. `POST /contracts {language?}` defaults to the renter's locale and the choice is frozen on `contracts.language`; `POST /notifications/custom` takes `{body_sw?, body_en?}` (at least one) and answers `202 {batch_id, queued, skipped, by_language:{sw,en}}` — `queued` stays a scalar.
 
 ---
 
 ## 6. Notifications (Beem SMS)
 
 Provider: **Beem Africa** HTTP API (api key + secret via env vars). Sender ID per org where approved; platform default otherwise.
+
+**Sender ID is not free text.** Beem rejects a send whose sender name it has not approved for the account (`API_INVALID_PARAMETER: Invalid Sender ID`), so `BEEM_SENDER_ID` — and any per-org `sender_name` override — must be a name approved on the Beem account. With `BEEM_API_KEY` empty the platform falls back to the dev `LogProvider`, which writes every message (OTP codes included) to the API log instead of sending it.
 
 | Kind | Trigger | Default timing |
 |------|---------|----------------|
@@ -440,12 +462,14 @@ Buckets: `branding` (logos, letterheads), `qrcodes` (unit QR PNGs; S3 requires �
 
 Part 2 (post-MVP iteration, plan in [PLAN2.md](PLAN2.md)):
 
-| Phase | Content |
-|-------|---------|
-| 9 | Foundations + end-to-end fixes: single recommended period, rent per payment period in the document, layout-level nav shell, mobile contract fix, `PeriodPicker`, `internal/period`, Part 2 migrations + `receipts` bucket |
-| 10 | Expenses: categories, ledger with receipts, void semantics, CSV, per-property and all-properties summary |
-| 11 | Reports v2: cadence everywhere, revenue/expenses/net time series with trends, occupancy series, per-property breakdown |
-| 12 | Theming v2: 8 presets + advanced token override with the contrast guard, applied to both landlord and renter apps |
-| 13 | Language: `users.locale` per user, SMS + bulk SMS in the recipient's language, UI i18n (SW/EN) |
-| 14 | Platform admin: prepaid SMS credits per org and DB-backed platform templates with per-kind locking |
-| 15 | Mobile landlord pass, performance and isolation hardening, seed v2, UAT 2 |
+| Phase | Content | Status |
+|-------|---------|--------|
+| 9 | Foundations + end-to-end fixes: single recommended period, rent per payment period in the document, layout-level nav shell, mobile contract fix, `PeriodPicker`, `internal/period`, Part 2 migrations + `receipts` bucket | ✅ 5 Sep 2026 |
+| 10 | Expenses: categories, ledger with receipts, void semantics, CSV, per-property and all-properties summary | ✅ 5 Sep 2026 |
+| 11 | Reports v2: cadence everywhere, revenue/expenses/net time series with trends, occupancy series, per-property breakdown | ✅ 5 Sep 2026 |
+| 12 | Theming v2: 8 presets + advanced token override with the contrast guard, applied to both landlord and renter apps | ✅ 5 Sep 2026 |
+| 13 | Language: `users.locale` per user, SMS + bulk SMS in the recipient's language, UI i18n (SW/EN) | ✅ 6 Sep 2026 |
+| 14 | Platform admin: prepaid SMS credits per org and DB-backed platform templates with per-kind locking | ✅ 6 Sep 2026 |
+| 15 | Mobile landlord pass, performance and isolation hardening, seed v2, UAT 2 | 🔄 in progress |
+
+The shipped contract for 9–14 is [API.md](API.md) § "Part 2 — shipped contract", which carries the deviations from the plan; the phase log is [PROGRESS.md](PROGRESS.md).

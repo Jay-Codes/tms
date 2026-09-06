@@ -72,6 +72,15 @@ func (s *Server) patchLocale(w http.ResponseWriter, r *http.Request, op string) 
 	}
 	p := auth.MustFromContext(r.Context())
 
+	// Keyed by the user, because the row being changed is theirs: a landlord
+	// with five staff does not spend one budget between them, and a renter
+	// cannot spend anybody's but their own.
+	if res := s.limiter.Allow(r.Context(), "locale:patch:"+p.UserIDString(),
+		localePatchLimit, localePatchWindow); !res.Allowed {
+		tooMany(w, res, "too many language changes; try again shortly")
+		return
+	}
+
 	var body struct {
 		Locale *string `json:"locale"`
 	}

@@ -56,6 +56,15 @@ const VARIABLE_KEYS: Record<string, string> = {
 };
 
 const EDITOR_STYLE = `
+  /* Phone: the toolbar keeps 44px targets and the variable picker takes a
+     row of its own instead of being pushed off the right edge by
+     \`margin-left: auto\`. */
+  @media (max-width: 767px) {
+    .tpl-toolbar .btn { min-height: var(--touch-min); }
+    .tpl-toolbar .tpl-var { margin-left: 0; width: 100%; }
+    .tpl-toolbar .tpl-var select { flex: 1; min-width: 0; width: 100% !important; min-height: var(--touch-min) !important; }
+    .tpl-editor .tiptap { min-height: 240px; padding: var(--sp-3); }
+  }
   .tpl-editor .tiptap {
     min-height: 340px;
     padding: var(--sp-4);
@@ -99,6 +108,7 @@ function ToolButton({
       onClick={onClick}
       style={{
         minHeight: 36,
+        minWidth: 'var(--touch-min)',
         padding: '0 var(--sp-2)',
         background: active ? 'var(--primary-soft)' : undefined,
       }}
@@ -112,6 +122,7 @@ function Toolbar({ editor }: { editor: Editor }) {
   const t = useT();
   return (
     <div
+      className="tpl-toolbar"
       style={{
         display: 'flex',
         flexWrap: 'wrap',
@@ -190,7 +201,11 @@ function Toolbar({ editor }: { editor: Editor }) {
         onClick={() => editor.chain().focus().redo().run()}
       />
 
-      <label htmlFor="tpl_var" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+      <label
+        htmlFor="tpl_var"
+        className="tpl-var"
+        style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}
+      >
         <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>{t('tpl.insert_variable')}</span>
         <select
           id="tpl_var"
@@ -365,7 +380,12 @@ export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
       <ProblemNote error={saveError} />
       {saved ? <Note>{t('tpl.saved')}</Note> : null}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 'var(--sp-5)' }}>
+      <div
+        // Editor and preview side by side only where both are usable: below
+        // ~700px of content the pair collapses to one column, which is what a
+        // phone and a portrait tablet get.
+        style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 'var(--sp-5)' }}
+      >
         {/* ------------------------------ editor ------------------------------ */}
         <div style={{ display: 'grid', gap: 'var(--sp-4)', alignContent: 'start', minWidth: 0 }}>
           <Field id="tpl_name" label={t('tpl.name')} error={saveError?.errors.name}>
@@ -402,7 +422,7 @@ export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
           </div>
 
           {/* ------------------------ language tabs ------------------------ */}
-          <div role="tablist" aria-label={t('tpl.body_tablist')} style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+          <div className="wrap-sm" role="tablist" aria-label={t('tpl.body_tablist')} style={{ display: 'flex', gap: 'var(--sp-2)' }}>
             {TEMPLATE_LANGS.map((l) => {
               const active = lang === l;
               const written = l === 'en' ? true : swWritten;
@@ -459,7 +479,7 @@ export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
             {t('tpl.variables_note', { example: '{{renter_name}}' })}
           </p>
 
-          <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+          <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
             <button type="button" className="btn btn-primary" onClick={() => void save()} disabled={busy || !editor}>
               <Icon icon="solar:diskette-linear" width={20} /> {busy ? t('common.saving') : t('tpl.save')}
             </button>

@@ -6,7 +6,7 @@
  */
 
 import Link from 'next/link';
-import { useT } from '@tms/ui';
+import { TableScroll, useT } from '@tms/ui';
 import { useCallback, useEffect, useState } from 'react';
 import { ProblemNote } from '../../../../components/FormBits';
 import { StatusMark } from '../../../../components/UnitStatus';
@@ -78,7 +78,8 @@ export function UnitsStep() {
           </p>
 
           {units.length > 0 ? (
-            <table className="ledger">
+            <TableScroll label={t('nav.units')}>
+<table className="ledger">
               <thead>
                 <tr>
                   <th>{t('common.unit')}</th>
@@ -106,9 +107,10 @@ export function UnitsStep() {
                 ))}
               </tbody>
             </table>
+</TableScroll>
           ) : null}
 
-          <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+          <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
             <button
               type="button"
               className={many ? 'btn btn-quiet' : 'btn btn-secondary'}

@@ -2,14 +2,14 @@
 
 White-label multi-tenant SaaS for landlords: properties, units, renters, contracts, rent collection, SMS reminders. First client brand: **JJnE Rentals**.
 
-**Status:** pre-alpha scaffold. Spec locked, design system in place, frontends are shells, backend not started. Target: testing-ready **15 Sep 2026**.
+**Status:** Part 1 (Phases 0–8) and Part 2 Phases 9–14 shipped; Phase 15 (mobile landlord pass, hardening, UAT 2) in progress. Target: testing-ready **15 Sep 2026**. Phase log: [PROGRESS.md](PROGRESS.md).
 
 ## Stack
 
 | Layer | Tech |
 |-------|------|
 | Frontend | Next.js 15 (CSR, TypeScript) × 3 apps, PWA |
-| Backend | Go (chi, pgx, sqlc, golang-migrate) — planned |
+| Backend | Go (chi, pgx, sqlc, golang-migrate) |
 | Database | PostgreSQL 17 |
 | Cache / queue | Redis 7 |
 | Object storage | MinIO (S3 API) |
@@ -27,13 +27,16 @@ apps/
   tenant/      Landlord portal   — basePath /tenant,  dev :3002
   admin/       Platform admin    — basePath /admin,   dev :3003
 packages/
-  ui/          @tms/ui design system: tokens.css, theme.ts (applyOrgTheme), ThemeSwitcher
-proxy/         Go reverse proxy :8080 → apps by path prefix (+ /api later)
-docker-compose.yml   postgres, redis, minio + bucket init (branding, qr, kyc, signatures)
+  ui/          @tms/ui design system: tokens.css, theme.ts (applyOrgTheme + presets),
+               charts/, i18n/ runtime, PeriodPicker, ThemeSwitcher
+backend/       Go API (:8081): cmd/api, cmd/seed, cmd/loadtest, migrations, internal/*
+proxy/         Go reverse proxy :8080 → apps by path prefix (+ /api, + MinIO buckets)
+docker-compose.yml   postgres, redis, minio + bucket init
+               (branding, qrcodes, kyc, signatures, receipts)
 Makefile       single entry point for all commands
 ```
 
-Docs: [SPEC.md](SPEC.md) (architecture, data model, API) · [FLOWS.md](FLOWS.md) (user flows) · [PLAN.md](PLAN.md) (phased implementation plan) · [DEV.md](DEV.md) (dev loop).
+Docs: [SPEC.md](SPEC.md) (architecture, data model, API) · [API.md](API.md) (live endpoint contract) · [FLOWS.md](FLOWS.md) (user flows) · [PLAN.md](PLAN.md) / [PLAN2.md](PLAN2.md) (phase plans) · [PROGRESS.md](PROGRESS.md) · [DECISIONS.md](DECISIONS.md) · [DEV.md](DEV.md) (dev loop).
 
 ## Terminology
 
@@ -73,11 +76,13 @@ Other targets (`make help` lists all):
 | `make api` / `make api-restart` | Build + run the Go API on :8081 (`make api-log` to tail) |
 | `make migrate` / `make migrate-down` | Apply / roll back one migration |
 | `make test-db` | Create the `tms_test` database used by handler tests |
-| `make build` / `make test` / `make lint` | Build, test, lint backend + frontends |
+| `make build` / `make test` / `make lint` | Build, test, lint backend + frontends. **Never run `next build` by hand** — `make build` sets `NEXT_DIST_DIR=.next-build` so it cannot clobber the running dev servers' `.next` |
+| `make apps-restart` | Restart only the three Next.js dev servers (proxy, ngrok and the API keep running) |
+| `make i18n-check` | Key + placeholder parity between `sw.ts` and `en.ts` in `apps/enduser/i18n` and `apps/tenant/i18n` (also run by `make lint`) |
 | `make images` | Build all deployable Docker images |
 | `make deploy` | `images` + bring the full compose profile up |
-| `make seed` | Seed a load-test org (`load@tms.local`/`password123`: 5 properties, 50 units, 40 renters, contracts, payments) |
-| `make seed-demo` | Demo data for JJnE Rentals (overdue/paid/pending contracts, link request; owner `demo@jjne.test`/`password123`) |
+| `make seed` | Seed the load-test org (`load@tms.local`/`password123`): 5 properties, 50 units, 40 renters split SW/EN, contracts, payments spread over a year, 12 months of expenses per property, an opening balance of 500 SMS credits |
+| `make seed-demo` | Demo data for JJnE Rentals (overdue/paid/pending contracts, link request, expenses, a custom theme, an edited platform template; owner `demo@jjne.test`/`password123`) |
 | `make loadtest` | 20-worker load pass against hot endpoints; results in `docs/LOADTEST.md` |
 | `make test-isolation` | Cross-org / cross-renter / admin isolation census (every registered route must be covered) |
 | `make test-race` | Race-detector run for httpserver, notify, payment (~2 min) |
@@ -142,19 +147,28 @@ Full list in `.env.example`. The ones that matter most:
 | `TLS_CERT_FILE` / `TLS_KEY_FILE` | Set both to terminate TLS at the proxy |
 | `NIDA_ENC_KEY` | pgcrypto key for encrypted NIDA numbers — rotating it makes existing values unreadable |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | First platform admin, seeded at startup when none exists |
-| `BEEM_*`, `NOTIFY_WORKERS` | Beem SMS credentials and the size of the sending pool |
+| `BEEM_API_KEY` / `BEEM_SECRET_KEY` / `BEEM_SENDER_ID` | Beem SMS credentials. Leave `BEEM_API_KEY` empty and the dev `LogProvider` writes every message (OTP codes included) to `.dev/api.log` instead of sending. `BEEM_SENDER_ID` **must be a sender name Beem has approved for the account** — an unapproved one fails every send with `API_INVALID_PARAMETER: Invalid Sender ID` |
+| `NOTIFY_WORKERS` | Size of the SMS sending pool (3). Each worker claims its row atomically, so raising it cannot duplicate a message |
+| `SMS_CREDIT_EXEMPT_KINDS` | Notification kinds that send without debiting SMS credit. Default `otp`; the literal `none` charges for everything |
 
-## What exists today
+## Part 2 at a glance
 
-- Three Next.js apps wired to `@tms/ui` (org-themable fonts via `next/font`: Bricolage Grotesque default, Archivo, Instrument Sans, Hanken Grotesk). Admin app is fixed to platform theme.
-- `@tms/ui` v0.2 — **"stamped ledger"** design system (landlord's rent book: paper background, ink text, ledger rules, right-aligned tabular amounts, rubber-stamp Paid/Overdue, pencilled Pending). Core tokens: paper/ink/rule palette, stamp colors, 16px type scale, 4px grid, 52px ledger rows / 44px touch minimum, Solar icons. Runtime org theming (`applyOrgTheme()`: one primary color + one whitelisted font), theme switcher. Shared classes: `.ledger`, `.stamp`, `.pencil`, `.amount`, `.btn-*`, `.field`/`.input`, `.sheet`, `.tabs`, `.bottom-bar`.
-- Go dev proxy, Make workflow, ngrok preview.
-- Compose infra definition (validated, not yet exercised).
-- Full spec, flows, and 8-phase plan.
+- **Expenses** — property-level ledger with categories, receipts (bucket `receipts`, JPEG/PNG/PDF ≤ 5 MiB), void-with-reason instead of delete, CSV export, per-property tab and an all-properties summary.
+- **Reports v2** — one period picker (month / quarter / 6 months / year / custom) drives every report; revenue vs expected vs expenses vs net as a series with a trend, occupancy over time, per-property breakdown, Δ vs the previous window.
+- **Themes** — eight presets (Ledger, Night ledger, Warm paper, Cool slate, Forest, Ocean, High contrast, Minimal white) plus an advanced seven-token override with a live WCAG-AA contrast guard the server re-runs on save. The backend's `presets.json` is the source of truth; the copy in `packages/ui` is generated and pinned by a test. One theme covers the landlord and renter apps; the admin app is never themed; print stays light.
+- **Languages** — `users.locale` (`sw`/`en`) per person decides both the screens and every SMS they receive, including bulk sends (two bodies, one per language). Public pages open in the org's language with an SW/EN toggle. Dictionaries live in `apps/*/i18n`; the admin app stays English.
+- **SMS credits** — prepaid per org, no expiry, 1 credit per 160-character GSM segment (70 for UCS-2), debited at send time. Out of credit parks a message as `held_no_credit` (never `failed`) until the platform tops the org up. Landlord URL: `/tenant/notifications`.
+- **Platform templates** — the admin edits every SMS body in both languages at `{BASE}/admin/templates`, with variable chips, segment counts, preview, version history, revert, and a per-kind lock (`otp` ships locked and is not org-overridable). SMS credit per org: `{BASE}/admin/orgs/{id}` → SMS tab.
 
-## What's next
+## App URLs
 
-Phase 0–1 of [PLAN.md](PLAN.md): compose infra up, `backend/` skeleton, migrations for full schema, auth (OTP + password), org onboarding, audit middleware.
+Behind the proxy at `{BASE}` (the ngrok URL from `make url`, or `http://localhost:8080`):
+
+| App | Paths |
+|-----|-------|
+| Renter (`enduser`) | `/enduser`, QR landing `/enduser/u/{unit_code}`, `/enduser/design-system` |
+| Landlord (`tenant`) | `/tenant` · properties, units, expenses, reports, payments, contracts, notifications, audit, `/tenant/settings/branding`, `/tenant/design-system` |
+| Platform admin | `/admin` · `/admin/orgs`, `/admin/orgs/{id}` (SMS credits tab), **`/admin/templates`**, `/admin/audit`, `/admin/jobs` |
 
 ## Key design decisions
 
@@ -164,7 +178,12 @@ Phase 0–1 of [PLAN.md](PLAN.md): compose infra up, `backend/` skeleton, migrat
 - Contracts snapshot terms + price at activation. Contract documents are **app-native**: rich-text template edited in-app, rendered with the org's uploaded letterhead/logo, printed via browser — no server-side PDF in MVP. Digitally signed in-app: renter accepts via OTP to registered phone (+ optional drawn signature), landlord countersigns on activation; snapshot hash + OTP/IP/UA evidence stored append-only.
 - MVP payments are offline-recorded; gateway (scan-to-pay) is a reserved post-MVP seam.
 - Append-only audit log on every mutation.
+- Corrections are **append-style**, never destructive: a payment is reversed, an expense is voided, a template edit writes a version. The only deletion in the ledger is detaching a receipt from an expense.
+- Exactly **one** payment period per org carries the "Recommended" badge; the other seeded presets stay restorable but unbadged.
+- `{{rent}}` in a contract is the amount **per payment period**; `{{rent_basis}}` keeps the unit's own price. Contracts already signed keep their snapshot verbatim.
 
 ## UAT
 
-Testing checklist: [docs/UAT.md](docs/UAT.md) (flows 1–11, accounts, OTP-from-log). Load results: [docs/LOADTEST.md](docs/LOADTEST.md).
+Testing checklist: [docs/UAT.md](docs/UAT.md) — Part 1 covers flows 1–11 with the accounts and unit codes; **Part 2 (UAT 2)** covers the mobile shell, expenses, reports v2, theming, language, SMS credits and platform templates. Load results: [docs/LOADTEST.md](docs/LOADTEST.md).
+
+**Reading OTPs and SMS in dev.** With `BEEM_API_KEY` empty the log provider is active and every message is written to the API log: `make api-log`, or `tail -f .dev/api.log | grep sms_` — the code is in `sms_body`. With real Beem credentials set, **nothing is logged** and the message must arrive on the handset; a sender ID Beem has not approved fails the send with `API_INVALID_PARAMETER: Invalid Sender ID`. To go back to reading codes from the log, blank `BEEM_API_KEY` in `.env` and `make api-restart`.

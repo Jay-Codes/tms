@@ -439,7 +439,7 @@ export function ThemePanel({
                 return (
                   <div className={valid ? 'field' : 'field invalid'} key={f.key}>
                     <label htmlFor={`token_${f.key}`}>{t(f.labelKey)}</label>
-                    <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center' }}>
+                    <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center' }}>
                       <input
                         aria-label={t('theme.token.picker_aria', { label: t(f.labelKey) })}
                         type="color"

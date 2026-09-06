@@ -117,6 +117,12 @@ func printSummary(sum *seed.Summary, title string) {
 		sum.Contracts, sum.Schedules, sum.Payments, sum.Reversed)
 	fmt.Printf("              %d link request(s), %d notification row(s)\n",
 		sum.LinkRequests, sum.Notifications)
+	// Part 2 (PLAN2 Phase 15): the rows the expense ledger, the reports and
+	// the credit screens are read from.
+	fmt.Printf("              %d expense(s) over %d months (%d voided)\n",
+		sum.Expenses, seed.ExpenseMonths, sum.ExpensesVoided)
+	fmt.Printf("              %d SMS credit(s) on the org, %d message(s) held for credit\n",
+		sum.Credits, sum.Held)
 	for _, n := range sum.Notes {
 		fmt.Printf("note          %s\n", n)
 	}

@@ -243,6 +243,14 @@ button, input, select, textarea {
   transform: rotate(-4deg);
   transform-origin: center;
   opacity: 0.92;
+  /* The painted box is bigger than the layout box: `outline-offset` puts the
+     hairline 3px outside the border, and the 4deg rotation swings the corners
+     out again (~2px sideways, ~4px up and down on a stamp this size). Without
+     this margin the stamp bleeds over whatever sits next to it — which is how
+     it clipped the renter's contract header at 375px (Phase 15). The margin
+     reserves exactly that overhang, so a stamp never paints outside its own
+     line. */
+  margin: 4px 2px;
 }
 
 .stamp-paid {
@@ -573,6 +581,23 @@ button, input, select, textarea {
   }
 }
 
+/* ---------------- Page header (added Phase 15) ---------------- */
+/*
+   Title on the left, actions on the right. At tablet widths the rail is still
+   on screen but the content column is not wide enough for both, and the title
+   was the one that gave way — "Properties" came out clipped at 768px. Giving
+   the title block a flex basis makes the actions wrap under it instead.
+*/
+
+.page-head {
+  flex-wrap: wrap;
+}
+
+.page-head > :first-child {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
 /* ---------------- Table scroll ---------------- */
 /* A wide ledger scrolls inside its own box instead of pushing the page
    sideways. The gradients are the classic scroll-shadow trick: the white
@@ -593,6 +618,20 @@ button, input, select, textarea {
   min-width: 100%;
 }
 
+/*
+   `.ledger` is `width: 100%`, so inside a scroll box the table squeezed to fit
+   instead of scrolling: at 375px the units board wrapped "Mbezi Beach Block A"
+   over three lines and the row grew to match. On a phone the table takes the
+   width its content asks for and the box scrolls — which is what the wrapper
+   was for. Desktop is untouched.
+*/
+@media (max-width: 767px) {
+  .table-scroll > table {
+    width: max-content;
+    min-width: 100%;
+  }
+}
+
 /* ---------------- Sheets on small screens ---------------- */
 /* A dialog is the whole screen below 768px; the inline sizing on the element
    is deliberate there, hence !important. */
@@ -600,7 +639,11 @@ button, input, select, textarea {
 @media (max-width: 767px) {
   .sheet-backdrop {
     padding: 0 !important;
-    align-items: stretch !important;
+    /* `stretch` would size the dialog to the backdrop (one viewport) and let
+       a longer form spill past its own background onto the tinted backdrop.
+       `flex-start` lets the dialog take its content's height; the
+       `min-height: 100dvh` below still fills a short one. */
+    align-items: flex-start !important;
   }
 
   .sheet-dialog {
@@ -786,4 +829,129 @@ button, input, select, textarea {
   --chart-6: #008300;
   --chart-7: #9085e9;
   --chart-8: #e66767;
+}
+
+/* ---------------- Mobile hardening (added Phase 15) ---------------- */
+/*
+   Everything below is additive and phone-only: the desktop cascade above is
+   untouched. Three jobs:
+
+   1. Touch targets. Dozens of call sites tighten a button with an inline
+      `minHeight: 32` (a quiet action inside a ledger row reads better that
+      way on a desktop). On a phone that is a 32px target, so the floor is
+      restored here — `!important` because the offender is an inline style.
+   2. Stacking. Layout classes below let a page keep its desktop grid inline
+      and collapse to one column on a phone without a media query per page.
+   3. Reach. Rows of actions wrap instead of pushing the page sideways.
+*/
+
+/** A grid that collapses to a single column on a phone. */
+@media (max-width: 767px) {
+  .stack-sm {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* A row of buttons/filters wraps rather than overflowing. */
+  .wrap-sm {
+    flex-wrap: wrap !important;
+  }
+
+  /* Buttons: no inline style may take a target below the 44px floor. */
+  .btn {
+    min-height: var(--touch-min) !important;
+  }
+
+  /* A bare <select>/<input> outside `.field` still gets a usable height. */
+  select,
+  input[type='text'],
+  input[type='number'],
+  input[type='date'],
+  input[type='search'],
+  input[type='tel'],
+  input[type='email'],
+  input[type='password'] {
+    min-height: var(--touch-min);
+  }
+
+  /* A checkbox/radio is drawn at its intrinsic size, and several call sites
+     pin an 18px box inline; WCAG 2.2's 24px minimum wins on a phone. */
+  input[type='checkbox'],
+  input[type='radio'] {
+    width: 24px !important;
+    height: 24px !important;
+    /* Several sit in a flex row and would otherwise be squeezed back. */
+    flex: none !important;
+  }
+
+  /* A page header's actions wrap among themselves, not just under the title. */
+  .page-head-actions {
+    flex-wrap: wrap;
+  }
+
+  /* A secondary link inside a ledger row: 17px of text is not a target.
+     Padding (not min-height) keeps the row's own rhythm intact. */
+  .ledger td a,
+  .facts dd a,
+  span.facts > a {
+    display: inline-block;
+    padding-block: 4px;
+  }
+
+  /* A stat tile's "Open …" link is the tile's only action; give it the
+     full floor rather than the 16px its type sets. */
+  .stat-tile-sub a {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--touch-min);
+  }
+
+  /* The SW/EN pills are drawn at 28px so they fit a desktop auth footer;
+     on a phone they are the only way to change language before signing in. */
+  .lang-toggle button {
+    min-height: var(--touch-min);
+    min-width: var(--touch-min);
+  }
+}
+
+/* ---------------- Sticky action bar (added Phase 15) ---------------- */
+/*
+   A sheet's confirm/cancel row that must stay reachable while the body
+   scrolls. Below 768px a sheet is the whole screen, so the bar sits on the
+   safe area rather than under the home indicator.
+*/
+
+.action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+@media (max-width: 767px) {
+  .action-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    margin: 0 calc(-1 * var(--sp-5)) calc(-1 * var(--sp-5));
+    padding: var(--sp-3) var(--sp-5);
+    padding-bottom: calc(var(--sp-3) + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--rule);
+    background: var(--sheet);
+  }
+}
+
+/* ---------------- Document scroll box (added Phase 15) ---------------- */
+/*
+   A table inside a contract document scrolls on screen and prints whole —
+   the same rule the renter app carries in its own document.css, promoted
+   here so the landlord's copy of the document behaves identically.
+*/
+
+.doc-scroll-x {
+  overflow-x: auto;
+}
+
+@media print {
+  .doc-scroll-x {
+    overflow: visible !important;
+  }
 }

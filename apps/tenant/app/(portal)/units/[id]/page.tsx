@@ -29,7 +29,7 @@ import {
   type UnitStatusOverride,
 } from '../../../../lib/api';
 import { Amount, fmtDate, fmtPrice, todayISO } from '../../../../lib/format';
-import { useT } from '@tms/ui';
+import { TableScroll, useT } from '@tms/ui';
 
 /** Override choices as dictionary keys — translated where they are drawn. */
 const OVERRIDES: { value: UnitStatusOverride; labelKey: string; hintKey: string }[] = [
@@ -71,7 +71,10 @@ function QrBlock({ unit }: { unit: Unit }) {
   return (
     <div style={{ display: 'grid', gap: 'var(--sp-4)', maxWidth: 640 }}>
       <ProblemNote error={error} />
-      <dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: 'var(--sp-2) var(--sp-4)', margin: 0 }}>
+      <dl
+        className="stack-sm"
+        style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: 'var(--sp-2) var(--sp-4)', margin: 0 }}
+      >
         <dt style={{ color: 'var(--ink-soft)' }}>{t('qr.unit_code')}</dt>
         <dd className="num" style={{ margin: 0, textAlign: 'left', letterSpacing: '0.14em', fontWeight: 600 }}>
           {unit.unit_code}
@@ -81,7 +84,7 @@ function QrBlock({ unit }: { unit: Unit }) {
       </dl>
 
       {qr ? (
-        <div style={{ display: 'flex', gap: 'var(--sp-4)', alignItems: 'flex-start' }}>
+        <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-4)', alignItems: 'flex-start' }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={qr.png_url}
@@ -103,7 +106,7 @@ function QrBlock({ unit }: { unit: Unit }) {
           </div>
         </div>
       ) : (
-        <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center' }}>
+        <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center' }}>
           <button type="button" className="btn btn-primary" onClick={() => void generate()} disabled={busy}>
             <Icon icon="solar:qr-code-linear" width={20} /> {busy ? t('qr.working') : t('qr.show')}
           </button>
@@ -178,7 +181,8 @@ function Prices({ unit, onPriceAdded }: { unit: Unit; onPriceAdded: () => void }
         <Amount value={current?.amount ?? null} per={current?.period_days ?? null} />
       </p>
 
-      <table className="ledger">
+      <TableScroll label={t('units.price.table_label')}>
+<table className="ledger">
         <thead>
           <tr>
             <th>{t('units.effective_from')}</th>
@@ -214,12 +218,13 @@ function Prices({ unit, onPriceAdded }: { unit: Unit; onPriceAdded: () => void }
           )}
         </tbody>
       </table>
+</TableScroll>
 
       <form onSubmit={submit} style={{ display: 'grid', gap: 'var(--sp-4)' }} noValidate>
         <h3 style={{ fontSize: 'var(--text-md)', fontWeight: 600 }}>{t('units.price.new')}</h3>
         <ProblemNote error={formError} />
         {note ? <Note>{note}</Note> : null}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px 180px', gap: 'var(--sp-4)' }}>
+        <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '1fr 140px 180px', gap: 'var(--sp-4)' }}>
           <Field id="np_amount" label={t('units.price.amount_label')} error={formError?.errors.amount}>
             <input
               id="np_amount"
@@ -386,6 +391,7 @@ function UnitBody({ id }: { id: string }) {
             e.preventDefault();
             void patch({ name: name.trim() });
           }}
+          className="wrap-sm"
           style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'flex-end' }}
           noValidate
         >
@@ -396,7 +402,7 @@ function UnitBody({ id }: { id: string }) {
               value={name}
               maxLength={60}
               onChange={(e) => setName(e.target.value)}
-              style={{ width: 320 }}
+              style={{ width: 320, maxWidth: '100%' }}
             />
           </Field>
           <button

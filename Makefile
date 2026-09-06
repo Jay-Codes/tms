@@ -152,7 +152,7 @@ test: ## Run backend Go tests and workspace tests (includes the isolation suite)
 test-isolation: ## Run only the org/renter/admin isolation suite (SPEC §8)
 	@cd backend && TEST_DATABASE_URL="$${TEST_DATABASE_URL:-postgres://tms:tms_dev@localhost:5433/tms_test?sslmode=disable}" \
 		go test -v -count=1 ./internal/httpserver/ \
-		-run 'TestIsolationSuiteCoversEveryRoute|TestCrossOrgIsolationSuite|TestCrossRenterIsolationSuite|TestAdminRoutesRefuseTenantSessions'
+		-run 'TestIsolationSuiteCoversEveryRoute|TestCrossOrgIsolationSuite|TestCrossRenterIsolationSuite|TestAdminRoutesRefuseTenantSessions|TestPart2CrossOrgProbes|TestRenterCannotReadAnotherRentersLanguage'
 
 # The three packages that run goroutines of their own: the HTTP handlers, the
 # notification scheduler/worker pool, and the payment allocator. -race makes

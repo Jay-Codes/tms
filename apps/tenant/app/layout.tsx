@@ -40,6 +40,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       // the stored/account locale resolves; Swahili is the platform default.
       lang="sw"
       className={`${bricolage.variable} ${archivo.variable} ${instrument.variable} ${hanken.variable}`}
+      // The no-flash script below writes the cached org theme onto this very
+      // element (inline custom properties, and `data-theme` for a dark
+      // preset) *before* React hydrates, so the server's bare <html> and the
+      // browser's themed one never match. That difference is deliberate and
+      // is the only thing that keeps the first paint from being platform
+      // blue, so the warning is suppressed here rather than the paint being
+      // deferred to an effect. It suppresses attribute diffs on this element
+      // only — children are still checked normally.
+      suppressHydrationWarning
     >
       <body>
         {/*

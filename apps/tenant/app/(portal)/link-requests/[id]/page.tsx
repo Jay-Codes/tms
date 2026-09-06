@@ -80,7 +80,7 @@ function RejectForm({
           placeholder={t('linkreq.reject.placeholder')}
         />
       </Field>
-      <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+      <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
         <button type="submit" className="btn btn-danger" disabled={busy || reason.trim().length === 0}>
           {busy ? t('linkreq.reject.busy') : t('linkreq.reject.submit')}
         </button>
@@ -316,7 +316,7 @@ function RequestBody({ id }: { id: string }) {
         {pending ? (
           <div style={{ display: 'grid', gap: 'var(--sp-3)', maxWidth: 640 }}>
             <p style={{ color: 'var(--ink-soft)' }}>{t('linkreq.decide.lead')}</p>
-            <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+            <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
               <button type="button" className="btn btn-primary" onClick={() => setConfirmOpen(true)} disabled={busy}>
                 <Icon icon="solar:check-circle-linear" width={20} /> {t('linkreq.approve')}
               </button>
@@ -350,7 +350,7 @@ function RequestBody({ id }: { id: string }) {
               period: request.payment_period?.label?.toLowerCase() ?? '—',
             })}
           </p>
-          <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+          <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
             <button
               type="button"
               className="btn btn-primary"

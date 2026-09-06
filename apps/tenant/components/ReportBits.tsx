@@ -96,7 +96,13 @@ export function StatTile({
       <strong style={{ fontSize: 'var(--text-xl)', color, fontVariantNumeric: 'tabular-nums lining-nums' }}>
         {value}
       </strong>
-      {sub ? <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>{sub}</span> : null}
+      {/* `stat-tile-sub` is the hook the phone rules use to turn a bare link
+          here into a real touch target (tokens.css, Phase 15). */}
+      {sub ? (
+        <span className="stat-tile-sub" style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>
+          {sub}
+        </span>
+      ) : null}
     </div>
   );
 }

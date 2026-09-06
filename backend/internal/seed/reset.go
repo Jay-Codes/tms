@@ -23,12 +23,22 @@ var orgScopedDeletes = []string{
 	"DELETE FROM contract_signatures  WHERE org_id = $1",
 	"DELETE FROM unit_link_requests   WHERE org_id = $1",
 	"DELETE FROM contracts            WHERE org_id = $1",
+	// Part 2 (PLAN2 Phase 15). Expenses go before the units and properties
+	// they point at; the categories go after the expenses filed under them.
+	"DELETE FROM expenses             WHERE org_id = $1",
+	"DELETE FROM expense_categories   WHERE org_id = $1",
 	"DELETE FROM contract_templates   WHERE org_id = $1",
 	"DELETE FROM price_plans          WHERE org_id = $1",
 	"DELETE FROM units                WHERE org_id = $1",
 	"DELETE FROM properties           WHERE org_id = $1",
 	"DELETE FROM payment_periods      WHERE org_id = $1",
 	"DELETE FROM org_branding         WHERE org_id = $1",
+	"DELETE FROM org_themes           WHERE org_id = $1",
+	// The ledger is append-only in normal operation for the same reason the
+	// audit log is; the replica-role transaction above is what lets a reset
+	// take it away with the org it belongs to.
+	"DELETE FROM sms_credit_ledger    WHERE org_id = $1",
+	"DELETE FROM org_sms_credits      WHERE org_id = $1",
 	"DELETE FROM sessions             WHERE org_id = $1",
 }
 

@@ -113,8 +113,16 @@ type Summary struct {
 	Reversed      int
 	Notifications int
 	LinkRequests  int
-	UnitCodes     []UnitCode
-	Notes         []string
+	// Part 2 (PLAN2 Phase 15).
+	Expenses       int
+	ExpensesVoided int
+	// Credits is the SMS balance the run left on the org, not the delta.
+	Credits int
+	// Held is how many messages were parked `held_no_credit` for the admin
+	// credit screen.
+	Held      int
+	UnitCodes []UnitCode
+	Notes     []string
 }
 
 // UnitCode is one unit's scan code, printed at the end of a run so the UAT
@@ -454,7 +462,12 @@ func (s *Seeder) ensureUnit(ctx context.Context, orgID, actor pgtype.UUID, prop 
 // platform-level account, so this is not a tenancy — it is the only trace that
 // says which seed run is responsible for the row, and Reset uses it to take a
 // seeded renter away with the org that made them.
-func (s *Seeder) ensureRenter(ctx context.Context, orgID pgtype.UUID, phone, fullName, pin, nida, kinName, kinPhone string) (sqlc.User, bool, error) {
+// locale is the language this renter reads (`sw` or `en`, PLAN2 Phase 13).
+// Blank means the column default. Seeded orgs deliberately split their renters
+// between the two: an org where every renter reads Swahili never exercises the
+// English rendering path, and the bulk-SMS screen has nothing to show for its
+// per-language counts.
+func (s *Seeder) ensureRenter(ctx context.Context, orgID pgtype.UUID, phone, fullName, pin, nida, kinName, kinPhone, locale string) (sqlc.User, bool, error) {
 	normalized, err := validate.NormalizePhone(phone)
 	if err != nil {
 		return sqlc.User{}, false, fmt.Errorf("seed: renter phone %q: %w", phone, err)
@@ -473,9 +486,13 @@ func (s *Seeder) ensureRenter(ctx context.Context, orgID pgtype.UUID, phone, ful
 	}
 	var created sqlc.User
 	txErr := s.inTx(ctx, func(q *sqlc.Queries) error {
-		user, err := q.CreateUser(ctx, sqlc.CreateUserParams{
+		params := sqlc.CreateUserParams{
 			Kind: auth.KindRenter, Phone: &normalized, FullName: fullName, PinHash: &pinHash,
-		})
+		}
+		if locale != "" {
+			params.Locale = &locale
+		}
+		user, err := q.CreateUser(ctx, params)
 		if err != nil {
 			return err
 		}
@@ -501,7 +518,7 @@ func (s *Seeder) ensureRenter(ctx context.Context, orgID pgtype.UUID, phone, ful
 			OrgID:       db.UUIDString(orgID),
 			ActorUserID: db.UUIDString(user.ID), Action: audit.ActionRegisterRenter,
 			EntityType: audit.EntityUser, EntityID: db.UUIDString(user.ID),
-			After: map[string]any{"phone": normalized, "seeded": true},
+			After: map[string]any{"phone": normalized, "locale": locale, "seeded": true},
 		})
 	})
 	return created, true, txErr
@@ -540,13 +557,20 @@ type contractResult struct {
 func (s *Seeder) ensureContract(ctx context.Context, spec contractSpec) (contractResult, error) {
 	var out contractResult
 
-	live, err := s.q.CountLiveContractsForUnit(ctx, sqlc.CountLiveContractsForUnitParams{
-		OrgID: spec.orgID, UnitID: spec.unit.unit.ID,
-	})
-	if err != nil {
+	// Any contract at all, not just a live one. The Part 2 fixture backdates
+	// its starts far enough that the lifecycle sweep ends some of them and
+	// hands their units back to the vacancy board (PLAN2 Phase 15) — and a
+	// vacant unit is exactly what "no live contract" looks like, so the live
+	// check alone made a second run re-let every unit whose tenancy had just
+	// run out. Seeding is a question about history, not about occupancy.
+	var seen int64
+	if err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM contracts
+		 WHERE org_id = $1 AND unit_id = $2 AND deleted_at IS NULL`,
+		spec.orgID, spec.unit.unit.ID).Scan(&seen); err != nil {
 		return out, err
 	}
-	if live > 0 {
+	if seen > 0 {
 		return out, nil
 	}
 
@@ -580,7 +604,7 @@ func (s *Seeder) ensureContract(ctx context.Context, spec contractSpec) (contrac
 	rows := contract.Generate(int(spec.unit.price), int(spec.unit.periodDays),
 		int(spec.termDays), int(spec.period.Days), start, nil)
 
-	err = s.inTx(ctx, func(q *sqlc.Queries) error {
+	err := s.inTx(ctx, func(q *sqlc.Queries) error {
 		created, err := q.CreateContract(ctx, sqlc.CreateContractParams{
 			OrgID: spec.orgID, UnitID: spec.unit.unit.ID, RenterUserID: spec.renter.ID,
 			TemplateID: spec.templateID, TermsSnapshotHtml: terms,

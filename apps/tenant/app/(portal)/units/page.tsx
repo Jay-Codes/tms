@@ -152,7 +152,7 @@ function BulkPriceForm({
         <input id="bp_from" className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
       </Field>
 
-      <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+      <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
         <button type="submit" className="btn btn-primary" disabled={busy || value === ''}>
           {busy ? t('units.bulk.applying') : t('units.bulk.apply')}
         </button>
@@ -242,7 +242,7 @@ function UnitsBody() {
       />
 
       <div style={{ display: 'flex', gap: 'var(--sp-4)', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 'var(--sp-4)' }}>
-        <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }} role="tablist" aria-label={t('common.status')}>
+        <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }} role="tablist" aria-label={t('common.status')}>
           {TABS.map((tab) => {
             const active = status === tab.value;
             return (

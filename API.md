@@ -309,102 +309,74 @@ Notes fixed in Phase 7:
 ### PWA
 Each app: `public/manifest.webmanifest` (name per app, `start_url` = basePath, display standalone, theme_color from core palette, icons 192/512 generated PNG), `<link rel=manifest>` in layout, service worker `public/sw.js` registered client-side: cache-first for app shell (`/_next/static/*`, manifest, icons), network-only for `/api/*` and presigned bucket paths, navigation fallback = cached shell; no offline writes. Registered only in production builds or when `NEXT_PUBLIC_ENABLE_SW=1` (avoid HMR interference in dev).
 
-## Part 2 (Phases 9–15) — planned contract
+## Part 2 — shipped contract (Phases 9–14)
 
-Everything below is **planned** until its phase ships; a row becomes live when the phase's `PROGRESS.md` entry lands, and the phase heading drops the "planned" marker. Plan and phase order in [PLAN2.md](PLAN2.md); semantics in SPEC §2.0, §3.2, §5.11–5.13, §6, §7.
+Everything in this section is **live**. It replaces the per-phase "planned" and
+"shipped" sections the phases were written against: where the plan and the code
+disagreed, the code is what is written below and the difference is called out in
+[Deviations from the planned contract](#deviations-from-the-planned-contract) at
+the end. Plan and phase order in [PLAN2.md](PLAN2.md); semantics in SPEC §2.0,
+§3.2, §5.11–5.13, §6, §7; flows 9, 12 and 13 in [FLOWS.md](FLOWS.md).
 
-### Phase 9 — foundations + end-to-end fixes (planned)
+Part 2 keeps every Phase 1–7 convention: audience cookies, RFC-7807 problems
+with the machine-readable code in `type`, **400** for a malformed field with
+`errors` populated, **404** for an id outside the caller's scope (never 403),
+and an audit row on every mutation. Two refusals are new and used only by the
+reporting windows: **422** for a request that parses but cannot be satisfied
+(`window cannot be resolved`, `too_many_buckets`), and **409** for the two Part 2
+business conflicts (`insufficient_sms_credits`, `template_locked`).
 
-| `POST /org/payment-periods/{id}/recommend` | (no body) → `200 {period}` — moves the single "Recommended" badge to this period and clears it from every other one in the org, in one transaction. Audience org (`tms_o`), owner + manager. An inactive or soft-deleted period → 409 `period_inactive`; another org's id → 404. Audited `payment_period.recommend` (`before`/`after` name the period that lost and the one that gained the badge). |
-| `GET /org/payment-periods` | unchanged shape, with a new guarantee: **at most one item has `is_recommended: true`** (partial unique index `payment_periods (org_id) WHERE is_recommended AND deleted_at IS NULL`). Ordering stays recommended first, then `sort_order`. `POST /org/payment-periods/restore-recommended` restores any missing seeded presets (30/90/180/365) unbadged; if the org has no recommended period at all, Monthly is badged so there is never zero. |
-| `GET /public/units/{unit_code}` | unchanged shape; `periods[]` is ordered recommended-first, and the badge now marks exactly one entry. |
-| `GET /contracts/{id}` and renter `GET /contracts/{id}` | gain `rent_per_period` (int TZS) beside the existing `rent_amount`, `rent_period_days` and `payment_period_days`. `rent_per_period = round(rent_amount × payment_period_days / rent_period_days)` — the schedule's proration rounding, so it equals a full schedule row's amount. |
-| `GET /contracts/{id}/document` | `{{rent}}` in the rendered terms is now the **per-payment-period** amount; new template variable `{{rent_basis}}` renders the unit price with its basis (`"TZS 100,000 / 30 days"`). Contracts signed before this change keep their `terms_snapshot_html` verbatim (snapshot rule) and their `snapshot_hash` is unaffected — the hash covers the rendered terms. |
-| `GET/POST/PATCH /contract-templates` | the variable list returned for the editor gains `rent_basis`; unknown variables are still a 400. |
+### Payment periods — the single recommended badge
 
-Phase 9 notes:
+Exactly one payment period per org carries the badge, enforced by a partial
+unique index (`payment_periods (org_id) WHERE is_recommended AND deleted_at IS
+NULL`). Audience org (`tms_o`), owner + manager.
 
-- `{{rent}}` and `rent_per_period` come from one helper, `contract.RentPerPeriod(rentAmount, rentPeriodDays, paymentPeriodDays)`, shared with schedule generation, so the document and the schedules can never quote different figures.
-- The **period resolver** (`internal/period`: cadence + anchor → `[from, to)` in EAT, plus bucket sizing) and the **client-IP trust rule** are internals — no endpoint exposes them. They surface only through the resolved `{from, to, cadence}` echoed by the Phase 11 report endpoints and through audit `ip` values.
-- Migration `000012_part2_foundations` adds the partial unique index, `users.locale`, and the (still unused) Part 2 tables; compose init adds the `receipts` bucket.
+| `POST /org/payment-periods/{id}/recommend` | (no body) → `200 {period}` — moves the badge to this period and clears it from every other one in the org, in one transaction. An inactive or soft-deleted period → **409 `period_inactive`**; another org's id → 404. Audited `payment_period.recommend`, `before`/`after` naming the period that lost the badge and the one that gained it. |
+| `GET /org/payment-periods` | unchanged shape, with a new guarantee: **at most one item has `is_recommended: true`**. Ordering stays recommended first, then `sort_order`. |
+| `PATCH /org/payment-periods/{id}` | rejects `is_recommended` — the badge moves only through `/recommend`. |
+| `POST /org/payment-periods/restore-recommended` | restores any missing seeded presets (30/90/180/365) **unbadged**; if the org has no recommended period at all, Monthly is badged, so there is never zero. |
+| `GET /public/units/{unit_code}` | unchanged shape; `periods[]` is ordered recommended-first and the badge now marks exactly one entry. |
 
-### Phase 10 — expenses (planned)
+Org bootstrap (`POST /orgs`) and `internal/seed` badge Monthly and nothing else.
 
-| `GET/POST/PATCH/DELETE /org/expense-categories` | `{name(1–60), sort_order?, active?}` → `{category}` / `{items}`; seeded with the eight defaults; a category in use cannot be hard-deleted (deactivate instead). |
-| `POST /expenses` | `{property_id, unit_id?, category_id, amount(int>0), incurred_on(date ≤ today+1), vendor?, reference?, note?}` → `201 {expense}`. Unit must belong to the property (400); cross-org ids → 404. |
-| `PATCH /expenses/{id}` | partial → `200 {expense}`; audited before/after. A voided expense → 409 `expense_voided`. |
-| `POST /expenses/{id}/void` | `{reason}` → `200 {expense}` with `status:"voided"` — append-style correction, nothing is restored or deleted. Already voided → 409 `expense_voided`. |
-| `GET /expenses?property_id=&unit_id=&category_id=&from=&to=&cursor=&limit=` | → `{items:[expense], next_cursor}`; `format=csv` streams the same rows, formula-neutralised. |
-| `POST /expenses/{id}/receipt` / `…/receipt/complete` / `GET …/receipt` | presigned PUT into bucket `receipts`, key `{org_id}/{expense_id}.{ext}`, ≤ 5 MiB, `image/jpeg` `image/png` `application/pdf`; read is a short-TTL presigned URL. |
-| `GET /expenses/summary?cadence=&from=&to=&group_by=property\|category` | → `{from,to,cadence,previous,groups:[{id,name,total}],total}`. |
+### Contracts — rent per payment period, and the document's language
 
-### Phase 11 — reports v2 (planned)
+| `GET /contracts/{id}` (org **and** renter audience) | gains `rent_per_period` (int TZS) beside `rent_amount`, `rent_period_days` and `payment_period`, and `language` (`"sw"\|"en"`). `rent_per_period = round(rent_amount × payment_period_days / rent_period_days)` — the schedule's own proration rounding, so it equals a full schedule row's amount. It is **derived, never stored**: the snapshot columns stay the source of truth. |
+| `GET /contracts/{id}/document` | `{{rent}}` in the rendered terms is the **per-payment-period** amount; `{{rent_basis}}` renders the unit price with its basis (`"TZS 100,000 / 30 days"`). Contracts signed before Phase 9 keep `terms_snapshot_html` verbatim (snapshot rule) and their `snapshot_hash` is unaffected — the hash covers the rendered terms. |
+| `POST /contracts` | optional `language` (`"sw"\|"en"`), defaulting to **the renter's own locale**. The Swahili body is used when the org has written one; an org that has not keeps issuing the English document rather than a blank one, and `language` records which of the two the renter actually received. `{{due_day}}` and `{{rent_basis}}` render in the contract's language. An unknown value → 400. |
+| `GET/POST/PATCH /contract-templates` | the variable list gains `rent_basis`; unknown variables are still a 400. `body_html_sw` is the Swahili twin of `body_html` (below). |
 
-| `GET /reports/summary\|payment-status\|collections`, `GET /expenses/summary` | all accept `cadence=month\|quarter\|half_year\|year\|custom` with `from`/`to` (required for `custom`) and optional `anchor`; every response echoes `{from,to,cadence}` and a `previous:{from,to}` window. Range beyond 5 years → 400. |
-| `GET /reports/revenue?cadence=&from=&to=&bucket=&property_id=&group_by=property` | → `{from,to,cadence,buckets:[{start,expected,collected,expenses,net}], totals, previous_totals, change_pct:{collected,expenses,net}, trend:{slope_collected_per_bucket}}`. Cash basis (non-reversed payments by `paid_at`), expected = schedules due in the bucket excluding waived, expenses by `incurred_on` excluding voided. Zero-filled; `bucket` auto `day` ≤ 62 days, `week` ≤ 26 weeks, else `month`; > 400 buckets → 400. |
-| `GET /reports/occupancy?cadence=&from=&to=&bucket=&property_id=` | → `{from,to,cadence,buckets:[{start,occupied,total,rate}]}` measured at each bucket end. |
-| `PUT /org/branding {dashboard_prefs}` | card ids gain `revenue`, `expenses`, `net_income`. |
+`{{rent}}` and `rent_per_period` come from one helper,
+`contract.RentPerPeriod(rentAmount, rentPeriodDays, paymentPeriodDays)`, shared
+with schedule generation, so the document and the schedules can never quote
+different figures. `contracts.language` is stored beside the terms it snapshots
+and returned on every `contract` DTO; **contracts issued before Part 2 read
+`"en"`** — the sole template body was the English one.
 
-### Phase 12 — theming v2 (planned)
+### Expenses
 
-| `GET /themes/presets` | public, cacheable → `{items:[{id,name,dark:bool,tokens:{paper,surface,ink,ink_muted,rule,primary,accent},font_id}]}` — the eight shipped presets. |
-| `GET/PUT /org/branding` | `theme` becomes `{preset_id:string\|null, tokens:{…}\|null, font_id}`. The server re-validates contrast and answers **400** with `errors.theme.contrast` listing the failing pairs and their ratios when a body-text pair is below 4.5:1. Audited `org.branding_update`. |
-| `GET /public/orgs/{slug}/branding`, `GET /public/units/{unit_code}` | `theme` carries the **resolved** token set (preset merged with the org's overrides; preset `ledger` when the org has none) plus `font_id`, so the renter app paints without a second call. |
-
-### Phase 13 — language (planned)
-
-| `POST /auth/register/renter`, `POST /orgs` | accept `locale:"sw"\|"en"` (default `sw`), carried from the public SW/EN toggle. |
-| `GET /auth/me`, `GET /me/profile` | return `locale` on `user`. |
-| `PATCH /me` (renter, `tms_r`) / `PATCH /org/members/me` (org user, `tms_o`) | `{locale:"sw"\|"en"}` → `200 {user}`; audited `user.locale_update`. |
-| `POST /notifications/custom` | body becomes `{body_sw?, body_en?, recipients, renter_user_ids?}` — at least one language required; each recipient gets the body for their locale, falling back to the other when only one is given. `202 {batch_id, queued:{sw,en}, skipped:n}`; the log row records the language used. Insufficient credits → 409 `insufficient_sms_credits {needed, balance}`. |
-| `GET /org/notification-settings` | `language` is relabelled in the UI as the default for renters without a preference; the wire field is unchanged (`orgs.settings.sms_language`). |
-| `POST /contracts` | optional `language` (defaults to the renter's locale); the snapshot records it. |
-
-### Phase 14 — SMS credits & platform templates (planned)
-
-| `GET /org/sms-credits` (audience org) | → `{balance, low_watermark, held_count}`. |
-| `GET /admin/orgs/{id}/sms` | → `{balance, low_watermark, used_30d, held_count, ledger:[{delta,balance_after,reason:"topup"\|"adjust"\|"debit"\|"refund",note,admin_name,created_at}]}`. |
-| `POST /admin/orgs/{id}/sms/topup` | `{credits(int>0), note}` → `200 {balance}`; releases `held_no_credit` rows in queue order. |
-| `POST /admin/orgs/{id}/sms/adjust` | `{delta(int≠0), note}` → `200 {balance}`; balance never goes below 0 (400). |
-| `PATCH /admin/orgs/{id}/sms` | `{low_watermark(int≥0)}` → `200 {low_watermark}`. |
-| `GET /admin/templates` | → `{items:[{kind,sw,en,variables:[…],locked,version,updated_by,updated_at}]}`. |
-| `PUT /admin/templates/{kind}` | `{sw, en}` (both required) → `200 {template}`; unknown variable → 400, > 3 segments → 200 with a `warnings` array; records a version; audited. |
-| `PATCH /admin/templates/{kind}` | `{locked:bool}` → `200 {template}`; `otp` ships locked. |
-| `POST /admin/templates/{kind}/preview` | `{language, sample?}` → `200 {body, segments, encoding:"gsm"\|"ucs2"}`. |
-| `POST /admin/templates/{kind}/revert` | `{version}` → `200 {template}` (restored as a new version). |
-| `PUT /org/notification-settings` | an override of a locked kind → **409 `template_locked`**; the GET marks locked kinds read-only. |
-| `GET /notifications/log` | `status` gains **`held_no_credit`** (`queued\|sending\|sent\|failed\|held_no_credit`); a held row is not `failed` and is not retryable — it leaves on the next top-up. |
-
-Credit rules: 1 credit per 160-character GSM segment (70 for UCS-2), debited **at send time** as one conditional update; `otp` and other security kinds are exempt (configurable list); an append-only `sms_credit_ledger` row records every movement with `balance_after`.
-
-### Phase 15 — hardening (planned)
-
-No new endpoints. Reports v2 routes enter `make loadtest` (p95 < 300 ms on the seed org), the isolation census covers every Part 2 route, and receipt uploads and admin template edits gain rate limits.
-
-## Part 2 — Phase 10 (shipped)
-
-The expense ledger (SPEC §5.11, FLOWS 12). Every route below is audience **org**
-(`tms_o`), owner + manager — the org's two roles: whoever may record a payment
-may record an expense. Errors are the same RFC-7807 documents as Phase 5, with
-the machine-readable code in `type`: `category_exists`, `category_in_use`,
-`expense_voided`. Another org's id is a 404 everywhere.
+The expense ledger (SPEC §5.11, FLOWS 12). Audience **org** (`tms_o`), owner +
+manager — whoever may record a payment may record an expense. Codes in `type`:
+`category_exists`, `category_in_use`, `expense_voided`. Another org's id is a 404
+everywhere.
 
 `category` shape: `{id, name, is_default, sort_order, active, created_at}`
 `expense` shape: `{id, property:{id,name}, unit:{id,name}|null, category:{id,name}|null, amount(int TZS), incurred_on:"YYYY-MM-DD", vendor, reference, note, receipt:{present:bool, content_type|null, size|null}, recorded_by:{user_id,name}|null, status:"recorded"|"voided", voided_at|null, void_reason|null, created_at, updated_at}`
 
-### Categories
+#### Categories
 
 | `GET /org/expense-categories` | → `{items:[category]}`, ordered by `sort_order` then `name`. Includes inactive rows (`active:false`) so the settings screen can switch one back on; excludes soft-deleted ones. **Seeds lazily:** an org with no categories gets the eight defaults on this read, so orgs created before Phase 10 are not left with an empty picker. |
-| `POST /org/expense-categories` | `{name(1–60), sort_order?(0–10000)}` → `201 {category}`; `is_default:false`. Omitting `sort_order` appends to the end. A duplicate name (case-insensitive, ignoring soft-deleted rows) → **409 `category_exists`**. Audited `expense_category.create`. |
-| `PATCH /org/expense-categories/{id}` | `{name?, sort_order?, active?}` → `200 {category}`; duplicate name → 409 `category_exists`. Audited `expense_category.update` (before/after). |
-| `DELETE /org/expense-categories/{id}` | → **204**, soft delete. If any non-deleted expense is filed under it → **409 `category_in_use`** ("deactivate it instead"). Audited `expense_category.delete`. |
+| `POST /org/expense-categories` | `{name(1–60), sort_order?(0–10000)}` → `201 {category}`; `is_default:false`. Omitting `sort_order` appends. A duplicate name (case-insensitive, ignoring soft-deleted rows) → **409 `category_exists`**. Audited `expense_category.create`. |
+| `PATCH /org/expense-categories/{id}` | `{name?, sort_order?, active?}` → `200 {category}`; duplicate name → 409 `category_exists`. Audited `expense_category.update`. |
+| `DELETE /org/expense-categories/{id}` | → **204**, soft delete. Any non-deleted expense filed under it → **409 `category_in_use`** ("deactivate it instead"). Audited `expense_category.delete`. |
 
 The eight seeded defaults, `is_default:true`, `sort_order` 1…8 in this order:
 Repairs & maintenance, Utilities, Security, Cleaning, Taxes & levies, Insurance,
 Management fees, Other. They are written by `POST /orgs`, by `internal/seed`, and
 lazily by the list endpoint — one list, `internal/expense.DefaultCategories`.
 
-### Expenses
+#### The ledger
 
 | `POST /expenses` | `{property_id, unit_id?, category_id?, amount(int 1…1,000,000,000), incurred_on(date), vendor?(≤120), reference?(≤120), note?(≤1000)}` → `201 {expense}`. `incurred_on` is `YYYY-MM-DD`, no earlier than `2000-01-01` and no later than **tomorrow** on the platform wall clock (Africa/Dar_es_Salaam). A property that is not the caller's → 404. A `unit_id` that is not a unit of that property, or a `category_id` that is not an **active** category of the org → **422** with the field named in `errors`. Audited `expense.create`. |
 | `PATCH /expenses/{id}` | partial, same fields → `200 {expense}`. `unit_id`/`category_id` accept an explicit `null` to clear them (an absent member leaves them alone). References are validated against the merged post-patch row, so moving an expense to another property with its old unit attached is refused. A voided expense → **409 `expense_voided`**. Audited `expense.update` (before/after). |
@@ -414,16 +386,12 @@ lazily by the list endpoint — one list, `internal/expense.DefaultCategories`.
 | `GET /expenses/{id}` | → `{expense}`; another org's id → 404. |
 | `GET /expenses/summary?cadence=&anchor=&from=&to=&group_by=property\|category&property_id=` | → `{window:{from,to,cadence}, previous:{from,to,cadence}, group_by, groups:[{id,name,amount,count}], total:{amount,count}, previous_total:{amount,count}, change_pct:number\|null}`. `status:"recorded"` only. |
 
-Phase 10 notes (implementation-confirmed):
-
-- **Windows.** With a `cadence` (`month` default, plus `quarter`, `half_year`,
-  `year`, `custom`) the window comes from the shared resolver `internal/period`,
-  so "this quarter" means the same here as on every other Part 2 report: EAT
-  midnight, half-open `[from, to)`, and the echoed `to` is the **exclusive** end.
-  Without a cadence, `GET /expenses` reads `from`/`to` as plain **inclusive**
-  dates and either may be omitted. `anchor` (a date) moves the window a
-  PeriodPicker has navigated to. A custom range needs both dates and may not
-  exceed five years (400 on `cadence`).
+- **Windows.** With a `cadence` the window comes from the shared resolver
+  (below), so "this quarter" means the same here as on every other Part 2
+  report. **Without** a cadence, `GET /expenses` reads `from`/`to` as plain
+  **inclusive** dates and either may be omitted. The ledger listing keeps its
+  Phase 10 behaviour of answering **400** for every window refusal, where the
+  reports answer 422 for an unsatisfiable one.
 - **Summary grouping** is zero-filled from the org's own rows rather than from
   the expenses: `group_by=property` returns a group per live property and
   `group_by=category` one per **active** category, spend or no spend, so a chart
@@ -432,56 +400,26 @@ Phase 10 notes (implementation-confirmed):
   and only when it holds something. Groups are sorted by `amount` descending,
   ties broken by name. `property_id` narrows both the groups and the totals.
 - **`change_pct`** is the movement against `previous_total`, rounded to one
-  decimal place, and **null when the previous window is empty** — a rise from
-  nothing is a first month, not "+100%". The arithmetic is
-  `internal/expense.ChangePct`, table-tested apart from the database.
+  decimal, and **null when the previous window is empty** — a rise from nothing
+  is a first month, not "+100%" (`internal/expense.ChangePct`).
 - **Pagination** carries the whole sort tuple: the cursor is base64url of
-  `incurred_on,created_at,id`, because a ledger sorted by a date alone would
-  drop rows at every page boundary that lands inside a busy day. It is therefore
-  not interchangeable with the `(timestamp,id)` cursor of the other listings.
+  `incurred_on,created_at,id`, because a ledger sorted by a date alone would drop
+  rows at every page boundary inside a busy day. It is therefore not
+  interchangeable with the `(timestamp,id)` cursor of the other listings.
 - **`q`** matches `vendor`, `reference` and `note` with `ILIKE`, its wildcards
-  escaped the way `/units` and `/renters` escape theirs (Phase 8), so a search
-  for `%` finds the vendor actually named with one.
-- **Receipts** live in bucket `receipts` under `{org_id}/{expense_id}.{jpg|png|pdf}`
-  — both segments are ids the server holds, so no request can steer the key.
-  - `POST /expenses/{id}/receipt` `{content_type:"image/jpeg"|"image/png"|"application/pdf", size(1…5 MiB)}`
-    → `200 {upload_url, object_key, expires_in:900, headers:{"Content-Type":…}}`.
-    The presigned PUT **must** carry that `Content-Type`: the completion callback
-    checks what MinIO stored. Rate limited to **30 per hour per org**; a voided
-    expense → 409 `expense_voided`; MinIO down → 503.
-  - `POST /expenses/{id}/receipt/complete` `{object_key?}` → `200 {expense}`.
-    The key is rebuilt from the org and the expense and only then matched against
-    what was sent, so a foreign prefix is a 400 before object storage is asked
-    anything; omitting it stats the three candidate keys. The object must exist,
-    be ≤ 5 MiB, and carry a content type matching the extension it was issued
-    under — otherwise it is deleted and the answer is 400. The accepted type and
-    the real size are stored (migration `000013_expense_receipts` adds
-    `expenses.receipt_content_type` and `receipt_size`) so a page of fifty ledger
-    rows renders its receipt chips without fifty round trips to MinIO. Audited
-    `expense.receipt_attach`.
-  - `GET /expenses/{id}/receipt` → `{url, expires_in:900}`, a presigned GET; no
-    receipt → 404.
-  - `DELETE /expenses/{id}/receipt` → `200 {expense}`, clears the three columns
-    and removes the object. This is the one deletion in the ledger, and it is
-    deliberate: the receipt is an attachment, the expense row is the record.
-    Audited `expense.receipt_remove`.
-- **Schema:** the tables came with `000012_part2_foundations`; Phase 10 adds only
-  `000013_expense_receipts` (the two receipt metadata columns). `expenses` and
-  `expense_categories` join the SPEC §2.1 org-scope guard, so a query against
-  either without an `org_id =` filter now fails the build.
+  escaped the way `/units` and `/renters` escape theirs (Phase 8).
 
-Phase 10 audit actions: `expense_category.create`, `expense_category.update`,
-`expense_category.delete`, `expense.create`, `expense.update`, `expense.void`,
-`expense.receipt_attach`, `expense.receipt_remove`.
+#### Receipts
 
-## Part 2 — Phase 11 (shipped)
+Bucket `receipts`, key `{org_id}/{expense_id}.{jpg|png|pdf}` — both segments are
+ids the server holds, so no request can steer the key.
 
-Reports v2 (SPEC §5.9, FLOWS 9, PLAN2 Phase 11): the same window vocabulary on
-every report, two new series, and a per-property breakdown. Audience **org**
-(`tms_o`), the same roles as the Phase 7 reports. Another org's `property_id`
-matches nothing rather than erroring — a foreign id is never confirmed.
+| `POST /expenses/{id}/receipt` | `{content_type:"image/jpeg"\|"image/png"\|"application/pdf", size(1…5 MiB)}` → `200 {upload_url, object_key, expires_in:900, headers:{"Content-Type":…}}`. The presigned PUT **must** carry that `Content-Type`: the completion callback checks what MinIO stored. Rate limited to **30 per hour per org**; a voided expense → 409 `expense_voided`; MinIO down → 503. |
+| `POST /expenses/{id}/receipt/complete` | `{object_key?}` → `200 {expense}`. The key is rebuilt from the org and the expense and only then matched against what was sent, so a foreign prefix is a 400 before object storage is asked anything; omitting it stats the three candidate keys. The object must exist, be ≤ 5 MiB, and carry a content type matching the extension it was issued under — otherwise it is deleted and the answer is 400. The accepted type and the real size are stored (`expenses.receipt_content_type`, `receipt_size`) so a page of fifty ledger rows renders its receipt chips without fifty round trips to MinIO. Audited `expense.receipt_attach`. |
+| `GET /expenses/{id}/receipt` | → `{url, expires_in:900}`, a presigned GET; no receipt → 404. |
+| `DELETE /expenses/{id}/receipt` | → `200 {expense}`, clears the three columns and removes the object. This is the one deletion in the ledger, and it is deliberate: the receipt is an attachment, the expense row is the record. Audited `expense.receipt_remove`. |
 
-### The shared window
+### Reports v2 — the shared window
 
 `cadence=month|quarter|half_year|year|custom`, `anchor=YYYY-MM-DD`, `from`, `to`
 are accepted by `GET /reports/summary`, `/reports/payment-status`,
@@ -507,45 +445,48 @@ Refusals separate the malformed from the impossible:
 | a window needing more than 400 buckets at the requested size | **422** `type:"too_many_buckets"` |
 
 `GET /reports/summary` also still takes the Phase 7 `period=month|YYYY-MM`,
-translated to `cadence=month` with that month's anchor; sending both `period`
-and `cadence` is a 400 on `period`. `GET /expenses` (the ledger listing, not the
-summary) keeps its Phase 10 behaviour: 400 for every window refusal.
+translated to `cadence=month` with that month's anchor; sending both `period` and
+`cadence` is a 400 on `period`.
 
-### What the four existing reports gained
+Audience **org** (`tms_o`), the same roles as the Phase 7 reports. Another org's
+`property_id` matches nothing rather than erroring — a foreign id is never
+confirmed. Every series endpoint runs the org-scoped overdue flip first, as the
+Phase 7 reports do.
 
-| `GET /reports/summary` | `window`, `previous`, `previous_totals:{expected,collected,outstanding,overdue_count,overdue_amount}` and `change_pct` keyed by those same five names. The Phase 7 `period` block is unchanged — still **inclusive** `from`/`to` and the same five figures — so existing clients keep working. |
+#### What the four existing reports gained
+
+| `GET /reports/summary` | `window`, `previous`, `previous_totals:{expected,collected,outstanding,overdue_count,overdue_amount}` and `change_pct` keyed by those same five names. The Phase 7 `period` block is unchanged — still **inclusive** `from`/`to` and the same five figures — so existing clients keep working. Its `occupancy_rate` remains a **0–1 fraction**. |
 | `GET /reports/payment-status` | `window` and `previous`, beside the unchanged `items`. The window is context for the page, **not** a filter: a renter's standing is a fact about now. |
 | `GET /reports/collections` | `window`, `previous`, `group` (the size actually used), `previous_totals:{expected,collected}` and `change_pct:{expected,collected}`. With a `cadence` the window drives the range and the grouping defaults to the auto-sized bucket (`bucket=` is accepted as a synonym for `group=`); without one, the Phase 7 defaults stand — `group=month`, the twelve months ending today, `from`/`to` inclusive — and the echoed window is `cadence:"custom"`. Buckets stay calendar-aligned here, as they always were. |
-| `GET /expenses/summary` | unchanged shape (it already carried `window`, `previous`, `previous_total`, `change_pct`); only the 422 refusals above are new. |
+| `GET /expenses/summary` | the shape above; only the 422 refusals are new. |
 
-### `GET /reports/revenue`
+#### `GET /reports/revenue`
 
 `?cadence=&anchor=&from=&to=&bucket=day|week|month&property_id=`
 
 → `{window, previous, bucket, buckets:[{start,expected,collected,expenses,net}], totals:{expected,collected,expenses,net}, previous_totals:{…}, change_pct:{expected,collected,expenses,net}, trend:{slope_collected_per_bucket}, collection_rate}`
 
 - **collected** = non-reversed, non-deleted payments by `paid_at`, bucketed on
-  the EAT wall clock. **expected** = `payment_schedules` by `due_date`,
-  excluding `waived` (which is how a terminated tenancy's remaining periods drop
-  out — FLOWS 6.5 waives them). **expenses** = `recorded` expenses by
-  `incurred_on`. **net** = collected − expenses: cash in minus cash out, because
-  a bank balance does not move on an invoice.
+  the EAT wall clock. **expected** = `payment_schedules` by `due_date`, excluding
+  `waived` (which is how a terminated tenancy's remaining periods drop out —
+  FLOWS 6.5 waives them). **expenses** = `recorded` expenses by `incurred_on`.
+  **net** = collected − expenses: cash in minus cash out, because a bank balance
+  does not move on an invoice.
 - `bucket` is auto-sized when absent — `day` ≤ 62 days, `week` ≤ 26 weeks, else
-  `month` — and echoed. Buckets are zero-filled, and the **first bucket starts
-  on the window's own first day**: a custom range opened on the 12th reports
-  from the 12th rather than snapping back to the 1st.
+  `month` — and echoed. Buckets are zero-filled, and the **first bucket starts on
+  the window's own first day**: a custom range opened on the 12th reports from
+  the 12th rather than snapping back to the 1st.
 - `trend.slope_collected_per_bucket` is the least-squares gradient of the
   collected series against its bucket index, rounded to one decimal; 0 for a
   series of fewer than two points.
-- `collection_rate` is `collected / expected` as a fraction, **null** when
+- `collection_rate` is `collected / expected` as a **fraction (0–1)**, null when
   nothing was expected.
 - `change_pct` members are percentages rounded to one decimal and are **null**
-  when the previous window's figure was zero — a rise from nothing is a first
-  period, not "+100%" (Phase 10's rule, now `internal/report.ChangePct`).
-- `property_id` narrows all three series alike: payments through
-  contract → unit → property, schedules likewise, expenses directly.
+  when the previous window's figure was zero.
+- `property_id` narrows all three series alike: payments through contract → unit
+  → property, schedules likewise, expenses directly.
 
-`?group_by=property` (with the same parameters) →
+`?group_by=property` (same parameters) →
 `{window, previous, groups:[{id,name,expected,collected,expenses,net,collection_rate}], totals, previous_totals, change_pct}`
 
 One row per **live property**, zero-filled from the property list rather than
@@ -553,7 +494,7 @@ from the money, so a block that earned nothing keeps its place and its colour in
 the legend. Sorted by `net` descending, ties broken by name. The rows always add
 up to `totals`. Any `group_by` other than `property` is a 400.
 
-### `GET /reports/occupancy`
+#### `GET /reports/occupancy`
 
 `?cadence=&anchor=&from=&to=&bucket=&property_id=` →
 `{window, previous, bucket, buckets:[{start, units_total, units_occupied, occupancy_pct}], current:{units_total, units_occupied, occupancy_pct}}`
@@ -564,61 +505,64 @@ up to `totals`. Any `group_by` other than `property` is a 400.
   end_date`, `end_date` being exclusive as everywhere else (SPEC §4). Statuses
   `active`, `expiring`, `ended` and `terminated` all count, because occupancy is
   a history: a unit let in March was let in March whatever happened since.
-  `draft` and `pending_signature` never count — nobody moved in. A terminated
-  tenancy counts **through its `termination_effective_date` inclusive**, the
-  same day its remaining schedules stop being waived.
+  `draft` and `pending_signature` never count. A terminated tenancy counts
+  **through its `termination_effective_date` inclusive**, the same day its
+  remaining schedules stop being waived.
 - `units_total` counts the org's non-deleted units that already existed on that
-  day (by `created_at`), so a bucket before a unit was created does not count
-  it. A tenancy on a since-deleted unit is dropped, so the ratio cannot exceed 1.
-- `occupancy_pct` is a **percentage, 0–100**, rounded to one decimal (unlike the
-  Phase 7 summary's `occupancy_rate`, which is a 0–1 fraction).
+  day (by `created_at`). A tenancy on a since-deleted unit is dropped, so the
+  ratio cannot exceed 1.
+- `occupancy_pct` is a **percentage, 0–100**, rounded to one decimal — unlike
+  `collection_rate` and the Phase 7 summary's `occupancy_rate`, which are 0–1
+  fractions.
 - `current` is the most recent real measurement the window contains: today when
-  today falls inside it, otherwise the nearest end of it — a window that has not
-  finished is never measured at a day that has not happened.
+  today falls inside it, otherwise the nearest end of it.
 
-Phase 11 notes:
+#### Dashboard cards
+
+`PUT /org/branding {dashboard_prefs}` accepts the card ids `revenue`,
+`expenses` and `net_income` alongside the Phase 7 set. Unknown card ids and
+unknown keys are still a 400.
+
+#### Notes
 
 - **Indexes** (`000014_report_indexes`): `payments (org_id, paid_at) WHERE
   deleted_at IS NULL AND reversed_at IS NULL`, `expenses (org_id, incurred_on)
   WHERE status='recorded' AND deleted_at IS NULL`, and `contracts (org_id,
-  start_date, end_date) WHERE deleted_at IS NULL`. The other two the phase
-  called for already existed: `expenses (org_id, property_id, incurred_on)`
-  (000012) and `payment_schedules (org_id, due_date, id)` (000007).
+  start_date, end_date) WHERE deleted_at IS NULL`. `expenses (org_id,
+  property_id, incurred_on)` (000012) and `payment_schedules (org_id, due_date,
+  id)` (000007) already existed.
 - **Bucketing is done in Go**, over day-grain SQL aggregates, rather than with
   `date_trunc`: the resolver's first bucket may start mid-month, and two
-  alignments that disagree by eleven days would be a wrong chart. A five-year
-  window is at most ~1830 rows per series.
-- Every series endpoint runs the org-scoped overdue flip first, as the Phase 7
-  reports do.
+  alignments that disagree by eleven days would be a wrong chart.
 
-## Part 2 — Phase 12 (shipped)
+### Themes
 
-Theming v2 (SPEC §2.0/§4 `org_themes`, PLAN2 Phase 12). **The backend is the
-source of truth for themes**: the eight presets and the contrast validator live
-in `backend/internal/theme` (`presets.json`, `go:embed`-ed), and the frontends
-fetch them rather than keeping a second copy that could disagree with the copy
-the server will accept.
+**The backend is the source of truth for themes**: the eight presets and the
+contrast validator live in `backend/internal/theme` (`presets.json`,
+`go:embed`-ed). `packages/ui` keeps a generated offline copy so the frontends can
+paint before the API answers, and `TestPresetsMatchUICopy` fails the build if the
+two drift.
 
-A theme is **seven colours and a font**:
+A theme is **seven colours and a font**: `tokens` = `{paper, surface, ink,
+ink_muted, rule, primary, accent}`, each a canonical lower-case `#rrggbb`
+(`#0A7C4A` is accepted on input and stored and returned as `#0a7c4a`; shorthand
+`#abc` and named colours are refused). `font_id` ∈ `bricolage | archivo |
+instrument | hanken`.
 
-`tokens` = `{paper, surface, ink, ink_muted, rule, primary, accent}`, each a
-canonical lower-case `#rrggbb` (`#0A7C4A` is accepted on input and stored and
-returned as `#0a7c4a`; shorthand `#abc` and named colours are refused).
-`font_id` ∈ `bricolage | archivo | instrument | hanken`.
-
-Everything derived from those — pressed/tinted primaries, `on-primary`, faint
-ink — is computed **client-side** and never stored: a derived value in the
-database is a value that can disagree with the thing it derives from.
+Everything derived from those — pressed/tinted primaries, `on-primary`, faint ink
+— is computed **client-side** and never stored. Stamp inks are not themable, but
+they get a fixed dark step (`#4ec07f` paid, `#ff8a80` overdue) under
+`data-theme="dark"`, as the chart palette does.
 
 `theme` shape (returned by every branding endpoint):
 `{preset_id:string|null, tokens:{7 keys}, font_id, dark:bool, source:"preset"|"custom"|"legacy"|"default", primary_color}`
 — `primary_color` is `tokens.primary` under its Phase 4 name, kept (with
 `font_id`) so clients written against Phase 4 keep working unchanged.
 
-### `GET /themes/presets`
+#### `GET /themes/presets`
 
-Public, rate-limited per IP like the other `/public` routes (60/min) →
-`{presets:[{id, name, dark, tokens, font_id}]}`, in display order:
+Public, rate-limited per IP like the other public routes (60/min) →
+**`{presets:[{id, name, dark, tokens, font_id}]}`**, in display order:
 
 | id | name | dark | font | paper | surface | ink | ink_muted | rule | primary = accent |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -634,7 +578,7 @@ Public, rate-limited per IP like the other `/public` routes (60/min) →
 `ledger` is byte-identical to `packages/ui/src/tokens.css`, and a test pins it
 there so the served default and the CSS fallback cannot drift apart.
 
-### The contrast guard
+#### The contrast guard
 
 `theme.Validate(tokens, font_id)` returns a `Failure` per broken rule —
 `{pair, ratio, minimum, message}` — using WCAG 2.x relative luminance on sRGB:
@@ -648,14 +592,12 @@ there so the served default and the CSS fallback cannot drift apart.
 | `rule/paper` | 1.2 | not a WCAG number — a ledger rule below it is simply not there |
 
 Hex-format and font-id problems are reported first and **short-circuit** the
-contrast pass (a ratio measured against a colour that does not parse is a
-number that means nothing). Every shipped preset passes; a test asserts it.
+contrast pass. Every shipped preset passes; a test asserts it.
 
-### `GET /org/branding`, `PUT /org/branding`
+#### `GET /org/branding`, `PUT /org/branding`
 
 `theme` on the response is the **resolved** block above. `PUT` accepts
-`theme:{preset_id?, tokens?, font_id?, primary_color?}` — every member
-optional:
+`theme:{preset_id?, tokens?, font_id?, primary_color?}` — every member optional:
 
 - `preset_id` must be one of the eight (else 400 `errors["theme.preset_id"]`).
 - `tokens`, if present, must be the **whole** seven-key set — a missing or an
@@ -667,15 +609,15 @@ optional:
 - `font_id` outside the whitelist → 400 `errors["theme.font_id"]`. Field-level
   problems are reported **together**, not one per round trip.
 
-A theme that fails the contrast guard is **400 `application/problem+json`**
-with both `errors` (`{"theme.tokens": "3 contrast failures"}`, for the form)
-and a top-level **`failures:[{pair, ratio, minimum, message}]`** array, for the
+A theme that fails the contrast guard is **400 `application/problem+json`** with
+both `errors` (`{"theme.tokens": "3 contrast failures"}`, for the form) and a
+top-level **`failures:[{pair, ratio, minimum, message}]`** array, for the
 advanced panel's per-swatch badges. Nothing is written on a rejection.
 
 On success the choice is upserted into `org_themes` (`org_id` PK: preset id,
 `tokens` — `{}` for a plain preset — and font), audited **`branding.theme_update`**
-with before/after, and the resolved `primary_color`/`font_id` are **mirrored
-into the legacy `org_branding.theme` JSON** so every Phase 4 reader still sees a
+with before/after, and the resolved `primary_color`/`font_id` are **mirrored into
+the legacy `org_branding.theme` JSON** so every Phase 4 reader still sees a
 coherent answer.
 
 **Resolution order** (`theme.Resolve`), highest first:
@@ -684,43 +626,33 @@ coherent answer.
    `preset_id` survives as the label the base came from — "Night ledger, edited");
 2. the row's `preset_id` → `source:"preset"`;
 3. a Phase 4 `org_branding.theme.primary_color` that differs from the schema
-   default `#1B4DB1` → ledger with `primary`+`accent` replaced by it and the
+   default `#1b4db1` → ledger with `primary`+`accent` replaced by it and the
    legacy font, `source:"legacy"`;
 4. the `ledger` preset → `source:"default"`.
 
 `dark` is computed from `paper` (`luminance < 0.5`), so an override of a dark
 preset with a white paper is correctly no longer dark.
 
-### `GET /public/orgs/{slug}/branding`, `GET /public/units/{unit_code}`
+#### `GET /public/orgs/{slug}/branding`, `GET /public/units/{unit_code}`
 
-Both return the same fully resolved `theme` object (including `primary_color`
-and `font_id`), so a renter's QR landing and the landlord's own screens paint
-identically from one theme — **one theme covers both apps** (DECISIONS.md) —
-and the renter app paints without a second call.
+Both return the same fully resolved `theme` object (including `primary_color` and
+`font_id`), so a renter's QR landing and the landlord's own screens paint
+identically from one theme — **one theme covers both apps** (DECISIONS.md) — and
+the renter app paints without a second call. The admin app is never themed.
 
-Phase 12 notes:
+`org_themes` has **no separate `org_id` index**: `org_id` is its primary key, and
+a second index on the same column would be dead weight. The migration guard was
+widened to accept that shape.
 
-- **Isolation.** The theme is written from the session's own org, so there is
-  no cross-org write to attempt; the suite instead asserts that org A saving a
-  theme leaves org B's private *and* public branding untouched. `/themes/presets`
-  is in the route census as `open` — platform data, identical for every org.
-- **`org_themes` has no separate `org_id` index**: `org_id` is its primary key,
-  and a second index on the same column would be dead weight. The migration
-  guard was widened to accept that shape.
+### Locale, and the language of every message
 
-## Part 2 — Phase 13 (shipped)
-
-Swahili/English per user (SPEC §3.2/§5.13/§6, PLAN2 Phase 13). The rule the
-whole phase turns on: **the language of a message is a fact about the person
-receiving it.** `users.locale` decides; `orgs.settings.sms_language` survives
-only as the default for a renter who has never expressed a preference. A
-landlord who reads English no longer sends English to a renter who does not.
+**The language of a message is a fact about the person receiving it.**
+`users.locale` decides; `orgs.settings.sms_language` survives only as the default
+for a renter who has never expressed a preference.
 
 `locale` is a closed set of two: `"sw" | "en"`. Anything else is a **400**
 validation error (`errors.locale = "must be one of: sw, en"`), like every other
 `OneOf` field on the platform. New accounts default to `sw`.
-
-### Locale on the account
 
 | route | change |
 | --- | --- |
@@ -729,10 +661,10 @@ validation error (`errors.locale = "must be one of: sw, en"`), like every other
 | `POST /org/members` | accepts optional `locale`; the invited member's screens open in it. The `member` in the response carries `locale`. |
 | `POST /auth/otp/send` | accepts optional `locale`. It is a **hint, not a preference**: it decides the language of this one code and only for a phone number that has no account yet. A number that resolves to a user is sent the code in that user's own locale. Nothing is written to `users`. |
 | `GET /auth/me`, `POST /auth/login`, every `{user}` payload | `user.locale` is returned, so the apps paint without a second round trip. |
-| `GET /me/profile` | `user.locale` is returned alongside the account fields. |
+| `GET /me/profile` | `user.locale` alongside the account fields. |
 | `GET /org/members` | each `member` carries `locale`. |
 
-### `PATCH /me` (renter, `tms_r`) and `PATCH /org/members/me` (org user, `tms_o`)
+#### `PATCH /me` (renter, `tms_r`) and `PATCH /org/members/me` (org user, `tms_o`)
 
 The language switch, one endpoint per audience. Both take exactly
 `{"locale": "sw"|"en"}` and answer `200 {user}` with the full user shape:
@@ -744,37 +676,32 @@ The language switch, one endpoint per audience. Both take exactly
 ```
 
 `locale` is **required** on these two routes (a PATCH that exists to set it):
-omitting it is `400 {"errors":{"locale":"locale is required"}}`. Both are
-audited `user.locale_update` with `before`/`after` = `{"locale":"…"}`.
+omitting it is `400 {"errors":{"locale":"locale is required"}}`. Both are audited
+`user.locale_update` with `before`/`after` = `{"locale":"…"}`.
 
 Neither route names a user id — **a member can only ever move their own**.
-`PATCH /org/members/me` lives under `/org/members` because it is the member's
-own row, not because it can reach another's.
+`PATCH /org/members/me` lives under `/org/members` because it is the member's own
+row, not because it can reach another's.
 
-### Language on every renter-directed SMS
+#### Language on every renter-directed SMS
 
 Resolution is one total function, `notify.LanguageFor(userLocale, orgLanguage)`:
-the recipient's own locale, then the org's default, then `sw`. It never fails —
-a user row that predates `users.locale` and an org whose settings blob was
-never written both still get a language.
+the recipient's own locale, then the org's default, then `sw`. It never fails.
 
-Every renter-directed enqueue now resolves it against the recipient rather than
-the org: link approved/rejected, contract ready/terminated, welcome, thank you,
-the `reminder_7d` / `reminder_due` / `overdue_daily` sweep, the unsigned-contract
+Every renter-directed enqueue resolves it against the recipient rather than the
+org: link approved/rejected, contract ready/terminated, welcome, thank you, the
+`reminder_7d` / `reminder_due` / `overdue_daily` sweep, the unsigned-contract
 nudge, and the login/sign OTP. The scheduler joins `users` for `locale`, so an
 English-speaking landlord's Swahili renter still gets Swahili.
 
 `notification_log.language` records what each message **was actually written
-in**, and is returned on every `GET /notifications/log` item as `language`. The
-delivery log can answer "which language did this renter get?" as data rather
-than by reading the prose.
+in**, and is returned on every `GET /notifications/log` item as `language`.
 
-The OTP body moved out of the auth handler into the platform template
-catalogue as kind `otp` with a `{{code}}` variable. It is **not** in
-`TemplateKinds()` and cannot be overridden per org: nobody should be able to
-re-word the message that lets a person into their own account.
+The OTP body moved out of the auth handler into the platform template catalogue
+as kind `otp` with a `{{code}}` variable. It is **not** in `TemplateKinds()` and
+cannot be overridden per org.
 
-### `POST /notifications/custom` — bilingual bulk send
+#### `POST /notifications/custom` — bilingual bulk send
 
 ```json
 {"recipients":"all_active"|"selected", "renter_user_ids":["…"],
@@ -783,21 +710,22 @@ re-word the message that lets a person into their own account.
 ```
 
 At least one of `body_sw` / `body_en` is required. Each recipient gets the body
-for their resolved language; **when only one body is given, everybody gets
-it** — silence is not the safer failure for "the water is off tomorrow", and
-the response says which language each message actually went out in.
+for their resolved language; **when only one body is given, everybody gets it** —
+silence is not the safer failure for "the water is off tomorrow", and the
+response says which language each message actually went out in.
 
 `body` (Phase 6, single-language) still works and stands for both languages, so
-an existing caller keeps working unchanged. It is ignored when either of the
-new fields is present.
+an existing caller keeps working unchanged. It is ignored when either of the new
+fields is present.
 
 Each body is validated **separately**, under its own field name, so the error
 names the tab the landlord typed in — `errors.body_sw`, `errors.body_en`, or
 `errors.body` for the legacy field. Same rules as Phase 6: ≤ 320 characters, no
-control characters, only `{{name}} {{unit}} {{property}} {{org}}`. No body at
-all → `400 {"errors":{"body_sw":"provide body_sw, body_en, or both"}}`.
+control characters, only `{{name}} {{unit}} {{property}} {{org}}`. No body at all
+→ `400 {"errors":{"body_sw":"provide body_sw, body_en, or both"}}`.
 
-Response is **202**, with the Phase 6 fields plus `by_language`:
+Response is **202**, with the Phase 6 fields plus `by_language` — `queued` stays
+a **scalar**:
 
 ```json
 {"batch_id":"e644a40e-fcd3-423b-b7e0-7c75f4573689",
@@ -805,30 +733,26 @@ Response is **202**, with the Phase 6 fields plus `by_language`:
  "by_language":{"sw":3, "en":1}}
 ```
 
-> Note: the planned contract above wrote this as `queued:{sw,en}`. It shipped
-> as a scalar `queued` plus a separate `by_language` map, so the Phase 6
-> `{queued, skipped}` shape is unchanged and the per-language counts are
-> additive rather than a breaking re-type of an existing field.
-
 Audited `notification.custom` with `body_sw`, `body_en` and `by_language`.
+Insufficient credit → **409 `insufficient_sms_credits`** (below); nothing is
+queued.
 
-### `GET /notifications/custom/recipients-preview` (audience org)
+#### `GET /notifications/custom/recipients-preview` (audience org)
 
-The compose screen's question, asked before anything is sent. Takes the same
-filters as the send, as query parameters:
-`?recipients=all_active` or `?recipients=selected&renter_user_ids=<uuid>,<uuid>`
-(comma-separated), and resolves them through the same helper, so the counts it
-shows are the counts the send will produce.
+The compose screen's question, asked before anything is sent. Same filters as the
+send, as query parameters: `?recipients=all_active` or
+`?recipients=selected&renter_user_ids=<uuid>,<uuid>` (comma-separated), resolved
+through the same helper, so the counts it shows are the counts the send will
+produce.
 
 ```json
 {"count":4, "skipped":0, "by_language":{"sw":3, "en":1}}
 ```
 
 `skipped` counts renters with no phone number on file. Ids belonging to another
-org are skipped, never a 404 — the request was well formed, and the count is
-the honest answer. Unknown `recipients` → 400.
+org are skipped, never a 404. Unknown `recipients` → 400.
 
-### Bilingual contract templates
+#### Bilingual contract templates
 
 `contract_templates` gains **`body_html_sw`**, the Swahili twin of `body_html`
 (which stays the English body). Empty means "this org has no Swahili terms".
@@ -837,80 +761,44 @@ the honest answer. Unknown `recipients` → 400.
 | --- | --- |
 | `GET /contract-templates/{id}` | returns `body_html_sw` alongside `body_html` (both omitted when empty). |
 | `POST /contract-templates` | accepts `body_html_sw`. Optional — `body_html` remains required. |
-| `PATCH /contract-templates/{id}` | accepts `body_html_sw`; an explicit `""` **clears** it (an org that decides it does not want one), rather than being a validation failure. |
+| `PATCH /contract-templates/{id}` | accepts `body_html_sw`; an explicit `""` **clears** it, rather than being a validation failure. |
 | `POST /contract-templates/{id}/preview` | accepts `{language?:"sw"\|"en"}` and returns `language` — the body actually previewed. Asking for Swahili from a template that has none previews the English one rather than a blank page. `{{due_day}}` renders in the previewed language. |
 
-Both bodies go through the same sanitizer on write **and** on render, so a body
-stored before a policy change can never escape the current allowlist. Both
-carry exactly the same `{{variables}}`; a test pins that they cannot drift.
+Both bodies go through the same sanitizer on write **and** on render, and carry
+exactly the same `{{variables}}`; a test pins that they cannot drift.
 
 `contract.DefaultTemplateBodySW` is the Swahili default, in the register a
 Tanzanian tenancy agreement is actually written in ("Mkataba wa Upangaji",
 "Mwenye Nyumba", "Mpangaji", "Kodi"). It is seeded on org bootstrap and by the
-seeder; migration 000015 seeds the byte-identical body for the orgs that
-already existed — but **only where the English body is still the platform
-wording verbatim**. A body the landlord has since edited is left alone: its
-Swahili counterpart is theirs to write, and guessing at one would put words the
-landlord never approved into a contract.
+seeder; migration 000015 seeds it for orgs that already existed — but **only
+where the English body is still the platform wording verbatim**. A body the
+landlord has since edited is left alone.
 
-### `POST /contracts {language?}`
+### SMS credits
 
-Optional `language`. Absent means **the renter's own locale** — the document a
-person signs should be in the language they read. The landlord may override it
-for one contract.
+Prepaid credit per organisation. The movements are platform-admin (`tms_a`); the
+landlord gets one read-only view of their own balance.
 
-The Swahili body is used when the org has written one; an org that has not
-keeps issuing the English document rather than a blank one, and `language`
-records which of the two the renter actually received. `{{due_day}}` and
-`{{rent_basis}}` render in the contract's language, so a Swahili document has
-no English clause in the middle of it.
-
-`contracts.language` is stored beside the terms it snapshots and returned on
-every `contract` DTO. **Contracts issued before Part 2 read `"en"`** — the sole
-template body was the English one, which is what they were rendered from.
-
-The snapshot flow is untouched: `snapshot_hash` still covers the rendered HTML,
-so a contract issued in Swahili verifies exactly as an English one does.
-
-### Migration `000015_language`
-
-Adds `notification_log.language` (`NOT NULL DEFAULT 'sw'`, checked `IN
-('sw','en')`), `contract_templates.body_html_sw` (`NOT NULL DEFAULT ''`, seeded
-as described above) and `contracts.language` (`NOT NULL DEFAULT 'en'`, checked
-`IN ('sw','en')`). `users.locale` already existed from 000012.
-
-### Audit actions
-
-`user.locale_update` joins the Part 2 action list.
-
-## Part 2 — Phase 14 (shipped)
-
-Prepaid SMS credit per organisation, and the platform SMS catalogue an admin
-edits (SPEC §4, §5.12, FLOWS 13, PLAN2 Phase 14). Two audiences: the credit
-movements and the whole catalogue are platform-admin (`tms_a`, `RequireAdmin`);
-the landlord gets one read-only view of their own balance and a read-only half
-of the notification-settings screen.
-
-### The credit unit
+#### The credit unit
 
 One credit per **SMS segment**, not per message: 160 characters in the GSM 03.38
 alphabet, 70 in UCS-2, dropping to 153 / 67 once a body is long enough to be
-concatenated. `notify.Segments(body)` is the single definition, and both the
-bulk pre-check and the worker's debit call it, so the shortfall a landlord is
-quoted is the amount that is actually taken.
+concatenated. `notify.Segments(body)` is the single definition, and both the bulk
+pre-check and the worker's debit call it, so the shortfall a landlord is quoted
+is the amount that is actually taken.
 
 Swahili is written in the Latin alphabet with no diacritics, so a Swahili
 reminder costs exactly what its English twin does. An emoji or a diacritic
-outside the alphabet pushes the *whole* message to UCS-2 and roughly doubles
-its price; the admin template editor reports `segments` and `encoding` on every
-save and preview so that is visible before anybody is texted.
+outside the alphabet pushes the *whole* message to UCS-2 and roughly doubles its
+price; the admin template editor reports `segments` and `encoding` on every save
+and preview.
 
-Credits have **no expiry and no monthly reset** (confirmed with the client).
+Credits have **no expiry and no monthly reset**.
 
-### When the debit happens
+#### When the debit happens
 
-At **send time**, inside the worker's claim transaction: the row moves `queued`
-→ `sending` and the balance drops by the message's segment count together, or
+At **send time**, inside the worker's claim transaction: the row moves `queued` →
+`sending` and the balance drops by the message's segment count together, or
 neither happens. The debit is one conditional statement —
 
 ```sql
@@ -918,70 +806,61 @@ UPDATE org_sms_credits SET balance = balance - $n
 WHERE org_id = $1 AND balance >= $n RETURNING balance
 ```
 
-— which is the whole of the concurrency story. Three workers racing the last
-two credits serialise on the row lock and exactly one comes back with a row, so
-a balance never goes negative and no message is sent that was not paid for.
+— which is the whole of the concurrency story. Three workers racing the last two
+credits serialise on the row lock and exactly one comes back with a row.
 
-Two consequences are deliberate:
-
-- a queued message that is never sent (an org suspended before its backlog
-  drains) **costs nothing**; and
-- a send the provider then rejects **has** consumed the credit. The platform
-  was billed for the attempt; refunding one is an `adjust` an admin makes, not
-  something the worker guesses at.
+Two consequences are deliberate: a queued message that is never sent (an org
+suspended before its backlog drains) **costs nothing**; and a send the provider
+then rejects **has** consumed the credit — refunding one is an `adjust` an admin
+makes, not something the worker guesses at.
 
 `org_sms_credits` is created lazily — balance 0, `low_watermark` 50 — on the
-first read or the first send, so an org that has never been topped up still has
-a balance rather than a missing row every caller special-cases.
+first read or the first send.
 
 **Exempt kinds** send without a debit: `otp` by default, overridable with
 `SMS_CREDIT_EXEMPT_KINDS` (comma-separated; the literal `none` charges for
-everything). A renter locked out of their own account because their landlord
-ran out of credit would be the product punishing the wrong person.
+everything).
 
-**Insufficient balance** → the row's status becomes `held_no_credit`. It is not
-`failed`: nothing went wrong with the message, the retry loop leaves it alone,
-`POST /notifications/log/{id}/retry` answers **409 `not_failed`**, and it goes
-out unchanged on the next top-up.
+**Insufficient balance** → the row's status becomes **`held_no_credit`**. It is
+not `failed`: nothing went wrong with the message, the retry loop leaves it
+alone, `POST /notifications/log/{id}/retry` answers **409 `not_failed`**, and it
+goes out unchanged on the next top-up.
 
 Every movement writes an append-only `sms_credit_ledger` row carrying `delta`,
-`balance_after`, `reason` and — for a debit — the `notification_id` it paid
-for, so the balance reconciles from its movements. `UPDATE` and `DELETE` on the
-ledger raise (trigger, migration 000012).
+`balance_after`, `reason` and — for a debit — the `notification_id` it paid for.
+`UPDATE` and `DELETE` on the ledger raise (trigger, migration 000012).
 
-### Credits — admin (`tms_a`)
+#### Admin (`tms_a`)
 
 | `GET /admin/orgs/{id}/sms` | → `{balance, low_watermark, used_30d, held_count, ledger:[{delta, balance_after, reason:"topup"\|"adjust"\|"debit"\|"refund", notification_id\|null, note, admin_name, created_at}]}` — the newest **100** movements. An org id that does not exist is a 404 and creates no credit row. |
-| `POST /admin/orgs/{id}/sms/topup` | `{credits(1–1000000), note(≤500)}` → `200 {balance, released}`. Writes a `topup` ledger row, then releases the org's `held_no_credit` rows **oldest first** and pushes them back onto the queue. Audited `sms_credits.topup`. |
-| `POST /admin/orgs/{id}/sms/adjust` | `{delta(≠0, ±1000000), note}` → `200 {balance, released}`. A delta that would take the balance below zero is a **400** naming the current balance — a prepaid balance has no overdraft. A positive adjustment releases held rows like a top-up. Audited `sms_credits.adjust`. |
+| `POST /admin/orgs/{id}/sms/topup` | `{credits(1–1000000), note(≤500)}` → **`200 {balance, released}`** (`released` = how many held rows were re-queued). Writes a `topup` ledger row, then releases the org's `held_no_credit` rows **oldest first**. Audited `sms_credits.topup`. |
+| `POST /admin/orgs/{id}/sms/adjust` | `{delta(≠0, ±1000000), note}` → **`200 {balance, released}`**. A delta that would take the balance below zero is a **400** naming the current balance — a prepaid balance has no overdraft. A positive adjustment releases held rows like a top-up. Audited `sms_credits.adjust`. |
 | `PATCH /admin/orgs/{id}/sms` | `{low_watermark(0–1000000)}` → `200 {low_watermark}`. Audited `sms_credits.watermark_update`. |
 
 **Release policy:** a top-up releases **every** held row, not only the ones the
 new balance covers. The debit happens at send time, so releasing more than the
 org can pay for costs nothing — the worker holds the surplus again, in the same
-order, on the next attempt. Releasing only the affordable prefix would mean
-deciding here what a message will cost (a second, drifting copy of the segment
-count) and would strand a message even when a later top-up arrived first.
+order, on the next attempt.
 
-All three movements carry the **target org** as `org_id` and the admin as
-actor, exactly as `org.suspend` does, so the landlord reads "credits added by
-platform" in their own audit page and the platform reads it in theirs.
+All three movements carry the **target org** as `org_id` and the admin as actor,
+exactly as `org.suspend` does, so the landlord reads "credits added by platform"
+in their own audit page.
 
-### Credits — landlord (`tms_o`)
+#### Landlord (`tms_o`)
 
 | `GET /org/sms-credits` | → `{balance, low_watermark, held_count, low:bool}`. Read-only: credits are sold by the platform. `low` is the banner's condition (`balance < low_watermark`), computed once server-side so the three apps cannot disagree at the boundary. |
-| `POST /notifications/custom` | Pre-checks credit **before** queuing: `needed` is the sum of `Segments(body)` over every recipient's *rendered* body — `{{name}}` expands differently per renter and Swahili runs longer than English — and a shortfall is **409 `insufficient_sms_credits`** carrying `{needed, balance}` as top-level members of the problem document. Nothing is queued. The check is advisory, not a reservation: two broadcasts racing one balance can both pass it and the second one's tail is held, which is what the held state is for. |
-| `GET /notifications/log?status=` | accepts `held_no_credit` alongside `queued\|sending\|sent\|failed`. |
+| `POST /notifications/custom` | Pre-checks credit **before** queuing: `needed` is the sum of `Segments(body)` over every recipient's *rendered* body — `{{name}}` expands differently per renter and Swahili runs longer than English — and a shortfall is **409 `insufficient_sms_credits`** carrying `{needed, balance}` as top-level members of the problem document. Nothing is queued. The check is advisory, not a reservation: two broadcasts racing one balance can both pass it and the second one's tail is held. |
+| `GET /notifications/log?status=` | accepts **`held_no_credit`** alongside `queued\|sending\|sent\|failed`. |
 
 When a debit takes a balance from at-or-above the watermark to below it, the
-org's owner is emailed **once** — the crossing test is what stops an org
-running at zero from mailing its owner forty times a day. In dev that is the
-log email provider (`.dev/api.log`).
+org's owner is emailed **once** — the crossing test is what stops an org running
+at zero from mailing its owner forty times a day. In dev that is the log email
+provider (`.dev/api.log`).
 
-### Platform templates — admin (`tms_a`)
+### Platform message templates
 
-`platform_templates` is the source of truth for the platform's wording, seeded
-by migration `000016_platform_templates_seed` from the Go catalogue in
+`platform_templates` is the source of truth for the platform's wording, seeded by
+migration `000016_platform_templates_seed` from the Go catalogue in
 `internal/notify/templates.go` and re-seeded (`ON CONFLICT DO NOTHING`) on every
 API startup, so a kind added in a later phase reaches the table without another
 migration.
@@ -989,42 +868,39 @@ migration.
 `notify.Render` resolution is **org override → `platform_templates` row → the
 built-in Go default**. The Go map stays as the last fallback rather than being
 deleted: it is what a fresh database is seeded from, and it is what renders a
-message when Postgres is unreachable at the moment a send goes out — a renter
-should not miss a rent reminder because the wording table could not be read.
+message when Postgres is unreachable at the moment a send goes out.
 
 Resolved wording is cached in Redis under `tmpl:{kind}` for **5 minutes** and in
-process for the same window; both are invalidated on every save, lock and
-revert, so the next render reads the new wording rather than waiting out the
-TTL.
+process for the same window; both are invalidated on every save, lock and revert.
 
 `thank_you_settled` is deliberately **not** in the table. It is a second wording
-of `thank_you` — the sentence used when there is no next instalment to name —
-not a notification kind, and there is one row per kind on the wire. It stays a
-code default: an admin editing `thank_you` changes the instalment wording, and
-the settled sentence keeps the platform's.
+of `thank_you` — the sentence used when there is no next instalment to name — not
+a notification kind, and there is one row per kind on the wire.
 
 | `GET /admin/templates` | → `{items:[{kind, sw, en, variables:[…], locked, version, updated_by, updated_at, segments:{sw,en}}]}`, ordered by kind. |
-| `PUT /admin/templates/{kind}` | `{sw, en}` — **both required** (a kind worded in one language would send half the platform's renters a blank message). > **480** characters → 400; a placeholder outside the kind's `variables` → 400 naming it; control characters → 400. → `200 {template, segments:{sw,en}, warnings?}`; `warnings` appears when either language runs past three segments. Writes the **previous** body to `platform_template_versions` and bumps `version`. Audited `platform_template.update`. |
+| `PUT /admin/templates/{kind}` | `{sw, en}` — **both required** (a kind worded in one language would send half the platform's renters a blank message). > **480** characters → 400; a placeholder outside the kind's `variables` → 400 naming it; control characters → 400. → **`200 {template, segments:{sw,en}, warnings?}`**; `warnings` appears when either language runs past three segments. Writes the **previous** body to `platform_template_versions` and bumps `version`. Audited `platform_template.update`. |
 | `PATCH /admin/templates/{kind}` | `{locked:bool}` → `200 {template}`. Audited `platform_template.lock`. |
-| `POST /admin/templates/{kind}/preview` | `{language:"sw"\|"en", sample?:{var:value}, sw?, en?}` → `200 {kind, language, body, segments, encoding:"gsm"\|"ucs2"}`. `sw`/`en` preview wording that has not been saved yet, so the editor can price a sentence as it is typed; `sample` fills placeholders, defaulting to a representative Tanzanian tenancy. |
+| `POST /admin/templates/{kind}/preview` | `{language:"sw"\|"en", sample?:{var:value}, sw?, en?}` → `200 {kind, language, body, segments, encoding:"gsm"\|"ucs2"}`. `sw`/`en` preview wording that has not been saved yet, so the editor can price a sentence as it is typed; `sample` fills placeholders, defaulting to a representative Tanzanian tenancy. An unknown `language` → 400. |
 | `GET /admin/templates/{kind}/versions` | → `{items:[{version, sw, en, admin_name, created_at}]}`, newest first. History holds the bodies that were **replaced**, so version *N* reads "this is what version N said". |
-| `POST /admin/templates/{kind}/revert` | `{version}` → `200 {template, restored_from}`. The old wording comes back as a **new** version rather than by rewinding the counter: "we went back to what version 2 said" is a fact worth keeping, and a version number that can go backwards is one nobody can cite. An unknown version is a 404. |
+| `POST /admin/templates/{kind}/revert` | `{version}` → `200 {template, restored_from}`. The old wording comes back as a **new** version rather than by rewinding the counter. An unknown version is a 404. |
 
-An unknown `{kind}` is a **404** on every route above: the caller is naming a
-template, and one the catalogue does not carry does not exist.
+An unknown `{kind}` is a **404** on every route above.
 
-`variables` is derived from the kind's own sentence plus the eight an org may
-use anywhere. `otp` is the exception — `{{code}}` is the only placeholder it
-offers, because an admin given `{{amount}}` there would write a sentence the
-auth path cannot fill in.
+`variables` is derived from the kind's own sentence plus the eight an org may use
+anywhere. `otp` is the exception — `{{code}}` is the only placeholder it offers.
 
-### The lock
+Migration `000016` seeds the eleven code-catalogue kinds — `contract_ready`,
+`contract_terminated`, `link_approved`, `link_rejected`, `otp` (locked),
+`overdue_daily`, `reminder_7d`, `reminder_due`, `thank_you`, `unsigned_reminder`,
+`welcome` — byte-identical to their Go defaults.
+
+#### The lock
 
 `platform_templates.locked` freezes a kind against org overrides. **`otp` ships
 locked**: a landlord rewording the message that lets somebody into their account
 is a phishing surface.
 
-| `GET /org/notification-settings` | gains `locked_kinds:[…]` and `platform_templates:{kind:{sw,en}}` — the wording every kind falls back to, so the screen can show a locked kind read-only rather than offering an editor whose save will be refused. `otp` appears in neither: it is not an org's to see an editor for at all. |
+| `GET /org/notification-settings` | gains `locked_kinds:[…]` and `platform_templates:{kind:{sw,en}}` — the wording every kind falls back to, so the screen can show a locked kind read-only rather than offering an editor whose save will be refused. **`otp` appears in neither**: it is not org-overridable at all, so it is invisible to a landlord rather than read-only. |
 | `PUT /org/notification-settings` | an override of a locked kind → **409 `template_locked`**, refused before anything is merged so the save is never half-applied. **Clearing** an override (a null value, or two blank bodies) is always allowed: it moves the org *back* to the platform's wording, which is what the lock protects. |
 
 ### `GET /admin/metrics`
@@ -1033,22 +909,50 @@ The `sms` block gains `credits_used_today` (debited credits since midnight),
 `orgs_under_watermark` and `held_total`, beside the existing `sent_24h`,
 `failed_24h` and `queued`.
 
-### Audit actions
+### Part 2 audit actions
 
-`sms_credits.topup`, `sms_credits.adjust`, `sms_credits.watermark_update`
-(entity `org_sms_credits`, carrying the target org), and
-`platform_template.update`, `platform_template.lock`,
-`platform_template.revert` (entity `platform_template`, no `org_id` — the
-wording belongs to the platform and an edit changes it for every tenant at
-once).
+`payment_period.recommend` · `expense_category.create` · `expense_category.update`
+· `expense_category.delete` · `expense.create` · `expense.update` · `expense.void`
+· `expense.receipt_attach` · `expense.receipt_remove` · `branding.theme_update` ·
+`user.locale_update` · `sms_credits.topup` · `sms_credits.adjust` ·
+`sms_credits.watermark_update` (entity `org_sms_credits`, carrying the target
+org) · `platform_template.update` · `platform_template.lock` ·
+`platform_template.revert` (entity `platform_template`, **no `org_id`** — the
+wording belongs to the platform and an edit changes it for every tenant at once).
 
-### Migration `000016_platform_templates_seed`
+### Part 2 migrations
 
-Inserts the eleven code-catalogue kinds — `contract_ready`,
-`contract_terminated`, `link_approved`, `link_rejected`, `otp` (locked),
-`overdue_daily`, `reminder_7d`, `reminder_due`, `thank_you`,
-`unsigned_reminder`, `welcome` — byte-identical to their Go defaults, each with
-the placeholders its sentence may name. `ON CONFLICT DO NOTHING` throughout, so
-re-running it never overwrites wording an admin has since edited. The tables
-themselves, and `notification_log.status = 'held_no_credit'`, came with
-migration `000012_part2_foundations`.
+| migration | adds |
+| --- | --- |
+| `000012_part2_foundations` | the partial unique index on `payment_periods`, `users.locale`, `expense_categories`, `expenses`, `org_themes`, `platform_templates` (+`locked`), `platform_template_versions`, `org_sms_credits`, `sms_credit_ledger` (append-only trigger), `notification_log.status = 'held_no_credit'`. Compose init adds the `receipts` bucket. |
+| `000013_expense_receipts` | `expenses.receipt_content_type`, `expenses.receipt_size`. |
+| `000014_report_indexes` | the three report indexes above. |
+| `000015_language` | `notification_log.language` (`NOT NULL DEFAULT 'sw'`, checked `IN ('sw','en')`), `contract_templates.body_html_sw` (`NOT NULL DEFAULT ''`, seeded as described), `contracts.language` (`NOT NULL DEFAULT 'en'`, checked `IN ('sw','en')`). |
+| `000016_platform_templates_seed` | the eleven platform template rows. |
+
+### Deviations from the planned contract
+
+The Part 2 plan was written before the code. Where they disagree, this is what
+shipped and why (rows also in DECISIONS.md):
+
+| planned | shipped | why |
+| --- | --- | --- |
+| `GET /themes/presets` → `{items:[…]}` | **`{presets:[…]}`** | the payload is a catalogue of presets, not a page of a listing |
+| invalid `locale` → 422 | **400** | codebase-wide validation convention: a bad field value is a 400 with `errors` |
+| bulk send → `queued:{sw,en}` | **`queued` scalar + `by_language:{sw,en}`** | keeps the Phase 6 `{queued, skipped}` shape; the per-language counts are additive, not a breaking re-type |
+| topup/adjust → `{balance}` | **`{balance, released}`** | the caller wants to know how many held messages the top-up let go |
+| `PUT /admin/templates/{kind}` → `{template}` | **`{template, segments, warnings?}`** | the editor prices the sentence it just saved without a second call |
+| `otp` shown as a locked kind to landlords | **`otp` never appears** in `locked_kinds` or `platform_templates` | it is not org-overridable at all, so a landlord has nothing to see read-only |
+| out-of-credit rows `failed` | **`held_no_credit`** | nothing went wrong with the message; `failed` would invite retries that cannot succeed |
+| `> 400 buckets` → 400 | **422 `too_many_buckets`** | the request parses; it is the window that cannot be served. Unresolvable windows are 422 too; malformed values stay 400 |
+| `{{rent}}` = the unit price | **`rent_per_period`** (unit price × payment period ÷ rent period) + `{{rent_basis}}` for the price | the signed document was stating the wrong figure (PLAN2 scope, found in the end-to-end test) |
+| contract language implicit | **`contracts.language`** on every DTO, defaulting to the renter's locale | the document a person signs should be in the language they read |
+| one occupancy number | **`occupancy_pct` is 0–100**, `collection_rate` and the Phase 7 `occupancy_rate` are 0–1 | the field names say which is which; a client that reads both must not scale them alike |
+| org theme presets duplicated in `packages/ui` | backend `presets.json` is the **source of truth**; the UI copy is generated and pinned by `TestPresetsMatchUICopy` | frontends need a fallback before the API answers; drift must fail the build |
+
+### Phase 15 — hardening
+
+No new endpoints. Reports v2 routes enter `make loadtest` (p95 < 300 ms on the
+seed org), the isolation census covers every Part 2 route (the build fails on an
+uncovered one), and receipt uploads (30/h/org) and admin template edits are rate
+limited.

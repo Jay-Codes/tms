@@ -17,7 +17,7 @@
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LOCALE_LABELS, useT, type Locale, type Translator } from '@tms/ui';
+import { LOCALE_LABELS, TableScroll, useT, type Locale, type Translator } from '@tms/ui';
 import { Note, ProblemNote } from './FormBits';
 import { Sheet } from './Sheet';
 import {
@@ -275,6 +275,7 @@ export function NotificationLogTable({
   const showLanguage = (items ?? []).some((n) => n.language === 'sw' || n.language === 'en');
   const cols = 5 + (showRenter ? 1 : 0) + (showLanguage ? 1 : 0) + (onRetry ? 1 : 0);
   return (
+    <TableScroll label={t('msg.log')}>
     <table className="ledger">
       <thead>
         <tr>
@@ -371,6 +372,7 @@ export function NotificationLogTable({
         )}
       </tbody>
     </table>
+    </TableScroll>
   );
 }
 
@@ -713,7 +715,7 @@ export function SendMessageForm({ onSent }: { onSent?: () => void }) {
 
       {/* ------------------------- the two bodies ------------------------- */}
       <div>
-        <div role="tablist" aria-label={t('msg.body.tablist')} style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+        <div className="wrap-sm" role="tablist" aria-label={t('msg.body.tablist')} style={{ display: 'flex', gap: 'var(--sp-2)' }}>
           {COMPOSE_LANGS.map((l) => {
             const active = tab === l;
             const written = bodies[l].trim().length > 0;

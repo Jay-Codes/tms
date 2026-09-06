@@ -9,7 +9,7 @@ Companion to [SPEC.md](SPEC.md). Actors: **Renter** (`apps/enduser`), **Landlord
 1. Landlord opens signup link → registers org: business name, owner name, email, phone, password.
 2. Email verification link → verified.
 3. Guided setup wizard:
-   1. **Branding** — display name (e.g. "JJnE Rentals"), logo upload, optional letterhead upload + document footer text (used on contract documents), and the **app theme**: pick one of the eight presets (Ledger, Night ledger, Warm paper, Cool slate, Forest, Ocean, High-contrast, Minimal white) from a gallery with a live mini-ledger preview, or open **Advanced** to set individual tokens (paper, surface, ink, ink-muted, rule, primary, accent) and the font. Contrast badges warn live and a body-text pair below 4.5:1 is refused on save. The chosen theme applies to both the landlord app and the renter-facing pages; the admin app is never themed.
+   1. **Branding** — display name (e.g. "JJnE Rentals"), logo upload, optional letterhead upload + document footer text (used on contract documents), and the **app theme**: pick one of the eight presets (Ledger, Night ledger, Warm paper, Cool slate, Forest, Ocean, High-contrast, Minimal white) from a gallery with a live mini-ledger preview, or open **Advanced** to set individual tokens (paper, surface, ink, ink-muted, rule, primary, accent) and the font. The gallery is served from the platform's own catalogue (`GET /themes/presets`), so what the landlord picks is exactly what the server will accept. Contrast badges warn live and a body-text pair below 4.5:1 is refused on save, with the failing pairs and their ratios named per swatch. The chosen theme applies to both the landlord app and the renter-facing pages; the admin app is never themed.
    2. **First property** — name (custom, e.g. "Mbezi Beach Block A"), location.
    3. **Payment periods** — list pre-seeded with four presets (Monthly 30d, Quarterly 90d, Half-year 180d, Yearly 365d). **Monthly** carries the single "Recommended" badge; "Set as recommended" moves it to any other period, and only one period can hold it. Landlord keeps/removes any, and adds custom periods as a label + number of days (e.g. "Weekly" 7d, "3 weeks" 21d, "45 days") — no limit on count or value.
    4. **Units** — add units with custom names ("Room 1", "House B"), set price (amount per N days, default 30) and optionally restrict which payment periods this unit offers.
@@ -79,6 +79,7 @@ Companion to [SPEC.md](SPEC.md). Actors: **Renter** (`apps/enduser`), **Landlord
 
 1. Templates page: create/edit named templates in an in-app rich-text editor (headings, lists, bold, variables like `{{renter_name}}`, `{{rent}}`), set default. Live preview shows the document with the org's uploaded letterhead/logo.
 1a. **Rent is written per payment period.** `{{rent}}` resolves to the amount due each payment period (unit price × payment-period days ÷ price-basis days, rounded as the schedule is), and `{{rent_basis}}` keeps the unit's own price — so a 100,000-per-30-days room on a quarterly cadence reads "TZS 300,000 per Quarterly (90 days) (TZS 100,000 / 30 days)". Both the landlord's contract page and the renter's show the per-period figure with the basis underneath.
+1b. **Templates are bilingual.** A template carries an English body and an optional Swahili one (`body_html_sw`), edited on EN/SW tabs with a per-language preview. A new contract is issued in the **renter's own language** unless the landlord picks otherwise on the "Document language" control, and the choice is frozen on the contract; an org that has written no Swahili body keeps issuing the English document rather than a blank one. Contracts issued before Part 2 read English.
 2. Editing a template never changes active contracts (snapshot rule) — banner states this, and contracts signed before this change keep the wording they were signed with.
 3. Contract lifecycle: `draft → pending_signature → active → expiring → ended | terminated`.
 4. ~30 days before end date contract flags **expiring**; landlord prompted to renew (new contract, current price, renter confirms via SMS link) or let lapse.
@@ -142,7 +143,9 @@ Dashboard (layout per org's saved **dashboard preferences**):
 - **Revenue** — collected vs expected as lines/area, expenses as bars, net as a line; hover tooltips; per-property toggle.
 - **Expenses** — stacked bars by category plus the ledger table.
 - **Payment status** and **Collections** as before, now windowed by the same picker.
-- Occupancy over time; all series bucketed by day/week/month according to the window length.
+- **Occupancy** over time; all series bucketed by day/week/month according to the window length (auto: day ≤ 62 days, week ≤ 26 weeks, else month).
+
+**What the numbers mean.** The window is resolved server-side on the Dar es Salaam wall clock and echoed back half-open (`from` inclusive, `to` exclusive) with the equivalent `previous` window, so every "vs previous period" figure on the page comes from one place. A custom range opened on the 12th charts from the 12th — buckets are not snapped back to the 1st. Occupancy is measured on the **last day inside** each bucket and reported as a **percentage (0–100)**; the collection rate is a **fraction (0–1)**. A Δ against a previous period of zero shows as "—", not "+100%".
 
 ---
 
@@ -171,7 +174,7 @@ Dashboard (layout per org's saved **dashboard preferences**):
 5. Settings → **Expense categories**: rename, reorder, deactivate; seeded with Repairs & maintenance, Utilities, Security, Cleaning, Taxes & levies, Insurance, Management fees, Other.
 6. Expenses feed the Reports revenue/net figures (flow 9) by `incurred_on`; voided rows are excluded everywhere.
 
-**Edge cases:** a date in the future beyond tomorrow, a unit that is not in the chosen property, or an amount outside bounds → validation error; a voided expense cannot be edited or voided twice.
+**Edge cases:** a date in the future beyond tomorrow, a unit that is not in the chosen property, an inactive category, or an amount outside bounds → validation error (a mismatched unit/category is a 422 naming the field, a cross-org id a 404); a voided expense cannot be edited or voided twice, and its receipt upload is refused too. A category that has expenses filed under it cannot be deleted — deactivate it. The summary keeps a row per property (or per active category) even at zero spend, so the chart's bars and colours are stable month to month.
 
 ---
 
@@ -180,14 +183,14 @@ Dashboard (layout per org's saved **dashboard preferences**):
 **SMS credits (per org):**
 1. Admin opens **Orgs → org detail → SMS**: balance, low watermark, credits used in 30 days, messages currently held, and the full credit ledger.
 2. **Top up** (credits + note), **adjust** (signed delta + note) or change the **watermark** — every action audited platform-side and in the org's own log, where the landlord reads it as "credits added by platform".
-3. Topping up releases the org's `held_no_credit` messages in queue order.
+3. Topping up releases **every** one of the org's `held_no_credit` messages, oldest first, and the response says how many (`released`). The debit happens at send time, so a release the balance cannot cover costs nothing — the worker simply holds the surplus again, in the same order.
 4. Admin dashboard metric: credits consumed today, and orgs sitting under their watermark.
 
 **Message templates:**
 1. **Templates** nav item lists every notification kind with its SW and EN bodies side by side, the variables it may use as chips, its version and last editor.
 2. Editing validates the placeholders against that kind's allowed variables, warns beyond three SMS segments, saves a new version and audits the change; **Preview** renders it with sample values.
 3. **Version history** shows previous bodies with a one-click **revert**.
-4. **Lock** a kind so landlords cannot override it — `otp` ships locked; a landlord editing a locked kind sees read-only wording and an override attempt is refused (`template_locked`).
+4. **Lock** a kind so landlords cannot override it — a landlord editing a locked kind sees read-only wording (with a "Show platform wording" toggle) and an override attempt is refused (`template_locked`); *clearing* an override is always allowed, since that moves the org back to the platform's wording. **`otp` ships locked and is not org-overridable at all**, so it does not appear on the landlord's notification settings screen in any form — the admin sees it locked in the catalogue.
 5. Resolution order at send time: org override → platform template → built-in code default.
 
 ---

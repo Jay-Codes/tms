@@ -36,7 +36,7 @@ import {
   type Schedule,
 } from '../lib/api';
 import { datetimeLocalToRfc3339, fmtDate, fmtTZS, nowDatetimeLocal } from '../lib/format';
-import { useT, type Translator } from '@tms/ui';
+import { TableScroll, useT, type Translator } from '@tms/ui';
 
 export interface RecordPaymentTarget {
   contractId: string;
@@ -84,7 +84,8 @@ function AppliedRows({ result }: { result: PaymentResult }) {
       </p>
 
       {applied.length > 0 ? (
-        <table className="ledger">
+        <TableScroll label={t('payments.record.applied_to')}>
+<table className="ledger">
           <thead>
             <tr>
               <th>{t('payments.record.applied_to')}</th>
@@ -117,6 +118,7 @@ function AppliedRows({ result }: { result: PaymentResult }) {
             })}
           </tbody>
         </table>
+</TableScroll>
       ) : null}
     </div>
   );
@@ -265,7 +267,7 @@ export function RecordPaymentSheet({
                 : t('payments.overpay.prompt', { amount: fmtTZS(overpay.excess) })}
             </span>
           </p>
-          <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+          <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
             <button
               type="button"
               className="btn btn-primary"
@@ -321,7 +323,7 @@ export function RecordPaymentSheet({
             </select>
           </Field>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-4)' }}>
+          <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-4)' }}>
             <Field id="rp_amount" label={t('payments.record.amount_label')} error={error?.errors.amount}>
               <input
                 id="rp_amount"
@@ -352,7 +354,7 @@ export function RecordPaymentSheet({
             </Field>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-4)' }}>
+          <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-4)' }}>
             <Field
               id="rp_reference"
               label={t('payments.record.reference_label')}
@@ -395,7 +397,7 @@ export function RecordPaymentSheet({
             />
           </Field>
 
-          <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+          <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
             <button type="submit" className="btn btn-primary" disabled={busy || !valid}>
               {busy ? t('payments.record.busy') : t('payments.record.submit')}
             </button>

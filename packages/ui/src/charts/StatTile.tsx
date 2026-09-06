@@ -109,10 +109,23 @@ export function StatTile({
         display: 'grid',
         gap: 'var(--sp-1)',
         alignContent: 'start',
+        minWidth: 0,
       }}
     >
       <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>{label}</span>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 'var(--sp-3)' }}>
+      {/* The figure never wraps (it is one amount), so where the tile is
+          narrower than figure + sparkline the sparkline drops to its own line
+          rather than the pair spilling out of the tile. */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-end',
+          justifyContent: 'space-between',
+          gap: 'var(--sp-3)',
+          flexWrap: 'wrap',
+          minWidth: 0,
+        }}
+      >
         <strong style={{ fontSize: 'var(--text-xl)', color, lineHeight: 1.1 }}>{value}</strong>
         {trend}
       </div>

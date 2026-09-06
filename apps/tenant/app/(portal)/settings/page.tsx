@@ -3,7 +3,7 @@
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { useT, type Translator } from '@tms/ui';
+import { TableScroll, useT, type Translator } from '@tms/ui';
 import { Field, Note, ProblemNote } from '../../../components/FormBits';
 import { PageHead } from '../../../components/PageHead';
 import {
@@ -225,7 +225,8 @@ function Members({ canManage }: { canManage: boolean }) {
   return (
     <div style={{ display: 'grid', gap: 'var(--sp-5)' }}>
       <ProblemNote error={loadError} />
-      <table className="ledger">
+      <TableScroll label={t('settings.members.table_label')}>
+<table className="ledger">
         <thead>
           <tr>
             <th>{t('common.name')}</th>
@@ -267,6 +268,7 @@ function Members({ canManage }: { canManage: boolean }) {
           )}
         </tbody>
       </table>
+</TableScroll>
 
       {canManage ? (
         <form onSubmit={invite} style={{ display: 'grid', gap: 'var(--sp-4)', maxWidth: 640 }} noValidate>

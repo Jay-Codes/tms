@@ -9,7 +9,7 @@ import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { useT } from '@tms/ui';
+import { TableScroll, useT } from '@tms/ui';
 import { Field, ProblemNote } from '../../../../components/FormBits';
 import { PageHead } from '../../../../components/PageHead';
 import { Sheet } from '../../../../components/Sheet';
@@ -158,7 +158,8 @@ function TemplatesBody() {
 
       <div style={{ paddingTop: 'var(--sp-4)', display: 'grid', gap: 'var(--sp-4)' }}>
         <ProblemNote error={error} />
-        <table className="ledger">
+        <TableScroll label={t('tpl.list.table_label')}>
+<table className="ledger">
           <thead>
             <tr>
               <th>{t('common.name')}</th>
@@ -196,6 +197,7 @@ function TemplatesBody() {
             )}
           </tbody>
         </table>
+</TableScroll>
       </div>
 
       <Sheet open={open} title={t('tpl.list.new')} onClose={() => setOpen(false)} width={480}>
