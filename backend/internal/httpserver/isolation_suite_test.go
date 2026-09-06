@@ -466,6 +466,55 @@ var isoRoutes = []isoCase{
 	{method: "POST", pattern: "/admin/orgs/{id}/activate", aud: isoAdmin, path: "/admin/orgs/{orgA}/activate"},
 	{method: "GET", pattern: "/admin/metrics", aud: isoAdmin},
 	{method: "GET", pattern: "/admin/audit-log", aud: isoAdmin},
+
+	// ----------------------------------- Phase 14: credits and templates --
+	//
+	// The org's own balance is org-scoped like every other `/org/…` read: org
+	// B sees org B's number, never org A's, and the route names no id it could
+	// be pointed at.
+	{method: "GET", pattern: "/org/sms-credits", aud: isoOrg, want: []int{200}},
+
+	// The credit routes name an org id and belong to the platform: an org
+	// owner or a renter reaching them is a 401, not a 403, because the admin
+	// audience is a different cookie rather than a stronger role.
+	{method: "GET", pattern: "/admin/orgs/{id}/sms", aud: isoAdmin, path: "/admin/orgs/{orgA}/sms"},
+	{
+		method: "PATCH", pattern: "/admin/orgs/{id}/sms", aud: isoAdmin,
+		path: "/admin/orgs/{orgA}/sms", body: map[string]any{"low_watermark": 10},
+	},
+	{
+		method: "POST", pattern: "/admin/orgs/{id}/sms/topup", aud: isoAdmin,
+		path: "/admin/orgs/{orgA}/sms/topup", body: map[string]any{"credits": 10},
+	},
+	{
+		method: "POST", pattern: "/admin/orgs/{id}/sms/adjust", aud: isoAdmin,
+		path: "/admin/orgs/{orgA}/sms/adjust", body: map[string]any{"delta": 10},
+	},
+
+	// The SMS catalogue is platform-wide — one wording for every tenant — so
+	// there is no org id to name and nothing an org may reach.
+	{method: "GET", pattern: "/admin/templates", aud: isoAdmin},
+	{
+		method: "PUT", pattern: "/admin/templates/{kind}", aud: isoAdmin,
+		path: "/admin/templates/reminder_due",
+		body: map[string]any{"sw": "Habari", "en": "Hello"},
+	},
+	{
+		method: "PATCH", pattern: "/admin/templates/{kind}", aud: isoAdmin,
+		path: "/admin/templates/reminder_due", body: map[string]any{"locked": true},
+	},
+	{
+		method: "POST", pattern: "/admin/templates/{kind}/preview", aud: isoAdmin,
+		path: "/admin/templates/reminder_due/preview", body: map[string]any{"language": "sw"},
+	},
+	{
+		method: "GET", pattern: "/admin/templates/{kind}/versions", aud: isoAdmin,
+		path: "/admin/templates/reminder_due/versions",
+	},
+	{
+		method: "POST", pattern: "/admin/templates/{kind}/revert", aud: isoAdmin,
+		path: "/admin/templates/reminder_due/revert", body: map[string]any{"version": 1},
+	},
 }
 
 // ------------------------------------------------- the router census --

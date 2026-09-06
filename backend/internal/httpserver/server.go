@@ -63,6 +63,9 @@ type Server struct {
 	sessions *auth.Manager
 	store    *auth.Store
 	limiter  *ratelimit.Limiter
+	// templates is the Phase 14 platform SMS catalogue: the DB layer between
+	// an org's own wording and the built-in Go defaults, cached in Redis.
+	templates *notify.PlatformStore
 
 	proxyTrust httpx.ProxyTrust
 }
@@ -93,6 +96,12 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) *Server {
 		Logger: logger,
 	}
 	s.store = &auth.Store{Redis: redisClient}
+	// One catalogue per process, installed for notify.Render to resolve
+	// against. Without Postgres it resolves nothing and Render falls through
+	// to the code defaults, which is the correct degraded behaviour: a rent
+	// reminder should not be blocked by an unreadable wording table.
+	s.templates = &notify.PlatformStore{Q: s.q, Redis: redisClient, Logger: logger}
+	notify.UsePlatformStore(s.templates)
 	s.limiter = ratelimit.New(redisClient, logger)
 	// Defaults for tests and the dev loop. In ENV=prod the dev log providers
 	// are refused (they would print OTP codes and invite links to the log);
@@ -251,6 +260,8 @@ func (s *Server) routes() chi.Router {
 			// Phase 13: the compose screen's per-language recipient counts,
 			// taken with the same filters as the send.
 			r.Get("/notifications/custom/recipients-preview", s.handleCustomRecipientsPreview)
+			// --- Phase 14: the org's own prepaid SMS balance (read-only) ---
+			r.Get("/org/sms-credits", s.handleOrgSMSCredits)
 			r.Get("/notifications/log", s.handleListNotificationLog)
 			r.Post("/notifications/log/{id}/retry", s.handleRetryNotification)
 
@@ -353,6 +364,20 @@ func (s *Server) routes() chi.Router {
 			r.Post("/admin/orgs/{id}/activate", s.handleAdminActivateOrg)
 			r.Get("/admin/metrics", s.handleAdminMetrics)
 			r.Get("/admin/audit-log", s.handleAdminAuditLog)
+
+			// --- Phase 14: prepaid SMS credits per org ---
+			r.Get("/admin/orgs/{id}/sms", s.handleAdminOrgSMS)
+			r.Patch("/admin/orgs/{id}/sms", s.handleAdminOrgSMSWatermark)
+			r.Post("/admin/orgs/{id}/sms/topup", s.handleAdminOrgSMSTopup)
+			r.Post("/admin/orgs/{id}/sms/adjust", s.handleAdminOrgSMSAdjust)
+
+			// --- Phase 14: the editable platform SMS catalogue ---
+			r.Get("/admin/templates", s.handleAdminListTemplates)
+			r.Put("/admin/templates/{kind}", s.handleAdminPutTemplate)
+			r.Patch("/admin/templates/{kind}", s.handleAdminPatchTemplate)
+			r.Post("/admin/templates/{kind}/preview", s.handleAdminPreviewTemplate)
+			r.Get("/admin/templates/{kind}/versions", s.handleAdminTemplateVersions)
+			r.Post("/admin/templates/{kind}/revert", s.handleAdminRevertTemplate)
 		})
 
 		// --- Phase 2: public (no session; rate limited per IP) ---

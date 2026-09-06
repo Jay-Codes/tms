@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -36,7 +37,48 @@ func (s *Server) handleGetNotificationSettings(w http.ResponseWriter, r *http.Re
 		s.serverError(w, r, "org.notification_settings.get", err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, toNotificationSettings(parseSettings(org.Settings)))
+	out := toNotificationSettings(parseSettings(org.Settings))
+	s.decorateLocked(r, &out)
+	WriteJSON(w, http.StatusOK, out)
+}
+
+// decorateLocked adds the Phase 14 read-only half of the settings screen: the
+// kinds an admin has frozen, and the platform wording behind every kind.
+//
+// The landlord's screen needs both. Without `platform_templates` it cannot
+// show what a kind says while the org has no override of its own — the
+// wording lives in the database now, not in a constant the frontend could
+// carry a copy of — and without `locked_kinds` it would offer an editor for a
+// kind whose save is going to be refused.
+func (s *Server) decorateLocked(r *http.Request, out *notificationSettingsResponse) {
+	rows, err := s.q.ListPlatformTemplates(r.Context())
+	if err != nil {
+		// The platform catalogue is unreachable. The org's own settings are
+		// still correct and still editable; the screen renders without the
+		// read-only half rather than failing whole.
+		s.logger.Warn("platform templates unavailable for notification settings", "error", err)
+		out.LockedKinds = []string{}
+		out.PlatformTemplates = map[string]notify.Template{}
+		return
+	}
+	overridable := map[string]bool{}
+	for _, k := range notify.TemplateKinds() {
+		overridable[k] = true
+	}
+	locked := make([]string, 0)
+	platform := make(map[string]notify.Template, len(rows))
+	for _, row := range rows {
+		if !overridable[row.Kind] {
+			continue // `otp` is not an org's to see an editor for at all
+		}
+		platform[row.Kind] = notify.Template{SW: row.Sw, EN: row.En}
+		if row.Locked {
+			locked = append(locked, row.Kind)
+		}
+	}
+	sort.Strings(locked)
+	out.LockedKinds = locked
+	out.PlatformTemplates = platform
 }
 
 // ------------------------------------- PUT /org/notification-settings --
@@ -62,6 +104,15 @@ func (s *Server) handlePutNotificationSettings(w http.ResponseWriter, r *http.Re
 	}
 	if err != nil {
 		s.serverError(w, r, "org.notification_settings.get", err)
+		return
+	}
+
+	// A locked kind is the platform's wording and stays that way: an override
+	// of one is refused before anything is merged, so the landlord is told
+	// which kind rather than finding their save half-applied (API.md).
+	if kind, ok := s.lockedOverride(r, body.Templates); ok {
+		conflictCode(w, "template_locked", "this message is set by the platform",
+			"the wording of `"+kind+"` is locked and cannot be overridden by an organisation")
 		return
 	}
 
@@ -97,7 +148,41 @@ func (s *Server) handlePutNotificationSettings(w http.ResponseWriter, r *http.Re
 		s.serverError(w, r, "org.notification_settings.tx", err)
 		return
 	}
+	s.decorateLocked(r, &after)
 	WriteJSON(w, http.StatusOK, after)
+}
+
+// lockedOverride reports the first locked kind the patch tries to override.
+//
+// Clearing an override (a null value, or two blank bodies) is always allowed:
+// it moves the org *back* to the platform's wording, which is what the lock is
+// protecting.
+func (s *Server) lockedOverride(r *http.Request, in map[string]*notify.Template) (string, bool) {
+	if len(in) == 0 || s.templates == nil {
+		return "", false
+	}
+	locked := s.templates.LockedKinds(r.Context())
+	if len(locked) == 0 {
+		return "", false
+	}
+	kinds := make([]string, 0, len(in))
+	for kind := range in {
+		kinds = append(kinds, kind)
+	}
+	sort.Strings(kinds) // a stable answer when a patch names two locked kinds
+	for _, kind := range kinds {
+		tpl := in[kind]
+		if tpl == nil {
+			continue
+		}
+		if strings.TrimSpace(tpl.SW) == "" && strings.TrimSpace(tpl.EN) == "" {
+			continue
+		}
+		if locked[kind] {
+			return kind, true
+		}
+	}
+	return "", false
 }
 
 // ------------------------------------------ POST /notifications/custom --
@@ -180,6 +265,46 @@ func (s *Server) handleCustomSMS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Phase 14: every recipient's message is rendered before anything is
+	// queued, because the credit pre-check has to total the *actual* bodies —
+	// `{{name}}` expands differently per renter, and Swahili runs longer than
+	// English for the same notice, so a per-message estimate would quote the
+	// landlord a shortfall that is not the one they will be charged.
+	type plannedSend struct {
+		rc   customRecipient
+		lang string
+		body string
+	}
+	planned := make([]plannedSend, 0, len(recipients))
+	bodyTexts := make([]string, 0, len(recipients))
+	for _, rc := range recipients {
+		lang := notify.LanguageFor(rc.Locale, settings.SMSLanguage)
+		text, sent := bodies.For(lang)
+		rendered := notify.Render(notify.KindCustom, sent, notify.Vars{
+			Name: rc.Name, Unit: rc.Unit, Property: rc.Property, Org: orgName, Body: text,
+		}, settings.notifyOverrides())
+		planned = append(planned, plannedSend{rc: rc, lang: sent, body: rendered})
+		bodyTexts = append(bodyTexts, rendered)
+	}
+
+	// The landlord is told about a shortfall before forty rows are queued,
+	// rather than finding them held afterwards (API.md Phase 14). It is
+	// advisory: the worker's conditional debit is still what decides whether
+	// any one message is paid for.
+	check, affordable, err := s.checkCredits(r, p.OrgID, bodyTexts, false)
+	if err != nil {
+		s.serverError(w, r, "notifications.custom.credits", err)
+		return
+	}
+	if !affordable {
+		httpx.WriteProblemExtra(w, http.StatusConflict, "insufficient_sms_credits",
+			"not enough SMS credits",
+			"this send needs "+strconv.Itoa(check.Needed)+" credits and the balance is "+
+				strconv.Itoa(int(check.Balance))+"; the platform can top the account up",
+			map[string]any{"needed": check.Needed, "balance": check.Balance})
+		return
+	}
+
 	batchID := notify.NewBatchID()
 	var (
 		queuedIDs []string
@@ -187,18 +312,15 @@ func (s *Server) handleCustomSMS(w http.ResponseWriter, r *http.Request) {
 	)
 	byLanguage := map[string]int{notify.LangSwahili: 0, notify.LangEnglish: 0}
 	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
-		for _, rc := range recipients {
-			lang := notify.LanguageFor(rc.Locale, settings.SMSLanguage)
-			text, sent := bodies.For(lang)
+		for _, pl := range planned {
+			rc, sent := pl.rc, pl.lang
 			id, qErr := notify.Queue(r.Context(), q, notify.Msg{
 				OrgID: p.OrgIDString(), UserID: rc.UserID, Kind: notify.KindCustom,
 				DedupeKey: "custom:" + batchID + ":" + rc.UserID,
 				Phone:     rc.Phone,
-				Body: notify.Render(notify.KindCustom, sent, notify.Vars{
-					Name: rc.Name, Unit: rc.Unit, Property: rc.Property, Org: orgName, Body: text,
-				}, settings.notifyOverrides()),
-				BatchID:  batchID,
-				Language: sent,
+				Body:      pl.body,
+				BatchID:   batchID,
+				Language:  sent,
 			})
 			if errors.Is(qErr, notify.ErrDuplicate) {
 				skipped++
@@ -461,7 +583,7 @@ func (s *Server) handleListNotificationLog(w http.ResponseWriter, r *http.Reques
 	}
 	if v := strings.TrimSpace(qs.Get("status")); v != "" {
 		if !notificationStatuses[v] {
-			f.Add("status", "must be one of: queued, sending, sent, failed")
+			f.Add("status", "must be one of: queued, sending, sent, failed, held_no_credit")
 		} else {
 			params.Status = &v
 		}

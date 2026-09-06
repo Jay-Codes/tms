@@ -37,6 +37,9 @@ var orgScopedTables = []string{
 	"expense_categories",
 	"expenses",
 	"org_themes",
+	// Part 2 (Phase 14): the prepaid SMS balance and its ledger.
+	"org_sms_credits",
+	"sms_credit_ledger",
 }
 
 var (

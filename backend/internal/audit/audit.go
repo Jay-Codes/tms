@@ -132,6 +132,21 @@ const (
 	// org's own audit page as from the platform one.
 	ActionOrgSuspend  = "org.suspend"
 	ActionOrgActivate = "org.activate"
+
+	// Phase 14 — prepaid SMS credits. Like suspension, every row carries the
+	// *target* org as org_id and the platform admin as actor, so a landlord
+	// reading their own audit page sees "credits added by platform" against
+	// the movement the ledger records.
+	ActionSMSCreditTopup     = "sms_credits.topup"
+	ActionSMSCreditAdjust    = "sms_credits.adjust"
+	ActionSMSCreditWatermark = "sms_credits.watermark_update"
+
+	// Phase 14 — the platform SMS catalogue. These carry no org_id: the
+	// wording belongs to the platform, and an edit changes it for every
+	// tenant at once.
+	ActionPlatformTemplateUpdate = "platform_template.update"
+	ActionPlatformTemplateLock   = "platform_template.lock"
+	ActionPlatformTemplateRevert = "platform_template.revert"
 )
 
 // Entity types.
@@ -160,6 +175,9 @@ const (
 
 	EntityExpense         = "expense"
 	EntityExpenseCategory = "expense_category"
+
+	EntitySMSCredits       = "org_sms_credits"
+	EntityPlatformTemplate = "platform_template"
 )
 
 type ctxKey int

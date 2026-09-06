@@ -312,6 +312,14 @@ func (s *Server) handleAdminMetrics(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "admin.metrics", err)
 		return
 	}
+	// Phase 14: the credit picture beside the delivery one. They are two
+	// statements rather than one because the credit tables are new and an
+	// installation mid-migration should still get the rest of the panel.
+	credits, err := s.q.AdminSMSMetrics(r.Context())
+	if err != nil {
+		s.serverError(w, r, "admin.metrics.sms", err)
+		return
+	}
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"orgs":      map[string]any{"total": m.OrgsTotal, "active": m.OrgsActive, "suspended": m.OrgsSuspended},
 		"renters":   map[string]any{"total": m.RentersTotal},
@@ -319,6 +327,9 @@ func (s *Server) handleAdminMetrics(w http.ResponseWriter, r *http.Request) {
 		"contracts": map[string]any{"active": m.ContractsActive},
 		"sms": map[string]any{
 			"sent_24h": m.SmsSent24h, "failed_24h": m.SmsFailed24h, "queued": m.SmsQueued,
+			"credits_used_today":   credits.CreditsUsedToday,
+			"orgs_under_watermark": credits.OrgsUnderWatermark,
+			"held_total":           credits.HeldTotal,
 		},
 		"payments": map[string]any{
 			"recorded_30d": m.PaymentsRecorded30d, "amount_30d": m.PaymentsAmount30d,
