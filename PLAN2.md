@@ -116,13 +116,13 @@ platform_template_versions  kind, version, sw, en, admin_user_id, created_at    
 
 **Exit:** admin tops up JJnE with 100 credits and lowers the watermark; a 120-recipient bulk send is refused with the shortfall; after top-up the held rows go out; admin edits the Swahili `reminder_due` template, previews it, and the next reminder uses the new wording; history shows the previous version.
 
-## Phase 15 — Mobile landlord pass, hardening, UAT 2 (1 day)
+## Phase 15 — Mobile landlord pass, hardening, UAT 2 (1 day) — ✅ done 6 Sep 2026 (UAT 2 phone run pending the ngrok tunnel + approved Beem sender ID)
 
-- [ ] **Mobile landlord (#5 full)**: every tenant screen audited at 375/414/768 px: properties, units board (card view), link inbox, renters, contracts + document (print unaffected), payments (record sheet full-screen), expenses, reports (charts scale, tables scroll), settings, branding, notifications (credits header, bulk compose SW/EN), audit. Bottom bar for the 5 most-used sections; sheets slide from bottom; sticky action bars respect safe areas. PWA install banner on tenant app. Renter app re-checked in both languages (Swahili strings are longer).
-- [ ] Performance: reports v2 endpoints in `make loadtest` (p95 < 300 ms on seed org); indexes for `expenses (org_id, incurred_on)`, `(org_id, property_id, incurred_on)`, `payments (org_id, paid_at)`, `notifications (org_id, status) WHERE status='held_no_credit'`.
-- [ ] Isolation census covers all new routes (build fails otherwise); rate limits on receipt uploads and admin template edits; CSV neutralisation on expenses export.
-- [ ] Seed v2: `make seed` adds 12 months of expenses per property and payments spread over a year so trends are meaningful, renters split SW/EN, 500 credits per org; `make seed-demo` adds JJnE expenses, a custom theme, and an edited platform template.
-- [ ] Docs: SPEC/FLOWS/API/README/DEV updated; `docs/UAT.md` Part 2 section (flows 9 v2, 12 expenses, 13 admin templates/credits, branding v2, language switch, mobile checklist).
+- [x] **Mobile landlord (#5 full)**: every tenant screen audited at 375/414/768 px: properties, units board (card view), link inbox, renters, contracts + document (print unaffected), payments (record sheet full-screen), expenses, reports (charts scale, tables scroll), settings, branding, notifications (credits header, bulk compose SW/EN), audit. Bottom bar for the 5 most-used sections; sheets slide from bottom; sticky action bars respect safe areas. PWA install banner on tenant app. Renter app re-checked in both languages (Swahili strings are longer).
+- [x] Performance: reports v2 endpoints in `make loadtest` (p95 < 300 ms on seed org); indexes for `expenses (org_id, incurred_on)`, `(org_id, property_id, incurred_on)`, `payments (org_id, paid_at)`, `notifications (org_id, status) WHERE status='held_no_credit'`.
+- [x] Isolation census covers all new routes (build fails otherwise); rate limits on receipt uploads and admin template edits; CSV neutralisation on expenses export.
+- [x] Seed v2: `make seed` adds 12 months of expenses per property and payments spread over a year so trends are meaningful, renters split SW/EN, 500 credits per org; `make seed-demo` adds JJnE expenses, a custom theme, and an edited platform template.
+- [x] Docs: SPEC/FLOWS/API/README/DEV updated; `docs/UAT.md` Part 2 section (flows 9 v2, 12 expenses, 13 admin templates/credits, branding v2, language switch, mobile checklist).
 
 **Exit:** UAT 2 checklist executed clean on the ngrok preview from a phone (landlord + renter, both languages); `make build/test/lint/test-isolation/loadtest` green; PROGRESS.md entries for 9–15.
 

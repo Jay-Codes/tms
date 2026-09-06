@@ -165,3 +165,14 @@
 **Verified**: `make build/test/lint` green (+ `-race` on notify/httpserver); curl: 409 → top-up → debits per segment → watermark `low` → held/release → templates PUT/preview/versions/revert → landlord 409 on locked; browser (admin): templates list with locked `otp`, editor for `reminder_due` v3, JJnE SMS tab with ledger (balance 600). Tenant credits card live.
 
 **Notes**: Beem still rejects the configured sender ID, so real sends fail after debiting (`.env` needs an approved `BEEM_SENDER_ID`). Messages log table lacks a scroll wrapper at 375 px and every tenant page logs a hydration mismatch from the branding style on `<html>` — both for Phase 15.
+
+## Phase 15 — Mobile landlord pass, hardening, UAT 2 (6 Sep 2026) — branch `phase-15-mobile-hardening`
+
+**Shipped**
+- Mobile pass: all 28 tenant routes audited at 375/414/768 px; 7 page-level overflows fixed (Messages log 1144 px, bank account 644 px, contract hash, renter/unit/member/template layouts), 9 tables wrapped in `TableScroll` (+ phone-only `max-content` widening so tables pan instead of squeeze), sheets fixed for tall forms + sticky safe-area action bar, phone-only 44 px floor for buttons/inputs/checkboxes/links, TipTap toolbar 44 px, page-head wrapping at 768, hydration warning fixed (`suppressHydrationWarning`), tenant PWA install prompt, `.stamp` overhang reserved. Enduser re-swept clean.
+- Backend hardening: seed v2 (12 months of expenses + payments, locale split, credits, held rows; idempotent across re-runs; `-reset` covers Part 2 tables), `make seed-demo` v2 (JJnE year of data, `cool_slate` theme, template history), loadtest covers all Part 2 reads (p95 ≤ 79 ms, 0 errors), migration 000017 (held-queue index; replaced the never-usable `reversed_at IS NULL` payments index with a `status <> 'reversed'` predicate), census 142/142 with build ratchet + cross-org/renter probes, new rate limits (theme PUT 30/h, admin template edits 60/h, locale PATCH 20/h) with 429 tests, CSV prefix table test.
+- Docs: API.md Part 2 folded into one shipped contract with a deviations table; SPEC/FLOWS/README/DEV/TOOLING aligned; `docs/UAT.md` Part 2 (P0–P11) checklists.
+
+**Verified**: `make build/test/lint/test-isolation` green, `make test-race` + `make loadtest` green (backend lane); browser: Messages page at 375 px has no page scroll and no sub-44 px buttons; zero hydration errors.
+
+**Remaining for the user (UAT 2 on a phone)**: restart ngrok and set `APP_BASE_URL`/`MINIO_PUBLIC_URL`; set an approved `BEEM_SENDER_ID` (or clear the Beem vars to use the log provider); then run `docs/UAT.md` Part 2 from a phone. Tablet note: 768 px sits on the desktop side of the breakpoint, so the 44 px floor does not apply on a portrait iPad.
