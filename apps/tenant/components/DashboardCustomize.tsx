@@ -33,6 +33,8 @@ export const CARD_LABEL_KEYS: Record<DashboardCard, string> = {
   collections: 'dash.card.collections',
   link_requests: 'dash.card.link_requests',
   overdue: 'dash.card.overdue',
+  upcoming: 'dash.card.upcoming',
+  proofs: 'dash.card.proofs',
   expenses: 'dash.card.expenses',
   revenue: 'dash.card.revenue',
   net_income: 'dash.card.net_income',

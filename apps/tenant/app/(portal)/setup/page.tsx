@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useT } from '@tms/ui';
 import { PageHead } from '../../../components/PageHead';
+import { PaymentInstructionsNudge } from '../../../components/PaymentInstructionsNudge';
 import { STEPS } from './steps';
 
 /**
@@ -104,6 +105,9 @@ function SetupBody() {
         title={t('setup.title')}
         lead={t('setup.lead', { step: current + 1, total: STEPS.length, name: t(step.labelKey) })}
       />
+      {/* Phase 16 §16.4 — the one piece of setup that lives outside the wizard
+          but that a renter cannot pay without. Silent once it is set. */}
+      <PaymentInstructionsNudge />
       <Stepper current={current} onPick={setCurrent} />
       <hr className="rule rule-strong" />
 

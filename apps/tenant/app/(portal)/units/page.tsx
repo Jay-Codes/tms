@@ -9,6 +9,7 @@
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { DueChip } from '../../../components/DueBits';
 import { Field, Note, ProblemNote } from '../../../components/FormBits';
 import { PageHead } from '../../../components/PageHead';
 import { Sheet } from '../../../components/Sheet';
@@ -369,7 +370,12 @@ function UnitsBody() {
                       </Link>
                     </td>
                     <td>
-                      <StatusMark status={u.status} override={u.status_override} />
+                      <span style={{ display: 'inline-flex', gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <StatusMark status={u.status} override={u.status_override} />
+                        {/* Phase 16 §16.3 — only occupied units carry a next
+                            due date, and the backend sends it only for them. */}
+                        <DueChip date={u.next_due_date} />
+                      </span>
                     </td>
                     <td className="num">{vacantDays === null ? '—' : vacantDays}</td>
                     <td className="num">

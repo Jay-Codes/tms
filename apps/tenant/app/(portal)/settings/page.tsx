@@ -436,6 +436,13 @@ function SettingsBody() {
         action={t('settings.card.preferences.action')}
       />
 
+      <SettingsCard
+        title={t('settings.card.import.title')}
+        lead={t('settings.card.import.lead')}
+        href="/settings/import"
+        action={t('settings.card.import.action')}
+      />
+
       <section style={{ paddingTop: 'var(--sp-7)' }}>
         <hr className="rule rule-strong" />
         <h2 style={{ fontSize: 'var(--text-lg)', margin: 'var(--sp-4) 0' }}>{t('settings.members.heading')}</h2>

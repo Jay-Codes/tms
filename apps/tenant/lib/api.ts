@@ -357,6 +357,12 @@ export interface Unit {
   vacant_since: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * Phase 16 §16.3 — the next unsettled due date on the unit's running
+   * contract; null for anything vacant, unlisted, in maintenance, or occupied
+   * with nothing outstanding.
+   */
+  next_due_date?: string | null;
 }
 
 export interface QrSheetItem {
@@ -600,6 +606,14 @@ export interface RenterSummary {
   locale?: Locale;
   units: RenterUnitLink[];
   created_at: string;
+  /**
+   * Phase 16 §16.3 — aggregated over the renter's running tenancies with this
+   * org, from the same three queries as `/reports/payment-status`. Optional so
+   * the directory still renders against the Phase 3 shape.
+   */
+  next_due_date?: string | null;
+  next_due_amount?: number | null;
+  overdue_amount?: number;
 }
 
 export interface RenterDetail {
@@ -1114,11 +1128,49 @@ export interface PaymentResult {
   schedules: Schedule[];
 }
 
+/**
+ * Phase 16 §16.4 — the wallet an org may take rent into. It lives beside
+ * `bank_account` in `orgs.settings`, so an org can take mobile money and no
+ * bank transfer at all.
+ */
+export interface MobileMoney {
+  provider: string;
+  number: string;
+  name: string;
+}
+
 export interface BankAccount {
   bank_name: string;
   account_name: string;
   account_number: string;
   instructions: string;
+  /** Repeated inside the account block: it is what the renter's card renders. */
+  mobile_money?: MobileMoney | null;
+}
+
+/**
+ * `GET /org/bank-account` in full. The wallet appears twice on purpose (API.md
+ * §16.4); `payment_instructions_set` is true when *either* block is set, and is
+ * the flag behind the landlord's dashboard nudge.
+ */
+export interface BankAccountView {
+  bank_account: BankAccount | null;
+  mobile_money: MobileMoney | null;
+  payment_instructions_set: boolean;
+}
+
+/**
+ * `PUT /org/bank-account`: the Phase 5 flat body plus an optional wallet. An
+ * object replaces it, an explicit `null` clears it, and **omitting the key
+ * keeps what is stored** — which is why `mobile_money` is `?:` and not just
+ * nullable here.
+ */
+export interface BankAccountInput {
+  bank_name: string;
+  account_name: string;
+  account_number: string;
+  instructions: string;
+  mobile_money?: MobileMoney | null;
 }
 
 /**
@@ -1185,14 +1237,37 @@ export const paymentsApi = {
 
 export const bankAccountApi = {
   get: (signal?: AbortSignal) =>
-    api.get<{ bank_account: BankAccount | null } | BankAccount>('/org/bank-account', { signal }),
-  save: (body: BankAccount) =>
-    api.put<{ bank_account: BankAccount } | BankAccount>('/org/bank-account', body),
+    api.get<BankAccountView | BankAccount>('/org/bank-account', { signal }),
+  save: (body: BankAccountInput) =>
+    api.put<BankAccountView | BankAccount>('/org/bank-account', body),
 };
 
 export const unwrapPayment = (res: { payment: Payment } | Payment) => unwrap<Payment>(res, 'payment');
-export const unwrapBankAccount = (res: { bank_account: BankAccount | null } | BankAccount) =>
+export const unwrapBankAccount = (res: BankAccountView | BankAccount) =>
   unwrap<BankAccount | null>(res, 'bank_account');
+
+/**
+ * Normalise either spelling of `GET`/`PUT /org/bank-account` into the Phase 16
+ * view: the flat Phase 5 body, the `{bank_account}` wrapper, and the full
+ * `{bank_account, mobile_money, payment_instructions_set}` all read the same.
+ * The wallet is taken from wherever it was sent, and the flag is derived when
+ * the backend did not send one.
+ */
+export function readBankAccountView(res: BankAccountView | BankAccount): BankAccountView {
+  const o = (res ?? {}) as Record<string, unknown>;
+  const wrapped = 'bank_account' in o;
+  const account = (wrapped ? (o.bank_account as BankAccount | null) : (res as BankAccount)) ?? null;
+  const wallet =
+    (o.mobile_money as MobileMoney | null | undefined) ?? account?.mobile_money ?? null;
+  const set =
+    typeof o.payment_instructions_set === 'boolean'
+      ? o.payment_instructions_set
+      : Boolean(
+          wallet ||
+            (account && (account.bank_name || account.account_name || account.account_number)),
+        );
+  return { bank_account: account, mobile_money: wallet, payment_instructions_set: set };
+}
 
 /** A schedule still owes money — the ones "Record payment" may target. */
 export function isUnsettled(s: Pick<Schedule, 'status'>): boolean {
@@ -1503,6 +1578,12 @@ export interface ReportSummary {
   contracts: { active: number; expiring: number; pending_signature: number };
   period: ReportPeriod;
   vacant_units: VacantUnitRow[];
+  /**
+   * Phase 16 §16.3 — always a 7-day window whatever the summary's period, so
+   * the dashboard's `upcoming` card costs no second call for its figure.
+   * Optional so the screen still renders against the Phase 7 shape.
+   */
+  upcoming_7d?: { count: number; total: number };
   /* Phase 11 — the resolved window and the one before it, for comparison.
      Optional so the screen still renders against the Phase 7 shape. */
   window?: ReportWindow;
@@ -1527,6 +1608,43 @@ export interface PaymentStatusRow {
   outstanding: number;
   overdue_amount: number;
   last_payment_at: string | null;
+}
+
+/**
+ * Phase 16 §16.3 — one row of `GET /reports/upcoming`: the Phase 5 schedule
+ * shape *flattened*, with the identity fields beside it rather than nested.
+ * `days_until_due` is counted on the Dar es Salaam wall clock by the backend
+ * and goes negative once the date has passed; nothing here recomputes it.
+ */
+export interface UpcomingItem {
+  id: string;
+  contract_id: string;
+  period_start: string;
+  period_end: string;
+  due_date: string;
+  amount: number;
+  paid_amount: number;
+  status: ScheduleStatus | string;
+  days_overdue: number;
+  renter_name: string;
+  renter_user_id: string;
+  phone: string | null;
+  unit_name: string;
+  property_name: string;
+  days_until_due: number;
+}
+
+/** The three windows the backend accepts; anything else is a 400 on `days`. */
+export const UPCOMING_WINDOWS = [7, 14, 30] as const;
+export type UpcomingWindow = (typeof UPCOMING_WINDOWS)[number];
+
+export interface UpcomingReport {
+  items: UpcomingItem[];
+  /** Sum of `amount − paid_amount` across the window — the backend sums it. */
+  total_due: number;
+  count: number;
+  days: number;
+  window: { from: string; to: string };
 }
 
 export type CollectionsGroup = 'day' | 'week' | 'month';
@@ -1650,6 +1768,10 @@ export const DASHBOARD_CARDS = [
   'collections',
   'link_requests',
   'overdue',
+  // Phase 16 §16.3/§16.1 — `upcoming` sits directly after `overdue` in the
+  // backend allowlist order, `proofs` directly after it.
+  'upcoming',
+  'proofs',
   'expenses',
   'revenue',
   'net_income',
@@ -1672,6 +1794,8 @@ export const DEFAULT_DASHBOARD_CARDS: readonly DashboardCard[] = [
   'collections',
   'link_requests',
   'overdue',
+  'upcoming',
+  'proofs',
 ];
 
 export interface DashboardPrefs {
@@ -1719,6 +1843,14 @@ export const reportsApi = {
     query: PeriodQuery & { status?: PaymentStatusValue | ''; property_id?: string } = {},
     signal?: AbortSignal,
   ) => api.get<{ items: PaymentStatusRow[] }>('/reports/payment-status', { query, signal }),
+  /**
+   * Phase 16 §16.3 — what falls due inside the next `days` (7, 14 or 30;
+   * default 14), sorted by due date. Unsettled rows on running contracts only.
+   */
+  upcoming: (
+    query: { days?: UpcomingWindow | number; property_id?: string } = {},
+    signal?: AbortSignal,
+  ) => api.get<UpcomingReport>('/reports/upcoming', { query, signal }),
   collections: (
     query: PeriodQuery & { group?: CollectionsGroup; property_id?: string },
     signal?: AbortSignal,
@@ -2044,4 +2176,268 @@ export const unwrapCategory = (res: { category: ExpenseCategory } | ExpenseCateg
 /** A voided expense is read-only — no edit, no second void (FLOWS flow 12). */
 export function isVoided(e: Pick<Expense, 'status'>): boolean {
   return e.status === 'voided';
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 16 §16.1 — proof of payment (audience org)                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A proof is a *claim*, not money: the renter says they paid and attaches the
+ * evidence. Only an accepted proof runs the allocator, and what the allocator
+ * writes is the payment (SPEC §6). So nothing here computes a balance — the
+ * landlord's screen puts the claim beside the schedule and the backend decides.
+ */
+export type ProofStatus = 'submitted' | 'accepted' | 'rejected';
+
+/** The three statuses in the order the review queue offers them. */
+export const PROOF_STATUSES: ProofStatus[] = ['submitted', 'accepted', 'rejected'];
+
+export interface Proof {
+  id: string;
+  contract: ScheduleContractRef;
+  /** Null when the renter did not say which instalment the money is for. */
+  schedule_id: string | null;
+  amount: number;
+  paid_at: string;
+  /** `bank_transfer` or `mobile_money_manual` — a proof is never cash. */
+  method: PaymentMethod | string;
+  reference: string | null;
+  note: string | null;
+  content_type: string;
+  size_bytes: number;
+  status: ProofStatus | string;
+  payment_id: string | null;
+  reviewed_at: string | null;
+  reviewed_by_name: string | null;
+  rejection_reason: string | null;
+  created_at: string;
+  /** Presigned read, 300 s. Only `GET /proofs/{id}` issues one. */
+  view_url?: string | null;
+}
+
+/**
+ * The landlord's corrections on the way through. Every field is optional: what
+ * is left out keeps the renter's own claim. The body is otherwise the
+ * `POST /payments` body, which is why the confirm sheet is reused unchanged.
+ */
+export interface ProofAcceptInput {
+  amount?: number;
+  schedule_id?: string;
+  paid_at?: string;
+  allow_overpay_rollover?: boolean;
+}
+
+/** `200 {proof, payment, schedules}` — a `PaymentResult` with the proof beside it. */
+export interface ProofAcceptResult extends PaymentResult {
+  proof: Proof;
+}
+
+/** How long a `view_url` lives (API.md §16.1). Refreshed a little before. */
+export const PROOF_VIEW_TTL_MS = 300_000;
+
+export const proofsApi = {
+  list: (
+    query: { status?: ProofStatus | ''; cursor?: string; limit?: number } = {},
+    signal?: AbortSignal,
+  ) =>
+    api.get<{ items: Proof[]; next_cursor?: string | null; status?: string }>('/proofs', {
+      query,
+      signal,
+    }),
+  summary: (signal?: AbortSignal) =>
+    api.get<{ submitted_count: number }>('/proofs/summary', { signal }),
+  get: (id: string, signal?: AbortSignal) =>
+    api.get<{ proof: Proof }>(`/proofs/${id}`, { signal }),
+  accept: (id: string, body: ProofAcceptInput) =>
+    api.post<ProofAcceptResult>(`/proofs/${id}/accept`, body),
+  reject: (id: string, reason: string) =>
+    api.post<{ proof: Proof }>(`/proofs/${id}/reject`, { reason }),
+};
+
+/** A proof is still waiting for an answer — the only state with actions on it. */
+export function isPendingProof(p: Pick<Proof, 'status'>): boolean {
+  return p.status === 'submitted';
+}
+
+/* ------------------------------------------------------------------ */
+/* Shapes — mirror API.md Part 2 §16.2 (CSV import) exactly.           */
+/* ------------------------------------------------------------------ */
+
+export type ImportKind = 'units' | 'renters' | 'payments';
+export const IMPORT_KINDS: readonly ImportKind[] = ['units', 'renters', 'payments'] as const;
+
+/** The server refuses anything larger — the page says so before the upload. */
+export const IMPORT_MAX_BYTES = 2 * 1024 * 1024;
+
+export type ImportBatchStatus = 'previewed' | 'committed' | 'undone';
+
+export interface ImportBatch {
+  id: string;
+  kind: ImportKind;
+  filename: string;
+  row_count: number;
+  ok_count: number;
+  error_count: number;
+  status: ImportBatchStatus;
+  created_by: { user_id?: string; name: string } | null;
+  committed_at: string | null;
+  undone_at: string | null;
+  /** Committed and still inside the 24 h window — the server decides, not us. */
+  can_undo: boolean;
+  created_at: string;
+}
+
+export interface ImportRow {
+  line: number;
+  raw: Record<string, string>;
+  /** Keyed by column name; the key `_row` is a problem with the whole line. */
+  errors: Record<string, string> | null;
+  /** What the row will hit or create — names before the commit, ids after. */
+  resolved: Record<string, unknown> | null;
+  entity_type: string | null;
+  entity_id: string | null;
+}
+
+export interface ImportTemplateColumn {
+  name: string;
+  required: boolean;
+  example: string;
+  help: string;
+}
+
+export interface ImportTemplate {
+  kind: ImportKind;
+  columns: ImportTemplateColumn[];
+}
+
+export interface ImportPreview {
+  batch: ImportBatch;
+  rows: ImportRow[];
+}
+
+export interface ImportCreatedCounts {
+  units: number;
+  properties: number;
+  renters: number;
+  contracts: number;
+  payments: number;
+}
+
+export interface ImportCommitResult {
+  batch: ImportBatch;
+  created: ImportCreatedCounts;
+}
+
+export interface ImportUndoResult {
+  batch: ImportBatch;
+  undone: ImportCreatedCounts;
+}
+
+/**
+ * The preview upload. `request()` cannot carry it: a FormData body must go up
+ * without a `Content-Type` header of our own, so the browser can write the
+ * multipart boundary. Everything else — the cookie, the problem+json parsing —
+ * follows the same rules as the rest of this module.
+ */
+async function postMultipart<T>(path: string, form: FormData, signal?: AbortSignal): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(buildUrl(path), {
+      method: 'POST',
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+      body: form,
+      signal,
+    });
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
+    throw offlineError(cause);
+  }
+  const text = await res.text();
+  let parsed: unknown = undefined;
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = undefined;
+    }
+  }
+  if (!res.ok) {
+    const problem: Problem =
+      parsed && typeof parsed === 'object'
+        ? (parsed as Problem)
+        : { title: res.statusText, detail: text.slice(0, 300) || res.statusText };
+    throw new ApiError(res.status, { ...problem, status: res.status });
+  }
+  return parsed as T;
+}
+
+export const importsApi = {
+  /** The column reference the screen prints (the `.csv`-less form of the same path). */
+  template: (kind: ImportKind, signal?: AbortSignal) =>
+    api.get<ImportTemplate>(`/imports/templates/${kind}`, { signal }),
+
+  /** The blank sheet. Fetched, not linked, so the attachment name is ours to use. */
+  templateCsv: async (kind: ImportKind): Promise<{ blob: Blob; filename: string }> => {
+    let res: Response;
+    try {
+      res = await fetch(buildUrl(`/imports/templates/${kind}.csv`), {
+        credentials: 'include',
+        headers: { Accept: 'text/csv' },
+      });
+    } catch (cause) {
+      throw offlineError(cause);
+    }
+    if (!res.ok) {
+      const text = await res.text();
+      let problem: Problem = { title: res.statusText, detail: text.slice(0, 300) || res.statusText };
+      try {
+        problem = JSON.parse(text) as Problem;
+      } catch {
+        /* not problem+json — keep the text */
+      }
+      throw new ApiError(res.status, { ...problem, status: res.status });
+    }
+    return {
+      blob: await res.blob(),
+      filename: filenameFromDisposition(res.headers.get('Content-Disposition')) || `tms-import-${kind}.csv`,
+    };
+  },
+
+  preview: (kind: ImportKind, file: File, signal?: AbortSignal) => {
+    const form = new FormData();
+    form.set('kind', kind);
+    form.set('file', file, file.name);
+    return postMultipart<ImportPreview>('/imports/preview', form, signal);
+  },
+
+  commit: (id: string, skipErrors = false) =>
+    api.post<ImportCommitResult>(`/imports/${id}/commit`, { skip_errors: skipErrors }),
+  undo: (id: string) => api.post<ImportUndoResult>(`/imports/${id}/undo`),
+  list: (query: { cursor?: string; limit?: number } = {}, signal?: AbortSignal) =>
+    api.get<{ items: ImportBatch[]; next_cursor?: string | null }>('/imports', { query, signal }),
+  get: (id: string, signal?: AbortSignal) => api.get<ImportPreview>(`/imports/${id}`, { signal }),
+};
+
+/**
+ * A header row that does not match the template comes back as a 400 carrying
+ * the two lists the screen needs. Anything else answers null.
+ */
+export function importHeaderMismatch(e: ApiError): { missing: string[]; unknown: string[] } | null {
+  if (e.status !== 400 || e.code !== 'csv_header_mismatch') return null;
+  const list = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  return { missing: list(e.body.missing), unknown: list(e.body.unknown) };
+}
+
+/** The `row_failed` 409 names the line that stopped the whole transaction. */
+export function importRowFailure(e: ApiError): { line: number; column: string; reason: string } | null {
+  if (e.status !== 409 || e.code !== 'row_failed') return null;
+  const line = typeof e.body.line === 'number' ? e.body.line : 0;
+  return {
+    line,
+    column: typeof e.body.column === 'string' ? e.body.column : '',
+    reason: typeof e.body.reason === 'string' ? e.body.reason : e.detail,
+  };
 }
