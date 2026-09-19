@@ -261,7 +261,7 @@ const messages: Messages = {
   'payments.accountNumber': 'Nambari ya akaunti',
   'payments.accountNumberLabel': 'nambari ya akaunti',
   'payments.reference': 'Tumia jina lako na chumba chako kama kumbukumbu',
-  'payments.howMoney': 'Lipa kwa fedha taslimu, kwa benki au kwa pesa za simu. Mwenye nyumba ataandika malipo hapa na yatapigwa muhuri kwenye safu iliyo juu.',
+  'payments.howMoney': 'Lipa kwa fedha taslimu, kwa benki au kwa pesa za simu. Mwenye nyumba ataandika malipo hapa na yatapigwa muhuri kwenye ratiba iliyo chini.',
   'payments.noAccount': 'Mwenye nyumba bado hajaweka taarifa za malipo. Muulize wapi upeleke kodi.',
   'payments.noSchedule': 'Bado hakuna ratiba ya malipo. Itaonekana hapa mkataba wako utakapoanza kutumika.',
   'payments.history': 'Historia',

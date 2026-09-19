@@ -266,7 +266,7 @@ const messages: Messages = {
   'payments.accountNumber': 'Account number',
   'payments.accountNumberLabel': 'account number',
   'payments.reference': 'Use your name and unit as reference',
-  'payments.howMoney': 'Pay cash, by bank transfer or by mobile money. Your landlord records the payment here and it is stamped on the row above.',
+  'payments.howMoney': 'Pay cash, by bank transfer or by mobile money. Your landlord records the payment here and it is stamped on the schedule below.',
   'payments.noAccount': 'Your landlord has not published payment details yet. Ask them where to send the rent.',
   'payments.noSchedule': 'No payment schedule yet. It appears here once your contract is active.',
   'payments.history': 'History',
