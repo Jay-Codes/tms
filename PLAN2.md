@@ -17,6 +17,11 @@ Continues [PLAN.md](PLAN.md) (Phases 0–8, done 5 Sep 2026). Same rules: backen
 | 10 | Swahili/English **per user** preference (renter + landlord) → screen language + SMS/bulk-SMS language | 13 |
 | 11 | Admin sets an **SMS balance limit** per landlord (org) | 14 |
 | 12 | All message templates (EN + SW) **configurable on the admin page** | 14 |
+| 13 | Renter uploads **proof of payment** (screenshot/PDF) to the landlord; landlord accepts → payment recorded | 16 |
+| 14 | **CSV import** of previous records (units, renters, payment history) | 16 |
+| 15 | **Next payment due** far more visible — landlord side (dashboard, renters, units) and renter side (home hero, countdown) | 16 |
+| 16 | **Payment instructions** easy to find for renters (pinned, reachable from home, contract and proof sheet) | 16 |
+| 17 | Contracts: **revoke, amend/update, re-sign, renew** | 17 (draft) |
 
 Found during the same test pass (fixed in Phase 9): the contract terms say "TZS 100,000 per Quarterly (90 days)" while the unit price is 100,000 **per 30 days** — `{{rent}}` is not scaled to the payment period, so the signed document states the wrong figure.
 
@@ -128,6 +133,91 @@ platform_template_versions  kind, version, sw, en, admin_user_id, created_at    
 
 ---
 
+## Phase 16 — Proof of payment, CSV import, due-date visibility (#13–#16) (2 days) — ⬜ planned
+
+Order inside the phase: docs → schema → proofs API → import API → visibility endpoints → tenant screens → renter screens → tests. Branch `phase-16-proofs-import`.
+
+### 16.0 Docs first (TECHSTACK rule)
+- [ ] SPEC: §4 tables `payment_proofs`, `import_batches`, `import_rows`; §5.7 proofs API; §5.14 imports API; §5.9 `GET /reports/upcoming`; §7 bucket `proofs`; §6 rule "a proof is a claim, a payment is a fact — only an accepted proof touches a schedule". FLOWS: flow 7 gains "renter sends proof → landlord accepts/rejects"; new flow 14 "Import previous records"; flow 8 note on `proof_rejected` SMS. API.md "Part 2 — Phase 16" section. DECISIONS for every spec-silent call below.
+
+### 16.1 Proof of payment (#13)
+Schema:
+```
+payment_proofs   id, org_id, contract_id, schedule_id NULLABLE, renter_user_id, amount BIGINT CHECK > 0,
+                 paid_at TIMESTAMPTZ, method (bank_transfer|mobile_money_manual), reference NULLABLE (≤80),
+                 note NULLABLE (≤500), object_key, content_type, size_bytes,
+                 status (submitted|accepted|rejected), payment_id NULLABLE REFERENCES payments,
+                 reviewed_by_user_id NULLABLE, reviewed_at NULLABLE, rejection_reason NULLABLE (≤200),
+                 created_at, updated_at
+                 -- index (org_id, status, created_at DESC); partial index WHERE status='submitted'
+```
+Bucket `proofs`, key `{org_id}/{proof_id}.{ext}`, `image/jpeg` / `image/png` / `application/pdf`, ≤ 5 MiB, private, presigned reads for the org and the submitting renter only (same shape as `receipts`).
+
+- [ ] **Renter API**: `POST /me/proofs/upload {contract_id, content_type, size_bytes}` → presigned PUT ticket; `POST /me/proofs {contract_id, schedule_id?, amount, paid_at, method, reference?, note?, object_key}` → `201 {proof}` status `submitted` (verifies the object exists and matches size/type — the completion callback pattern from receipts); `GET /me/proofs?cursor=` → own proofs with status, reviewer note; `DELETE /me/proofs/{id}` only while `submitted` (withdraw). Rate limit 10 proofs / renter / day. Contract must be `active|expiring` and belong to the renter → else 404/409 `contract_not_active`.
+- [ ] **Landlord API**: `GET /proofs?status=submitted|accepted|rejected&cursor=` (default `submitted`, ascending by `created_at` — oldest claim first); `GET /proofs/{id}` (+ `view_url` presigned, short TTL); `POST /proofs/{id}/accept {amount?, schedule_id?, paid_at?, allow_overpay_rollover?}` → runs the existing `POST /payments` allocator with the proof's fields (overrides allowed, audited as before/after), links `payment_id`, status `accepted`, queues the existing `thank_you` SMS; **409** `overpay_confirm_required` / `exceeds_contract_balance` propagate unchanged so the UI reuses the confirm sheet; `POST /proofs/{id}/reject {reason}` → status `rejected`, SMS `proof_rejected` (new kind, SW/EN, platform template + org override, `{{reason}}` platform-only as today). Reversing an accepted proof's payment (existing `POST /payments/{id}/reverse`) leaves the proof `accepted` with the payment stamped reversed — the record stays. Audit actions: `proof.submit`, `proof.withdraw`, `proof.accept`, `proof.reject`, `proof.view`.
+- [ ] **Renter screens** (`apps/enduser`): "Send proof of payment" button on the home hero and on the Payments tab (pre-filled with `next_due` amount + schedule); sheet = amount, date, method, reference, photo/PDF picker (camera on mobile), the org's **payment instructions repeated inside the sheet**; on submit the schedule row shows an "Awaiting confirmation" pencil chip until accepted/rejected; a rejected proof shows the reason with "Send again". Proof history under Payments → History.
+- [ ] **Landlord screens** (`apps/tenant`): Payments page gains a **Proofs** tab (first tab when `submitted_count > 0`, badge in nav + bottom bar, dashboard card `proofs` added to the card allowlist); row = renter, unit, claimed amount vs outstanding, date, thumbnail; detail sheet = full image/PDF viewer, side-by-side "claimed" vs "schedule expects", Accept (opens the Record-payment sheet pre-filled, so the overpay confirm and reverse flows are unchanged) / Reject with reason. Renter detail page and contract page list the renter's proofs.
+- [ ] **Notifications**: kind `proof_rejected` added to `notify.Render`, platform template seeded (SW/EN), admin template editor picks it up automatically, org override allowed, credits debited like any other kind. No SMS on submit (the landlord uses the dashboard, same rule as signing) — the in-app badge is the signal.
+- [ ] Tests: presign/complete size+type enforcement; renter cannot submit for another renter's contract (404); org B cannot read org A's proofs (census extended, build fails otherwise); accept → payment allocated and `payment_id` linked, schedule flips paid; accept with overpay → 409 passthrough; reject → SMS queued with reason; withdraw only while `submitted`; rate limit 429.
+
+### 16.2 CSV import of previous records (#14)
+Schema:
+```
+import_batches   id, org_id, kind (units|renters|payments), filename, row_count, ok_count, error_count,
+                 status (previewed|committed|undone), created_by_user_id, committed_at, undone_at, created_at
+import_rows      id, batch_id, org_id, line INT, raw JSONB, errors JSONB NULLABLE,
+                 entity_type NULLABLE, entity_id NULLABLE            -- what the row became on commit
+```
+- [ ] **API** (`/imports`, landlord, owner/manager): `GET /imports/templates/{kind}.csv` → header row + one example line (SW/EN header labels are *not* used — fixed English machine headers, documented on the page); `POST /imports/preview` multipart `file` + `kind`, ≤ 2 MiB, ≤ 5 000 rows, UTF-8/BOM tolerant, `,` or `;` delimiter sniffed → `201 {batch_id, rows:[{line, raw, errors, resolved:{…}}], ok_count, error_count}` — nothing written but the batch; `POST /imports/{batch_id}/commit` → runs every ok row in **one transaction** (all-or-nothing — a landlord must never end up with half a spreadsheet), rows with errors are refused unless `skip_errors=true`; `POST /imports/{batch_id}/undo` within 24 h → payments reversed with reason `import undone`, units/renters created by the batch soft-deleted when untouched since; `GET /imports?cursor=` history. Rate limit 20 previews / h. Audited `import.preview`, `import.commit`, `import.undo` (with batch id, counts).
+- [ ] **Kinds and columns** (validated per row, same rules as the manual endpoints — the import calls the same service functions, never raw SQL):
+  - `units`: `property, unit, rent_amount, rent_period_days?, status?` → property matched by name (created when missing, flagged in preview), unit created `vacant`/`unlisted`.
+  - `renters`: `full_name, phone, locale?, property?, unit?` → user pre-registered by phone (existing "known to org" path); when `unit` is given, a `link_request` is created `approved` → contract `pending_signature` from the org default template, `contract_ready` SMS held until commit; the landlord activates via the existing FLOWS 3.6 countersign path when the renter cannot sign. No contract is ever activated by an import.
+  - `payments`: `unit, renter_phone, amount, paid_at, method, reference?, note?` → contract resolved by unit + renter phone (must be `active|expiring|ended|terminated` — history may belong to a finished contract), allocated by the existing allocator in `paid_at` order with `allow_overpay_rollover=true`; a row that exceeds the contract balance is an error in preview (the landlord fixes the sheet or the contract dates). `method` limited to the three manual values. Payments carry `import_batch_id` (new nullable column, migration) and show an "imported" pencil chip in ledgers.
+- [ ] **Tenant screens**: Settings → **Import data** page: kind picker with column reference and template download, drop zone, preview table (row status, inline errors, resolved property/unit/renter names), "Commit N rows" / "Skip M rows with errors and commit", history list with Undo (24 h). Mobile: preview table scrolls horizontally (Phase 15 pattern).
+- [ ] Tests: delimiter + BOM sniffing; formula-prefix cells are stored verbatim but neutralised on every export (existing rule); every column validation error lands on the right line; commit is atomic (inject a failure on row N → nothing written); payments allocation order; undo reverses only the batch's payments; org B cannot see org A batches; 5 000-row batch under 5 s on the seed org.
+
+### 16.3 Next payment due — visibility (#15)
+- [ ] **API**: `GET /me/schedules` adds `next_due.days_until_due` (negative when past) and `next_due.proof:{id,status}|null`; new `GET /reports/upcoming?days=7|14|30&property_id=` → `{items:[{schedule…, renter_name, phone, unit_name, property_name, days_until_due}], total_due, count}` sorted by due date; `GET /renters` list rows gain `next_due_date, next_due_amount, overdue_amount`; `GET /units` board rows gain `next_due_date` for occupied units.
+- [ ] **Renter app**: home **hero block** replaces the small ledger row — large due date, amount, a countdown chip ("Due in 5 days" / "Due today" / "3 days overdue" in the stamp colours, "Awaiting confirmation" when a proof is pending), two full-width buttons **How to pay** (jumps to the pinned instructions card) and **Send proof**; contract page shows the same chip in its header; Payments tab keeps the chip on every row. Countdown wording SW/EN.
+- [ ] **Landlord app**: dashboard card `upcoming` ("Due in the next 7 days": count + total, top 5 rows, link to Payments → Due soon) added to the allowlist and to the default card order right after `overdue`; Renters list gains a **Next due** column (sortable, overdue tinted); renter detail header shows Next due / Overdue figures above the tabs; units board card chip "Due 3 Oct" on occupied units; Payments "Due soon" tab default window 14 days with a 7/14/30 picker.
+- [ ] Tests: `days_until_due` across EAT midnight; upcoming report excludes waived/paid and finished contracts; renter list figures match `/reports/payment-status` for the same renter (reconciliation test).
+
+### 16.4 Payment instructions — findability (#16)
+- [ ] **Renter app**: "How to pay" card **pinned at the top** of the Payments tab (bank, account name, number with copy, instructions text, reference hint "use your unit name"), collapsible only after the first view; reachable from the home hero button, from the contract page ("How to pay" link under the rent row) and repeated inside the proof sheet; when the org has no bank account set, the card says "Ask your landlord for payment details" instead of disappearing.
+- [ ] **Landlord app**: setup checklist / dashboard nudge "Add payment instructions so renters know where to pay" until `bank_account` is set (dismissable, returns if cleared); Settings → Bank account page shows a live **renter preview** of the card; optional second block "Mobile money" (`mobile_money:{provider, number, name}`) stored beside `bank_account` in `orgs.settings`, shown on the same card.
+- [ ] **SMS**: `{{pay_link}}` variable (deep link to `/enduser/payments`) added to the org template whitelist and used by the platform defaults of `reminder_7d`, `reminder_due`, `overdue_daily`.
+- [ ] Tests: `mobile_money` round-trips through `PATCH /org` untouched; `{{pay_link}}` renders per org base URL; whitelist validation accepts the new variable and still rejects unknown ones.
+
+**Exit:** renter Asha sees "Due in 5 days · TZS 100,000" on her home screen with How-to-pay and Send-proof buttons, uploads a screenshot, JJnE sees it in the Proofs tab with a badge, accepts it → schedule paid, thank-you SMS queued with next due; a rejected proof reaches her with the reason. JJnE imports a 300-row payments CSV: preview shows 2 errors on lines 14 and 87, commit with skip, ledger shows imported chips, undo reverses them. Dashboard "Due in 7 days" card and the Renters "Next due" column agree with the payment-status report. `make build/test/lint/test-isolation` green, census extended, PROGRESS entry.
+
+---
+
+## Phase 17 — Contracts: revoke, amend, re-sign, renew (#17) — 📝 draft, to discuss with the client before scoping
+
+What exists today: `POST /contracts/{id}/terminate` (works from `pending_signature`, `active`, `expiring` — cancelling an unsigned contract is the same call), the `landlord_recorded` countersign path, `expiring` at ~30 days, and the rule that a signed document is **never edited** (snapshot hash, FLOWS 3 edge case: "landlord terminates and issues a new contract"). Anything below must keep that rule: a change is always a **new document** the renter signs again.
+
+Proposed model — **supersession**:
+```
+contracts  + supersedes_contract_id NULLABLE, superseded_by_contract_id NULLABLE, amendment_reason NULLABLE,
+           + status value `superseded`
+```
+- **Amend** (`POST /contracts/{id}/amend {changes:{rent_amount?, payment_period_id?, due_day?, end_date?, unit_id?}, effective_date, reason}`): creates a new `pending_signature` contract pre-filled from the old one with the changes applied, `supersedes_contract_id` set, terms re-rendered from the current template, SMS `contract_ready`. The old contract stays `active` and keeps collecting until the new one **activates**; activation then marks the old one `superseded` (not terminated), waives its schedules with `period_start ≥ effective_date`, carries paid/partial rows across as credit on the first new schedule, and moves the unit if `unit_id` changed. Only one open amendment per contract (409 `amendment_pending`).
+- **Renew** = amend with only `end_date` (and optionally `rent_amount`) from an `expiring` contract; the "Renew" button on the contract page is this call. Replaces the FLOWS 4 "renew (new contract, current price)" wording.
+- **Revoke** = the existing terminate from `pending_signature` (already there), renamed in the UI to "Withdraw" so it is not confused with terminating a live tenancy. For an `active` contract with wrong terms: amend (renter re-signs) — or terminate + new contract when the tenancy itself is wrong. No silent edit path, ever.
+- **Re-sign** (recovery): `POST /contracts/{id}/reissue {reason}` for a `pending_signature` contract whose snapshot is stale (`snapshot_mismatch` on sign/activate, template changed, phone changed): withdraws it and creates a fresh one from the same parameters, new SMS. Also the answer to "renter never signed and the link expired".
+- **Landlord countersign correction**: none — a landlord signature error is a reissue.
+- **Document**: the contract document shows "Supersedes contract #… from {date}" / "Superseded by #… on {date}" in the header; both stay printable and verifiable. The renter app lists the chain under Contract.
+- **Audit**: `contract.amend`, `contract.reissue`, `contract.supersede` with before/after terms; the org audit filter gains these kinds.
+
+Open questions for the client (defaults applied if unanswered):
+1. Amendment takes effect **only after the renter signs** (default) vs landlord-only amendment for rent changes with an SMS notice? Default: renter signs, always.
+2. Carry-over of money already paid past `effective_date`: credit on the new contract's first schedule (default) vs refund recorded as an expense.
+3. Can a **renter** request an amendment (e.g. shorter term) or is it landlord-initiated only? Default: landlord only in this phase.
+4. Rent increase cap / notice period (Tanzanian practice: written notice, commonly 30–90 days): enforce `effective_date ≥ today + notice_days` (org setting, default 30) or just warn? Default: warn.
+5. Renewal reminders: reuse `expiring` timing (30 days) with a new SMS kind `renewal_offer` carrying the link to sign, or keep landlord-driven? Default: landlord-driven, no new SMS kind.
+
+---
+
 ## Open questions (answer whenever; defaults applied if unanswered)
 
 1. **Credit unit**: 1 credit per 160-char GSM segment (default; 70 for UCS-2) vs 1 credit per message regardless of length. OTP/security messages exempt (default yes).
@@ -135,6 +225,9 @@ platform_template_versions  kind, version, sw, en, admin_user_id, created_at    
 3. Revenue **basis toggle**: cash (collected) is the default; add an "accrual (expected)" toggle in Reports? Default: both lines always shown, no toggle.
 4. Theme **per app**: one org theme applies to both landlord and renter apps (default).
 5. Receipts as **PDF** allowed? Default: yes (image/jpeg, image/png, application/pdf, ≤5 MiB).
+6. **Payments import for history before the contract start** (rent paid before the landlord joined TMS): default is *not supported* — the contract's `start_date` should be the real tenancy start so past periods exist as schedules; alternative is a ledger-only "historical" row that touches no schedule and shows only in History. Phase 16 ships the default.
+7. **Proof of payment on submit**: SMS/e-mail to the landlord (costs credits) or in-app badge only (default)?
+8. **Import undo window**: 24 h (default) vs until the next import.
 
 ## Risks
 
