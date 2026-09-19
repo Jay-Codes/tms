@@ -320,6 +320,49 @@ var isoRoutes = []isoCase{
 	{method: "GET", pattern: "/expenses/{id}/receipt", aud: isoOrg, path: "/expenses/{expenseA}/receipt"},
 	{method: "DELETE", pattern: "/expenses/{id}/receipt", aud: isoOrg, path: "/expenses/{expenseA}/receipt"},
 
+	// ------------------------------------------- proofs of payment (16.1) --
+	//
+	// Org B's queue is its own: the listing and the badge answer 200 with
+	// nothing of A's in them, and every path naming A's claim is a 404.
+	{method: "GET", pattern: "/proofs", aud: isoOrg, want: []int{200}},
+	{method: "GET", pattern: "/proofs/summary", aud: isoOrg, want: []int{200}},
+	{method: "GET", pattern: "/proofs/{id}", aud: isoOrg, path: "/proofs/{proofA}"},
+	{
+		method: "POST", pattern: "/proofs/{id}/accept", aud: isoOrg,
+		path: "/proofs/{proofA}/accept", body: map[string]any{},
+	},
+	{
+		method: "POST", pattern: "/proofs/{id}/reject", aud: isoOrg,
+		path: "/proofs/{proofA}/reject", body: map[string]any{"reason": "hijack"},
+	},
+
+	// ------------------------------------------------ CSV imports (16.2) --
+	//
+	// A batch is one org's spreadsheet of another org's business: names,
+	// phone numbers and money. Every path naming A's batch is a 404, the
+	// history answers org B with its own (empty) list, and the template is
+	// deliberately the same blank sheet for everybody.
+	{
+		method: "GET", pattern: "/imports/templates/{kind}", aud: isoOrg,
+		path: "/imports/templates/units.csv", want: []int{200},
+	},
+	{
+		// The route takes multipart; the suite sends JSON, which is refused
+		// before any org is consulted. What matters here is that the refusal
+		// carries nothing of A's.
+		method: "POST", pattern: "/imports/preview", aud: isoOrg, want: []int{400},
+	},
+	{method: "GET", pattern: "/imports", aud: isoOrg, want: []int{200}},
+	{method: "GET", pattern: "/imports/{id}", aud: isoOrg, path: "/imports/{importBatchA}"},
+	{
+		method: "POST", pattern: "/imports/{id}/commit", aud: isoOrg,
+		path: "/imports/{importBatchA}/commit", body: map[string]any{"skip_errors": true},
+	},
+	{
+		method: "POST", pattern: "/imports/{id}/undo", aud: isoOrg,
+		path: "/imports/{importBatchA}/undo",
+	},
+
 	// ------------------------------------------------------ notifications --
 	{method: "GET", pattern: "/org/notification-settings", aud: isoOrg, want: []int{200}},
 	{
@@ -358,6 +401,9 @@ var isoRoutes = []isoCase{
 	{method: "GET", pattern: "/reports/collections", aud: isoOrg, want: []int{200}},
 	{method: "GET", pattern: "/reports/revenue", aud: isoOrg, want: []int{200}},
 	{method: "GET", pattern: "/reports/occupancy", aud: isoOrg, want: []int{200}},
+	// Phase 16 §16.3. The window names no id, so org B gets its own 200; the
+	// sweep for org A's ids in the body is what proves the rows are B's.
+	{method: "GET", pattern: "/reports/upcoming", aud: isoOrg, want: []int{200}},
 
 	// ----------------------------------------------------------- branding --
 	{method: "GET", pattern: "/org/branding", aud: isoOrg, want: []int{200}},
@@ -450,6 +496,30 @@ var isoRoutes = []isoCase{
 	{
 		method: "POST", pattern: "/contracts/{id}/sign", aud: isoRenter,
 		path: "/contracts/{contractA}/sign", body: map[string]any{"otp_code": "123456"},
+	},
+
+	// ------------------------------------------- proofs of payment (16.1) --
+	//
+	// Renter 2's own history is theirs; every path naming renter 1's contract
+	// or claim is a 404, so a renter cannot file a claim on somebody else's
+	// tenancy or take back somebody else's.
+	{method: "GET", pattern: "/me/proofs", aud: isoRenter, want: []int{200}},
+	{
+		method: "POST", pattern: "/me/proofs/upload", aud: isoRenter,
+		body: map[string]any{
+			"contract_id": "{contractA}", "content_type": "image/png", "size_bytes": 2048,
+		},
+	},
+	{
+		method: "POST", pattern: "/me/proofs", aud: isoRenter,
+		body: map[string]any{
+			"contract_id": "{contractA}", "amount": 1000, "method": "bank_transfer",
+			"paid_at": "{todayRFC3339}", "object_key": "{orgA}/{proofA}.png",
+		},
+	},
+	{
+		method: "DELETE", pattern: "/me/proofs/{id}", aud: isoRenter,
+		path: "/me/proofs/{proofA}",
 	},
 
 	// ------------------------------------------------------ platform admin --
@@ -668,6 +738,11 @@ var isoSecretIDs = []string{
 	"orgA", "propertyA", "unitA", "contractA", "scheduleA", "paymentA",
 	"templateA", "linkRequestA", "memberA", "auditA", "notificationA", "renterUserA",
 	"expenseA", "categoryA",
+	// Phase 16 §16.1: a proof carries a renter's banking evidence, so its id
+	// is as private as the payment it may become.
+	"proofA",
+	// Phase 16 §16.2: an import batch is a file of one org's records.
+	"importBatchA",
 }
 
 func (f *isoFixture) secrets() map[string]string {
@@ -707,6 +782,7 @@ func newIsoFixture(t *testing.T, h *harness) *isoFixture {
 	f := &isoFixture{h: h, ownerA: base.owner, renter1: base.renter, ids: map[string]string{}}
 
 	f.ids["today"] = time.Now().UTC().Format("2006-01-02")
+	f.ids["todayRFC3339"] = time.Now().UTC().Format(time.RFC3339)
 	f.ids["orgA"] = base.orgID
 	f.ids["contractA"] = base.contractID
 	f.ids["scheduleA"] = base.scheduleIDs[0]
@@ -743,6 +819,20 @@ func newIsoFixture(t *testing.T, h *harness) *isoFixture {
 		"amount": 42_000, "incurred_on": f.ids["today"], "vendor": "Alpha Hardware",
 	}).mustStatus(t, http.StatusCreated, "org A expense").str(t, "expense", "id")
 
+	// A renter's proof of payment, waiting for a ruling (Phase 16 §16.1). It
+	// needs a real object in the bucket, so on a machine with no MinIO the id
+	// stays empty — the proof routes are then exercised with an unresolved
+	// placeholder, which is a 404 for the same reason a foreign id is.
+	if h.store != nil {
+		f.ids["proofA"] = isoProof(t, h, base)
+	}
+
+	// A previewed CSV import, so the import routes have one org's spreadsheet
+	// for the other org to try to read, commit and undo (Phase 16 §16.2).
+	f.ids["importBatchA"] = base.owner.importPreview(t, "units",
+		"iso-alpha.csv", "property,unit,rent_amount\nIso Alpha Block,Z9,150000\n").
+		mustStatus(t, http.StatusCreated, "org A import preview").str(t, "batch", "id")
+
 	// A staff member to remove.
 	f.ids["memberA"] = base.owner.do(http.MethodPost, "/org/members", map[string]any{
 		"email": "alpha-staff@iso.test", "full_name": "Alpha Staff", "role": "org_manager",
@@ -761,6 +851,15 @@ func newIsoFixture(t *testing.T, h *harness) *isoFixture {
 	f.renter2.completeProfile(t, "Iso Renter Two", "19900101123456789013")
 
 	return f
+}
+
+// isoProof files one proof of payment as org A's renter, so the org run has a
+// claim of somebody else's to try to read, accept and reject.
+func isoProof(t *testing.T, h *harness, base paymentFixture) string {
+	t.Helper()
+	fix := proofFixture{paymentFixture: base, h: h}
+	return fix.submitProof(t, 1024, map[string]any{"amount": 1_000}).
+		mustStatus(t, http.StatusCreated, "org A proof of payment").str(t, "proof", "id")
 }
 
 // firstID reads the id of the first row of a list response.

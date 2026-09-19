@@ -277,6 +277,9 @@ func (s *Server) routes() chi.Router {
 			r.Get("/reports/revenue", s.handleReportRevenue)
 			r.Get("/reports/occupancy", s.handleReportOccupancy)
 
+			// --- Phase 16 §16.3: what falls due next ---
+			r.Get("/reports/upcoming", s.handleReportUpcoming)
+
 			// --- Phase 10: the expense ledger ---
 			//
 			// Owner and manager, the org's two roles: whoever may record a
@@ -300,6 +303,30 @@ func (s *Server) routes() chi.Router {
 				r.Post("/expenses/{id}/receipt/complete", s.handleExpenseReceiptComplete)
 				r.Get("/expenses/{id}/receipt", s.handleExpenseReceiptView)
 				r.Delete("/expenses/{id}/receipt", s.handleExpenseReceiptDelete)
+
+				// --- Phase 16 §16.1: the proof-of-payment review queue ---
+				//
+				// Same two roles as the ledger, for the same reason: accepting
+				// a proof records a payment, so whoever may record one may
+				// rule on a claim.
+				r.Get("/proofs", s.handleListProofs)
+				r.Get("/proofs/summary", s.handleProofSummary)
+				r.Get("/proofs/{id}", s.handleGetProof)
+				r.Post("/proofs/{id}/accept", s.handleAcceptProof)
+				r.Post("/proofs/{id}/reject", s.handleRejectProof)
+
+				// --- Phase 16 §16.2: CSV import of previous records ---
+				//
+				// Owner and manager again: an import creates units, renters and
+				// payments, so it needs exactly the rights those endpoints do
+				// and no more. The template route sits above `/imports/{id}` —
+				// chi matches the static segment first.
+				r.Get("/imports/templates/{kind}", s.handleImportTemplate)
+				r.Post("/imports/preview", s.handleImportPreview)
+				r.Get("/imports", s.handleListImports)
+				r.Get("/imports/{id}", s.handleGetImport)
+				r.Post("/imports/{id}/commit", s.handleCommitImport)
+				r.Post("/imports/{id}/undo", s.handleUndoImport)
 			})
 
 			// --- Phase 4: branding ---
@@ -336,6 +363,12 @@ func (s *Server) routes() chi.Router {
 
 			// --- Phase 5: the renter's own payment history ---
 			r.Get("/me/payments", s.handleListMyPayments)
+
+			// --- Phase 16 §16.1: the renter's proofs of payment ---
+			r.Post("/me/proofs/upload", s.handleProofUpload)
+			r.Post("/me/proofs", s.handleCreateProof)
+			r.Get("/me/proofs", s.handleListMyProofs)
+			r.Delete("/me/proofs/{id}", s.handleWithdrawProof)
 		})
 
 		// --- Phase 4: contract reads, open to either party (tms_o or tms_r) ---

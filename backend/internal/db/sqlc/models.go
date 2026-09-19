@@ -114,6 +114,37 @@ type ExpenseCategory struct {
 	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
 }
 
+type ImportBatch struct {
+	ID              pgtype.UUID        `json:"id"`
+	OrgID           pgtype.UUID        `json:"org_id"`
+	Kind            string             `json:"kind"`
+	Filename        string             `json:"filename"`
+	RowCount        int32              `json:"row_count"`
+	OkCount         int32              `json:"ok_count"`
+	ErrorCount      int32              `json:"error_count"`
+	Status          string             `json:"status"`
+	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
+	CommittedAt     pgtype.Timestamptz `json:"committed_at"`
+	UndoneAt        pgtype.Timestamptz `json:"undone_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type ImportRow struct {
+	ID         pgtype.UUID        `json:"id"`
+	BatchID    pgtype.UUID        `json:"batch_id"`
+	OrgID      pgtype.UUID        `json:"org_id"`
+	Line       int32              `json:"line"`
+	Raw        []byte             `json:"raw"`
+	Errors     []byte             `json:"errors"`
+	Resolved   []byte             `json:"resolved"`
+	EntityType *string            `json:"entity_type"`
+	EntityID   pgtype.UUID        `json:"entity_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type NotificationLog struct {
 	ID            pgtype.UUID        `json:"id"`
 	OrgID         pgtype.UUID        `json:"org_id"`
@@ -205,6 +236,7 @@ type Payment struct {
 	ReversedAt       pgtype.Timestamptz `json:"reversed_at"`
 	ReversalReason   *string            `json:"reversal_reason"`
 	ReversedByUserID pgtype.UUID        `json:"reversed_by_user_id"`
+	ImportBatchID    pgtype.UUID        `json:"import_batch_id"`
 }
 
 type PaymentAllocation struct {
@@ -228,6 +260,29 @@ type PaymentPeriod struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt     pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type PaymentProof struct {
+	ID               pgtype.UUID        `json:"id"`
+	OrgID            pgtype.UUID        `json:"org_id"`
+	ContractID       pgtype.UUID        `json:"contract_id"`
+	ScheduleID       pgtype.UUID        `json:"schedule_id"`
+	RenterUserID     pgtype.UUID        `json:"renter_user_id"`
+	Amount           int64              `json:"amount"`
+	PaidAt           pgtype.Timestamptz `json:"paid_at"`
+	Method           string             `json:"method"`
+	Reference        *string            `json:"reference"`
+	Note             *string            `json:"note"`
+	ObjectKey        string             `json:"object_key"`
+	ContentType      string             `json:"content_type"`
+	SizeBytes        int64              `json:"size_bytes"`
+	Status           string             `json:"status"`
+	PaymentID        pgtype.UUID        `json:"payment_id"`
+	ReviewedByUserID pgtype.UUID        `json:"reviewed_by_user_id"`
+	ReviewedAt       pgtype.Timestamptz `json:"reviewed_at"`
+	RejectionReason  *string            `json:"rejection_reason"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 type PaymentSchedule struct {

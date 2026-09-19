@@ -167,7 +167,7 @@ func runForOrg(
 		if err != nil {
 			return fmt.Errorf("notify: reminder_7d targets: %w", err)
 		}
-		queueScheduleRows(ctx, q, KindReminder7d, orgID, org.DisplayName, date, set, rows, res)
+		queueScheduleRows(ctx, q, KindReminder7d, orgID, org.DisplayName, date, set, rows, opt, res)
 	}
 
 	// reminder_due — the instalment falling due today.
@@ -180,7 +180,7 @@ func runForOrg(
 		if err != nil {
 			return fmt.Errorf("notify: reminder_due targets: %w", err)
 		}
-		queueScheduleRows(ctx, q, KindReminderDue, orgID, org.DisplayName, date, set, rows, res)
+		queueScheduleRows(ctx, q, KindReminderDue, orgID, org.DisplayName, date, set, rows, opt, res)
 	}
 
 	// overdue_daily — every unresolved row past its due date, once a day until
@@ -194,7 +194,7 @@ func runForOrg(
 		if err != nil {
 			return fmt.Errorf("notify: overdue targets: %w", err)
 		}
-		queueScheduleRows(ctx, q, KindOverdueDaily, orgID, org.DisplayName, date, set, rows, res)
+		queueScheduleRows(ctx, q, KindOverdueDaily, orgID, org.DisplayName, date, set, rows, opt, res)
 	}
 
 	// unsigned_reminder — a contract still waiting on the renter's signature.
@@ -243,7 +243,7 @@ func runForOrg(
 // queueScheduleRows renders and queues one kind's schedule-derived messages.
 func queueScheduleRows(
 	ctx context.Context, q *sqlc.Queries, kind, orgID, orgName, date string,
-	set SchedulerSettings, rows []sqlc.ListScheduleReminderTargetsRow, res *Result,
+	set SchedulerSettings, rows []sqlc.ListScheduleReminderTargetsRow, opt Options, res *Result,
 ) {
 	for _, row := range rows {
 		phone := db.StrVal(row.RenterPhone)
@@ -261,6 +261,10 @@ func queueScheduleRows(
 			Property: row.PropertyName,
 			Unit:     row.UnitName,
 			Org:      orgName,
+			// Phase 16 §16.4: every rent reminder says where to pay. The link
+			// is the renter's Payments tab, which carries the pinned "How to
+			// pay" card and the Send-proof button.
+			PayLink: PayLink(opt.BaseURL),
 		}
 		if row.NextDueDate.Valid {
 			vars.NextDueDate = row.NextDueDate.Time.Format(dateLayout)
@@ -287,6 +291,13 @@ func queueOne(ctx context.Context, q *sqlc.Queries, res *Result, m Msg) {
 		return
 	}
 	res.add(m.Kind, id)
+}
+
+// PayLink builds the renter-facing link to their Payments tab — the
+// `{{pay_link}}` variable of Phase 16 §16.4, resolved against the platform's
+// configured public origin.
+func PayLink(baseURL string) string {
+	return strings.TrimRight(baseURL, "/") + "/enduser/payments"
 }
 
 // contractLink builds the renter-facing link to a contract.

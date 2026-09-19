@@ -949,6 +949,11 @@ shipped and why (rows also in DECISIONS.md):
 | contract language implicit | **`contracts.language`** on every DTO, defaulting to the renter's locale | the document a person signs should be in the language they read |
 | one occupancy number | **`occupancy_pct` is 0–100**, `collection_rate` and the Phase 7 `occupancy_rate` are 0–1 | the field names say which is which; a client that reads both must not scale them alike |
 | org theme presets duplicated in `packages/ui` | backend `presets.json` is the **source of truth**; the UI copy is generated and pinned by `TestPresetsMatchUICopy` | frontends need a fallback before the API answers; drift must fail the build |
+| §16.3 `items:[{schedule:{…}, renter_name, …}]` | the **schedule fields flattened** into the item beside the identity fields | the row is one thing a landlord reads; a nested object for six fields buys nothing and the Phase 5 `schedule` shape is already flat everywhere else |
+| §16.3 sorted by `due_date` then `id` | `due_date`, then **unit name**, then id | on a day with several instalments the landlord reads the board by unit; an id is not an order anybody can see |
+| §16.4 `PUT /org/bank-account {bank_account?, mobile_money?}` | the **Phase 5 flat body** plus an optional `mobile_money` key | re-nesting the four bank fields would break every existing client for no gain; the wallet is additive |
+| §16.4 `GET /public/units/{unit_code}` carries the payment blocks | **not shipped** — the blocks are on `GET /org/bank-account` and `GET /me/schedules` only | publishing an account number on an unauthenticated QR endpoint invites payment-redirect fraud; a renter sees the instructions once they are linked, which is when they owe anything |
+| §16.4 audited `org.update` | audited **`org.bank_account_update`** | the action the Phase 5 endpoint already writes; before/after now carry both blocks |
 
 ### Phase 15 — hardening
 
@@ -956,3 +961,156 @@ No new endpoints. Reports v2 routes enter `make loadtest` (p95 < 300 ms on the
 seed org), the isolation census covers every Part 2 route (the build fails on an
 uncovered one), and receipt uploads (30/h/org) and admin template edits are rate
 limited.
+
+---
+
+## Part 2 — Phase 16 (planned)
+
+**Planned, not shipped.** This section is the contract the Phase 16 lanes build
+against ([PLAN2.md](PLAN2.md) §16.1–§16.4; SPEC §4 ledger rules, §5.7, §5.9,
+§5.14, §7; FLOWS 7 and 14). Each sub-heading is self-contained and is edited in
+place by the lane that implements it — a lane rewrites its own sub-heading with
+what shipped and adds any difference to
+[Deviations from the planned contract](#deviations-from-the-planned-contract).
+
+Phase 16 keeps every Part 2 convention: audience cookies, RFC-7807 problems with
+the machine-readable code in `type`, **400** for a malformed field with `errors`
+populated, **404** for an id outside the caller's scope, **409** for a business
+conflict, and an audit row on every mutation. New codes: `contract_not_active`,
+`proof_not_pending`, `batch_not_previewed`, `batch_committed`, `undo_expired`.
+
+### 16.1 Proofs
+
+**Shipped.** Audience **renter** (`tms_r`) for `/me/proofs*`, **org** (`tms_o`,
+owner + manager) for `/proofs*`. Bucket `proofs`, key
+`{org_id}/{proof_id}.{jpg|png|pdf}` — both segments are ids the server minted,
+so no request can steer the key.
+
+`proof` shape, identical on every route that returns one:
+
+```json
+{"id":"…","contract":{"id":"…","unit_name":"A2","property_name":"Mikocheni Flats","renter_name":"Asha Mrisho","renter_user_id":"…"},
+ "schedule_id":"…|null","amount":250000,"paid_at":"2026-09-19T08:00:00Z",
+ "method":"bank_transfer|mobile_money_manual","reference":"TRF-99|null","note":"…|null",
+ "content_type":"image/png","size_bytes":20480,
+ "status":"submitted|accepted|rejected","payment_id":"…|null",
+ "reviewed_at":"…|null","reviewed_by_name":"…|null","rejection_reason":"…|null",
+ "created_at":"…","view_url":"https://…"}
+```
+
+`view_url` is present only on `GET /proofs/{id}`, where one was issued.
+
+| Route | Contract |
+| --- | --- |
+| `POST /me/proofs/upload` | `{contract_id, content_type:"image/jpeg"\|"image/png"\|"application/pdf", size_bytes(1…5 MiB)}` → `200 {proof_id, upload_url, object_key, expires_in:900, headers:{"Content-Type":…}}`. The `proof_id` is minted here and becomes the row's id on submission. The contract must be the caller's own and `active\|expiring` — another renter's id is a **404**, an unsigned or finished one a **409 `contract_not_active`**. Type and size are checked before MinIO is consulted (400 naming `content_type` / `size_bytes`). 30 links per renter per hour. MinIO down → 503; the ticket store (Redis) down → 503. |
+| `POST /me/proofs` | `{contract_id, schedule_id?, amount(int >0), paid_at, method, reference?(≤80), note?(≤500), object_key}` → **`201 {proof}`** with `status:"submitted"`. The completion-callback pattern of `/expenses/{id}/receipt/complete`, plus a one-shot ticket: `object_key` must be one this renter was issued for this contract, and the object MinIO holds must match the ticket's size and content type exactly, or it is deleted and the answer is a **400** naming `object_key`, `size_bytes` or `content_type`. `schedule_id` must belong to the same contract (else 404). `paid_at` is RFC3339 and no more than a day in the future. Rate limited to **10 per renter per day** (429 with `Retry-After`), enforced in Redis and again in Postgres so a cold cache cannot lift the ceiling. **No SMS** is sent. Audited `proof.submit`. |
+| `GET /me/proofs?cursor=&limit=` | → `{items:[proof], next_cursor}`, newest first, the caller's own proofs across every org they rent from, each carrying `rejection_reason` when rejected. Shared `(created_at, id)` cursor encoding. |
+| `DELETE /me/proofs/{id}` | → **204**, withdraw. Only while `status:"submitted"` — an answered proof is a record and stays (**409 `proof_not_pending`**). The row and the object are both removed. Audited `proof.withdraw`. |
+| `GET /proofs?status=&cursor=&limit=` | → `{items:[proof], next_cursor, status}`. `status` is `submitted\|accepted\|rejected`, default `submitted`; ordering is **`created_at` ascending — the oldest claim first** (the queue is worked forward, unlike the org's other listings). |
+| `GET /proofs/summary` | → `{submitted_count}`. The badge is its own endpoint rather than a field on the listing, because it is drawn on every landlord screen including the ones that never list a proof. It reads the partial index and nothing else. |
+| `GET /proofs/{id}` | → `{proof}` with `view_url` — a presigned read, **TTL 300 s**, shorter than a receipt's because the file is a renter's banking screenshot. Issuing it is audited `proof.view`, the way `kyc.view` is. |
+| `POST /proofs/{id}/accept` | `{amount?, schedule_id?, paid_at?, allow_overpay_rollover?}` → `200 {proof, payment, schedules:[…]}`. Runs the **same allocator `POST /payments` runs**, with the proof's own fields as defaults and the landlord's corrections applied (both readings recorded in the audit row); links `payments.id` onto `payment_proofs.payment_id`, sets `status:"accepted"` with `reviewed_by_name`/`reviewed_at`, and queues the existing `thank_you` SMS. The allocator's **409 `overpay_confirm_required`** (with `excess` and `next_schedule`), **409 `exceeds_contract_balance`**, **409 `contract_not_active`** and **404** for a schedule outside the contract propagate unchanged, so the landlord's confirm sheet is reused without a second code path. Not `submitted` → **409 `proof_not_pending`**. Audited `proof.accept` beside the allocator's own `payment.record`. |
+| `POST /proofs/{id}/reject` | `{reason(1–200)}` → `200 {proof}` with `status:"rejected"`, `rejection_reason`, `reviewed_by_name`, `reviewed_at`. Queues **`proof_rejected`** (new kind, SW/EN, platform template seeded by migration 000018 + org override, `{{reason}}` platform-only as `contract_terminated` has it), debited like any other kind. Not `submitted` → **409 `proof_not_pending`**. Audited `proof.reject`. |
+
+**Differences from the planned contract above:** the conflict code is
+`proof_not_pending` (not `proof_not_submitted`); the badge is `GET
+/proofs/summary` rather than a `submitted_count` field on the listing; the proof
+shape carries `renter_name`/`renter_user_id` inside `contract` and flat
+`content_type`/`size_bytes`/`reviewed_by_name` rather than nested `renter`,
+`file` and `reviewed_by` blocks; `GET /proofs/{id}` returns no `schedule` block
+(the schedule is already on `GET /contracts/{id}/schedules`); the read TTL is
+300 s; `POST /me/proofs/upload` also returns `proof_id`, and an upload is bound
+to a one-shot ticket in Redis rather than to the key's shape alone.
+
+`POST /payments/{id}/reverse` on a payment that came from a proof leaves the
+proof **`accepted`** with the payment stamped reversed: the claim was made and
+answered, and the reversal is a fact about the payment (SPEC §4 ledger rules).
+
+### 16.2 Imports
+
+**Shipped.** Audience **org** (`tms_o`), owner + manager. `kind` is
+`units|renters|payments`. An import is two movements: a **preview** that writes
+nothing but a record of the file, and a **commit** that runs every ok row
+through the same service functions the manual endpoints use, inside one
+transaction — a landlord never ends up with half a spreadsheet.
+
+| route | behaviour |
+| --- | --- |
+| `GET /imports/templates/{kind}.csv` | → `text/csv` attachment (`filename="tms-import-{kind}.csv"`): the header row plus one example line. Headers are **fixed English machine names** — never the SW/EN screen labels. Without the `.csv` suffix the same path answers `200 {kind, columns:[{name, required, example, help}]}`, the column reference the screen prints. Unknown kind → 404. |
+| `POST /imports/preview` | multipart `file` + form field `kind` → **`201 {batch, rows:[…]}`** (shapes below). File ≤ **2 MiB** and ≤ **5 000 data rows**; UTF-8 with or without BOM; delimiter `,` or `;` sniffed from the header line; headers matched case-insensitively and trimmed. A header that does not match → **400 `csv_header_mismatch`** with `missing:[…]` and `unknown:[…]`. Other file refusals carry `type`: `empty_file`, `not_utf8`, `too_many_rows`, `file_too_large`, `unreadable_csv`. **Nothing is written but the batch** (`status:"previewed"`) and its rows. Rate limited to **20 per hour per org** (429). Audited `import.preview`. |
+| `POST /imports/{batch_id}/commit` | `{skip_errors?:bool}` (body optional) → `200 {batch, created:{units, properties, renters, contracts, payments}}`. With `error_count > 0` and `skip_errors` absent/false → **409 `batch_has_errors` `{error_count}`**; with `skip_errors:true` the bad lines are dropped and the rest commit. The file is **re-resolved inside the transaction**: a row that passed the preview and no longer does → **409 `row_failed` `{line, column, reason}`** and nothing is written. A batch that is not `previewed` → 409 `already_committed` / `already_undone`. Each committed row records what it became (`entity_type`, `entity_id`). Audited `import.commit`. |
+| `POST /imports/{batch_id}/undo` | → `200 {batch, undone:{payments, contracts, units, properties, renters}}`, within **24 h** of `committed_at` (else **409 `undo_window_closed`**; a batch that was never committed → 409 `not_committed`, one already undone → 409 `already_undone`). Audited `import.undo`. |
+| `GET /imports?cursor=&limit=` | → `{items:[batch…], next_cursor}`, newest first. |
+| `GET /imports/{id}` | → `{batch, rows:[…]}` — the preview table as stored, with each row's `entity_type`/`entity_id` after a commit. |
+
+```jsonc
+// batch
+{ "id": "…", "kind": "units", "filename": "previous-units.csv",
+  "row_count": 5, "ok_count": 2, "error_count": 3,
+  "status": "previewed",                       // previewed | committed | undone
+  "created_by": {"user_id": "…", "name": "Joseph Chuchu"},
+  "committed_at": null, "undone_at": null,
+  "can_undo": false,                           // committed and inside the 24 h window
+  "created_at": "2026-09-19T20:11:03Z" }
+
+// row  (errors is null when the row is ready to commit)
+{ "line": 3,                                   // the line of the file, header = 1
+  "raw": {"property": "Block A", "unit": "A2", "rent_amount": "150000"},
+  "errors": {"unit": "this property already has a unit with this name"},
+  "resolved": {"property": "Block A", "property_create": false, "unit": "A2",
+               "rent_amount": 150000, "rent_period_days": 30, "status": "vacant"},
+  "entity_type": null, "entity_id": null }
+```
+
+`errors` is an object keyed by **column name**; the key `_row` carries a problem
+with the whole line (a record with the wrong number of cells). `resolved` is
+what the row will hit or create — names for the preview table, ids after the
+commit.
+
+Columns per kind, validated per row with the rules of the manual endpoints:
+
+| kind | columns | notes |
+| --- | --- | --- |
+| `units` | `property, unit, rent_amount, rent_period_days?, status?` | property matched by name within the org (case-insensitive, trimmed) and **created when missing**, flagged `resolved.property_create:true`; `rent_period_days` defaults to the org's recommended payment period, else 30; `status` is `vacant` (default) or `unlisted`. A unit name the property already has — or that an earlier line of the same file claims — is a row error. `rent_amount` accepts `TZS 150,000` and a trailing `.00`. |
+| `renters` | `full_name, phone, locale?, property?, unit?` | phone normalised like registration (`+255…`); an existing account with that number is **attached to the org, never duplicated**; a new one is pre-registered with no PIN and claims itself through the ordinary OTP sign-in. With a `unit`, an `approved` `unit_link_requests` row and, through the same `onLinkApproved` hook the Approve button runs, a contract at **`pending_signature`** from the org default template (term 365 days, starting today), its `contract_ready` SMS queued **on commit only**. **No import ever activates a contract**, and the unit stays vacant. Without a `property` the unit name must be unique across the org. |
+| `payments` | `unit, renter_phone, amount, paid_at, method, reference?, note?` | contract resolved by unit + renter phone, newest in status `active\|expiring\|ended\|terminated` — history may belong to a finished tenancy. `paid_at` takes `YYYY-MM-DD` or a date-time, and may not be more than a day ahead; payments predating the contract start are **not** special-cased (PLAN2 open question 6). Rows are allocated by the existing allocator in **`paid_at` then line order** with `allow_overpay_rollover=true`; the preview simulates the same order, so a row that would exceed the contract balance is a row error `exceeds_contract_balance` on `amount`. `method` is limited to `cash\|bank_transfer\|mobile_money_manual`. Committed payments carry `import_batch_id`, which the `payment` shape now returns (null for money keyed in by hand) so ledgers can show an "imported" chip. No thank-you SMS is sent for historical money. |
+
+**Undo semantics.** Payments of the batch are reversed through the existing
+reverse path with reason `import undone` (the rows stay, stamped `reversed`).
+Contracts, units, properties and renter accounts the batch created are taken
+back **only when untouched since**, which means simply: nothing references
+them — a contract with any payment stays, a unit with any contract stays, a
+property with any live unit stays, and a renter account stays the moment it
+holds a contract or a link request in the org, or has ever been signed into
+(`pin_hash`/`password_hash` set). Anything kept is simply absent from the
+`undone` counts.
+
+Cells beginning `=`, `+`, `-` or `@` are stored **verbatim** and neutralised on
+every export, exactly as the payment-status and expenses exports do.
+
+### 16.3 Upcoming / next-due fields
+
+**Shipped.** Every countdown on the platform is counted on the Dar es Salaam
+wall clock (`internal/tz`), never on `CURRENT_DATE`: a schedule due today reads
+`0` from 00:00 EAT, not from 03:00.
+
+| `GET /reports/upcoming?days=7\|14\|30&property_id=` | org audience → `{items:[schedule + {renter_name, renter_user_id, phone, unit_name, property_name, days_until_due}], total_due, count, days, window:{from,to}}`. The item is the **Phase 5 `schedule` shape flattened** — `id, contract_id, period_start, period_end, due_date, amount, paid_amount, status, days_overdue` — with the identity fields beside it (no nested `schedule` or `contract` object). Sorted by `due_date`, then unit name, then id. `days` defaults to **14**; anything else is a **400** with `errors.days`. Rows are the unsettled ones (`pending\|partial\|overdue`) on `active\|expiring` contracts with `due_date` in `[today, today+days]`; `waived`, `paid` and finished tenancies are excluded. `total_due` is the sum of `amount − paid_amount`. `property_id` outside the org → **404**. The org's overdue sweep runs first, as on `GET /schedules`. |
+| `GET /reports/summary` | gains **`upcoming_7d:{count,total}`** — the dashboard `upcoming` card, always a 7-day window whatever the summary's period, so the card costs no second call. |
+| `GET /me/schedules` | every item row gains **`days_until_due`** (0 today, negative when past; `days_overdue` is unchanged and still floored at 0). `next_due` is the same object, so it carries it too, and additionally **`proof:{id,status}\|null`** — the caller's newest proof still `submitted` against that instalment. The `bank_account` block gains `mobile_money`, and a top-level `mobile_money` rides beside it (16.4). |
+| `GET /renters` | rows gain `next_due_date\|null`, `next_due_amount\|null` and `overdue_amount` (0 when none), aggregated over the renter's running tenancies with this org. They are computed from the **same three queries** as `/reports/payment-status` (`ReportTenancies`, `ReportContractBalances`, `ReportNextDue`), so the column and the report cannot drift; a reconciliation test asserts it. `GET /renters/{user_id}` carries the same three fields on its `renter` block. |
+| `GET /units` | occupied rows gain `next_due_date\|null` — the next unsettled due date on the unit's running contract. Vacant, unlisted, maintenance, and occupied units with nothing outstanding carry `null`. |
+| `PUT /org/branding {dashboard_prefs}` | accepts the card ids **`proofs`** and **`upcoming`** alongside the Phase 9–14 set; `upcoming` sits directly after `overdue` in the allowlist order. Unknown ids stay a 400. |
+
+### 16.4 Payment instructions
+
+**Shipped.** `mobile_money` lives beside `bank_account` in `orgs.settings` as a
+top-level key, so both round-trip through `PATCH /org` untouched.
+
+| `GET /org/bank-account` | → `{bank_account:{bank_name, account_name, account_number, instructions, mobile_money:{provider,number,name}\|null}\|null, mobile_money:{provider,number,name}\|null, payment_instructions_set:bool}`. The wallet appears **twice on purpose**: inside the account block, which is what the renter's card renders, and beside it, because an org may take mobile money and no bank transfer. `payment_instructions_set` is true when either block is set — the flag behind the landlord's setup nudge. |
+| `PUT /org/bank-account` | the Phase 5 body (flat `bank_name`, `account_name`, `account_number`, `instructions`) plus optional **`mobile_money`**: an object replaces the wallet, an explicit `null` clears it, and **omitting the key keeps what is stored** (so editing bank details never silently drops the wallet). `provider` ≤ 40, `number` ≤ 20, `name` ≤ 120, all three required when the object is present → else 400. Response is the `GET` shape. Audited `org.bank_account_update`, before/after carrying both blocks. |
+| `GET /me/schedules` | `bank_account` gains `mobile_money`, and `mobile_money` rides beside it. Both are the org behind `next_due`, and both are `null` when the renter owes nothing or the landlord has set neither. |
+| org SMS template whitelist | gains **`{{pay_link}}`** → `{PUBLIC_BASE_URL or APP_BASE_URL}/enduser/payments`. Nine variables now: `name amount due_date property unit org next_due_date link pay_link`. The platform defaults of `reminder_7d`, `reminder_due` and `overdue_daily` end with it in SW ("Lipa hapa: …") and EN ("Pay here: …"). Unknown variables are still a 400. Installations seeded by `000016` are updated **without a migration**: `SeedPlatformTemplates` (which already runs at every startup) re-applies the new sentence to any row still holding the previous wording byte-for-byte at `version = 1`, and refreshes every kind's `variables` column so the admin editor's chips offer `pay_link`. An admin's own wording is never touched. |
+
+**Phase 16 audit actions:** `proof.submit` · `proof.withdraw` · `proof.accept` ·
+`proof.reject` · `proof.view` (entity `payment_proof`) · `import.preview` ·
+`import.commit` · `import.undo` (entity `import_batch`).

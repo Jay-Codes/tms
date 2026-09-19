@@ -452,9 +452,13 @@ func previewVars(sample map[string]string) notify.Vars {
 		Org:         get("org", "JJnE Properties"),
 		NextDueDate: get("next_due_date", "2026-11-01"),
 		Link:        get("link", "https://tms.example/c/AB12CD"),
-		Reason:      get("reason", "unit no longer available"),
-		StartDate:   get("start_date", "2026-10-01"),
-		NextAmount:  get("next_amount", "TZS 250,000"),
-		Code:        get("code", "123456"),
+		// Phase 16 §16.4: the preview resolves `{{pay_link}}` against the
+		// platform's own origin, so an admin sees the link a renter will get
+		// rather than the placeholder.
+		PayLink:    get("pay_link", "https://tms.example/enduser/payments"),
+		Reason:     get("reason", "unit no longer available"),
+		StartDate:  get("start_date", "2026-10-01"),
+		NextAmount: get("next_amount", "TZS 250,000"),
+		Code:       get("code", "123456"),
 	}
 }

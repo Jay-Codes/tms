@@ -350,6 +350,28 @@ func SeedPlatformTemplates(ctx context.Context, q *sqlc.Queries) error {
 		}); err != nil {
 			return err
 		}
+		// The chips the admin editor offers, and the whitelist its validation
+		// checks against, are derived from the code — so they are re-applied
+		// whatever the row's version. Phase 16 adds `{{pay_link}}` to every
+		// kind an org may re-word.
+		if err := q.RefreshPlatformTemplateVariables(ctx, sqlc.RefreshPlatformTemplateVariablesParams{
+			Kind: kind, Variables: VariablesFor(kind),
+		}); err != nil {
+			return err
+		}
+		// A default the platform has changed since this installation was
+		// seeded reaches the table here, and only where nobody has edited it
+		// (see supersededDefaults).
+		prev, superseded := supersededDefaults[kind]
+		if !superseded {
+			continue
+		}
+		if err := q.RefreshPlatformTemplateDefault(ctx, sqlc.RefreshPlatformTemplateDefaultParams{
+			Kind: kind, Sw: t.SW, En: t.EN, Variables: VariablesFor(kind),
+			PrevSw: prev.SW, PrevEn: prev.EN,
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -7,15 +7,18 @@
 -- may read their own. The dual-scoped queries take one or the other, never
 -- neither.
 
+-- `import_batch_id` is NULL for money a landlord keys in and set for a row that
+-- arrived on a CSV import (Phase 16 §16.2), which is what puts the "imported"
+-- chip on a ledger row and what the 24 h undo walks.
 -- name: CreatePayment :one
 INSERT INTO payments (
     org_id, contract_id, schedule_id, amount, method, reference, paid_at,
-    recorded_by_user_id, note
+    recorded_by_user_id, note, import_batch_id
 )
 VALUES (
     sqlc.arg(org_id), sqlc.arg(contract_id), sqlc.narg(schedule_id), sqlc.arg(amount),
     sqlc.arg(method), sqlc.narg(reference), sqlc.arg(paid_at),
-    sqlc.narg(recorded_by_user_id), sqlc.narg(note)
+    sqlc.narg(recorded_by_user_id), sqlc.narg(note), sqlc.narg(import_batch_id)
 )
 RETURNING *;
 

@@ -64,6 +64,11 @@ type reportSummaryResponse struct {
 	PreviousTotals reportPeriodTotals   `json:"previous_totals"`
 	ChangePct      map[string]*float64  `json:"change_pct"`
 	VacantUnits    []vacantUnitResponse `json:"vacant_units"`
+	// Upcoming7d is the Phase 16 dashboard card: how many instalments fall due
+	// in the next seven days and what they add up to. It rides on the summary
+	// rather than on a call of its own, because the card is on the same screen
+	// and a second round trip for two numbers is a second thing to fail.
+	Upcoming7d upcomingCard `json:"upcoming_7d"`
 }
 
 // paymentStatusRow is one renter's line of GET /reports/payment-status.

@@ -1313,9 +1313,14 @@ func (s *Server) handleMySchedules(w http.ResponseWriter, r *http.Request) {
 	}
 
 	today := time.Now().UTC()
+	// Phase 16 §16.3: the countdown chip is read on the renter's own wall
+	// clock, so "due today" turns over at midnight in Dar es Salaam rather
+	// than three hours later in UTC.
+	localToday := todayEAT()
 	items := make([]map[string]any, 0, len(rows))
 	var (
 		next         map[string]any
+		nextSchedule string
 		nextOrgID    pgtype.UUID
 		overdueTotal int64
 	)
@@ -1329,6 +1334,10 @@ func (s *Server) handleMySchedules(w http.ResponseWriter, r *http.Request) {
 			"status":       sc.Status,
 			"paid_amount":  sc.PaidAmount,
 			"days_overdue": daysOverdue(sc.Status, sc.DueDate.Time, today),
+			// Whole days from today to the due date: 0 today, negative once
+			// it has passed (§16.3). `days_overdue` stays what it was — it is
+			// floored at zero and only counts a row that is actually late.
+			"days_until_due": daysUntilDue(sc.DueDate.Time, localToday),
 			"contract": map[string]any{
 				"id": db.UUIDString(sc.ContractID), "unit_name": sc.UnitName,
 				"property_name": sc.PropertyName, "org_name": sc.OrgName,
@@ -1344,20 +1353,38 @@ func (s *Server) handleMySchedules(w http.ResponseWriter, r *http.Request) {
 		if next == nil && isLiveContract(sc.ContractStatus) &&
 			(sc.Status == "pending" || sc.Status == "partial" || sc.Status == "overdue") {
 			next = item
+			nextSchedule = db.UUIDString(sc.ID)
 			nextOrgID = sc.OrgID
 		}
 	}
+	// A proof already filed against the next instalment is why the app shows
+	// "Awaiting confirmation" instead of a countdown that makes the renter
+	// pay twice (§16.3). Only the instalment being asked for carries it.
+	if next != nil {
+		var proof *scheduleProof
+		if found, ok := s.mySubmittedProofs(r.Context(), p.UserID)[nextSchedule]; ok {
+			proof = &found
+		}
+		next["proof"] = proof
+	}
 	// The account shown is the one behind the next payment. A renter with no
 	// outstanding instalment is not being asked for money, so none is shown.
-	var bank *BankAccount
+	var (
+		bank   *bankAccountPayload
+		wallet *MobileMoney
+	)
 	if nextOrgID.Valid {
 		if org, err := s.q.GetOrg(r.Context(), nextOrgID); err == nil {
-			bank = parseSettings(org.Settings).BankAccount
+			bank, wallet = payInstructions(parseSettings(org.Settings))
 		}
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"items": items, "next_due": next,
 		"overdue_total": overdueTotal, "bank_account": bank,
+		// §16.4: the wallet travels beside the account as well as inside it,
+		// so an org that takes mobile money and no bank transfer still tells
+		// the renter where to send the rent.
+		"mobile_money": wallet,
 	})
 }
 

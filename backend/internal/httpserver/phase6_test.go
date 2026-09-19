@@ -336,9 +336,15 @@ func TestSchedulerWaitsForTheSendHour(t *testing.T) {
 	h.parkSchedules(t, fix.contractID)
 	h.setDueDate(t, fix.scheduleIDs[0], schedulerToday(), "pending")
 
-	// 23:00 local is an hour no test run can already have passed.
+	// Pick the next whole hour so the gate is still ahead of the wall clock;
+	// in the 23:00 hour there is no such hour, and the run is skipped rather
+	// than made to fail.
+	sendHour := time.Now().In(tz.Zone()).Hour() + 1
+	if sendHour > 23 {
+		t.Skip("no local hour left ahead of the clock to gate on")
+	}
 	fix.owner.do(http.MethodPut, "/org/notification-settings", map[string]any{
-		"send_hour_local": 23,
+		"send_hour_local": sendHour,
 	}).mustStatus(t, http.StatusOK, "set send hour")
 
 	if res := h.runScheduler(t, notify.Options{}); res.Total() != 0 {

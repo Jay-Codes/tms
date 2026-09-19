@@ -40,6 +40,15 @@ var orgScopedTables = []string{
 	// Part 2 (Phase 14): the prepaid SMS balance and its ledger.
 	"org_sms_credits",
 	"sms_credit_ledger",
+	// Part 2 (Phase 16 §16.1): renters' proofs of payment. The renter-scoped
+	// reads carry a `guard-exempt` line naming why, exactly as the payments
+	// table's do.
+	"payment_proofs",
+	// Part 2 (Phase 16 §16.2): the CSV import batches and their rows. A row is
+	// reached only through its batch's org, and carries org_id of its own so
+	// the guard can check every statement rather than trusting the join.
+	"import_batches",
+	"import_rows",
 }
 
 var (

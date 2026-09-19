@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -434,42 +435,9 @@ func (s *Server) createUnitTx(r *http.Request, p auth.Principal, propertyID pgty
 	var lastErr error
 	for attempt := 0; attempt < unitCodeAttempts; attempt++ {
 		lastErr = s.inTx(r.Context(), func(q *sqlc.Queries) error {
-			code, err := s.newUnitCode(r.Context(), q)
-			if err != nil {
-				return err
-			}
-			unit, err := q.CreateUnit(r.Context(), sqlc.CreateUnitParams{
-				OrgID: p.OrgID, PropertyID: propertyID, Name: name,
-				UnitCode: code, AllowedPeriodIds: allowed,
-			})
-			if err != nil {
-				return err
-			}
-			if price != nil {
-				if _, err := q.CreatePricePlan(r.Context(), sqlc.CreatePricePlanParams{
-					OrgID: p.OrgID, UnitID: unit.ID, Amount: price.Amount, Currency: currencyTZS,
-					PeriodDays: price.PeriodDays, EffectiveFrom: todayDate(),
-					CreatedByUserID: p.UserID,
-				}); err != nil {
-					return err
-				}
-			}
-			if err := audit.Record(r.Context(), q, audit.Entry{
-				OrgID:       p.OrgIDString(),
-				ActorUserID: p.UserIDString(),
-				Action:      audit.ActionUnitCreate,
-				EntityType:  audit.EntityUnit,
-				EntityID:    db.UUIDString(unit.ID),
-				After:       map[string]any{"name": unit.Name, "unit_code": unit.UnitCode, "property_id": db.UUIDString(propertyID)},
-			}); err != nil {
-				return err
-			}
-			row, err := q.GetUnit(r.Context(), sqlc.GetUnitParams{OrgID: p.OrgID, ID: unit.ID})
-			if err != nil {
-				return err
-			}
-			out = s.toUnit(unitRowOfGet(row))
-			return nil
+			var err error
+			out, err = s.createUnitIn(r.Context(), q, p, propertyID, name, price, allowed)
+			return err
 		})
 		if lastErr == nil {
 			return out, nil
@@ -479,6 +447,53 @@ func (s *Server) createUnitTx(r *http.Request, p auth.Principal, propertyID pgty
 		}
 	}
 	return unitResponse{}, lastErr
+}
+
+// createUnitIn is the body of that creation, bound to a transaction handle the
+// caller owns: the unit, its optional first price and the audit row. It is the
+// one place a unit is written, so the CSV import (Phase 16 §16.2) creates units
+// through exactly the path the form does rather than a second INSERT of its own.
+func (s *Server) createUnitIn(ctx context.Context, q *sqlc.Queries, p auth.Principal,
+	propertyID pgtype.UUID, name string, price *unitPriceInput, allowed []pgtype.UUID,
+) (unitResponse, error) {
+	code, err := s.newUnitCode(ctx, q)
+	if err != nil {
+		return unitResponse{}, err
+	}
+	unit, err := q.CreateUnit(ctx, sqlc.CreateUnitParams{
+		OrgID: p.OrgID, PropertyID: propertyID, Name: name,
+		UnitCode: code, AllowedPeriodIds: allowed,
+	})
+	if err != nil {
+		return unitResponse{}, err
+	}
+	if price != nil {
+		if _, err := q.CreatePricePlan(ctx, sqlc.CreatePricePlanParams{
+			OrgID: p.OrgID, UnitID: unit.ID, Amount: price.Amount, Currency: currencyTZS,
+			PeriodDays: price.PeriodDays, EffectiveFrom: todayDate(),
+			CreatedByUserID: p.UserID,
+		}); err != nil {
+			return unitResponse{}, err
+		}
+	}
+	if err := audit.Record(ctx, q, audit.Entry{
+		OrgID:       p.OrgIDString(),
+		ActorUserID: p.UserIDString(),
+		Action:      audit.ActionUnitCreate,
+		EntityType:  audit.EntityUnit,
+		EntityID:    db.UUIDString(unit.ID),
+		After: map[string]any{
+			"name": unit.Name, "unit_code": unit.UnitCode,
+			"property_id": db.UUIDString(propertyID),
+		},
+	}); err != nil {
+		return unitResponse{}, err
+	}
+	row, err := q.GetUnit(ctx, sqlc.GetUnitParams{OrgID: p.OrgID, ID: unit.ID})
+	if err != nil {
+		return unitResponse{}, err
+	}
+	return s.toUnit(unitRowOfGet(row)), nil
 }
 
 // ----------------------------------------------- /properties/{id}/qr-sheet --

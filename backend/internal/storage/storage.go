@@ -24,6 +24,10 @@ const (
 	// `{org_id}/{expense_id}.{ext}`). Created in Phase 9 so the bucket exists
 	// before the endpoints that write to it.
 	BucketReceipts = "receipts"
+	// BucketProofs holds renters' proof-of-payment uploads (PLAN2 §16.1, key
+	// `{org_id}/{proof_id}.{ext}`). Private like the rest: reads are presigned
+	// for the org's staff and the submitting renter, nobody else.
+	BucketProofs = "proofs"
 )
 
 // minioRegion is the region presigned URLs are signed for. MinIO serves a

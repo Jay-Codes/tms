@@ -90,8 +90,12 @@ type unitResponse struct {
 	CurrentPrice   *priceResponse `json:"current_price"`
 	ScanURL        string         `json:"scan_url"`
 	VacantSince    *time.Time     `json:"vacant_since"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	// NextDueDate is the units board chip (Phase 16 §16.3): the next date rent
+	// is owed on an occupied unit, null on every other status and on an
+	// occupied unit with nothing outstanding.
+	NextDueDate *string   `json:"next_due_date"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // periodResponse is one row of GET /org/payment-periods.

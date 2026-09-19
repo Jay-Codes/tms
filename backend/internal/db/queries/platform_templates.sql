@@ -32,6 +32,32 @@ INSERT INTO platform_templates (kind, sw, en, variables, locked)
 VALUES (sqlc.arg(kind), sqlc.arg(sw), sqlc.arg(en), sqlc.arg(variables), sqlc.arg(locked))
 ON CONFLICT (kind) DO NOTHING;
 
+-- RefreshPlatformTemplateDefault re-applies the code default to a row the
+-- platform has never edited (Phase 16 §16.4: the three rent reminders gain
+-- `{{pay_link}}`).
+--
+-- It is how a *changed* default reaches an installation whose catalogue was
+-- seeded by 000016, without a data migration that would have to be repeated
+-- every time a sentence is reworded. The guard is deliberately narrow: version
+-- 1 (nobody has edited it) and the previous wording byte-for-byte in both
+-- languages. Anything else is an admin's text and is left alone. The DISTINCT
+-- check makes a re-run a no-op rather than a fresh `updated_at`.
+-- name: RefreshPlatformTemplateDefault :exec
+UPDATE platform_templates
+SET sw = sqlc.arg(sw), en = sqlc.arg(en), variables = sqlc.arg(variables)
+WHERE kind = sqlc.arg(kind) AND version = 1
+  AND sw = sqlc.arg(prev_sw) AND en = sqlc.arg(prev_en)
+  AND (sw IS DISTINCT FROM sqlc.arg(sw) OR en IS DISTINCT FROM sqlc.arg(en));
+
+-- RefreshPlatformTemplateVariables keeps the placeholder chips the admin editor
+-- offers in step with the code's whitelist. The variables a kind may name are
+-- derived, never typed by an admin, so unlike the wording they are refreshed
+-- whatever the row's version.
+-- name: RefreshPlatformTemplateVariables :exec
+UPDATE platform_templates
+SET variables = sqlc.arg(variables)
+WHERE kind = sqlc.arg(kind) AND variables IS DISTINCT FROM sqlc.arg(variables);
+
 -- UpdatePlatformTemplate saves new wording and bumps the version. The previous
 -- body is written to platform_template_versions by the caller first, inside the
 -- same transaction, so history never loses a step.
