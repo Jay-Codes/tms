@@ -15,8 +15,8 @@
  */
 
 import { useT, type Translator } from '@tms/ui';
-import type { MySchedule, PaymentSchedule } from '../lib/api';
-import { money } from '../lib/format';
+import type { MySchedule, PaymentSchedule, ProofStatus } from '../lib/api';
+import { daysUntil, money } from '../lib/format';
 
 type ScheduleLike = Pick<PaymentSchedule, 'status' | 'amount' | 'paid_amount'> & {
   days_overdue?: number;
@@ -92,4 +92,59 @@ export function NextDueChip({ schedule }: { schedule: MySchedule }) {
     );
   }
   return <ScheduleMark schedule={schedule} />;
+}
+
+/**
+ * Phase 16 (§16.3): the countdown itself — how many days there are before the
+ * money is expected, in the stamp colours. `days_until_due` comes from the
+ * API (counted on the Dar es Salaam wall clock); a row without it is counted
+ * from `due_date` here purely so the chip still says something.
+ *
+ * A proof already sent outranks the countdown: once a renter has handed over
+ * a receipt, what they are waiting on is their landlord, not the calendar.
+ */
+export function CountdownChip({
+  schedule,
+  awaiting = false,
+}: {
+  schedule?: MySchedule | null;
+  /** A still-`submitted` proof covers this row. */
+  awaiting?: boolean;
+}) {
+  const t = useT();
+
+  if (awaiting || schedule?.proof?.status === 'submitted') {
+    return <span className="pencil">{t('due.awaiting')}</span>;
+  }
+  if (!schedule) return <span className="pencil">{t('due.nothing')}</span>;
+  if (schedule.status === 'paid') {
+    return <span className="stamp stamp-paid">{t('schedule.paid')}</span>;
+  }
+  if (schedule.status === 'waived') {
+    return <span className="pencil">{t('schedule.waived')}</span>;
+  }
+
+  const left =
+    typeof schedule.days_until_due === 'number'
+      ? schedule.days_until_due
+      : daysUntil(schedule.due_date);
+  if (left === null) return <ScheduleMark schedule={schedule} />;
+
+  if (left < 0) {
+    return <span className="stamp stamp-overdue">{t.n('due.overdue', -left)}</span>;
+  }
+  if (left === 0) return <span className="stamp">{t('due.today')}</span>;
+  return <span className="pencil">{t.n('due.in', left)}</span>;
+}
+
+/** Where a claim stands: pencilled while it waits, stamped once answered. */
+export function ProofChip({ status }: { status: ProofStatus }) {
+  const t = useT();
+  if (status === 'accepted') {
+    return <span className="stamp stamp-paid">{t('proof.status.accepted')}</span>;
+  }
+  if (status === 'rejected') {
+    return <span className="stamp stamp-overdue">{t('proof.status.rejected')}</span>;
+  }
+  return <span className="pencil">{t('proof.status.submitted')}</span>;
 }

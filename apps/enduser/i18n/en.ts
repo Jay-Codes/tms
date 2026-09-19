@@ -81,6 +81,9 @@ const messages: Messages = {
   'error.pinMismatch': 'The two PINs do not match.',
   'error.code': 'Enter the 6-digit code from the SMS.',
   'error.nameRequired': 'Enter your full name.',
+  'error.proofsTooMany': 'You have sent too many proofs today. Try again tomorrow.',
+  'error.contractNotActive': 'This tenancy is not active, so proof cannot be sent.',
+  'error.proofNotPending': 'Your landlord has already answered this proof.',
 
   /* ------------------------------------------------------------- fields */
   'field.phone': 'Phone number',
@@ -151,6 +154,7 @@ const messages: Messages = {
   'home.hint.approved': 'Payments start once your contract is signed and activated.',
   'home.hint.none': 'No tenancy yet — scan your unit’s QR code.',
   'home.hint.qr': 'The sticker on your door opens this app with the unit already filled in.',
+  'home.hero.howToPay': 'How to pay',
 
   /* ------------------------------------------------------------ install */
   'install.text': 'Add Rent Book to your home screen.',
@@ -161,6 +165,15 @@ const messages: Messages = {
   'payment.next.title': 'Next payment',
   'payment.next.howToPay': 'How to pay →',
   'payment.overdueShort': '{amount} overdue.',
+
+  /* ------------------------------------------------------------ due in */
+  'due.in.one': 'Due in {count} day',
+  'due.in.other': 'Due in {count} days',
+  'due.today': 'Due today',
+  'due.overdue.one': '{count} day overdue',
+  'due.overdue.other': '{count} days overdue',
+  'due.awaiting': 'Awaiting confirmation',
+  'due.nothing': 'Nothing to pay yet',
 
   /* ----------------------------------------------------------- contract */
   'contract.list.eyebrow': 'Your agreements',
@@ -263,6 +276,11 @@ const messages: Messages = {
   'payments.method.cash': 'Cash',
   'payments.method.bank_transfer': 'Bank transfer',
   'payments.method.mobile_money_manual': 'Mobile money',
+  'payments.mobileMoney': 'Mobile money',
+  'payments.mmProvider': 'Provider',
+  'payments.mmNumber': 'Number',
+  'payments.mmName': 'Registered name',
+  'payments.mmNumberLabel': 'mobile money number',
 
   /* ----------------------------------------------------------- schedule */
   'schedule.paid': 'Paid',
@@ -274,6 +292,42 @@ const messages: Messages = {
   'schedule.paidAmount': '{amount} paid',
   'schedule.daysLate.one': '{count} day late',
   'schedule.daysLate.other': '{count} days late',
+
+  /* -------------------------------------------------------------- proof */
+  'proof.send': 'Send proof',
+  'proof.sendAgain': 'Send again',
+  'proof.title': 'Send proof of payment',
+  'proof.lead': 'Already paid? Send the receipt and your landlord will confirm it here.',
+  'proof.amount': 'Amount you paid',
+  'proof.paidAt': 'Day you paid',
+  'proof.method': 'How you paid',
+  'proof.reference': 'Reference (optional)',
+  'proof.note': 'Note (optional)',
+  'proof.file': 'Photo or PDF of the receipt',
+  'proof.fileHint': 'JPEG, PNG or PDF, up to 5 MB.',
+  'proof.filePreviewAlt': 'The receipt you chose',
+  'proof.instructions': 'Where to pay',
+  'proof.submit': 'Send to your landlord',
+  'proof.submitting': 'Sending…',
+  'proof.uploading': 'Uploading your receipt…',
+  'proof.done.title': 'Sent.',
+  'proof.done.lead': 'Your landlord checks it and the row is stamped once they confirm it.',
+  'proof.close': 'Close',
+  'proof.status.submitted': 'Awaiting confirmation',
+  'proof.status.accepted': 'Accepted',
+  'proof.status.rejected': 'Not accepted',
+  'proof.rejected.reason': 'Not accepted: {reason}',
+  'proof.history': 'Proofs you sent',
+  'proof.none': 'You have not sent any proof yet.',
+  'proof.withdraw': 'Withdraw',
+  'proof.withdrawing': 'Withdrawing…',
+  'proof.withdrawConfirm': 'Withdraw this proof? Your landlord will no longer see it.',
+  'proof.noContract': 'You can send proof once your tenancy is active.',
+  'proof.error.amount': 'Enter the amount you paid.',
+  'proof.error.date': 'Choose the day you paid. It cannot be in the future.',
+  'proof.error.fileRequired': 'Choose a photo or PDF of your receipt.',
+  'proof.error.fileType': 'Choose a JPEG, PNG or PDF file.',
+  'proof.error.fileSize': 'That file is larger than 5 MB. Choose a smaller one.',
 
   /* ------------------------------------------------------------ profile */
   'profile.eyebrow': 'Profile',

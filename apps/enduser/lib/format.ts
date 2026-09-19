@@ -73,6 +73,21 @@ export function errorMessage(t: Translator, err: unknown, fallbackRetryMinutes =
   return t('error.generic');
 }
 
+/**
+ * The same line, for the proof endpoints (API.md §16.1). The three answers a
+ * renter can actually run into get wording of their own — "10 a day" is a
+ * ceiling, not a "try again in 10 minutes" — and everything else falls
+ * through to `errorMessage()`.
+ */
+export function proofErrorMessage(t: Translator, err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 429) return t('error.proofsTooMany');
+    if (err.is('contract_not_active')) return t('error.contractNotActive');
+    if (err.is('proof_not_pending')) return t('error.proofNotPending');
+  }
+  return errorMessage(t, err);
+}
+
 /** Translated stand-in for a problem the backend did not describe itself. */
 export function statusText(t: Translator, status: number): string {
   if (status === 0) return t('error.status.offline');
@@ -150,6 +165,21 @@ export function addDays(iso: string, n: number): string {
   if (!d) return iso;
   d.setUTCDate(d.getUTCDate() + n);
   return toIso(d);
+}
+
+/**
+ * Days from today to `iso` — `0` today, negative once past. DISPLAY ONLY and
+ * a fallback at that: the API sends `days_until_due` counted on the Dar es
+ * Salaam wall clock (API.md §16.3) and that number wins wherever it arrives.
+ * This exists so an older API, or a row without the field, still shows a
+ * countdown rather than nothing.
+ */
+export function daysUntil(iso: string | null | undefined, from: string = todayIso()): number | null {
+  if (!iso) return null;
+  const target = parseDate(iso);
+  const start = parseDate(from);
+  if (!target || !start) return null;
+  return Math.round((target.getTime() - start.getTime()) / 86_400_000);
 }
 
 /**
