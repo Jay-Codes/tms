@@ -46,26 +46,6 @@ func (q *Queries) CommitImportBatch(ctx context.Context, arg CommitImportBatchPa
 	return i, err
 }
 
-const countContractsForRenter = `-- name: CountContractsForRenter :one
-SELECT count(*) FROM contracts
-WHERE org_id = $1 AND renter_user_id = $2
-  AND deleted_at IS NULL
-`
-
-type CountContractsForRenterParams struct {
-	OrgID        pgtype.UUID `json:"org_id"`
-	RenterUserID pgtype.UUID `json:"renter_user_id"`
-}
-
-// CountContractsForRenter is the same question for a renter account an import
-// created: a contract anywhere in this org keeps the account.
-func (q *Queries) CountContractsForRenter(ctx context.Context, arg CountContractsForRenterParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countContractsForRenter, arg.OrgID, arg.RenterUserID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countContractsForUnit = `-- name: CountContractsForUnit :one
 SELECT count(*) FROM contracts
 WHERE org_id = $1 AND unit_id = $2 AND deleted_at IS NULL
@@ -143,6 +123,31 @@ func (q *Queries) CountPaymentsForContract(ctx context.Context, arg CountPayment
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countRenterReferencesAnywhere = `-- name: CountRenterReferencesAnywhere :one
+SELECT (
+    (SELECT count(*) FROM contracts c
+      WHERE c.renter_user_id = $1 AND c.deleted_at IS NULL)
+  + (SELECT count(*) FROM unit_link_requests lr
+      WHERE lr.renter_user_id = $1 AND lr.deleted_at IS NULL)
+  + (SELECT count(*) FROM org_members m
+      WHERE m.user_id = $1 AND m.deleted_at IS NULL)
+)::bigint AS refs
+`
+
+// CountRenterReferencesAnywhere is the question that actually decides whether a
+// renter account may be taken back. `users` is platform-global, so an org-scoped
+// count is the wrong instrument: org A's undo must not delete the account org B
+// has since given a tenancy or a link request to. Everything that makes a person
+// real to somebody is counted here — contracts, link requests and staff
+// memberships — across every org.
+// guard-exempt: deliberately cross-org. The account being tested lives in the platform-global `users` table, and the whole point of the count is to see the orgs the caller cannot: a per-org answer would authorise deleting another landlord's renter.
+func (q *Queries) CountRenterReferencesAnywhere(ctx context.Context, userID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countRenterReferencesAnywhere, userID)
+	var refs int64
+	err := row.Scan(&refs)
+	return refs, err
 }
 
 const createImportBatch = `-- name: CreateImportBatch :one
@@ -704,54 +709,6 @@ func (q *Queries) ListImportedPayments(ctx context.Context, arg ListImportedPaym
 	return items, nil
 }
 
-const listLinkRequestsForRenterInOrg = `-- name: ListLinkRequestsForRenterInOrg :many
-SELECT id, org_id, unit_id, renter_user_id, status, created_at, updated_at, deleted_at, payment_period_id, term_days, start_date, end_date, rejection_reason, decided_at, decided_by_user_id, accepted_terms_at FROM unit_link_requests
-WHERE org_id = $1 AND renter_user_id = $2
-  AND deleted_at IS NULL
-`
-
-type ListLinkRequestsForRenterInOrgParams struct {
-	OrgID        pgtype.UUID `json:"org_id"`
-	RenterUserID pgtype.UUID `json:"renter_user_id"`
-}
-
-func (q *Queries) ListLinkRequestsForRenterInOrg(ctx context.Context, arg ListLinkRequestsForRenterInOrgParams) ([]UnitLinkRequest, error) {
-	rows, err := q.db.Query(ctx, listLinkRequestsForRenterInOrg, arg.OrgID, arg.RenterUserID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []UnitLinkRequest{}
-	for rows.Next() {
-		var i UnitLinkRequest
-		if err := rows.Scan(
-			&i.ID,
-			&i.OrgID,
-			&i.UnitID,
-			&i.RenterUserID,
-			&i.Status,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.DeletedAt,
-			&i.PaymentPeriodID,
-			&i.TermDays,
-			&i.StartDate,
-			&i.EndDate,
-			&i.RejectionReason,
-			&i.DecidedAt,
-			&i.DecidedByUserID,
-			&i.AcceptedTermsAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listUnitNamesForProperty = `-- name: ListUnitNamesForProperty :many
 SELECT lower(btrim(name))::text AS name
 FROM units
@@ -863,7 +820,7 @@ WHERE id = $1 AND kind = 'renter' AND pin_hash IS NULL
 // SoftDeleteImportedRenter takes back an account the import itself created, and
 // only one that never became a real login: `pin_hash IS NULL` means nobody has
 // ever signed in as this person.
-// guard-exempt: users is a platform-global table with no org_id; the caller has already proved the account was created by this org's batch and holds nothing in it.
+// guard-exempt: users is a platform-global table with no org_id; the caller has already proved, with CountRenterReferencesAnywhere, that this org's batch created the account and that no org anywhere still references it.
 func (q *Queries) SoftDeleteImportedRenter(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, softDeleteImportedRenter, id)
 	return err

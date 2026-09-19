@@ -8,6 +8,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -600,6 +602,344 @@ func TestImportBatchesAreOrgScoped(t *testing.T) {
 	}
 }
 
+// TestImportPaymentsPreviewNamesNoRenterFromAnotherOrg: the preview resolves a
+// phone number against a platform-global table, and must give nothing away for
+// it. A number belonging to another landlord's tenant and a number belonging to
+// nobody answer with the *same* row error, and neither puts a name in
+// `resolved` — otherwise a payments sheet of guessed numbers would be a
+// directory of every renter on the platform (SPEC §8).
+func TestImportPaymentsPreviewNamesNoRenterFromAnotherOrg(t *testing.T) {
+	h := newHarness(t)
+	a := h.newPaymentFixture(t, "LeakA", "0716000200", "+255716000201")
+	b := h.newOrgWithUnits("LeakB", "leakb@jjne.test", "0716000202", []string{"Room 1"}, 250_000)
+
+	paidAt := time.Now().UTC().AddDate(0, 0, -3).Format("2006-01-02")
+	preview := b.client.importPreview(t, "payments", "probe.csv",
+		"unit,renter_phone,amount,paid_at,method\n"+
+			fmt.Sprintf("Room 1,%s,1000,%s,cash\n", a.renterPhone, paidAt)+
+			fmt.Sprintf("Room 1,0716999998,1000,%s,cash\n", paidAt)).
+		mustStatus(t, http.StatusCreated, "org B previews org A's renter")
+
+	if got := num(t, preview, "batch", "error_count"); got != 2 {
+		t.Fatalf("error_count = %v, want 2 — body: %s", got, preview.Raw)
+	}
+	rows := importRows(t, preview)
+	theirs := rowError(t, rows, "2", "renter_phone")
+	nobody := rowError(t, rows, "3", "renter_phone")
+	if theirs == "" {
+		t.Fatalf("another org's renter was accepted: %s", preview.Raw)
+	}
+	if theirs != nobody {
+		t.Errorf("another org's renter answers %q while an unknown number answers %q; "+
+			"the two must be indistinguishable", theirs, nobody)
+	}
+	if res := resolvedOfRow(t, rows, 2); res["renter_name"] != nil || res["user_id"] != nil {
+		t.Errorf("the preview resolved a renter org B does not know: %v", res)
+	}
+	if strings.Contains(preview.Raw, "LeakA Renter") {
+		t.Errorf("org A's renter name leaked into org B's preview: %s", preview.Raw)
+	}
+}
+
+// TestImportRentersPreviewHidesAStrangersAccount: the renters sheet attaches an
+// existing account rather than duplicating it, but it may only *say* so for a
+// renter this org already knows. For anybody else the row reads "will be
+// created or attached", under the name the sheet itself supplies.
+func TestImportRentersPreviewHidesAStrangersAccount(t *testing.T) {
+	h := newHarness(t)
+	a := h.newPaymentFixture(t, "HideA", "0716000205", "+255716000206")
+	b := h.newOrgWithUnits("HideB", "hideb@jjne.test", "0716000207", []string{"Room 1"}, 250_000)
+
+	preview := b.client.importPreview(t, "renters", "stranger.csv",
+		"full_name,phone,property,unit\nNot Their Name,"+a.renterPhone+",HideB Block A,Room 1\n").
+		mustStatus(t, http.StatusCreated, "org B previews org A's renter")
+	res := resolvedOfRow(t, importRows(t, preview), 2)
+	if res["renter_create"] != true {
+		t.Errorf("org B was told the account already exists: %v", res)
+	}
+	if res["user_id"] != nil {
+		t.Errorf("org B was handed a stranger's user id: %v", res)
+	}
+	if res["full_name"] != "Not Their Name" || strings.Contains(preview.Raw, "HideA Renter") {
+		t.Errorf("the stored name leaked instead of the sheet's own: %s", preview.Raw)
+	}
+
+	// The account is still reused, not duplicated: the commit attaches it.
+	batchID := preview.str(t, "batch", "id")
+	committed := b.client.do(http.MethodPost, "/imports/"+batchID+"/commit", nil).
+		mustStatus(t, http.StatusOK, "commit")
+	if got := num(t, committed, "created", "renters"); got != 0 {
+		t.Errorf("created.renters = %v, want 0 — the existing account must be attached, not copied", got)
+	}
+	if got := num(t, committed, "created", "contracts"); got != 1 {
+		t.Errorf("created.contracts = %v, want 1 — body: %s", got, committed.Raw)
+	}
+}
+
+// TestImportUndoKeepsARenterAnotherOrgKnows: `users` is platform-global, so the
+// undo's delete is too. An account another landlord has since taken on is not
+// this org's to take back — it is detached here and left standing.
+func TestImportUndoKeepsARenterAnotherOrgKnows(t *testing.T) {
+	h := newHarness(t)
+	a := h.newOrgWithUnits("KeepA", "keepa@jjne.test", "0716000210", []string{"Room 1"}, 250_000)
+	b := h.newOrgWithUnits("KeepB", "keepb@jjne.test", "0716000211", []string{"Room 1"}, 250_000)
+
+	const phone = "0716000212"
+	batchID := a.client.importPreview(t, "renters", "a.csv",
+		"full_name,phone,property,unit\nSalma Kileo,"+phone+",KeepA Block A,Room 1\n").
+		mustStatus(t, http.StatusCreated, "org A preview").str(t, "batch", "id")
+	if got := num(t, a.client.do(http.MethodPost, "/imports/"+batchID+"/commit", nil).
+		mustStatus(t, http.StatusOK, "org A commit"), "created", "renters"); got != 1 {
+		t.Fatalf("org A created %v renters, want 1", got)
+	}
+
+	// Org B takes the same person on.
+	bBatch := b.client.importPreview(t, "renters", "b.csv",
+		"full_name,phone,property,unit\nSalma Kileo,"+phone+",KeepB Block A,Room 1\n").
+		mustStatus(t, http.StatusCreated, "org B preview").str(t, "batch", "id")
+	b.client.do(http.MethodPost, "/imports/"+bBatch+"/commit", nil).
+		mustStatus(t, http.StatusOK, "org B commit")
+
+	undone := a.client.do(http.MethodPost, "/imports/"+batchID+"/undo", nil).
+		mustStatus(t, http.StatusOK, "org A undo")
+	if got := num(t, undone, "undone", "renters"); got != 0 {
+		t.Errorf("undone.renters = %v, want 0 — org B still knows this person", got)
+	}
+	if !h.userLives(t, phone) {
+		t.Fatal("org A's undo deleted an account org B holds a tenancy for")
+	}
+	if rows := listOf(t, b.client.do(http.MethodGet, "/renters", nil).
+		mustStatus(t, http.StatusOK, "org B's directory")); len(rows) != 1 {
+		t.Errorf("org B's renter directory = %+v, want the renter it took on", rows)
+	}
+}
+
+// userLives answers whether an account with this number is still there, by the
+// number's last nine digits: registration normalises `0716…` to `+255716…`.
+func (h *harness) userLives(t *testing.T, phone string) bool {
+	t.Helper()
+	tail := phone
+	if len(tail) > 9 {
+		tail = tail[len(tail)-9:]
+	}
+	var n int
+	if err := h.pool.QueryRow(context.Background(),
+		"SELECT count(*) FROM users WHERE phone LIKE '%' || $1 AND deleted_at IS NULL", tail).
+		Scan(&n); err != nil {
+		t.Fatalf("count users: %v", err)
+	}
+	return n > 0
+}
+
+// TestImportPaymentsUndoLeavesTheContractAlone: a payments row's `contract_id`
+// names a tenancy that was already there. Undoing the batch reverses its money
+// and stops — it may not reach for the contract, whatever status that contract
+// happens to be in.
+func TestImportPaymentsUndoLeavesTheContractAlone(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newPaymentFixture(t, "PayUndo", "0716000220", "+255716000221")
+	owner := fix.owner
+
+	paidAt := time.Now().UTC().AddDate(0, 0, -4).Format("2006-01-02")
+	batchID := owner.importPreview(t, "payments", "pay.csv",
+		"unit,renter_phone,amount,paid_at,method,reference\n"+
+			fmt.Sprintf("Room 1,%s,%d,%s,cash,HIST\n", fix.renterPhone, fix.amounts[0], paidAt)).
+		mustStatus(t, http.StatusCreated, "preview").str(t, "batch", "id")
+	owner.do(http.MethodPost, "/imports/"+batchID+"/commit", nil).
+		mustStatus(t, http.StatusOK, "commit")
+
+	// The one status the undo's contract statement can move. Reaching it here is
+	// artificial — a payments sheet never resolves to an unsigned contract — and
+	// that is the point: the gate must be the batch's kind, not the row's shape.
+	h.setContractStatus(t, fix.contractID, "pending_signature")
+
+	undone := owner.do(http.MethodPost, "/imports/"+batchID+"/undo", nil).
+		mustStatus(t, http.StatusOK, "undo the payments batch")
+	if got := num(t, undone, "undone", "payments"); got != 1 {
+		t.Errorf("undone.payments = %v, want 1 — body: %s", got, undone.Raw)
+	}
+	if got := num(t, undone, "undone", "contracts"); got != 0 {
+		t.Errorf("undone.contracts = %v, want 0 — a payments undo must not touch a contract", got)
+	}
+	if !h.contractLives(t, fix.contractID) {
+		t.Fatal("undoing a payments import withdrew the renter's contract")
+	}
+
+	// Again, with the batch's own money taken out of the picture, so the
+	// contract is protected by nothing except the gate itself.
+	h.setContractStatus(t, fix.contractID, "active") // a payments sheet only resolves a running tenancy
+	second := owner.importPreview(t, "payments", "pay2.csv",
+		"unit,renter_phone,amount,paid_at,method,reference\n"+
+			fmt.Sprintf("Room 1,%s,%d,%s,cash,HIST2\n", fix.renterPhone, fix.amounts[0], paidAt)).
+		mustStatus(t, http.StatusCreated, "second preview").str(t, "batch", "id")
+	owner.do(http.MethodPost, "/imports/"+second+"/commit", nil).
+		mustStatus(t, http.StatusOK, "second commit")
+	h.forgetPaymentsOfBatch(t, second)
+	h.setContractStatus(t, fix.contractID, "pending_signature")
+
+	bare := owner.do(http.MethodPost, "/imports/"+second+"/undo", nil).
+		mustStatus(t, http.StatusOK, "undo a payments batch with no money left to reverse")
+	if got := num(t, bare, "undone", "contracts"); got != 0 {
+		t.Errorf("undone.contracts = %v, want 0 — only a renters batch owns a contract", got)
+	}
+	if !h.contractLives(t, fix.contractID) {
+		t.Fatal("the payments undo followed resolved.contract_id into a contract it never created")
+	}
+}
+
+// forgetPaymentsOfBatch removes a batch's payments outright, which the API
+// never does. It is here to strip away the incidental protection the payment
+// count gives a contract, so the undo's kind gate is the only thing left
+// standing between a payments rollback and somebody's tenancy.
+func (h *harness) forgetPaymentsOfBatch(t *testing.T, batchID string) {
+	t.Helper()
+	if _, err := h.pool.Exec(context.Background(),
+		"UPDATE payments SET deleted_at = now() WHERE import_batch_id = $1", batchID); err != nil {
+		t.Fatalf("remove the batch's payments: %v", err)
+	}
+}
+
+func (h *harness) setContractStatus(t *testing.T, contractID, status string) {
+	t.Helper()
+	if _, err := h.pool.Exec(context.Background(),
+		"UPDATE contracts SET status = $2 WHERE id = $1", contractID, status); err != nil {
+		t.Fatalf("set contract status: %v", err)
+	}
+}
+
+func (h *harness) contractLives(t *testing.T, contractID string) bool {
+	t.Helper()
+	var live bool
+	if err := h.pool.QueryRow(context.Background(),
+		"SELECT deleted_at IS NULL FROM contracts WHERE id = $1", contractID).Scan(&live); err != nil {
+		t.Fatalf("read contract: %v", err)
+	}
+	return live
+}
+
+// TestImportRentersUndoKeepsASignedTenancy: signing does not move a contract
+// off `pending_signature` — activation does — so status alone would let a
+// rollback tear up a document the renter has put their name to. A signature is
+// a reference, the contract stays, and the approval that created it stays with
+// it.
+func TestImportRentersUndoKeepsASignedTenancy(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newOrgWithUnits("SignU", "signu@jjne.test", "0716000230", []string{"Room 1"}, 250_000)
+	owner := fix.client
+
+	const phone = "+255716000231"
+	renter := h.registerRenter(phone, "SignU Renter", defaultPIN)
+	renter.completeProfile(t, "SignU Renter", validNIDA)
+
+	batchID := owner.importPreview(t, "renters", "signed.csv",
+		"full_name,phone,property,unit\nSignU Renter,"+phone+",SignU Block A,Room 1\n").
+		mustStatus(t, http.StatusCreated, "preview").str(t, "batch", "id")
+	owner.do(http.MethodPost, "/imports/"+batchID+"/commit", nil).
+		mustStatus(t, http.StatusOK, "commit")
+
+	contracts := listOf(t, owner.do(http.MethodGet, "/contracts", nil).
+		mustStatus(t, http.StatusOK, "contracts"))
+	if len(contracts) != 1 {
+		t.Fatalf("contracts = %d, want the one the import drew up", len(contracts))
+	}
+	contractID, _ := contracts[0]["id"].(string)
+	h.signAsRenter(t, renter, contractID, phone)
+
+	undone := owner.do(http.MethodPost, "/imports/"+batchID+"/undo", nil).
+		mustStatus(t, http.StatusOK, "undo after the renter signed")
+	if got := num(t, undone, "undone", "contracts"); got != 0 {
+		t.Errorf("undone.contracts = %v, want 0 — the renter signed this one", got)
+	}
+	if got := num(t, undone, "undone", "renters"); got != 0 {
+		t.Errorf("undone.renters = %v, want 0 — the account was not created by this import", got)
+	}
+	owner.do(http.MethodGet, "/contracts/"+contractID, nil).
+		mustStatus(t, http.StatusOK, "the signed contract is still there")
+	links := listOf(t, owner.do(http.MethodGet, "/link-requests?status=approved", nil).
+		mustStatus(t, http.StatusOK, "link requests"))
+	if len(links) != 1 {
+		t.Errorf("approved link requests = %+v, want the one behind the signed contract", links)
+	}
+	if !h.userLives(t, phone) {
+		t.Error("the undo deleted the renter's account")
+	}
+}
+
+// TestImportedPaymentMatchesTheManualOne is the parity `applyImportedPayment`
+// owes the ledger. The import writes its own payment rather than going through
+// allocatePayment (a finished tenancy cannot: DECISIONS), so the two paths are
+// held to the same result — the same schedule statuses, the same paid amounts
+// and the same payment_allocations rows for the same money.
+func TestImportedPaymentMatchesTheManualOne(t *testing.T) {
+	h := newHarness(t)
+	imported := h.newPaymentFixture(t, "ParityI", "0716000240", "+255716000241")
+	manual := h.newPaymentFixture(t, "ParityM", "0716000242", "+255716000243")
+
+	// Enough to settle the first instalment and spill onto the second, so the
+	// comparison covers more than one allocation row.
+	amount := imported.amounts[0] + 5_000
+	paidAt := time.Now().UTC().AddDate(0, 0, -2)
+
+	batchID := imported.owner.importPreview(t, "payments", "parity.csv",
+		"unit,renter_phone,amount,paid_at,method,reference,note\n"+
+			fmt.Sprintf("Room 1,%s,%d,%s,cash,PARITY,at the office\n",
+				imported.renterPhone, amount, paidAt.Format("2006-01-02"))).
+		mustStatus(t, http.StatusCreated, "preview").str(t, "batch", "id")
+	imported.owner.do(http.MethodPost, "/imports/"+batchID+"/commit", nil).
+		mustStatus(t, http.StatusOK, "commit the imported payment")
+
+	manual.owner.recordPayment(map[string]any{
+		"contract_id": manual.contractID, "amount": amount, "method": "cash",
+		"reference": "PARITY", "note": "at the office",
+		"paid_at": paidAt.Format(time.RFC3339), "allow_overpay_rollover": true,
+	}).mustStatus(t, http.StatusCreated, "record the same payment by hand")
+
+	gotStatuses, gotPaid, gotAllocs := paymentLedger(t, imported)
+	wantStatuses, wantPaid, wantAllocs := paymentLedger(t, manual)
+	if !reflect.DeepEqual(gotStatuses, wantStatuses) {
+		t.Errorf("imported statuses = %v, hand-keyed = %v", gotStatuses, wantStatuses)
+	}
+	if !reflect.DeepEqual(gotPaid, wantPaid) {
+		t.Errorf("imported paid_amount = %v, hand-keyed = %v", gotPaid, wantPaid)
+	}
+	if !reflect.DeepEqual(gotAllocs, wantAllocs) {
+		t.Errorf("imported allocations = %v, hand-keyed = %v", gotAllocs, wantAllocs)
+	}
+	if len(gotAllocs) < 2 {
+		t.Fatalf("the payment did not spill onto a second schedule: %v", gotAllocs)
+	}
+}
+
+// paymentLedger reads one contract's schedules and the allocations written
+// against them, keyed by the schedule's *position* rather than its id, so two
+// different contracts can be compared row for row.
+func paymentLedger(t *testing.T, fix paymentFixture) (statuses []string, paid []int64, allocs []string) {
+	t.Helper()
+	index := map[string]int{}
+	for _, row := range listOf(t, fix.owner.do(http.MethodGet,
+		"/contracts/"+fix.contractID+"/schedules", nil).
+		mustStatus(t, http.StatusOK, "schedules")) {
+		id, _ := row["id"].(string)
+		index[id] = len(statuses)
+		status, _ := row["status"].(string)
+		statuses = append(statuses, status)
+		paid = append(paid, int64(mustFloat(t, row, "paid_amount")))
+	}
+	allocs = []string{}
+	for _, row := range listOf(t, fix.owner.do(http.MethodGet, "/payments?limit=50", nil).
+		mustStatus(t, http.StatusOK, "payments")) {
+		applied, _ := row["applied"].([]any)
+		for _, a := range applied {
+			m, _ := a.(map[string]any)
+			id, _ := m["schedule_id"].(string)
+			amount, _ := m["amount"].(float64)
+			allocs = append(allocs, fmt.Sprintf("%d:%d", index[id], int64(amount)))
+		}
+	}
+	sort.Strings(allocs)
+	return statuses, paid, allocs
+}
+
 // TestImportTemplateServesHeadersAndColumns: the template download and the
 // column reference come off the same route, so they cannot drift apart.
 func TestImportTemplateServesHeadersAndColumns(t *testing.T) {
@@ -632,6 +972,29 @@ func TestImportPreviewIsRateLimited(t *testing.T) {
 	}
 	fix.client.importPreview(t, "units", "rate.csv", sheet).
 		mustStatus(t, http.StatusTooManyRequests, "the twenty-first preview")
+
+	// Redis is ephemeral and the limiter fails open, so the ceiling is counted
+	// again in Postgres. With the counters gone the answer must not change: a
+	// restarted cache cannot hand an org twenty more uploads.
+	h.forgetRateLimits(t, "rl:import:preview:*")
+	fix.client.importPreview(t, "units", "rate.csv", sheet).
+		mustStatus(t, http.StatusTooManyRequests, "the twenty-first preview against a cold cache")
+}
+
+// forgetRateLimits drops the limiter's counters, the way losing Redis does.
+func (h *harness) forgetRateLimits(t *testing.T, pattern string) {
+	t.Helper()
+	ctx := context.Background()
+	keys, err := h.redis.Keys(ctx, pattern).Result()
+	if err != nil {
+		t.Fatalf("list rate-limit keys: %v", err)
+	}
+	if len(keys) == 0 {
+		t.Fatalf("no rate-limit keys matched %q; the counter is not where the test thinks", pattern)
+	}
+	if err := h.redis.Del(ctx, keys...).Err(); err != nil {
+		t.Fatalf("clear rate-limit keys: %v", err)
+	}
 }
 
 // TestImportLargeUnitsPreviewIsFast is the PLAN2 budget: 5 000 rows previewed

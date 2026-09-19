@@ -544,7 +544,7 @@ Part 2 (post-MVP iteration, plan in [PLAN2.md](PLAN2.md)):
 | 13 | Language: `users.locale` per user, SMS + bulk SMS in the recipient's language, UI i18n (SW/EN) | ✅ 6 Sep 2026 |
 | 14 | Platform admin: prepaid SMS credits per org and DB-backed platform templates with per-kind locking | ✅ 6 Sep 2026 |
 | 15 | Mobile landlord pass, performance and isolation hardening, seed v2, UAT 2 | ✅ 6 Sep 2026 |
-| 16 | Proof of payment (renter upload → landlord accept/reject), CSV import of units/renters/payments, next-due visibility on both apps, pinned payment instructions | ⬜ planned |
+| 16 | Proof of payment (renter upload → landlord accept/reject), CSV import of units/renters/payments, next-due visibility on both apps, pinned payment instructions | ✅ 20 Sep 2026 |
 | 17 | Contracts: amend/renew by supersession, withdraw, reissue for re-signing | 📝 draft |
 
 The shipped contract for 9–14 is [API.md](API.md) § "Part 2 — shipped contract", which carries the deviations from the plan; the phase log is [PROGRESS.md](PROGRESS.md).

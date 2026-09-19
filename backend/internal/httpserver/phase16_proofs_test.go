@@ -351,6 +351,88 @@ func TestWithdrawProofOnlyWhileSubmitted(t *testing.T) {
 		mustStatus(t, http.StatusConflict, "withdraw a proof that has been accepted")
 }
 
+// TestProofTicketIsSingleUse: one upload link buys one claim. The ticket is
+// redeemed with a GETDEL, so a replay of the same body finds nothing and is
+// refused on `object_key` — which is what stops one screenshot of a bank app
+// becoming two claims on the landlord's queue.
+func TestProofTicketIsSingleUse(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newProofFixture(t, "ProofTicket", "0716120180", "+255716120181")
+	fix.requireStorage(t)
+
+	key := fix.renter.do(http.MethodPost, "/me/proofs/upload", map[string]any{
+		"contract_id": fix.contractID, "content_type": "image/png", "size_bytes": 2048,
+	}).mustStatus(t, http.StatusOK, "presign").str(t, "object_key")
+	if err := h.store.PutBytes(context.Background(), storage.BucketProofs,
+		key, pngBytes(2048), "image/png"); err != nil {
+		t.Fatalf("upload the proof object: %v", err)
+	}
+
+	body := map[string]any{
+		"contract_id": fix.contractID, "amount": fix.amounts[0],
+		"paid_at": time.Now().UTC().Format(time.RFC3339),
+		"method":  "bank_transfer", "reference": "TRF-1", "object_key": key,
+	}
+	fix.renter.do(http.MethodPost, "/me/proofs", body).
+		mustStatus(t, http.StatusCreated, "file the claim")
+
+	second := fix.renter.do(http.MethodPost, "/me/proofs", body)
+	if second.Code != http.StatusBadRequest && second.Code != http.StatusConflict {
+		t.Fatalf("redeeming the same upload twice: status = %d, want 400 or 409 — body: %s",
+			second.Code, second.Raw)
+	}
+	if second.Code == http.StatusBadRequest {
+		if _, ok := errorsOf(t, second)["object_key"]; !ok {
+			t.Errorf("the second submission did not name object_key: %s", second.Raw)
+		}
+	}
+	if rows := listOf(t, fix.renter.do(http.MethodGet, "/me/proofs", nil).
+		mustStatus(t, http.StatusOK, "the renter's proofs")); len(rows) != 1 {
+		t.Errorf("one upload became %d claims: %+v", len(rows), rows)
+	}
+}
+
+// TestAcceptedProofSurvivesAReversal: a decided claim is a record. A second
+// ruling is `proof_not_pending`, and reversing the payment it created does not
+// un-decide it — the claim was made and answered, and the reversal is a fact
+// about the payment, not about the proof (API.md §16.1, SPEC §4).
+func TestAcceptedProofSurvivesAReversal(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newProofFixture(t, "ProofReverse", "0716120190", "+255716120191")
+	fix.requireStorage(t)
+
+	proofID := fix.submitProof(t, 2048, nil).
+		mustStatus(t, http.StatusCreated, "file a proof").str(t, "proof", "id")
+	accepted := fix.owner.do(http.MethodPost, "/proofs/"+proofID+"/accept", map[string]any{}).
+		mustStatus(t, http.StatusOK, "accept the proof")
+	paymentID := accepted.str(t, "payment", "id")
+
+	again := fix.owner.do(http.MethodPost, "/proofs/"+proofID+"/accept", map[string]any{})
+	again.mustStatus(t, http.StatusConflict, "accept the same proof twice")
+	if again.Body["type"] != "proof_not_pending" {
+		t.Errorf("type = %v, want proof_not_pending — body: %s", again.Body["type"], again.Raw)
+	}
+	if len(h.auditPayloads(t, "payment.record")) != 1 {
+		t.Error("a second acceptance recorded a second payment")
+	}
+
+	fix.owner.do(http.MethodPost, "/payments/"+paymentID+"/reverse",
+		map[string]any{"reason": "the transfer bounced"}).
+		mustStatus(t, http.StatusOK, "reverse the payment the proof created")
+
+	after := fix.owner.do(http.MethodGet, "/proofs/"+proofID, nil).
+		mustStatus(t, http.StatusOK, "read the proof after the reversal")
+	if got := after.str(t, "proof", "status"); got != "accepted" {
+		t.Errorf("proof status after the reversal = %q, want accepted", got)
+	}
+	if got := after.str(t, "proof", "payment_id"); got != paymentID {
+		t.Errorf("proof.payment_id = %q, want %q — the link to the reversed payment stays", got, paymentID)
+	}
+	if got := fix.statuses(t)[0]; got == "paid" {
+		t.Error("reversing the payment left the schedule settled")
+	}
+}
+
 // TestProofSubmissionRateLimit: ten claims a day is the ceiling PLAN2 names.
 func TestProofSubmissionRateLimit(t *testing.T) {
 	h := newHarness(t)

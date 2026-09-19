@@ -98,6 +98,22 @@ func (s *Server) handleImportPreview(w http.ResponseWriter, r *http.Request) {
 		tooMany(w, res, "too many import previews this hour; try again later")
 		return
 	}
+	// The same ceiling again, in Postgres. The Redis limiter fails open when the
+	// cache is unreachable (SPEC §8), and a ceiling that protects a write path —
+	// every preview stores a batch and up to 5 000 rows — must not lift itself
+	// because a cache went down. This is the backstop proofs already keep.
+	previewed, err := s.q.CountImportPreviewsSince(r.Context(), sqlc.CountImportPreviewsSinceParams{
+		OrgID: p.OrgID, Since: db.TS(time.Now().UTC().Add(-importPreviewWindow)),
+	})
+	if err != nil {
+		s.serverError(w, r, "import.preview.count", err)
+		return
+	}
+	if previewed >= importPreviewLimit {
+		tooMany(w, s.limiter.Allow(r.Context(), "import:preview:"+p.OrgIDString(), 0, importPreviewWindow),
+			"too many import previews this hour; try again later")
+		return
+	}
 
 	// The body is read under a hard ceiling before anything else looks at it.
 	r.Body = http.MaxBytesReader(w, r.Body, importer.MaxBytes+importMultipartMemory)
@@ -831,10 +847,27 @@ func (s *Server) resolveRenterRows(
 			continue
 		default:
 			// Known to the platform: the import attaches the existing person to
-			// this org rather than making a second account for them.
+			// this org rather than making a second account for them. Whether the
+			// preview may *say* so is a different question — "this number is
+			// already someone" is exactly the fact a landlord must not be able to
+			// mine out of a spreadsheet of guesses. So the account is reused
+			// silently, and only a renter this org already knows is reported as
+			// an existing one, with their id.
 			row.renterUserID = user.ID
-			row.resolved["renter_create"] = false
-			row.resolved["user_id"] = db.UUIDString(user.ID)
+			known, err := q.RenterKnownToOrg(ctx, sqlc.RenterKnownToOrgParams{
+				OrgID: p.OrgID, RenterUserID: user.ID,
+			})
+			if err != nil {
+				return err
+			}
+			if known {
+				row.resolved["renter_create"] = false
+				row.resolved["user_id"] = db.UUIDString(user.ID)
+			} else {
+				// The screen reads this as "will be created or attached"; the
+				// name shown beside it is the sheet's own, never the stored one.
+				row.resolved["renter_create"] = true
+			}
 		}
 
 		if parsed.Unit == "" {
@@ -1012,6 +1045,13 @@ func (s *Server) resolvePaymentRows(
 		row.resolved["method"] = parsed.Method
 		row.resolved["paid_at"] = parsed.PaidAt.Format(time.RFC3339)
 
+		// The phone is looked up platform-wide because that is the only index
+		// there is, but the answer is not the landlord's to see until the person
+		// is confirmed to be one of *their* renters. A number belonging to
+		// another org's tenant and a number belonging to nobody give the same
+		// row error, and neither puts a name in `resolved`: otherwise the import
+		// preview would be a directory of every renter on the platform, keyed by
+		// phone number (SPEC §8).
 		user, cached := users[parsed.RenterPhone]
 		if !cached {
 			phone := parsed.RenterPhone
@@ -1021,7 +1061,15 @@ func (s *Server) resolvePaymentRows(
 			case err != nil:
 				return err
 			default:
-				user = &found
+				known, err := q.RenterKnownToOrg(ctx, sqlc.RenterKnownToOrgParams{
+					OrgID: p.OrgID, RenterUserID: found.ID,
+				})
+				if err != nil {
+					return err
+				}
+				if known {
+					user = &found
+				}
 			}
 			users[parsed.RenterPhone] = user
 		}
@@ -1514,8 +1562,14 @@ func (s *Server) applyImportedPayment(
 // "Untouched" is deliberately a simple test, and the same one everywhere:
 // nothing else may reference the row. A unit with any contract stays, a
 // property with any live unit stays, a contract with any payment stays, and a
-// renter account stays the moment it holds a contract in this org or has ever
-// been signed into. Anything kept is reported in the counts as not taken back.
+// renter account stays the moment anything anywhere references it or it has
+// ever been signed into. Anything kept is reported in the counts as not taken
+// back.
+//
+// Each step belongs to one kind of sheet, and runs only for that kind. The
+// `resolved` map is not self-describing — a payments row's `contract_id` names
+// a tenancy that was already there — so the batch's own kind, not the presence
+// of a key, decides what an undo is allowed to reach for.
 func (s *Server) undoImportBatch(
 	ctx context.Context, q *sqlc.Queries, p auth.Principal, batch sqlc.ImportBatch, graceDays int32,
 ) (importUndoCounts, error) {
@@ -1577,37 +1631,70 @@ func (s *Server) undoImportBatch(
 	}
 
 	// 2. Tenancies drawn up by a renters import, then the accounts behind them.
-	for _, row := range rows {
-		res := resolvedOf(row)
-		if contractID := uuidFrom(res["contract_id"]); contractID.Valid {
-			used, err := q.CountPaymentsForContract(ctx, sqlc.CountPaymentsForContractParams{
-				OrgID: p.OrgID, ContractID: contractID,
-			})
-			if err != nil {
-				return out, err
+	//
+	// Only a renters batch owns a contract. A payments row also carries
+	// `contract_id` in `resolved` — but that is the *pre-existing* tenancy the
+	// money was posted against, which this batch neither created nor may touch.
+	// Undoing an imported payment reverses the payment and stops there.
+	if batch.Kind == importer.KindRenters {
+		for _, row := range rows {
+			res := resolvedOf(row)
+			withdrew := false
+			if contractID := uuidFrom(res["contract_id"]); contractID.Valid {
+				used, err := q.CountPaymentsForContract(ctx, sqlc.CountPaymentsForContractParams{
+					OrgID: p.OrgID, ContractID: contractID,
+				})
+				if err != nil {
+					return out, err
+				}
+				// A signature is a reference like any other, and the strongest
+				// one there is: the renter has put their name to this tenancy.
+				// Signing does not move the contract off `pending_signature`
+				// (activation does), so the status alone would let the rollback
+				// tear up a document somebody signed.
+				signed, err := q.CountContractSignatures(ctx, sqlc.CountContractSignaturesParams{
+					OrgID: p.OrgID, ContractID: contractID, Party: partyRenter,
+				})
+				if err != nil {
+					return out, err
+				}
+				if used == 0 && signed == 0 {
+					// The statement only moves a contract still at
+					// `pending_signature`: a renter who signed has a tenancy, and
+					// a tenancy is ended through the ordinary path, never by a
+					// landlord's spreadsheet rollback.
+					if _, err := q.WithdrawImportedContract(ctx, sqlc.WithdrawImportedContractParams{
+						OrgID: p.OrgID, ID: contractID,
+					}); err == nil {
+						withdrew = true
+						out.Contracts++
+					} else if !isNoRows(err) {
+						return out, err
+					}
+				}
 			}
-			if used == 0 {
-				if _, err := q.WithdrawImportedContract(ctx, sqlc.WithdrawImportedContractParams{
-					OrgID: p.OrgID, ID: contractID,
-				}); err == nil {
-					out.Contracts++
-				} else if !isNoRows(err) {
+			// The link request is the approval that *made* that contract. It is
+			// cancelled only when the contract went with it: taking the approval
+			// off a tenancy the renter has signed would leave the contract
+			// orphaned and the unit unreachable from the renter's directory.
+			if linkID := uuidFrom(res["link_request_id"]); linkID.Valid && withdrew {
+				if err := q.WithdrawImportedLinkRequest(ctx, sqlc.WithdrawImportedLinkRequestParams{
+					OrgID: p.OrgID, ID: linkID,
+				}); err != nil {
 					return out, err
 				}
 			}
 		}
-		if linkID := uuidFrom(res["link_request_id"]); linkID.Valid {
-			if err := q.WithdrawImportedLinkRequest(ctx, sqlc.WithdrawImportedLinkRequestParams{
-				OrgID: p.OrgID, ID: linkID,
-			}); err != nil {
-				return out, err
-			}
-		}
 	}
 
-	// 3. Units, and the properties the import had to make for them.
+	// 3. Units, and the properties the import had to make for them — a units
+	//    batch and nothing else.
 	properties := map[string]pgtype.UUID{}
-	for _, row := range rows {
+	unitRows := rows
+	if batch.Kind != importer.KindUnits {
+		unitRows = nil
+	}
+	for _, row := range unitRows {
 		res := resolvedOf(row)
 		if row.EntityType != nil && *row.EntityType == audit.EntityUnit && row.EntityID.Valid {
 			used, err := q.CountContractsForUnit(ctx, sqlc.CountContractsForUnitParams{
@@ -1651,39 +1738,48 @@ func (s *Server) undoImportBatch(
 		}
 	}
 
-	// 4. Renter accounts the import itself created, and only those that never
-	//    became a login and hold nothing in this org.
-	for _, row := range rows {
-		res := resolvedOf(row)
-		if created, _ := res["renter_created"].(bool); !created {
-			continue
+	// 4. Renter accounts a renters batch itself created — and only those that
+	//    never became a login and that *nobody anywhere* still references.
+	//
+	//    `users` is platform-global: it has no org_id, and SoftDeleteImportedRenter
+	//    deletes the person, not their membership of this org. So the question
+	//    cannot be asked org-scoped. Between the commit and the undo the same
+	//    person may have applied to another landlord, been given a tenancy there,
+	//    or been made staff somewhere; any one of those makes the account theirs
+	//    as much as ours, and this org's rollback may not take it away. The
+	//    org's own tie to them was already released in step 2 — the link request
+	//    and the pending contract — so leaving the account alone *is* the detach.
+	if batch.Kind == importer.KindRenters {
+		for _, row := range rows {
+			res := resolvedOf(row)
+			if created, _ := res["renter_created"].(bool); !created {
+				continue
+			}
+			userID := uuidFrom(res["user_id"])
+			if !userID.Valid {
+				continue
+			}
+			// And it must be this very row's account: the stamp the commit wrote,
+			// not just an id that happens to sit in `resolved`.
+			if row.EntityType == nil || *row.EntityType != audit.EntityUser ||
+				db.UUIDString(row.EntityID) != db.UUIDString(userID) {
+				continue
+			}
+			refs, err := q.CountRenterReferencesAnywhere(ctx, userID)
+			if err != nil {
+				return out, err
+			}
+			if refs > 0 {
+				continue
+			}
+			// The statement adds the last condition of its own: no pin_hash and
+			// no password_hash, so an account somebody has signed into survives
+			// even when nothing points at it yet.
+			if err := q.SoftDeleteImportedRenter(ctx, userID); err != nil {
+				return out, err
+			}
+			out.Renters++
 		}
-		userID := uuidFrom(res["user_id"])
-		if !userID.Valid {
-			continue
-		}
-		contracts, err := q.CountContractsForRenter(ctx, sqlc.CountContractsForRenterParams{
-			OrgID: p.OrgID, RenterUserID: userID,
-		})
-		if err != nil {
-			return out, err
-		}
-		if contracts > 0 {
-			continue
-		}
-		links, err := q.ListLinkRequestsForRenterInOrg(ctx, sqlc.ListLinkRequestsForRenterInOrgParams{
-			OrgID: p.OrgID, RenterUserID: userID,
-		})
-		if err != nil {
-			return out, err
-		}
-		if len(links) > 0 {
-			continue
-		}
-		if err := q.SoftDeleteImportedRenter(ctx, userID); err != nil {
-			return out, err
-		}
-		out.Renters++
 	}
 	return out, nil
 }

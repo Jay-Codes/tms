@@ -160,11 +160,6 @@ RETURNING *;
 UPDATE unit_link_requests SET status = 'cancelled', deleted_at = now()
 WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND deleted_at IS NULL;
 
--- name: ListLinkRequestsForRenterInOrg :many
-SELECT * FROM unit_link_requests
-WHERE org_id = sqlc.arg(org_id) AND renter_user_id = sqlc.arg(renter_user_id)
-  AND deleted_at IS NULL;
-
 -- CountLiveUnitsForProperty decides whether a property an import created is
 -- still empty after its units have been taken back.
 -- name: CountLiveUnitsForProperty :one
@@ -178,17 +173,27 @@ WHERE org_id = sqlc.arg(org_id) AND property_id = sqlc.arg(property_id)
 SELECT count(*) FROM contracts
 WHERE org_id = sqlc.arg(org_id) AND unit_id = sqlc.arg(unit_id) AND deleted_at IS NULL;
 
--- CountContractsForRenter is the same question for a renter account an import
--- created: a contract anywhere in this org keeps the account.
--- name: CountContractsForRenter :one
-SELECT count(*) FROM contracts
-WHERE org_id = sqlc.arg(org_id) AND renter_user_id = sqlc.arg(renter_user_id)
-  AND deleted_at IS NULL;
+-- CountRenterReferencesAnywhere is the question that actually decides whether a
+-- renter account may be taken back. `users` is platform-global, so an org-scoped
+-- count is the wrong instrument: org A's undo must not delete the account org B
+-- has since given a tenancy or a link request to. Everything that makes a person
+-- real to somebody is counted here — contracts, link requests and staff
+-- memberships — across every org.
+-- guard-exempt: deliberately cross-org. The account being tested lives in the platform-global `users` table, and the whole point of the count is to see the orgs the caller cannot: a per-org answer would authorise deleting another landlord's renter.
+-- name: CountRenterReferencesAnywhere :one
+SELECT (
+    (SELECT count(*) FROM contracts c
+      WHERE c.renter_user_id = sqlc.arg(user_id) AND c.deleted_at IS NULL)
+  + (SELECT count(*) FROM unit_link_requests lr
+      WHERE lr.renter_user_id = sqlc.arg(user_id) AND lr.deleted_at IS NULL)
+  + (SELECT count(*) FROM org_members m
+      WHERE m.user_id = sqlc.arg(user_id) AND m.deleted_at IS NULL)
+)::bigint AS refs;
 
 -- SoftDeleteImportedRenter takes back an account the import itself created, and
 -- only one that never became a real login: `pin_hash IS NULL` means nobody has
 -- ever signed in as this person.
--- guard-exempt: users is a platform-global table with no org_id; the caller has already proved the account was created by this org's batch and holds nothing in it.
+-- guard-exempt: users is a platform-global table with no org_id; the caller has already proved, with CountRenterReferencesAnywhere, that this org's batch created the account and that no org anywhere still references it.
 -- name: SoftDeleteImportedRenter :exec
 UPDATE users SET deleted_at = now()
 WHERE id = sqlc.arg(id) AND kind = 'renter' AND pin_hash IS NULL
