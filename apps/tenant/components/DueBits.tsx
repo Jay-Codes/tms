@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 /**
  * Phase 16 §16.3 — the small marks that put "when is the next rent due" on
@@ -10,8 +10,8 @@
  * already passed, which is a matter of drawing it in red — not of money.
  */
 
-import { useT } from '@tms/ui';
-import { fmtDate, fmtTZS, todayISO } from '../lib/format';
+import { useT } from "@tms/ui";
+import { fmtDate, fmtTZS, todayISO } from "../lib/format";
 
 /** `YYYY-MM-DD` of the value, whatever spelling the API used for it. */
 function dayOf(value: string | null | undefined): string | null {
@@ -20,10 +20,24 @@ function dayOf(value: string | null | undefined): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
 }
 
+/** Today in Dar es Salaam — the calendar every due date is written on. */
+function todayEAT(): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Africa/Dar_es_Salaam",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  } catch {
+    return todayISO();
+  }
+}
+
 /** True once the due date is behind us. Dates sort as strings, so no parsing. */
 export function isPastDue(value: string | null | undefined): boolean {
   const d = dayOf(value);
-  return d !== null && d < todayISO();
+  return d !== null && d < todayEAT();
 }
 
 /**
@@ -44,25 +58,33 @@ export function NextDueCell({
   const arrears = Number(overdue ?? 0);
   const late = arrears > 0;
 
-  if (!date && !late) return <span style={{ color: 'var(--ink-faint)' }}>—</span>;
+  if (!date && !late)
+    return <span style={{ color: "var(--ink-faint)" }}>—</span>;
 
   return (
-    <span style={{ display: 'grid', gap: 2 }}>
+    <span style={{ display: "grid", gap: 2 }}>
       {late ? (
-        <span style={{ color: 'var(--stamp-overdue)', fontWeight: 600 }}>
-          {t('due.overdue_by', { amount: fmtTZS(arrears) })}
+        <span style={{ color: "var(--stamp-overdue)", fontWeight: 600 }}>
+          {t("due.overdue_by", { amount: fmtTZS(arrears) })}
         </span>
       ) : null}
       {date ? (
         <span
           style={{
-            color: late ? 'var(--ink-soft)' : isPastDue(date) ? 'var(--stamp-overdue)' : 'var(--ink)',
-            fontSize: late ? 'var(--text-sm)' : undefined,
+            color: late
+              ? "var(--ink-soft)"
+              : isPastDue(date)
+                ? "var(--stamp-overdue)"
+                : "var(--ink)",
+            fontSize: late ? "var(--text-sm)" : undefined,
           }}
         >
           {fmtDate(date)}
           {amount === null || amount === undefined ? null : (
-            <span style={{ color: 'var(--ink-soft)' }}> · {fmtTZS(amount)}</span>
+            <span style={{ color: "var(--ink-soft)" }}>
+              {" "}
+              · {fmtTZS(amount)}
+            </span>
           )}
         </span>
       ) : null}
@@ -77,11 +99,15 @@ export function DueChip({ date }: { date: string | null | undefined }) {
   const late = isPastDue(date);
   return (
     <span
-      className={late ? 'stamp stamp-overdue' : 'stamp'}
-      style={late ? undefined : { color: 'var(--ink-soft)', borderColor: 'var(--ink-soft)' }}
-      title={t(late ? 'due.chip.late_title' : 'due.chip.title')}
+      className={late ? "stamp stamp-overdue" : "stamp"}
+      style={
+        late
+          ? undefined
+          : { color: "var(--ink-soft)", borderColor: "var(--ink-soft)" }
+      }
+      title={t(late ? "due.chip.late_title" : "due.chip.title")}
     >
-      {t('due.chip', { date: fmtDate(date) })}
+      {t("due.chip", { date: fmtDate(date) })}
     </span>
   );
 }

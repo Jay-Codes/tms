@@ -966,12 +966,7 @@ limited.
 
 ## Part 2 — Phase 16 (planned)
 
-**Planned, not shipped.** This section is the contract the Phase 16 lanes build
-against ([PLAN2.md](PLAN2.md) §16.1–§16.4; SPEC §4 ledger rules, §5.7, §5.9,
-§5.14, §7; FLOWS 7 and 14). Each sub-heading is self-contained and is edited in
-place by the lane that implements it — a lane rewrites its own sub-heading with
-what shipped and adds any difference to
-[Deviations from the planned contract](#deviations-from-the-planned-contract).
+**Shipped 20 Sep 2026.** Each sub-heading below is the contract as implemented ([PLAN2.md](PLAN2.md) §16.1–§16.4; SPEC §4 ledger rules, §5.7, §5.9, §5.14, §7; FLOWS 7 and 14). Where a lane deviated from the plan it says so under "Differences from the planned contract".
 
 Phase 16 keeps every Part 2 convention: audience cookies, RFC-7807 problems with
 the machine-readable code in `type`, **400** for a malformed field with `errors`
@@ -1003,7 +998,7 @@ so no request can steer the key.
 | Route | Contract |
 | --- | --- |
 | `POST /me/proofs/upload` | `{contract_id, content_type:"image/jpeg"\|"image/png"\|"application/pdf", size_bytes(1…5 MiB)}` → `200 {proof_id, upload_url, object_key, expires_in:900, headers:{"Content-Type":…}}`. The `proof_id` is minted here and becomes the row's id on submission. The contract must be the caller's own and `active\|expiring` — another renter's id is a **404**, an unsigned or finished one a **409 `contract_not_active`**. Type and size are checked before MinIO is consulted (400 naming `content_type` / `size_bytes`). 30 links per renter per hour. MinIO down → 503; the ticket store (Redis) down → 503. |
-| `POST /me/proofs` | `{contract_id, schedule_id?, amount(int >0), paid_at, method, reference?(≤80), note?(≤500), object_key}` → **`201 {proof}`** with `status:"submitted"`. The completion-callback pattern of `/expenses/{id}/receipt/complete`, plus a one-shot ticket: `object_key` must be one this renter was issued for this contract, and the object MinIO holds must match the ticket's size and content type exactly, or it is deleted and the answer is a **400** naming `object_key`, `size_bytes` or `content_type`. `schedule_id` must belong to the same contract (else 404). `paid_at` is RFC3339 and no more than a day in the future. Rate limited to **10 per renter per day** (429 with `Retry-After`), enforced in Redis and again in Postgres so a cold cache cannot lift the ceiling. **No SMS** is sent. Audited `proof.submit`. |
+| `POST /me/proofs` | `{contract_id, schedule_id?, amount(int >0), paid_at, method, reference?(≤80), note?(≤500), object_key}` → **`201 {proof}`** with `status:"submitted"`. The completion-callback pattern of `/expenses/{id}/receipt/complete`, plus a one-shot ticket: `object_key` must be one this renter was issued for this contract, and the object MinIO holds must match the ticket's size and content type exactly, or it is deleted and the answer is a **400** naming `object_key`, `size_bytes` or `content_type`. `schedule_id` must belong to the same contract (else 404). `paid_at` is RFC3339 and no more than a day in the future. Rate limited to **10 per renter per rolling 24 h** (429 with `Retry-After`), enforced in Redis and again in Postgres so a cold cache cannot lift the ceiling. **No SMS** is sent. Audited `proof.submit`. |
 | `GET /me/proofs?cursor=&limit=` | → `{items:[proof], next_cursor}`, newest first, the caller's own proofs across every org they rent from, each carrying `rejection_reason` when rejected. Shared `(created_at, id)` cursor encoding. |
 | `DELETE /me/proofs/{id}` | → **204**, withdraw. Only while `status:"submitted"` — an answered proof is a record and stays (**409 `proof_not_pending`**). The row and the object are both removed. Audited `proof.withdraw`. |
 | `GET /proofs?status=&cursor=&limit=` | → `{items:[proof], next_cursor, status}`. `status` is `submitted\|accepted\|rejected`, default `submitted`; ordering is **`created_at` ascending — the oldest claim first** (the queue is worked forward, unlike the org's other listings). |
