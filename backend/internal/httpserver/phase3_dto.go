@@ -173,7 +173,15 @@ type renterDirectoryEntry struct {
 	Email     *string          `json:"email"`
 	KycStatus string           `json:"kyc_status"`
 	Units     []renterUnitLink `json:"units"`
-	CreatedAt time.Time        `json:"created_at"`
+	// Phase 16 §16.3: the Next due / Overdue columns of the renters list,
+	// aggregated over this renter's running tenancies with this org and
+	// computed from the same queries as GET /reports/payment-status. Null when
+	// the renter owes nothing; `overdue_amount` is 0 rather than null, since
+	// "nothing overdue" is a number the column can show.
+	NextDueDate   *string   `json:"next_due_date"`
+	NextDueAmount *int64    `json:"next_due_amount"`
+	OverdueAmount int64     `json:"overdue_amount"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // ------------------------------------------------------------- mapping --

@@ -73,6 +73,64 @@ main > * {
   min-width: 0;
 }
 
+/* A pencilled chip in the money column — "Awaiting confirmation",
+   "Due in 5 days" — is prose, not a figure, and `.ledger td.num` is
+   `white-space: nowrap`. On a 375px phone that pushed the chip past
+   the card's right edge; let those lines wrap instead. The amount
+   above them keeps the ledger's nowrap. */
+.ledger td.num .pencil {
+  display: inline-block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* ============================================================
+   Proof sheet (Phase 16). A phone holds one sheet of paper at a
+   time: the dialog rises from the bottom edge, never taller than
+   the viewport, and keeps its own scroll so the page behind it
+   stays where the renter left it. On a wider screen it settles in
+   the middle of the column instead.
+   ============================================================ */
+
+.proof-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: color-mix(in srgb, var(--ink) 35%, transparent);
+  overflow-y: auto;
+}
+
+.proof-sheet {
+  display: grid;
+  gap: var(--sp-4);
+  width: 100%;
+  max-width: 440px;
+  max-height: 92dvh;
+  overflow-y: auto;
+  padding: var(--sp-4);
+  padding-bottom: calc(var(--sp-5) + env(safe-area-inset-bottom));
+  border-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+@media (min-width: 560px) {
+  .proof-backdrop {
+    align-items: center;
+    padding: var(--sp-5);
+  }
+
+  .proof-sheet {
+    max-height: 88dvh;
+    border-bottom: 1px solid var(--rule);
+    border-radius: var(--radius-lg);
+    padding-bottom: var(--sp-5);
+  }
+}
+
 /* ============================================================
    Dark themes (Phase 12). `data-theme="dark"` is set on <html> by
    lib/theme.ts whenever the org's resolved theme is a dark preset

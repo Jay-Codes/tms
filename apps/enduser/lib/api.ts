@@ -440,6 +440,25 @@ export const renterApi = {
 
   /** `GET /me/payments` — the renter's own receipts, newest first. */
   payments: (signal?: AbortSignal) => api.get<MyPaymentsResponse>('/me/payments', { signal }),
+
+  /* Phase 16 — proof of payment (API.md Part 2 §16.1). */
+
+  /** `POST /me/proofs/upload` — presigned PUT ticket for the receipt file. */
+  proofUploadTicket: (contractId: string, contentType: string, sizeBytes: number) =>
+    api.post<ProofUploadTicket>('/me/proofs/upload', {
+      contract_id: contractId,
+      content_type: contentType,
+      size_bytes: sizeBytes,
+    }),
+
+  /** `POST /me/proofs` — the claim itself, once the object is in the bucket. */
+  createProof: (input: ProofInput) => api.post<{ proof: Proof }>('/me/proofs', input),
+
+  /** `GET /me/proofs` — the renter's own claims, newest first. */
+  proofs: (signal?: AbortSignal) => api.get<MyProofsResponse>('/me/proofs', { signal }),
+
+  /** `DELETE /me/proofs/{id}` — withdraw, only while `submitted`. */
+  withdrawProof: (id: string) => api.del<void>(`/me/proofs/${encodeURIComponent(id)}`),
 };
 
 /**
@@ -602,6 +621,14 @@ export interface MySchedule extends PaymentSchedule {
   };
   /** Days past `due_date`; only meaningful while `status === 'overdue'`. */
   days_overdue?: number;
+  /**
+   * Phase 16: days left until `due_date` on the Dar es Salaam wall clock —
+   * `0` today, negative once past. Absent on an older API, where the screens
+   * fall back to counting from `due_date` in the reader's own timezone.
+   */
+  days_until_due?: number;
+  /** Phase 16: the caller's newest still-`submitted` proof for this row. */
+  proof?: ScheduleProof | null;
 }
 
 export interface MySchedulesResponse {
@@ -611,6 +638,11 @@ export interface MySchedulesResponse {
   overdue_total?: number;
   /** Phase 5: where to send the money (API.md `GET /org/bank-account`). */
   bank_account?: BankAccount | null;
+  /**
+   * Phase 16: the same wallet as `bank_account.mobile_money`, repeated at the
+   * top level because an org may take mobile money and no bank transfer.
+   */
+  mobile_money?: MobileMoney | null;
 }
 
 export interface SignInput {
@@ -678,6 +710,15 @@ export interface BankAccount {
   account_name: string;
   account_number: string;
   instructions: string;
+  /** Phase 16 (§16.4): the org's mobile-money wallet, when it has one. */
+  mobile_money?: MobileMoney | null;
+}
+
+/** A mobile-money wallet as the landlord published it (API.md §16.4). */
+export interface MobileMoney {
+  provider: string;
+  number: string;
+  name: string;
 }
 
 /** How the money actually moved. The renter never picks this — the landlord does. */
@@ -733,3 +774,75 @@ export function paymentMethodLabel(t: Translator, method: string): string {
 export function scheduleOutstanding(s: Pick<PaymentSchedule, 'amount' | 'paid_amount'>): number {
   return Math.max(0, s.amount - (s.paid_amount ?? 0));
 }
+
+/* ---------------------------------------------------------------- */
+/* Shapes from API.md — Phase 16 (proof of payment)                   */
+/* ---------------------------------------------------------------- */
+
+/**
+ * A proof is a *claim*, never a fact: the renter says they paid and attaches
+ * the receipt, the landlord accepts or rejects it, and only an accepted proof
+ * ever turns into a payment on the ledger (SPEC §6).
+ */
+export type ProofStatus = 'submitted' | 'accepted' | 'rejected';
+
+/** The two ways money can have moved when a renter sends proof of it. */
+export type ProofMethod = 'bank_transfer' | 'mobile_money_manual';
+
+/** The proof stub `GET /me/schedules` hangs off `next_due`. */
+export interface ScheduleProof {
+  id: string;
+  status: ProofStatus;
+}
+
+export interface Proof {
+  id: string;
+  contract: {
+    id: string;
+    unit_name: string;
+    property_name?: string | null;
+    renter_name?: string | null;
+    renter_user_id?: string | null;
+  };
+  schedule_id?: string | null;
+  amount: number;
+  paid_at: string;
+  method: ProofMethod | string;
+  reference?: string | null;
+  note?: string | null;
+  content_type: string;
+  size_bytes: number;
+  status: ProofStatus;
+  payment_id?: string | null;
+  reviewed_at?: string | null;
+  reviewed_by_name?: string | null;
+  rejection_reason?: string | null;
+  created_at: string;
+}
+
+export interface MyProofsResponse {
+  items: Proof[];
+  next_cursor?: string | null;
+}
+
+/** `POST /me/proofs/upload` — the KYC ticket plus the id the row will carry. */
+export interface ProofUploadTicket extends UploadTicket {
+  proof_id: string;
+  expires_in?: number;
+}
+
+export interface ProofInput {
+  contract_id: string;
+  schedule_id?: string;
+  amount: number;
+  /** RFC3339; the sheet sends the chosen day at local midnight. */
+  paid_at: string;
+  method: ProofMethod;
+  reference?: string;
+  note?: string;
+  object_key: string;
+}
+
+/** Uploads a renter may send as proof, and the ceiling the API enforces. */
+export const PROOF_TYPES = ['image/jpeg', 'image/png', 'application/pdf'] as const;
+export const PROOF_MAX_BYTES = 5 * 1024 * 1024;

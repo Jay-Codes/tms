@@ -241,6 +241,65 @@ func (q *Queries) ListPlatformTemplates(ctx context.Context) ([]ListPlatformTemp
 	return items, nil
 }
 
+const refreshPlatformTemplateDefault = `-- name: RefreshPlatformTemplateDefault :exec
+UPDATE platform_templates
+SET sw = $1, en = $2, variables = $3
+WHERE kind = $4 AND version = 1
+  AND sw = $5 AND en = $6
+  AND (sw IS DISTINCT FROM $1 OR en IS DISTINCT FROM $2)
+`
+
+type RefreshPlatformTemplateDefaultParams struct {
+	Sw        string   `json:"sw"`
+	En        string   `json:"en"`
+	Variables []string `json:"variables"`
+	Kind      string   `json:"kind"`
+	PrevSw    string   `json:"prev_sw"`
+	PrevEn    string   `json:"prev_en"`
+}
+
+// RefreshPlatformTemplateDefault re-applies the code default to a row the
+// platform has never edited (Phase 16 §16.4: the three rent reminders gain
+// `{{pay_link}}`).
+//
+// It is how a *changed* default reaches an installation whose catalogue was
+// seeded by 000016, without a data migration that would have to be repeated
+// every time a sentence is reworded. The guard is deliberately narrow: version
+// 1 (nobody has edited it) and the previous wording byte-for-byte in both
+// languages. Anything else is an admin's text and is left alone. The DISTINCT
+// check makes a re-run a no-op rather than a fresh `updated_at`.
+func (q *Queries) RefreshPlatformTemplateDefault(ctx context.Context, arg RefreshPlatformTemplateDefaultParams) error {
+	_, err := q.db.Exec(ctx, refreshPlatformTemplateDefault,
+		arg.Sw,
+		arg.En,
+		arg.Variables,
+		arg.Kind,
+		arg.PrevSw,
+		arg.PrevEn,
+	)
+	return err
+}
+
+const refreshPlatformTemplateVariables = `-- name: RefreshPlatformTemplateVariables :exec
+UPDATE platform_templates
+SET variables = $1
+WHERE kind = $2 AND variables IS DISTINCT FROM $1
+`
+
+type RefreshPlatformTemplateVariablesParams struct {
+	Variables []string `json:"variables"`
+	Kind      string   `json:"kind"`
+}
+
+// RefreshPlatformTemplateVariables keeps the placeholder chips the admin editor
+// offers in step with the code's whitelist. The variables a kind may name are
+// derived, never typed by an admin, so unlike the wording they are refreshed
+// whatever the row's version.
+func (q *Queries) RefreshPlatformTemplateVariables(ctx context.Context, arg RefreshPlatformTemplateVariablesParams) error {
+	_, err := q.db.Exec(ctx, refreshPlatformTemplateVariables, arg.Variables, arg.Kind)
+	return err
+}
+
 const seedPlatformTemplate = `-- name: SeedPlatformTemplate :exec
 INSERT INTO platform_templates (kind, sw, en, variables, locked)
 VALUES ($1, $2, $3, $4, $5)

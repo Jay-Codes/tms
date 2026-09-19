@@ -17,6 +17,7 @@ Companion to [SPEC.md](SPEC.md). Actors: **Renter** (`apps/enduser`), **Landlord
    6. **Notification settings** — confirm reminder timings, sender name, and the **default language for renters without a preference** (SW/EN) — each renter's own choice wins over it.
    7. **Language preference** — the owner's own screen language (Kiswahili / English), prefilled from the signup toggle and changeable later in Settings → Preferences. It also decides the language of anything the platform sends to them.
 4. Wizard ends on dashboard; empty-state cards prompt "Print QR codes" and "Invite staff".
+4a. **Payment instructions nudge.** Until the org has a bank account saved, the setup checklist and the dashboard carry "Add payment instructions so renters know where to pay" → Settings → Bank account, which shows a live **renter preview** of the card the renter will see, plus an optional **Mobile money** block (provider, number, name). The nudge is dismissable and comes back if the details are later cleared.
 5. Optional: invite `org_manager` staff by email.
 
 **Edge cases:** duplicate org email → resend verification; abandoning wizard → resumable, dashboard shows setup checklist.
@@ -90,14 +91,18 @@ Companion to [SPEC.md](SPEC.md). Actors: **Renter** (`apps/enduser`), **Landlord
 ## 7. Payment collection — MVP offline flow
 
 **Renter:**
-1. Dashboard shows: **next payment due** (date + amount), status chip (paid / pending / overdue), payment history.
-2. Renter pays outside the system (cash / bank transfer / mobile money) to the org's **bank collection account** shown on the payment screen with reference instructions.
+1. Home opens on a **next-due hero block**: the due date and amount in full size, a countdown chip in the stamp colours — "Due in 5 days" / "Due today" / "3 days overdue", or "Awaiting confirmation" while a proof is pending — and two full-width buttons, **How to pay** and **Send proof**. The same chip repeats in the contract header and on every row of the Payments tab, which also keeps the payment history.
+2. **How to pay** jumps to the "How to pay" card **pinned at the top of the Payments tab**: bank name, account name, account number with a copy button, the landlord's instructions text and the reference hint "use your unit name", plus the mobile-money block when the org has one. It collapses only after the first view, and an org with no details saved shows "Ask your landlord for payment details" rather than nothing.
+3. Renter pays outside the system (cash / bank transfer / mobile money) to the org's **bank collection account**.
+4. **Send proof** (home hero, Payments tab, or the contract page) opens a sheet pre-filled with the next-due amount and schedule: amount, date, method, reference, note and a photo/PDF picker (camera on mobile), with the payment instructions repeated inside the sheet. On submit the schedule row shows an "Awaiting confirmation" pencil chip. No SMS goes out — the landlord's badge is the signal. The renter can **withdraw** a proof while it is still unanswered, and reads the whole history under Payments → History.
 
 **Landlord:**
 1. Money arrives → landlord opens renter or schedule → **Record payment**: amount, method, reference no., date, note.
+1a. **Or a proof arrives.** Payments gains a **Proofs** tab — first tab, with a badge in the nav and the bottom bar, while anything is unanswered — listing claims **oldest first**: renter, unit, claimed amount against what the schedule expects, date, thumbnail. The detail sheet shows the full image or PDF beside the two figures, and **Accept** opens the ordinary Record-payment sheet pre-filled from the proof, so the overpay confirm and the reversal path are unchanged; accepting links the payment to the proof and queues the thank-you SMS. **Reject** takes a reason, which is texted to the renter (`proof_rejected`) and shown in their app above a "Send again" button. The renter's detail page and the contract page list their proofs.
 2. Full amount → schedule `paid`; underpayment → `partial` (remainder tracked); overpayment → applied to next schedule (confirm prompt).
 3. System sends **thank-you SMS** with next due date.
-4. Mistake → **reverse payment** (audited), schedule reverts.
+4. Mistake → **reverse payment** (audited), schedule reverts. An accepted proof stays accepted — the claim was answered; the reversal is a fact about the payment.
+5. Dashboard card **"Due in the next 7 days"** (count + total, top 5 rows) links to Payments → **Due soon**, a 14-day window by default with a 7 / 14 / 30 picker. The Renters list carries a sortable **Next due** column tinted when overdue, the renter's header shows Next due / Overdue above the tabs, and occupied cards on the units board carry a "Due 3 Oct" chip.
 
 **System:**
 - Due date passes unpaid → schedule `overdue`; overdue SMS daily until resolved.
@@ -120,6 +125,12 @@ reminder SMS   reminder SMS    daily overdue SMS    thank-you SMS
 
 - Every message goes out in the **recipient's own language** (their saved preference; the org's default language only covers renters who never chose one). The language used is recorded in the log.
 - All sends deduped per schedule per day; logged in notification log (landlord can view delivery status).
+- **Proof of payment (flow 7):** submitting one sends **nothing** — the landlord's badge is the signal, the same rule as signing. Rejecting one sends `proof_rejected` with the landlord's reason; accepting one sends the existing `thank_you` with the next due date. The three reminder kinds carry `{{pay_link}}`, the deep link to the renter's payments screen where the instructions and "Send proof" sit.
+
+| Kind | Trigger | Reaches |
+|------|---------|---------|
+| `proof_rejected` | landlord rejects a proof, with a reason | the submitting renter, in their own language |
+
 - Landlord can also send **custom bulk SMS** to all/selected renters (e.g. water outage notice) — permission-gated, audited. The compose screen has **SW and EN tabs** with a recipient count per language; each renter receives the body in their language, falling back to the other one if only one was written.
 - **SMS credits:** the Notifications header shows the org's prepaid balance, a low-balance warning under the watermark, and "N messages held". A send with no credit left is parked as **held_no_credit** (not failed) and goes out in order once the platform tops the org up; a bulk send that would exceed the balance is refused up front with the shortfall.
 
@@ -195,7 +206,21 @@ Dashboard (layout per org's saved **dashboard preferences**):
 
 ---
 
-## 14. Client-requirement traceability
+## 14. Import previous records (landlord)
+
+A landlord arriving with a spreadsheet of what already exists — rooms, renters, last year's rent — loads it once instead of typing it in.
+
+1. **Settings → Import data**. Pick the kind: **units**, **renters** or **payments**. The page lists that kind's columns and what each one must contain, and offers **Download template** — a CSV with the fixed English machine headers and one example line. The headers are never the SW/EN screen labels, so a Swahili session and an English one upload the same file.
+2. **Drop the file** (≤ 2 MiB, ≤ 5 000 rows; UTF-8 with or without a BOM, comma- or semicolon-separated — the delimiter is sniffed). → **Preview**: every line with its status, the errors named inline on the line they belong to, and what each ok line resolved to (property, unit, renter). Nothing has been written.
+3. **Commit N rows**, or **Skip M rows with errors and commit** when some lines are bad. The commit runs in **one transaction** — a landlord never ends up with half a spreadsheet — and every row goes through the same validation as the manual screens.
+4. What each kind creates: `units` → properties (created when missing, flagged in the preview) and units with their price; `renters` → renters pre-registered by phone and, where a unit is named, a contract at **`pending_signature`** — an import **never activates a contract**, the renter still signs (or the landlord countersigns on the flow 3.6 path); `payments` → payments allocated against the resolved contract in date order, which may belong to a finished tenancy because history usually does. Imported payments carry an "imported" pencil chip in every ledger.
+5. **History** lists every batch with its counts and an **Undo** for 24 hours: payments reversed with the reason "import undone", units and renters the batch created removed when nothing has touched them since.
+
+**Edge cases:** a payment row that exceeds the contract's remaining balance is an **error in the preview** — the landlord fixes the sheet or the contract dates rather than discovering it at commit; a cell beginning `=`, `+`, `-` or `@` is stored exactly as typed and neutralised on every export; 20 previews per hour; a batch older than 24 hours can no longer be undone, and a committed batch cannot be committed twice. On mobile the preview table scrolls horizontally.
+
+---
+
+## 15. Client-requirement traceability
 
 | Client requirement | Covered by |
 |---|---|
@@ -228,3 +253,7 @@ Part 2 requests (5 Sep 2026, numbering per [PLAN2.md](PLAN2.md) scope table):
 | 10 | Swahili/English per user → screens + SMS/bulk SMS | Flow 1 step 3.7, Flow 2 steps 2–3, Flow 8 |
 | 11 | Admin sets an SMS balance per landlord | Flow 13, Flow 8 (landlord's view of balance and held messages) |
 | 12 | All message templates (EN + SW) configurable on the admin page | Flow 13 |
+| 13 | Renter sends proof of payment; landlord accepts or rejects it | Flow 7 (renter steps 4, landlord step 1a), Flow 8 |
+| 14 | Import previous records (units, renters, payments) from a spreadsheet | Flow 14 |
+| 15 | Next payment due visible to both sides | Flow 7 (renter step 1, landlord step 5) |
+| 16 | Payment instructions easy to find | Flow 7 (renter step 2), Flow 1 step 4a |

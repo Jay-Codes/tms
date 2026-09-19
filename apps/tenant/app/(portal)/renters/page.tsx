@@ -5,8 +5,10 @@
  * units. Search by name or phone, filter by KYC state (SPEC §5.4).
  */
 
+import { Icon } from '@iconify/react';
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { NextDueCell } from '../../../components/DueBits';
 import { Field, ProblemNote } from '../../../components/FormBits';
 import { FilterTabs, KycStamp, linkStatusLabel, localeLabel } from '../../../components/RenterBits';
 import { PageHead } from '../../../components/PageHead';
@@ -28,12 +30,31 @@ const KYC_TABS: { value: KycStatus | ''; key: string }[] = [
   { value: 'none', key: 'renters.kyc.tab.none' },
 ];
 
+/**
+ * `GET /renters` takes no `sort` parameter (API.md), so the Next-due ordering
+ * is applied to the page that was loaded — the whole directory at `limit: 200`
+ * for every org this product is built for. A renter with no next due sorts to
+ * the end in both directions, because "nothing owing" is never the answer to
+ * "who is next".
+ */
+function byNextDue(rows: RenterSummary[], dir: 'asc' | 'desc'): RenterSummary[] {
+  return [...rows].sort((a, b) => {
+    const x = a.next_due_date ?? '';
+    const y = b.next_due_date ?? '';
+    if (!x && !y) return 0;
+    if (!x) return 1;
+    if (!y) return -1;
+    return dir === 'asc' ? x.localeCompare(y) : y.localeCompare(x);
+  });
+}
+
 function DirectoryBody() {
   const t = useT();
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
   const [kyc, setKyc] = useState<KycStatus | ''>('');
   const [items, setItems] = useState<RenterSummary[] | null>(null);
+  const [sort, setSort] = useState<'' | 'asc' | 'desc'>('');
   const [error, setError] = useState<ApiError | null>(null);
 
   useEffect(() => {
@@ -64,6 +85,11 @@ function DirectoryBody() {
     void load(ac.signal);
     return () => ac.abort();
   }, [load]);
+
+  const rows = useMemo(
+    () => (items === null || sort === '' ? items : byNextDue(items, sort)),
+    [items, sort],
+  );
 
   return (
     <>
@@ -111,24 +137,49 @@ function DirectoryBody() {
               <th>{t('renters.col.kyc')}</th>
               <th>{t('renters.locale')}</th>
               <th>{t('renters.col.units')}</th>
+              <th aria-sort={sort === 'asc' ? 'ascending' : sort === 'desc' ? 'descending' : 'none'}>
+                <button
+                  type="button"
+                  className="btn btn-quiet"
+                  onClick={() => setSort((s) => (s === 'asc' ? 'desc' : 'asc'))}
+                  style={{
+                    minHeight: 'var(--touch-min)',
+                    padding: '0 var(--sp-2)',
+                    font: 'inherit',
+                    color: 'inherit',
+                  }}
+                >
+                  {t('renters.col.next_due')}
+                  <Icon
+                    icon={
+                      sort === 'desc'
+                        ? 'solar:alt-arrow-down-linear'
+                        : sort === 'asc'
+                          ? 'solar:alt-arrow-up-linear'
+                          : 'solar:sort-vertical-linear'
+                    }
+                    width={16}
+                  />
+                </button>
+              </th>
               <th>{t('renters.col.known_since')}</th>
             </tr>
           </thead>
           <tbody>
-            {items === null ? (
+            {rows === null ? (
               <tr>
-                <td colSpan={6} style={{ color: 'var(--ink-soft)' }}>
+                <td colSpan={7} style={{ color: 'var(--ink-soft)' }}>
                   {t('common.loading')}
                 </td>
               </tr>
-            ) : items.length === 0 ? (
+            ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={6} style={{ color: 'var(--ink-soft)' }}>
+                <td colSpan={7} style={{ color: 'var(--ink-soft)' }}>
                   {error ? t('common.no_results') : t('renters.empty')}
                 </td>
               </tr>
             ) : (
-              items.map((r) => (
+              rows.map((r) => (
                 <tr key={r.user_id}>
                   <td style={{ fontWeight: 600 }}>
                     <Link href={`/renters/${r.user_id}`} style={{ color: 'inherit' }}>
@@ -165,6 +216,13 @@ function DirectoryBody() {
                         ))}
                       </ul>
                     )}
+                  </td>
+                  <td style={{ fontSize: 'var(--text-sm)' }}>
+                    <NextDueCell
+                      date={r.next_due_date}
+                      amount={r.next_due_amount}
+                      overdue={r.overdue_amount}
+                    />
                   </td>
                   <td style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{fmtDate(r.created_at)}</td>
                 </tr>

@@ -724,7 +724,7 @@ func (s *Server) handleNotificationsJob(w http.ResponseWriter, r *http.Request) 
 	f := validate.Fields{}
 	opt := notify.Options{
 		ForceHour: body.ForceHour,
-		BaseURL:   s.cfg.PublicBaseURL,
+		BaseURL:   s.publicBaseURL(),
 		Settings:  SchedulerSettings,
 	}
 	if v := strings.TrimSpace(body.Date); v != "" {

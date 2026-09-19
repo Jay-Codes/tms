@@ -35,15 +35,59 @@ import {
   type PaymentResult,
   type Schedule,
 } from '../lib/api';
-import { datetimeLocalToRfc3339, fmtDate, fmtTZS, nowDatetimeLocal } from '../lib/format';
+import {
+  datetimeLocalToRfc3339,
+  fmtDate,
+  fmtTZS,
+  nowDatetimeLocal,
+  rfc3339ToDatetimeLocal,
+} from '../lib/format';
 import { TableScroll, useT, type Translator } from '@tms/ui';
 
+/**
+ * Everything the sheet needs to know about *this* opening of it.
+ *
+ * The prefill fields and `submit` are what Phase 16 added, and they are the
+ * whole of the parameterisation: accepting a proof of payment opens this same
+ * sheet with the renter's claim in the boxes and `POST /proofs/{id}/accept`
+ * behind the button. That endpoint takes the `POST /payments` body and returns
+ * the same `{payment, schedules}`, so the overpay confirm, the field errors
+ * and the applied-to table below are reused without a second code path.
+ *
+ * A caller that passes none of them gets the Phase 5 behaviour unchanged.
+ */
 export interface RecordPaymentTarget {
   contractId: string;
   /** "Room 2 · Mbezi Court — Asha Juma", printed at the head of the sheet. */
   label?: string;
   /** Prefilled when the sheet was opened from a schedule row. */
   scheduleId?: string;
+  /** Prefill: overrides the "what is still owing" default in the amount box. */
+  amount?: number;
+  method?: PaymentMethod;
+  /** Prefill for `paid_at`, as RFC3339; the box shows it in the local zone. */
+  paidAt?: string;
+  reference?: string;
+  note?: string;
+  /**
+   * Boxes the endpoint behind `submit` will not act on, shown filled but
+   * disabled rather than quietly ignored. `POST /proofs/{id}/accept` takes
+   * only amount, schedule and date as corrections — the method, the reference
+   * and the note are the renter's own words and travel unchanged.
+   */
+  readOnlyFields?: Array<'method' | 'reference' | 'note'>;
+  /** Explains the disabled boxes, already translated. */
+  readOnlyHint?: string;
+  /** Sheet heading, already translated. Defaults to "Record payment". */
+  title?: string;
+  /** Primary button label, already translated. */
+  submitLabel?: string;
+  /**
+   * Where the body goes. Defaults to `POST /payments`. A caller may point it
+   * at any endpoint that takes the payment body and answers with
+   * `{payment, schedules}` — the proof accept route is the one that does.
+   */
+  submit?: (body: PaymentInput) => Promise<PaymentResult>;
 }
 
 /** Earliest unsettled row — the target when the landlord did not pick one. */
@@ -159,16 +203,27 @@ export function RecordPaymentSheet({
     if (!open) return;
     setSchedules(null);
     setScheduleId(target?.scheduleId ?? '');
-    setAmount('');
-    setAmountTouched(false);
-    setMethod('cash');
-    setReference('');
-    setPaidAt(nowDatetimeLocal());
-    setNote('');
+    // A prefilled amount counts as already edited, so the ledger read below
+    // does not overwrite the renter's claim with what the schedule expects.
+    setAmount(target?.amount != null ? String(target.amount) : '');
+    setAmountTouched(target?.amount != null);
+    setMethod(target?.method ?? 'cash');
+    setReference(target?.reference ?? '');
+    setPaidAt(target?.paidAt ? rfc3339ToDatetimeLocal(target.paidAt) : nowDatetimeLocal());
+    setNote(target?.note ?? '');
     setError(null);
     setOverpay(null);
     setResult(null);
-  }, [open, target?.contractId, target?.scheduleId]);
+  }, [
+    open,
+    target?.contractId,
+    target?.scheduleId,
+    target?.amount,
+    target?.method,
+    target?.paidAt,
+    target?.reference,
+    target?.note,
+  ]);
 
   // The ledger is read for two reasons: to offer a target when the sheet was
   // opened from the page head, and to prefill the amount with what is owed.
@@ -210,7 +265,7 @@ export function RecordPaymentSheet({
           note: note.trim() || undefined,
         };
         if (allowOverpay) body.allow_overpay_rollover = true;
-        const res = await paymentsApi.record(body);
+        const res = await (target?.submit ?? paymentsApi.record)(body);
         setOverpay(null);
         setResult(res);
         onRecorded(res);
@@ -224,14 +279,17 @@ export function RecordPaymentSheet({
         setBusy(false);
       }
     },
-    [amount, contractId, method, note, onRecorded, paidAt, reference, scheduleId],
+    [amount, contractId, method, note, onRecorded, paidAt, reference, scheduleId, target?.submit],
   );
 
   const amountNum = Math.round(Number(amount));
   const valid = contractId !== '' && Number.isFinite(amountNum) && amountNum > 0;
+  const locked = (f: 'method' | 'reference' | 'note') => (target?.readOnlyFields ?? []).includes(f);
+  const lockHint = (f: 'method' | 'reference' | 'note') =>
+    locked(f) ? target?.readOnlyHint : undefined;
 
   return (
-    <Sheet open={open} title={t('payments.record.title')} onClose={onClose} width={560}>
+    <Sheet open={open} title={target?.title ?? t('payments.record.title')} onClose={onClose} width={560}>
       {target?.label ? (
         <p style={{ marginBottom: 'var(--sp-4)', color: 'var(--ink-soft)' }}>{target.label}</p>
       ) : null}
@@ -338,11 +396,17 @@ export function RecordPaymentSheet({
                 }}
               />
             </Field>
-            <Field id="rp_method" label={t('payments.record.method_label')} error={error?.errors.method}>
+            <Field
+              id="rp_method"
+              label={t('payments.record.method_label')}
+              hint={lockHint('method')}
+              error={error?.errors.method}
+            >
               <select
                 id="rp_method"
                 className="input"
                 value={method}
+                disabled={locked('method')}
                 onChange={(e) => setMethod(e.target.value as PaymentMethod)}
               >
                 {PAYMENT_METHODS.map((m) => (
@@ -358,13 +422,14 @@ export function RecordPaymentSheet({
             <Field
               id="rp_reference"
               label={t('payments.record.reference_label')}
-              hint={t('payments.record.reference_hint')}
+              hint={lockHint('reference') ?? t('payments.record.reference_hint')}
               error={error?.errors.reference}
             >
               <input
                 id="rp_reference"
                 className="input"
                 maxLength={80}
+                disabled={locked('reference')}
                 value={reference}
                 onChange={(e) => setReference(e.target.value)}
                 placeholder={t('payments.record.reference_placeholder')}
@@ -384,7 +449,7 @@ export function RecordPaymentSheet({
           <Field
             id="rp_note"
             label={t('common.note')}
-            hint={t('payments.record.note_hint', { count: note.length })}
+            hint={lockHint('note') ?? t('payments.record.note_hint', { count: note.length })}
             error={error?.errors.note}
           >
             <textarea
@@ -392,6 +457,7 @@ export function RecordPaymentSheet({
               className="input"
               rows={2}
               maxLength={500}
+              disabled={locked('note')}
               value={note}
               onChange={(e) => setNote(e.target.value)}
             />
@@ -399,7 +465,7 @@ export function RecordPaymentSheet({
 
           <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
             <button type="submit" className="btn btn-primary" disabled={busy || !valid}>
-              {busy ? t('payments.record.busy') : t('payments.record.submit')}
+              {busy ? t('payments.record.busy') : (target?.submitLabel ?? t('payments.record.submit'))}
             </button>
             <button type="button" className="btn btn-quiet" onClick={onClose} disabled={busy}>
               {t('common.cancel')}

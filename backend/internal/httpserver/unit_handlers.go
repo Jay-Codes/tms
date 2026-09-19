@@ -137,9 +137,23 @@ func (s *Server) handleListUnits(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "units.list", err)
 		return
 	}
+	// Phase 16 §16.3: the board chip. One lookup for the page, and only an
+	// occupied unit carries a date — a vacant one owes nothing by definition,
+	// and a stale schedule on a finished tenancy is not a chip.
+	nextDue, err := s.unitNextDue(r.Context(), p.OrgID)
+	if err != nil {
+		s.serverError(w, r, "units.list.next_due", err)
+		return
+	}
 	items := make([]unitResponse, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, s.toUnit(unitRowOfList(row)))
+		unit := s.toUnit(unitRowOfList(row))
+		if unit.Status == statusOccupied {
+			if due, ok := nextDue[unit.ID]; ok {
+				unit.NextDueDate = &due
+			}
+		}
+		items = append(items, unit)
 	}
 	var next *string
 	if len(rows) > 0 {

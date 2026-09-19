@@ -21,9 +21,11 @@ import { CHART_ROLES, ChangeMark as DeltaMark, Sparkline, formatDateIntl, useLoc
 import { PageHead } from '../../components/PageHead';
 import { pendingLabel, usePendingLinkRequests } from '../../components/NavBadges';
 import { SmsCreditsBanner } from '../../components/NotificationBits';
+import { PaymentInstructionsNudge } from '../../components/PaymentInstructionsNudge';
 import {
   brandingApi,
   expensesApi,
+  proofsApi,
   propertiesApi,
   readDashboardPrefs,
   reportsApi,
@@ -35,9 +37,10 @@ import {
   type Property,
   type ReportSummary,
   type RevenueReport,
+  type UpcomingItem,
 } from '../../lib/api';
 import { useMe } from '../../lib/auth';
-import { fmtTZS } from '../../lib/format';
+import { fmtDate, fmtTZS } from '../../lib/format';
 
 function EmptyCard({
   icon,
@@ -137,6 +140,8 @@ function useDashboardData() {
   const [statuses, setStatuses] = useState<PaymentStatusRow[] | null>(null);
   const [expenses, setExpenses] = useState<ExpenseSummary | null>(null);
   const [revenue, setRevenue] = useState<RevenueReport | null>(null);
+  const [upcoming, setUpcoming] = useState<UpcomingItem[] | null>(null);
+  const [proofCount, setProofCount] = useState<number | null>(null);
 
   useEffect(() => {
     const ac = new AbortController();
@@ -160,10 +165,22 @@ function useDashboardData() {
       .revenue({ cadence: 'month', bucket: 'day' }, ac.signal)
       .then(setRevenue)
       .catch(() => setRevenue(null));
+    // Phase 16 — the `upcoming` card's figure rides on the summary
+    // (`upcoming_7d`); this read is only for the five rows under it.
+    reportsApi
+      .upcoming({ days: 7 }, ac.signal)
+      .then((r) => setUpcoming(r.items ?? []))
+      .catch(() => setUpcoming(null));
+    // The proofs queue. Its own endpoint, because it is drawn on screens that
+    // never list a proof.
+    proofsApi
+      .summary(ac.signal)
+      .then((r) => setProofCount(r.submitted_count ?? 0))
+      .catch(() => setProofCount(null));
     return () => ac.abort();
   }, []);
 
-  return { summary, statuses, expenses, revenue };
+  return { summary, statuses, expenses, revenue, upcoming, proofCount };
 }
 
 function DashboardBody() {
@@ -175,7 +192,7 @@ function DashboardBody() {
   const [customizing, setCustomizing] = useState(false);
   const pending = usePendingLinkRequests();
   const countersign = useReadyToCountersign();
-  const { summary, statuses, expenses, revenue } = useDashboardData();
+  const { summary, statuses, expenses, revenue, upcoming, proofCount } = useDashboardData();
 
   useEffect(() => {
     const ac = new AbortController();
@@ -338,6 +355,84 @@ function DashboardBody() {
               />
             </DashCard>
           );
+        case 'upcoming': {
+          // The figure is the summary's own 7-day window; the rows below it
+          // are the first five of `/reports/upcoming?days=7`, already sorted
+          // by due date. Nothing is summed or re-sorted here.
+          const u = summary?.upcoming_7d;
+          const rows = (upcoming ?? []).slice(0, 5);
+          return (
+            <DashCard
+              key={card}
+              icon="solar:calendar-mark-linear"
+              label={t(CARD_LABEL_KEYS.upcoming)}
+              href="/payments?tab=due_soon"
+              cta={t('dash.cta.due_soon')}
+            >
+              <Figure
+                value={!u ? '—' : u.count === 0 ? t('dash.upcoming.none') : fmtTZS(u.total)}
+                sub={
+                  u
+                    ? u.count === 0
+                      ? t('dash.upcoming.clear')
+                      : t.n('dash.upcoming.count', u.count)
+                    : t('dash.waiting')
+                }
+              />
+              {rows.length > 0 ? (
+                <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 'var(--sp-2)' }}>
+                  {rows.map((r) => (
+                    <li
+                      key={r.id}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: 'var(--sp-3)',
+                        flexWrap: 'wrap',
+                        fontSize: 'var(--text-sm)',
+                        borderTop: '1px solid var(--rule)',
+                        paddingTop: 'var(--sp-2)',
+                      }}
+                    >
+                      <span>
+                        <Link href={`/renters/${r.renter_user_id}`} style={{ color: 'inherit' }}>
+                          {r.renter_name}
+                        </Link>
+                        <span style={{ color: 'var(--ink-soft)' }}> · {r.unit_name}</span>
+                      </span>
+                      <span style={{ color: 'var(--ink-soft)', fontVariantNumeric: 'tabular-nums lining-nums' }}>
+                        {fmtDate(r.due_date)} · {fmtTZS(Math.max(0, r.amount - r.paid_amount))}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </DashCard>
+          );
+        }
+        case 'proofs':
+          return (
+            <DashCard
+              key={card}
+              icon="solar:camera-linear"
+              label={t(CARD_LABEL_KEYS.proofs)}
+              href="/payments?tab=proofs"
+              cta={proofCount ? t('dash.cta.review_proofs') : t('dash.cta.open_payments')}
+            >
+              <Figure
+                value={
+                  proofCount === null ? '—' : proofCount === 0 ? t('dash.proofs.none') : proofCount
+                }
+                sub={
+                  proofCount === null
+                    ? t('dash.waiting')
+                    : proofCount === 0
+                      ? t('dash.proofs.clear')
+                      : t.n('dash.proofs.count', proofCount)
+                }
+              />
+            </DashCard>
+          );
         case 'expenses':
           return (
             <DashCard
@@ -435,7 +530,7 @@ function DashboardBody() {
           return null;
       }
     },
-    [summary, statuses, pending, expenses, revenue, t],
+    [summary, statuses, pending, expenses, revenue, upcoming, proofCount, t],
   );
 
   return (
@@ -460,6 +555,10 @@ function DashboardBody() {
       {/* Phase 14 — a persistent strip, not a card: it says nothing at all
           unless the balance is low or messages are being held. */}
       <SmsCreditsBanner />
+
+      {/* Phase 16 §16.4 — silent unless the org has set neither a bank account
+          nor a mobile-money wallet, and dismissable once seen. */}
+      <PaymentInstructionsNudge />
 
       {/* Phase 15 — offered only where the browser says the app is
           installable; silent everywhere else. */}

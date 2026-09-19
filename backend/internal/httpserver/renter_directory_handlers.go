@@ -57,6 +57,21 @@ func (s *Server) handleListRenters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The money columns quote schedule statuses, so the org's overdue sweep
+	// runs first here exactly as it does ahead of /schedules and the reports:
+	// a row that lapsed overnight must not read `pending` on one screen and
+	// `overdue` on the other.
+	s.flipOverdueFor(r.Context(), p.OrgID)
+
+	// Phase 16 §16.3: the money columns, taken once for the whole page rather
+	// than per row, from the queries GET /reports/payment-status uses — the
+	// two screens are read side by side and must agree.
+	due, err := s.renterDueFigures(r.Context(), p.OrgID)
+	if err != nil {
+		s.serverError(w, r, "renters.list.due", err)
+		return
+	}
+
 	items := make([]renterDirectoryEntry, 0, len(rows))
 	for _, row := range rows {
 		units, err := s.renterUnits(r, p, row.UserID)
@@ -64,14 +79,19 @@ func (s *Server) handleListRenters(w http.ResponseWriter, r *http.Request) {
 			s.serverError(w, r, "renters.list.units", err)
 			return
 		}
+		userID := db.UUIDString(row.UserID)
+		figures := due[userID]
 		items = append(items, renterDirectoryEntry{
-			UserID:    db.UUIDString(row.UserID),
-			FullName:  row.ProfileName,
-			Phone:     row.Phone,
-			Email:     row.Email,
-			KycStatus: kycOut(row.KycStatus),
-			Units:     units,
-			CreatedAt: row.CreatedAt.Time,
+			UserID:        userID,
+			FullName:      row.ProfileName,
+			Phone:         row.Phone,
+			Email:         row.Email,
+			KycStatus:     kycOut(row.KycStatus),
+			Units:         units,
+			NextDueDate:   figures.NextDueDate,
+			NextDueAmount: figures.NextDueAmount,
+			OverdueAmount: figures.OverdueAmount,
+			CreatedAt:     row.CreatedAt.Time,
 		})
 	}
 	var next *string
@@ -170,15 +190,22 @@ func (s *Server) handleGetRenter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The detail header carries the same two figures as the list row, from the
+	// same source: one renter read twice must not show two different debts.
+	figures := s.renterDueFor(r, p.OrgID, db.UUIDString(row.UserID))
+
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"renter": renterDirectoryEntry{
-			UserID:    db.UUIDString(row.UserID),
-			FullName:  row.ProfileName,
-			Phone:     row.Phone,
-			Email:     row.Email,
-			KycStatus: kycOut(row.KycStatus),
-			Units:     units,
-			CreatedAt: row.CreatedAt.Time,
+			UserID:        db.UUIDString(row.UserID),
+			FullName:      row.ProfileName,
+			Phone:         row.Phone,
+			Email:         row.Email,
+			KycStatus:     kycOut(row.KycStatus),
+			Units:         units,
+			NextDueDate:   figures.NextDueDate,
+			NextDueAmount: figures.NextDueAmount,
+			OverdueAmount: figures.OverdueAmount,
+			CreatedAt:     row.CreatedAt.Time,
 		},
 		"profile":       block,
 		"link_requests": items,

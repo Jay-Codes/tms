@@ -783,6 +783,113 @@ own container rather than pushing the page.
 
 ---
 
+# Phase 16 — proofs, import, due visibility
+
+Run after P0's preconditions, as `demo@jjne.test` (landlord) and Asha
+(renter) on the phone. Planned scope: PLAN2 §16, FLOWS 7 and 14.
+
+## P12. Proof of payment (#13, flow 7)
+
+- [ ] **P12.1** As Asha, `{BASE}/enduser` → the home hero shows the next due
+      date and amount with a countdown chip, above **How to pay** and **Send
+      proof**.
+- [ ] **P12.2** **Send proof** → the sheet opens pre-filled with the next-due
+      amount and schedule, repeats the org's payment instructions, and takes a
+      photo from the camera (repeat once with a PDF). Submit. → the schedule row
+      shows an **"Awaiting confirmation"** pencil chip, and **no SMS** is sent
+      (`make api-log` shows nothing for the submit).
+- [ ] **P12.3** As the landlord, `{BASE}/tenant/payments` → a **Proofs** tab,
+      first, with a badge in the nav and the bottom bar; the dashboard carries a
+      `proofs` card. The claim lists renter, unit, claimed vs expected, date and
+      a thumbnail, **oldest first**.
+- [ ] **P12.4** Open it → the full image/PDF viewer with claimed beside what the
+      schedule expects. **Accept** → the Record-payment sheet opens pre-filled;
+      confirm. → the schedule flips **paid**, the proof reads accepted and links
+      the payment, and a `thank_you` SMS with the next due date is queued.
+- [ ] **P12.5** **Overpay path** — send a second proof for more than the
+      contract's remaining balance and accept it. → the usual **409** confirm
+      sheet appears, unchanged; confirming rolls over, cancelling writes nothing.
+- [ ] **P12.6** **Reject** a third proof with a reason. → Asha's app shows the
+      reason above **Send again**, and a `proof_rejected` SMS in her own language
+      reaches her (`make api-log`), debited like any other kind.
+- [ ] **P12.7** **Withdraw** — Asha submits a proof and withdraws it while it is
+      unanswered → gone; withdrawing an accepted or rejected one is refused.
+- [ ] **P12.8** **Reverse** the payment from P12.4 → the schedule reverts and the
+      proof **stays accepted**, with the payment stamped reversed.
+- [ ] **P12.9** Limits and isolation: a 6 MiB file and a `.docx` are refused; an
+      11th proof in a day is refused with a `Retry-After`; as `demo@jjne.test`,
+      opening a Load Test Estates proof id → **404**.
+      *Evidence: renter hero, Proofs tab with badge, detail sheet, audit rows
+      `proof.submit|accept|reject|withdraw`, api-log SMS lines.*
+
+---
+
+## P13. Import previous records (#14, flow 14)
+
+- [ ] **P13.1** `{BASE}/tenant/settings/import` → kind picker (units, renters,
+      payments) with the column reference and **Download template**; the template
+      has English machine headers and one example line, in both UI languages.
+- [ ] **P13.2** Upload a ~300-row **payments** file with two deliberately bad
+      lines (an unknown unit, an amount over the contract balance). → the preview
+      names the errors **on lines 14 and 87**, shows what every ok row resolved
+      to, and **nothing is written** yet.
+- [ ] **P13.3** "Commit N rows" without skipping → refused while errors remain;
+      **"Skip 2 rows with errors and commit"** → the rest commit, the ledger shows
+      the **imported** pencil chips, and the totals move by the file's sum.
+- [ ] **P13.4** **Atomicity** — repeat with a file whose last line is invalid in
+      a way only the commit can hit. → nothing at all is written.
+- [ ] **P13.5** **Undo** the batch from history (within 24 h) → the payments are
+      reversed with the reason "import undone", the chips go, and the schedules
+      revert. A batch older than 24 h offers no Undo.
+- [ ] **P13.6** **Units** kind: a file naming a property that does not exist →
+      the preview flags that it will be created; commit → property and units
+      appear, units `vacant`.
+- [ ] **P13.7** **Renters** kind with a unit column → renters pre-registered and
+      contracts created at **`pending_signature`** — **no contract is active**,
+      and the `contract_ready` SMS goes out only at commit.
+- [ ] **P13.8** A cell starting `=`, `+`, `-` or `@` survives verbatim in the app
+      and is prefixed with `'` in every export. A 6 MiB file and a 6 000-row file
+      are refused; a 21st preview in an hour is rate limited.
+- [ ] **P13.9** Mobile: the preview table scrolls horizontally at 375 px with no
+      page-level horizontal scroll. Cross-org: another org's `batch_id` → **404**.
+      *Evidence: preview table with inline errors, ledger with imported chips,
+      history with Undo, audit rows `import.preview|commit|undo`.*
+
+---
+
+## P14. Next payment due & payment instructions (#15, #16)
+
+- [ ] **P14.1** Renter hero wording across states: "Due in 5 days", "Due today",
+      "3 days overdue", "Awaiting confirmation" — in Kiswahili **and** English,
+      in the stamp colours. The contract header and every Payments row carry the
+      same chip.
+- [ ] **P14.2** **How to pay** is pinned at the top of the Payments tab: bank,
+      account name, account number with a working **copy** button, instructions,
+      the reference hint "use your unit name", and the mobile-money block. It
+      collapses only after the first view.
+- [ ] **P14.3** Clear the org's bank account in Settings → the renter's card
+      reads "Ask your landlord for payment details" rather than disappearing, and
+      the landlord's dashboard nudge "Add payment instructions…" comes back.
+      Restore the details, plus a **Mobile money** block; the settings page shows
+      the live renter preview, and the block survives a `PATCH /org`.
+- [ ] **P14.4** Landlord dashboard card **"Due in the next 7 days"** sits right
+      after Overdue with a count, a total and the top 5 rows, linking to Payments
+      → **Due soon** (14 days by default, 7 / 14 / 30 picker).
+- [ ] **P14.5** Renters list **Next due** column sorts and tints overdue rows;
+      the renter header shows Next due / Overdue; occupied units-board cards carry
+      a "Due 3 Oct" chip.
+- [ ] **P14.6** **Reconciliation** — the figures for one renter match
+      `{BASE}/tenant/reports` → Payment status for the same window, and the
+      upcoming list excludes waived, paid and finished contracts.
+- [ ] **P14.7** **Midnight EAT** — a schedule due today reads "Due today" from
+      00:00 EAT, and "1 day overdue" the following morning.
+- [ ] **P14.8** A reminder SMS carries `{{pay_link}}`; tapping it on the phone
+      opens the renter's Payments tab at the instructions card.
+      *Evidence: hero in both languages, pinned card, dashboard card, Renters
+      column, one reminder SMS body from `make api-log`.*
+
+---
+
 ## Recording the run
 
 Tick each box as you go, in Part 1 and Part 2 alike. For a failure, note the

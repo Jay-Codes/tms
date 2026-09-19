@@ -41,9 +41,14 @@ var brandingFonts = []string{"bricolage", "archivo", "instrument", "hanken"}
 // render is refused at the edge rather than stored and silently dropped —
 // exactly as an unknown font id is.
 //
+// Phase 16 adds `proofs` (the claims queue) and `upcoming` (what falls due in
+// the next seven days); `upcoming` belongs directly after `overdue` in the
+// default order, since it is the same question asked one week earlier.
+//
 //nolint:gochecknoglobals // fixed vocabulary, read-only.
 var dashboardCards = []string{
-	"assets", "renters", "payment_status", "collections", "link_requests", "overdue", "expenses", "revenue", "net_income",
+	"assets", "renters", "payment_status", "collections", "link_requests", "overdue", "upcoming",
+	"expenses", "revenue", "net_income", "proofs",
 }
 
 // dashboardLayouts is the layout enum.

@@ -29,6 +29,7 @@ import {
 import { DocumentPaper, PrintStyles } from '../../../../components/DocumentPaper';
 import { Field, Note, ProblemNote } from '../../../../components/FormBits';
 import { DaysOverdue, PaymentsTable, ReverseSheet } from '../../../../components/PaymentBits';
+import { ProofsFor } from '../../../../components/ProofBits';
 import { RecordPaymentSheet, type RecordPaymentTarget } from '../../../../components/RecordPaymentSheet';
 import { PageHead } from '../../../../components/PageHead';
 import { Sheet } from '../../../../components/Sheet';
@@ -652,6 +653,18 @@ function ContractBody({ id }: { id: string }) {
               setReversing(p);
             }}
           />
+        </section>
+
+        {/* -------------------------------- proofs ------------------------------- */}
+        <section style={{ marginTop: 'var(--sp-6)' }}>
+          <hr className="rule rule-strong" />
+          <div style={{ margin: 'var(--sp-4) 0' }}>
+            <h2 style={{ fontSize: 'var(--text-lg)' }}>{t('proofs.title')}</h2>
+            <p style={{ marginTop: 'var(--sp-2)', color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+              {t('proofs.lead')}
+            </p>
+          </div>
+          <ProofsFor contractId={id} />
         </section>
 
         <hr className="rule rule-strong" style={{ marginTop: 'var(--sp-6)' }} />

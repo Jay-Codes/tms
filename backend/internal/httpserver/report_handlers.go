@@ -199,6 +199,7 @@ func (s *Server) handleReportSummary(w http.ResponseWriter, r *http.Request) {
 			"overdue_amount": report.ChangePct(totals.OverdueAmount, previousTotals.OverdueAmount),
 		},
 		VacantUnits: empties,
+		Upcoming7d:  s.upcomingSummary(r.Context(), p.OrgID),
 	})
 }
 

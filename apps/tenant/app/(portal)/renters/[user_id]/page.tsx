@@ -13,6 +13,8 @@ import { ContractsTable } from '../../../../components/ContractBits';
 import { ProblemNote } from '../../../../components/FormBits';
 import { NotificationLogTable } from '../../../../components/NotificationBits';
 import { PaymentsTable } from '../../../../components/PaymentBits';
+import { ProofsFor } from '../../../../components/ProofBits';
+import { StatTile, TileRow } from '../../../../components/ReportBits';
 import { Facts, KycStamp, LinkStatusStamp, ViewIdDocButton, localeLabel } from '../../../../components/RenterBits';
 import { PageHead } from '../../../../components/PageHead';
 import {
@@ -28,7 +30,7 @@ import {
   type Payment,
   type RenterDetail,
 } from '../../../../lib/api';
-import { Amount, fmtDate } from '../../../../lib/format';
+import { Amount, fmtDate, fmtTZS } from '../../../../lib/format';
 import { TableScroll, useT } from '@tms/ui';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -149,6 +151,29 @@ function RenterBody({ userId }: { userId: string }) {
       <div style={{ marginBottom: 'var(--sp-4)' }}>
         <KycStamp status={profile?.kyc_status ?? renter?.kyc_status} />
       </div>
+
+      {/* Phase 16 §16.3 — what this renter owes, before the record itself.
+          Both figures are the backend's, aggregated over their running
+          tenancies with this org. */}
+      {renter?.next_due_date || (renter?.overdue_amount ?? 0) > 0 ? (
+        <div style={{ marginBottom: 'var(--sp-5)' }}>
+          <TileRow min={220}>
+            <StatTile
+              label={t('renters.next_due')}
+              value={renter?.next_due_amount != null ? fmtTZS(renter.next_due_amount) : '—'}
+              sub={renter?.next_due_date ? fmtDate(renter.next_due_date) : t('renters.next_due.none')}
+            />
+            {(renter?.overdue_amount ?? 0) > 0 ? (
+              <StatTile
+                label={t('renters.overdue')}
+                tone="overdue"
+                value={fmtTZS(renter?.overdue_amount ?? 0)}
+                sub={t('renters.overdue.sub')}
+              />
+            ) : null}
+          </TileRow>
+        </div>
+      ) : null}
 
       <Section title={t('renters.section.profile')}>
         <div style={{ display: 'grid', gap: 'var(--sp-4)', maxWidth: 640 }}>
@@ -271,6 +296,10 @@ function RenterBody({ userId }: { userId: string }) {
           showRenter={false}
           emptyText={t('renters.payments.empty')}
         />
+      </Section>
+
+      <Section title={t('proofs.title')}>
+        <ProofsFor renterUserId={userId} />
       </Section>
 
       <Section title={t('nav.messages')}>

@@ -76,6 +76,9 @@ const messages: Messages = {
   'error.pinMismatch': 'PIN mbili hazifanani.',
   'error.code': 'Weka msimbo wa tarakimu 6 uliopokea kwa SMS.',
   'error.nameRequired': 'Weka jina lako kamili.',
+  'error.proofsTooMany': 'Umetuma uthibitisho mwingi leo. Jaribu tena kesho.',
+  'error.contractNotActive': 'Mkataba huu hauko hai, hivyo huwezi kutuma uthibitisho.',
+  'error.proofNotPending': 'Mwenye nyumba ameshajibu uthibitisho huu.',
 
   /* ------------------------------------------------------------- fields */
   'field.phone': 'Nambari ya simu',
@@ -146,6 +149,7 @@ const messages: Messages = {
   'home.hint.approved': 'Malipo yataanza mkataba wako ukishasainiwa na kuanza kutumika.',
   'home.hint.none': 'Bado huna upangaji — piga skani msimbo wa QR wa chumba chako.',
   'home.hint.qr': 'Kibandiko kilichopo mlangoni kwako hufungua programu hii na chumba kikiwa tayari kimejazwa.',
+  'home.hero.howToPay': 'Jinsi ya kulipa',
 
   /* ------------------------------------------------------------ install */
   'install.text': 'Weka Kitabu cha kodi kwenye skrini yako ya mwanzo.',
@@ -156,6 +160,15 @@ const messages: Messages = {
   'payment.next.title': 'Malipo yanayofuata',
   'payment.next.howToPay': 'Jinsi ya kulipa →',
   'payment.overdueShort': '{amount} imechelewa.',
+
+  /* ------------------------------------------------------------ due in */
+  'due.in.one': 'Inalipwa baada ya siku {count}',
+  'due.in.other': 'Inalipwa baada ya siku {count}',
+  'due.today': 'Inalipwa leo',
+  'due.overdue.one': 'Imechelewa siku {count}',
+  'due.overdue.other': 'Imechelewa siku {count}',
+  'due.awaiting': 'Inasubiri uthibitisho',
+  'due.nothing': 'Hakuna deni kwa sasa',
 
   /* ----------------------------------------------------------- contract */
   'contract.list.eyebrow': 'Mikataba yako',
@@ -248,7 +261,7 @@ const messages: Messages = {
   'payments.accountNumber': 'Nambari ya akaunti',
   'payments.accountNumberLabel': 'nambari ya akaunti',
   'payments.reference': 'Tumia jina lako na chumba chako kama kumbukumbu',
-  'payments.howMoney': 'Lipa kwa fedha taslimu, kwa benki au kwa pesa za simu. Mwenye nyumba ataandika malipo hapa na yatapigwa muhuri kwenye safu iliyo juu.',
+  'payments.howMoney': 'Lipa kwa fedha taslimu, kwa benki au kwa pesa za simu. Mwenye nyumba ataandika malipo hapa na yatapigwa muhuri kwenye ratiba iliyo chini.',
   'payments.noAccount': 'Mwenye nyumba bado hajaweka taarifa za malipo. Muulize wapi upeleke kodi.',
   'payments.noSchedule': 'Bado hakuna ratiba ya malipo. Itaonekana hapa mkataba wako utakapoanza kutumika.',
   'payments.history': 'Historia',
@@ -258,6 +271,11 @@ const messages: Messages = {
   'payments.method.cash': 'Fedha taslimu',
   'payments.method.bank_transfer': 'Kwa benki',
   'payments.method.mobile_money_manual': 'Pesa kwa simu',
+  'payments.mobileMoney': 'Pesa kwa simu',
+  'payments.mmProvider': 'Mtoa huduma',
+  'payments.mmNumber': 'Namba',
+  'payments.mmName': 'Jina lililosajiliwa',
+  'payments.mmNumberLabel': 'namba ya pesa kwa simu',
 
   /* ----------------------------------------------------------- schedule */
   'schedule.paid': 'Imelipwa',
@@ -269,6 +287,42 @@ const messages: Messages = {
   'schedule.paidAmount': '{amount} zimelipwa',
   'schedule.daysLate.one': 'imechelewa siku {count}',
   'schedule.daysLate.other': 'imechelewa siku {count}',
+
+  /* -------------------------------------------------------------- proof */
+  'proof.send': 'Tuma uthibitisho',
+  'proof.sendAgain': 'Tuma tena',
+  'proof.title': 'Tuma uthibitisho wa malipo',
+  'proof.lead': 'Umeshalipa? Tuma risiti na mwenye nyumba atathibitisha hapa.',
+  'proof.amount': 'Kiasi ulicholipa',
+  'proof.paidAt': 'Siku uliyolipa',
+  'proof.method': 'Ulilipaje',
+  'proof.reference': 'Kumbukumbu (si lazima)',
+  'proof.note': 'Maelezo (si lazima)',
+  'proof.file': 'Picha au PDF ya risiti',
+  'proof.fileHint': 'JPEG, PNG au PDF, hadi MB 5.',
+  'proof.filePreviewAlt': 'Risiti uliyochagua',
+  'proof.instructions': 'Mahali pa kulipa',
+  'proof.submit': 'Tuma kwa mwenye nyumba',
+  'proof.submitting': 'Inatuma…',
+  'proof.uploading': 'Inapakia risiti yako…',
+  'proof.done.title': 'Imetumwa.',
+  'proof.done.lead': 'Mwenye nyumba ataikagua na safu itapigwa muhuri atakapothibitisha.',
+  'proof.close': 'Funga',
+  'proof.status.submitted': 'Inasubiri uthibitisho',
+  'proof.status.accepted': 'Imekubaliwa',
+  'proof.status.rejected': 'Haikukubaliwa',
+  'proof.rejected.reason': 'Haikukubaliwa: {reason}',
+  'proof.history': 'Uthibitisho uliotuma',
+  'proof.none': 'Bado hujatuma uthibitisho wowote.',
+  'proof.withdraw': 'Ondoa',
+  'proof.withdrawing': 'Inaondoa…',
+  'proof.withdrawConfirm': 'Uondoe uthibitisho huu? Mwenye nyumba hataweza kuuona tena.',
+  'proof.noContract': 'Utaweza kutuma uthibitisho pindi mkataba wako utakapoanza.',
+  'proof.error.amount': 'Andika kiasi ulicholipa.',
+  'proof.error.date': 'Chagua siku uliyolipa. Haiwezi kuwa ya baadaye.',
+  'proof.error.fileRequired': 'Chagua picha au PDF ya risiti yako.',
+  'proof.error.fileType': 'Chagua faili la JPEG, PNG au PDF.',
+  'proof.error.fileSize': 'Faili hilo ni kubwa kuliko MB 5. Chagua dogo zaidi.',
 
   /* ------------------------------------------------------------ profile */
   'profile.eyebrow': 'Wasifu',

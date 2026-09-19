@@ -22,8 +22,10 @@ import {
   needsRenterSignature,
   renterApi,
   scheduleOutstanding,
+  type BankAccount,
   type Contract,
   type LinkRequest,
+  type MobileMoney,
   type MySchedule,
 } from '../lib/api';
 import { useLocale, useT, type Translator } from '@tms/ui';
@@ -33,7 +35,8 @@ import { forgetScannedUnit, readScannedUnit } from '../lib/scan';
 import { Protected } from '../components/Protected';
 import { InstallPrompt } from '../components/InstallPrompt';
 import { Money } from '../components/Money';
-import { NextDueChip } from '../components/PaymentStatus';
+import { CountdownChip } from '../components/PaymentStatus';
+import { ProofSheet, type ProofTarget } from '../components/ProofSheet';
 import { Notice, Screen, ScreenHeader } from '../components/Screen';
 
 function firstName(fullName: string): string {
@@ -118,6 +121,9 @@ function HomeContent() {
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [nextDue, setNextDue] = useState<MySchedule | null>(null);
   const [overdueTotal, setOverdueTotal] = useState(0);
+  const [bankAccount, setBankAccount] = useState<BankAccount | null>(null);
+  const [mobileMoney, setMobileMoney] = useState<MobileMoney | null>(null);
+  const [proofOpen, setProofOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<string | null>(null);
@@ -135,10 +141,14 @@ function HomeContent() {
       .then((res) => {
         setNextDue(res.next_due ?? null);
         setOverdueTotal(res.overdue_total ?? 0);
+        setBankAccount(res.bank_account ?? null);
+        setMobileMoney(res.mobile_money ?? res.bank_account?.mobile_money ?? null);
       })
       .catch(() => {
         setNextDue(null);
         setOverdueTotal(0);
+        setBankAccount(null);
+        setMobileMoney(null);
       });
 
     try {
@@ -181,6 +191,20 @@ function HomeContent() {
   const signedWaiting = contracts.some(
     (c) => c.status === 'pending_signature' && !needsRenterSignature(c),
   );
+
+  /* Proof is only offered against a running tenancy — without a `next_due`
+     there is no contract to attach a claim to (API.md 409 `contract_not_active`). */
+  const proofTarget: ProofTarget | null = nextDue?.contract?.id
+    ? {
+        contractId: nextDue.contract.id,
+        contractLabel: [nextDue.contract.unit_name, nextDue.contract.property_name]
+          .filter(Boolean)
+          .join(' · '),
+        scheduleId: nextDue.id,
+        amount: scheduleOutstanding(nextDue),
+      }
+    : null;
+  const payReference = nextDue?.contract?.unit_name ?? '';
 
   return (
     <Screen bottomBar>
@@ -280,6 +304,8 @@ function HomeContent() {
         </section>
       )}
 
+      {/* The hero (Phase 16 §16.3): the date, the amount, how long there is
+          left, and the two things a renter can do about it. */}
       <section className="sheet" style={{ padding: 'var(--sp-4)' }}>
         <div
           style={{
@@ -287,16 +313,32 @@ function HomeContent() {
             alignItems: 'baseline',
             justifyContent: 'space-between',
             gap: 'var(--sp-3)',
+            flexWrap: 'wrap',
           }}
         >
           <h2 style={{ fontSize: 'var(--text-lg)' }}>{t('payment.next.title')}</h2>
-          <Link
-            href="/payments"
-            style={{ color: 'var(--primary)', fontSize: 'var(--text-sm)', fontWeight: 600 }}
-          >
-            {t('payment.next.howToPay')}
-          </Link>
+          <CountdownChip schedule={nextDue} />
         </div>
+
+        {nextDue ? (
+          <div style={{ display: 'grid', gap: 'var(--sp-1)', paddingTop: 'var(--sp-3)' }}>
+            <p style={{ margin: 0, fontSize: 'var(--text-lg)', fontWeight: 600 }}>
+              {formatDate(locale, nextDue.due_date)}
+            </p>
+            <Money
+              amount={scheduleOutstanding(nextDue)}
+              style={{ fontSize: 'var(--text-2xl)', lineHeight: 1.1 }}
+            />
+            <p style={{ margin: 0, color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+              {nextDue.contract?.unit_name ?? t('common.yourUnit')}
+              {nextDue.contract?.property_name ? ` · ${nextDue.contract.property_name}` : ''}
+            </p>
+          </div>
+        ) : (
+          <p style={{ margin: 'var(--sp-3) 0 0', color: 'var(--ink-soft)' }}>
+            {t('common.nothingToPayYet')}
+          </p>
+        )}
 
         {overdueTotal > 0 && (
           <p
@@ -312,33 +354,17 @@ function HomeContent() {
           </p>
         )}
 
-        <table className="ledger" style={{ marginTop: 'var(--sp-4)' }}>
-          <tbody>
-            {nextDue ? (
-              <tr>
-                <td>
-                  {formatDate(locale, nextDue.due_date)}
-                  <br />
-                  <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-                    {nextDue.contract?.unit_name ?? t('common.yourUnit')}
-                  </span>
-                </td>
-                <td className="num">
-                  <Money amount={scheduleOutstanding(nextDue)} />
-                  <br />
-                  <NextDueChip schedule={nextDue} />
-                </td>
-              </tr>
-            ) : (
-              <tr>
-                <td style={{ color: 'var(--ink-soft)' }}>{t('common.nothingToPayYet')}</td>
-                <td className="num">
-                  <span className="pencil">—</span>
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        <div style={{ display: 'grid', gap: 'var(--sp-3)', paddingTop: 'var(--sp-4)' }}>
+          <Link className="btn btn-secondary" href="/payments#how-to-pay">
+            {t('home.hero.howToPay')}
+          </Link>
+          {proofTarget && (
+            <button type="button" className="btn btn-primary" onClick={() => setProofOpen(true)}>
+              <Icon icon="solar:camera-linear" width={20} aria-hidden />
+              {t('proof.send')}
+            </button>
+          )}
+        </div>
 
         <div style={{ display: 'grid', gap: 'var(--sp-3)', paddingTop: 'var(--sp-4)' }}>
           <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
@@ -366,6 +392,16 @@ function HomeContent() {
           </p>
         </div>
       </section>
+
+      <ProofSheet
+        open={proofOpen}
+        target={proofTarget}
+        account={bankAccount}
+        mobileMoney={mobileMoney}
+        reference={payReference}
+        onClose={() => setProofOpen(false)}
+        onSubmitted={() => void load()}
+      />
     </Screen>
   );
 }

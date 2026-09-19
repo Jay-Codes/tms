@@ -147,6 +147,28 @@ const (
 	ActionPlatformTemplateUpdate = "platform_template.update"
 	ActionPlatformTemplateLock   = "platform_template.lock"
 	ActionPlatformTemplateRevert = "platform_template.revert"
+
+	// Phase 16 §16.2 — CSV import of previous records. The three actions are
+	// the three movements a landlord makes, and each carries the batch id with
+	// its counts, so "where did these forty payments come from?" is answerable
+	// from the trail alone. `import.preview` is audited although it writes no
+	// domain row: an upload is when a file of other people's data enters the
+	// system, and that is worth recording.
+	ActionImportPreview = "import.preview"
+	ActionImportCommit  = "import.commit"
+	ActionImportUndo    = "import.undo"
+
+	// Phase 16 §16.1 — proof of payment. A proof is a claim, so the trail
+	// records the claim and the ruling separately: `proof.accept` sits beside
+	// the `payment.record` the allocator writes and answers "who believed
+	// this, and was the amount the renter typed the amount that was banked?".
+	// `proof.view` records every issue of a read link, the way `kyc.view`
+	// does — the file is a photo of somebody's bank app.
+	ActionProofSubmit   = "proof.submit"
+	ActionProofWithdraw = "proof.withdraw"
+	ActionProofAccept   = "proof.accept"
+	ActionProofReject   = "proof.reject"
+	ActionProofView     = "proof.view"
 )
 
 // Entity types.
@@ -170,6 +192,7 @@ const (
 
 	EntityPayment         = "payment"
 	EntityPaymentSchedule = "payment_schedule"
+	EntityPaymentProof    = "payment_proof"
 
 	EntityNotification = "notification"
 
@@ -178,6 +201,9 @@ const (
 
 	EntitySMSCredits       = "org_sms_credits"
 	EntityPlatformTemplate = "platform_template"
+
+	// EntityImportBatch is one uploaded spreadsheet (Phase 16 §16.2).
+	EntityImportBatch = "import_batch"
 )
 
 type ctxKey int

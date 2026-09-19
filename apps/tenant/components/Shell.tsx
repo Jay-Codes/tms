@@ -202,6 +202,9 @@ function NavList({ badges, onNavigate }: { badges: Badges; onNavigate?: () => vo
                   label={t('shell.badge.countersign', { count: badges.countersign })}
                 />
               ) : null}
+              {item.href === '/payments' && badges.proofs ? (
+                <Badge count={badges.proofs} label={t('shell.badge.proofs', { count: badges.proofs })} />
+              ) : null}
               {item.href === '/link-requests' && badges.pending ? (
                 <Badge
                   count={badges.pending}
@@ -347,6 +350,29 @@ function BottomBar({ badges, onMore }: { badges: Badges; onMore: () => void }) {
           <span style={{ position: 'relative', display: 'inline-flex' }}>
             <Icon icon={b.icon} width={22} />
             {b.href === '/contracts' && badges.countersign ? <span className="shell-dot" aria-hidden /> : null}
+            {/* Proofs carry the number, not a dot: "three people say they have
+                paid" is a different morning from "someone has". */}
+            {b.href === '/payments' && badges.proofs ? (
+              <span
+                aria-label={t('shell.badge.proofs', { count: badges.proofs })}
+                style={{
+                  position: 'absolute',
+                  top: -6,
+                  right: -10,
+                  minWidth: 18,
+                  padding: '0 5px',
+                  borderRadius: 999,
+                  background: 'var(--primary)',
+                  color: 'var(--on-primary)',
+                  fontSize: 'var(--text-xs)',
+                  fontWeight: 600,
+                  lineHeight: '18px',
+                  textAlign: 'center',
+                }}
+              >
+                {pendingLabel(badges.proofs)}
+              </span>
+            ) : null}
           </span>
           {t(b.labelKey)}
         </Link>

@@ -134,3 +134,30 @@ export function datetimeLocalToRfc3339(value: string): string | undefined {
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
 }
+
+/** RFC3339 → `YYYY-MM-DDTHH:mm` in the browser's zone, for a prefilled box. */
+export function rfc3339ToDatetimeLocal(value: string | null | undefined): string {
+  if (!value) return nowDatetimeLocal();
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return nowDatetimeLocal();
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/**
+ * How long ago something happened, as a unit and a count — "2 h ago" is built
+ * from it by the caller so the wording stays in the dictionary (SPEC §3.2).
+ * Anything under a minute reads as `just_now`.
+ */
+export function ageParts(
+  value: string | null | undefined,
+): { unit: 'just_now' | 'minutes' | 'hours' | 'days'; count: number } | null {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  const secs = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+  if (secs < 60) return { unit: 'just_now', count: 0 };
+  if (secs < 3600) return { unit: 'minutes', count: Math.floor(secs / 60) };
+  if (secs < 86_400) return { unit: 'hours', count: Math.floor(secs / 3600) };
+  return { unit: 'days', count: Math.floor(secs / 86_400) };
+}

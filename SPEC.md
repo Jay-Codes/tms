@@ -163,7 +163,21 @@ payment_schedules    org_id, contract_id, period_start, period_end, due_date, am
                      status (pending|paid|partial|overdue|waived)
 payments             org_id, contract_id, schedule_id NULLABLE, amount, method
                      (cash|bank_transfer|mobile_money_manual), reference, paid_at,
-                     recorded_by_user_id, note, status (recorded|confirmed|reversed)
+                     recorded_by_user_id, note, status (recorded|confirmed|reversed),
+                     import_batch_id NULLABLE REFERENCES import_batches   -- set by a CSV import
+payment_proofs       org_id, contract_id, schedule_id NULLABLE, renter_user_id,
+                     amount BIGINT CHECK > 0, paid_at, method (bank_transfer|mobile_money_manual),
+                     reference NULLABLE (≤80), note NULLABLE (≤500),
+                     object_key, content_type, size_bytes,
+                     status (submitted|accepted|rejected), payment_id NULLABLE REFERENCES payments,
+                     reviewed_by_user_id NULLABLE, reviewed_at NULLABLE,
+                     rejection_reason NULLABLE (≤200)
+                     -- index (org_id, status, created_at DESC); partial index WHERE status='submitted'
+import_batches       org_id, kind (units|renters|payments), filename, row_count, ok_count,
+                     error_count, status (previewed|committed|undone), created_by_user_id,
+                     committed_at, undone_at
+import_rows          batch_id, org_id, line INT, raw JSONB, errors JSONB NULLABLE,
+                     entity_type NULLABLE, entity_id NULLABLE   -- what the row became on commit
 expense_categories   org_id, name, is_default, sort_order, active
                      -- seeded: Repairs & maintenance, Utilities, Security, Cleaning,
                      --         Taxes & levies, Insurance, Management fees, Other
@@ -197,6 +211,12 @@ Key rules:
 - A payment recorded against a schedule flips it `paid` (or `partial` if under amount). Nightly + on-demand job flips past-due `pending` → `overdue`.
 - Unit `status` derives from contracts where possible but is stored for explicit landlord overrides (`unlisted`, `maintenance`).
 
+**Ledger rules (Phase 16).**
+
+- **A proof is a claim, a payment is a fact — only an accepted proof touches a schedule.** A renter's `payment_proofs` row never moves money on its own: nothing in `payment_schedules` changes until a landlord accepts it, and acceptance works by running the ordinary `POST /payments` allocator and linking the payment it created (`payment_proofs.payment_id`). Reversing that payment later leaves the proof `accepted` — the claim was made and answered; the reversal is a fact about the payment.
+- **An import is all-or-nothing.** A commit runs every ok row of the batch in **one transaction**: a landlord must never end up with half a spreadsheet. Rows carrying errors are refused unless the caller passes `skip_errors=true`, which drops them and commits the rest — still in one transaction. Import writes go through the same service functions as the manual endpoints, never raw SQL, so every validation rule holds identically.
+- **An import never activates a contract.** The `renters` kind may pre-register a user, create an approved link request and issue a contract, but the contract stops at `pending_signature`: activation always needs a signature row (the renter's, or the landlord's on the FLOWS 3.6 countersign path).
+
 ---
 
 ## 5. API surface (REST, JSON, `/api/v1`)
@@ -224,8 +244,13 @@ GET/PUT   /org/branding           display name, theme, dashboard prefs; `theme` 
                                   contrast and rejects < 4.5:1 body text (400 + failing pairs)
 POST      /org/branding/logo      → presigned MinIO upload URL
 POST      /org/branding/letterhead → presigned upload (PNG/JPG banner shown atop contract documents)
+GET/PUT   /org/bank-account       payment instructions shown to renters: `bank_account`
+                                  {bank_name, account_name, account_number, instructions} and
+                                  the optional `mobile_money` {provider, number, name} block,
+                                  both stored in `orgs.settings`
 POST/GET/DELETE /org/members      staff management
 ```
+`dashboard_prefs` (on `PUT /org/branding`) accepts the Phase 16 card ids `proofs` and `upcoming` alongside the existing set; `upcoming` sits right after `overdue` in the default order, and `proofs` is shown when the org has submitted proofs. Unknown card ids stay a 400.
 
 ### 5.3 Properties, units, vacancy, pricing
 ```
@@ -304,7 +329,27 @@ POST /payments/{id}/reverse       correction (audited)
 GET  /payments                    history, filterable; /me/payments for renter
 ```
 
-### 5.7 Gateway-ready (post-MVP, reserved)
+### 5.7 Proof of payment · gateway-ready seam
+
+**Proof of payment (Phase 16).** The renter uploads evidence of a payment made outside the system; the landlord accepts or rejects it. A proof is a claim, not money (§4 ledger rules).
+
+```
+POST   /me/proofs/upload          renter: {contract_id, content_type, size_bytes} → presigned PUT
+POST   /me/proofs                 renter: {contract_id, schedule_id?, amount, paid_at, method,
+                                  reference?, note?, object_key} → 201 {proof} status submitted
+GET    /me/proofs                 renter: own proofs, status + reviewer note
+DELETE /me/proofs/{id}            renter: withdraw, only while `submitted`
+GET    /proofs?status=            landlord: submitted (default) | accepted | rejected,
+                                  oldest claim first
+GET    /proofs/{id}               landlord: + presigned `view_url`, short TTL
+POST   /proofs/{id}/accept        landlord: {amount?, schedule_id?, paid_at?,
+                                  allow_overpay_rollover?} → runs the §5.6 allocator, links
+                                  `payment_id`, status accepted, queues `thank_you`
+POST   /proofs/{id}/reject        landlord: {reason} → status rejected, SMS `proof_rejected`
+```
+The contract must be `active|expiring` and belong to the renter (else 404 / 409 `contract_not_active`); 10 proofs per renter per day. `accept` propagates the allocator's **409** `overpay_confirm_required` / `exceeds_contract_balance` unchanged, so the landlord's existing confirm sheet is reused. Audit actions: `proof.submit`, `proof.withdraw`, `proof.accept`, `proof.reject`, `proof.view`.
+
+**Gateway-ready (post-MVP, reserved).**
 ```
 POST /payments/intents            create scan-to-pay intent
 POST /webhooks/gateway            provider callback → confirm payment
@@ -332,8 +377,14 @@ GET /reports/payment-status       per renter: paid | pending | overdue (+ CSV ex
 GET /reports/collections          collections over time
 GET /reports/revenue              expected vs collected vs expenses vs net, bucketed series + trend
 GET /reports/occupancy            units occupied per bucket end
+GET /reports/upcoming?days=7|14|30&property_id=   schedules falling due inside the window:
+                                  {items:[{schedule…, renter_name, phone, unit_name,
+                                  property_name, days_until_due}], total_due, count},
+                                  sorted by due date
 GET /audit-log?entity=&actor=&from=&to=      (org-scoped; admin sees all)
 ```
+
+**Due-date visibility (Phase 16).** `/reports/upcoming` excludes waived and settled schedules and contracts that are no longer collecting (`ended|terminated`); `days` is one of 7 / 14 / 30, default 14, and `days_until_due` is counted on the Dar es Salaam wall clock. The same figure appears in three more places: `GET /renters` rows gain `next_due_date`, `next_due_amount` and `overdue_amount`; `GET /units` board rows gain `next_due_date` for occupied units; and the renter's `GET /me/schedules` `next_due` gains `days_until_due` (negative when past) and `proof: {id, status} | null` — the proof awaiting a landlord's answer, so the app can show "Awaiting confirmation" instead of a stale chip.
 
 **Cadence (Part 2).** `/reports/summary`, `/reports/payment-status`, `/reports/collections`, `/reports/revenue`, `/reports/occupancy` and `/expenses/summary` all accept the same window parameters: `cadence=month|quarter|half_year|year|custom` with `from` / `to` (required for `custom`) and an optional `anchor` date. Windows resolve on the Dar es Salaam wall clock (`internal/period`), and every response **echoes the resolved `{from, to, cadence}` plus the equivalent `previous` window**, so period-over-period comparisons are computed from one place. Series endpoints add `bucket=day|week|month` (auto: `day` for ≤ 62 days, `week` for ≤ 26 weeks, `month` otherwise), zero-filled, capped at 400 buckets, and accept `property_id` / `group_by=property`.
 
@@ -393,6 +444,27 @@ POST  /auth/otp/send              accepts locale as a *hint* for a phone with no
 ```
 `locale` is **required** on the two PATCH routes (they exist to set it) and neither names a user id — a member can only ever move their own. An unknown value is a **400**. `POST /contracts {language?}` defaults to the renter's locale and the choice is frozen on `contracts.language`; `POST /notifications/custom` takes `{body_sw?, body_en?}` (at least one) and answers `202 {batch_id, queued, skipped, by_language:{sw,en}}` — `queued` stays a scalar.
 
+### 5.14 Imports (landlord, owner + manager)
+```
+GET  /imports/templates/{kind}.csv   header row + one example line; fixed English machine
+                                     headers (never the SW/EN screen labels)
+POST /imports/preview                multipart {file, kind} → 201 {batch_id, rows:[{line, raw,
+                                     errors, resolved}], ok_count, error_count}; nothing is
+                                     written but the batch
+POST /imports/{batch_id}/commit      {skip_errors?} → every ok row in one transaction
+POST /imports/{batch_id}/undo        within 24 h of the commit
+GET  /imports                        batch history
+```
+`kind` is `units | renters | payments`. A file is ≤ 2 MiB and ≤ 5 000 rows, UTF-8 with or without a BOM, delimiter `,` or `;` sniffed. 20 previews per hour. Audited `import.preview`, `import.commit`, `import.undo` (batch id + counts).
+
+| kind | columns | becomes |
+|------|---------|---------|
+| `units` | `property, unit, rent_amount, rent_period_days?, status?` | property matched by name (created when missing, flagged in the preview); unit created `vacant`/`unlisted` with its price plan |
+| `renters` | `full_name, phone, locale?, property?, unit?` | user pre-registered by phone; with a `unit`, an `approved` link request and a `pending_signature` contract from the org default template, `contract_ready` SMS held until commit — **never activated** |
+| `payments` | `unit, renter_phone, amount, paid_at, method, reference?, note?` | contract resolved by unit + renter phone (`active|expiring|ended|terminated` — history may belong to a finished contract), allocated by the §5.6 allocator in `paid_at` order with `allow_overpay_rollover=true`; `method` limited to the three manual values; the payment carries `import_batch_id` |
+
+A row that would exceed the contract balance is an **error in the preview**, not a refusal at commit. `undo` reverses the batch's payments with reason `import undone` and soft-deletes the units and renters it created when nothing has touched them since. Formula-prefixed cells are stored verbatim and neutralised on export, as everywhere else (§8).
+
 ---
 
 ## 6. Notifications (Beem SMS)
@@ -407,10 +479,11 @@ Provider: **Beem Africa** HTTP API (api key + secret via env vars). Sender ID pe
 | `reminder_due` | due date | 09:00 EAT |
 | `overdue_daily` | schedule overdue, unresolved | daily 09:00 EAT until paid/waived |
 | `thank_you` | payment confirmed | immediate; includes next due date |
+| `proof_rejected` | landlord rejects a proof of payment | immediate; carries `{{reason}}` |
 | `otp` | auth | immediate |
 | `custom` | landlord-initiated | immediate |
 
-Mechanics: scheduler derives due sends from Postgres → `dedupe_key` (`{kind}:{schedule_id}:{date}`) prevents duplicates → Redis queue → worker calls Beem with retry/backoff (3 attempts) → result stored in `notification_log`. Templates support variables (`{{name}}, {{amount}}, {{due_date}}, {{property}}, {{unit}}, {{org}}, {{next_due_date}}, {{link}}`); org-overridable.
+Mechanics: scheduler derives due sends from Postgres → `dedupe_key` (`{kind}:{schedule_id}:{date}`) prevents duplicates → Redis queue → worker calls Beem with retry/backoff (3 attempts) → result stored in `notification_log`. Templates support variables (`{{name}}, {{amount}}, {{due_date}}, {{property}}, {{unit}}, {{org}}, {{next_due_date}}, {{link}}, {{pay_link}}`); org-overridable. `{{pay_link}}` (Phase 16) is the deep link to the renter's payments screen (`{APP_BASE_URL}/enduser/payments`), where the pinned payment instructions and "Send proof" live; the platform defaults of `reminder_7d`, `reminder_due` and `overdue_daily` use it. No SMS is sent when a proof is **submitted** — the landlord's badge is the signal, as with signing; only a rejection (`proof_rejected`) is texted.
 
 **Language resolution (Part 2).** `notify.LanguageFor(recipientUser, org)` = the **recipient's `users.locale`**, falling back to `orgs.settings.sms_language` when the user has no preference. Every queue writer passes the recipient's locale, not the org's, and the scheduler groups by recipient locale. A bulk send fans out per recipient (`body_sw` / `body_en`).
 
@@ -422,7 +495,7 @@ Mechanics: scheduler derives due sends from Postgres → `dedupe_key` (`{kind}:{
 
 ## 7. Object storage (MinIO)
 
-Buckets: `branding` (logos, letterheads), `qrcodes` (unit QR PNGs; S3 requires ≥3-char names), `kyc` (ID document images — private, short-TTL presigned reads only), `signatures` (drawn signature PNGs — private, presigned reads only for contract parties), `receipts` (expense receipts, key `{org_id}/{expense_id}.{ext}`, ≤ 5 MiB, `image/jpeg` / `image/png` / `application/pdf` — private, presigned reads only for the org). No `contracts` bucket in MVP — contract documents are app-native (§5.5). All access via backend-issued presigned URLs; uploads via presigned PUT with content-type and size limits enforced on completion callback.
+Buckets: `branding` (logos, letterheads), `qrcodes` (unit QR PNGs; S3 requires ≥3-char names), `kyc` (ID document images — private, short-TTL presigned reads only), `signatures` (drawn signature PNGs — private, presigned reads only for contract parties), `receipts` (expense receipts, key `{org_id}/{expense_id}.{ext}`, ≤ 5 MiB, `image/jpeg` / `image/png` / `application/pdf` — private, presigned reads only for the org), `proofs` (renter proof-of-payment uploads, key `{org_id}/{proof_id}.{ext}`, ≤ 5 MiB, `image/jpeg` / `image/png` / `application/pdf` — private, presigned reads for the org only — the renter keeps their own copy and never receives a read link). No `contracts` bucket in MVP — contract documents are app-native (§5.5). All access via backend-issued presigned URLs; uploads via presigned PUT with content-type and size limits enforced on completion callback.
 
 ---
 
@@ -470,6 +543,8 @@ Part 2 (post-MVP iteration, plan in [PLAN2.md](PLAN2.md)):
 | 12 | Theming v2: 8 presets + advanced token override with the contrast guard, applied to both landlord and renter apps | ✅ 5 Sep 2026 |
 | 13 | Language: `users.locale` per user, SMS + bulk SMS in the recipient's language, UI i18n (SW/EN) | ✅ 6 Sep 2026 |
 | 14 | Platform admin: prepaid SMS credits per org and DB-backed platform templates with per-kind locking | ✅ 6 Sep 2026 |
-| 15 | Mobile landlord pass, performance and isolation hardening, seed v2, UAT 2 | 🔄 in progress |
+| 15 | Mobile landlord pass, performance and isolation hardening, seed v2, UAT 2 | ✅ 6 Sep 2026 |
+| 16 | Proof of payment (renter upload → landlord accept/reject), CSV import of units/renters/payments, next-due visibility on both apps, pinned payment instructions | ✅ 20 Sep 2026 |
+| 17 | Contracts: amend/renew by supersession, withdraw, reissue for re-signing | 📝 draft |
 
 The shipped contract for 9–14 is [API.md](API.md) § "Part 2 — shipped contract", which carries the deviations from the plan; the phase log is [PROGRESS.md](PROGRESS.md).

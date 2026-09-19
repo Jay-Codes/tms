@@ -23,14 +23,18 @@ import {
   contractApi,
   hasLandlordSignature,
   hasRenterSignature,
+  renterApi,
   type Contract,
   type ContractDocument,
   type DocumentSignature,
+  type MySchedule,
+  type Proof,
   type VerifyResponse,
 } from '../../../lib/api';
 import { errorMessage, formatDate, money, phoneLast4 } from '../../../lib/format';
 import { Protected } from '../../../components/Protected';
 import { ContractStamp } from '../../../components/ContractStatus';
+import { CountdownChip } from '../../../components/PaymentStatus';
 import { RentValue } from '../../../components/RentValue';
 import { Notice, Screen } from '../../../components/Screen';
 import './document.css';
@@ -93,6 +97,8 @@ function DocumentContent() {
 
   const [doc, setDoc] = useState<ContractDocument | null>(null);
   const [contract, setContract] = useState<Contract | null>(null);
+  const [schedules, setSchedules] = useState<MySchedule[]>([]);
+  const [proofs, setProofs] = useState<Proof[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -108,13 +114,20 @@ function DocumentContent() {
       try {
         // The document is the screen; the contract record only adds the
         // commercial summary, so a failure there must not blank the page.
-        const [d, c] = await Promise.all([
+        // The ledger and the renter's own proofs only decorate the document
+        // (Phase 16: the countdown chip beside the rent, an "awaiting
+        // confirmation" mark on an instalment), so neither may blank it.
+        const [d, c, s, pr] = await Promise.all([
           contractApi.document(id, ac.signal),
           contractApi.get(id, ac.signal).catch(() => null),
+          renterApi.schedules(ac.signal).catch(() => null),
+          renterApi.proofs(ac.signal).catch(() => null),
         ]);
         if (!live) return;
         setDoc(d);
         setContract(c?.contract ?? null);
+        setSchedules((s?.items ?? []).filter((row) => row.contract?.id === id));
+        setProofs(pr?.items ?? []);
         setError(null);
       } catch (err) {
         if (!live || (err instanceof DOMException && err.name === 'AbortError')) return;
@@ -168,6 +181,29 @@ function DocumentContent() {
   const landlordSigned = hasLandlordSignature({ signatures: doc.signatures });
   const needsSignature = doc.status === 'pending_signature' && !renterSigned;
   const scheduleTotal = doc.schedule.reduce((sum, row) => sum + row.amount, 0);
+
+  /* Phase 16: the next instalment still owed on this tenancy drives the
+     countdown chip in the header. The document's own schedule rows carry no
+     ids — they are a snapshot, not the ledger — so they are matched to the
+     ledger by due date, which is unique within one contract. */
+  const ledger = [...schedules].sort((a, b) => a.due_date.localeCompare(b.due_date));
+  const unsettled = ledger.find((row) => row.status !== 'paid' && row.status !== 'waived') ?? null;
+  const scheduleByDue = new Map(ledger.map((row) => [row.due_date, row]));
+  const proofBySchedule = new Map<string, Proof>();
+  for (const p of proofs) {
+    // `GET /me/proofs` is newest first: the first one seen still speaks.
+    if (p.schedule_id && !proofBySchedule.has(p.schedule_id)) proofBySchedule.set(p.schedule_id, p);
+  }
+  /** The renter's own claim against the instalment due on `dueDate`. */
+  const proofFor = (dueDate: string): { awaiting: boolean; rejected: Proof | null } => {
+    const row = scheduleByDue.get(dueDate);
+    if (!row) return { awaiting: false, rejected: null };
+    const full = proofBySchedule.get(row.id) ?? null;
+    return {
+      awaiting: row.proof?.status === 'submitted' || full?.status === 'submitted',
+      rejected: full?.status === 'rejected' ? full : null,
+    };
+  };
 
   return (
     <Screen bottomBar style={needsSignature ? { paddingBottom: 176 } : undefined}>
@@ -260,6 +296,19 @@ function DocumentContent() {
                     <td>{t('common.rent')}</td>
                     <td className="num">
                       <RentValue contract={contract} />
+                      {unsettled && (
+                        <span className="sub">
+                          <CountdownChip schedule={unsettled} />
+                        </span>
+                      )}
+                      <span className="sub no-print">
+                        <Link
+                          href="/payments#how-to-pay"
+                          style={{ color: 'var(--primary)', fontWeight: 600 }}
+                        >
+                          {t('payment.next.howToPay')}
+                        </Link>
+                      </span>
                     </td>
                   </tr>
                   <tr>
@@ -306,16 +355,36 @@ function DocumentContent() {
                   </tr>
                 </thead>
                 <tbody>
-                  {doc.schedule.map((row) => (
-                    <tr key={`${row.due_date}-${row.period_start}`}>
-                      <td>{formatDate(locale, row.due_date)}</td>
-                      <td style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-                        {formatDate(locale, row.period_start)} –{' '}
-                        {formatDate(locale, row.period_end)}
-                      </td>
-                      <td className="num amount">{money(row.amount)}</td>
-                    </tr>
-                  ))}
+                  {doc.schedule.map((row) => {
+                    const { awaiting, rejected } = proofFor(row.due_date);
+                    return (
+                      <tr key={`${row.due_date}-${row.period_start}`}>
+                        <td>
+                          {formatDate(locale, row.due_date)}
+                          {awaiting && (
+                            <span className="sub">
+                              <span className="pencil">{t('due.awaiting')}</span>
+                            </span>
+                          )}
+                          {rejected && (
+                            <span
+                              className="sub"
+                              style={{ color: 'var(--stamp-overdue)' }}
+                            >
+                              {rejected.rejection_reason
+                                ? t('proof.rejected.reason', { reason: rejected.rejection_reason })
+                                : t('proof.status.rejected')}
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+                          {formatDate(locale, row.period_start)} –{' '}
+                          {formatDate(locale, row.period_end)}
+                        </td>
+                        <td className="num amount">{money(row.amount)}</td>
+                      </tr>
+                    );
+                  })}
                   <tr className="total">
                     <td colSpan={2}>{t('doc.totalOverTerm')}</td>
                     <td className="num amount">{money(scheduleTotal)}</td>

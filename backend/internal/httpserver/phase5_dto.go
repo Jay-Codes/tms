@@ -82,10 +82,14 @@ type paymentResponse struct {
 	ReversedAt     *time.Time     `json:"reversed_at"`
 	ReversalReason *string        `json:"reversal_reason"`
 	Applied        []appliedAlloc `json:"applied"`
-	UnitName       string         `json:"unit_name"`
-	PropertyName   string         `json:"property_name"`
-	RenterName     string         `json:"renter_name"`
-	CreatedAt      time.Time      `json:"created_at"`
+	// ImportBatchID names the CSV import this payment arrived on, and is null
+	// for money the landlord keyed in. It is what puts the "imported" chip on
+	// a ledger row (Phase 16 §16.2).
+	ImportBatchID *string   `json:"import_batch_id"`
+	UnitName      string    `json:"unit_name"`
+	PropertyName  string    `json:"property_name"`
+	RenterName    string    `json:"renter_name"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // scheduleContract is the identity block each schedule of the landlord's board
@@ -157,6 +161,10 @@ func toPayment(r paymentRow, applied []appliedAlloc, withActor bool) paymentResp
 	if r.ScheduleID.Valid {
 		id := db.UUIDString(r.ScheduleID)
 		out.ScheduleID = &id
+	}
+	if r.ImportBatchID.Valid {
+		id := db.UUIDString(r.ImportBatchID)
+		out.ImportBatchID = &id
 	}
 	if r.RecordedByName != nil {
 		rb := &recordedBy{Name: *r.RecordedByName}

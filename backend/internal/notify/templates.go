@@ -18,8 +18,12 @@ const (
 	KindReminderDue        = "reminder_due"
 	KindOverdueDaily       = "overdue_daily"
 	KindUnsignedReminder   = "unsigned_reminder"
-	KindCustom             = "custom"
-	KindOTP                = "otp"
+	// KindProofRejected tells a renter their proof of payment was not
+	// accepted, and why (PLAN2 §16.1). Acceptance raises no message of its
+	// own: the allocator's existing `thank_you` is the acceptance.
+	KindProofRejected = "proof_rejected"
+	KindCustom        = "custom"
+	KindOTP           = "otp"
 )
 
 // Languages a message may be written in. Every user carries one
@@ -84,6 +88,7 @@ type Vars struct {
 	Org         string // the org's display name (branding, falling back to its name)
 	NextDueDate string // YYYY-MM-DD, empty when everything is settled
 	Link        string // an absolute link into the enduser app
+	PayLink     string // the renter's Payments tab: {base}/enduser/payments
 
 	Reason     string // termination / rejection only
 	StartDate  string // welcome only
@@ -102,6 +107,11 @@ type Vars struct {
 //nolint:gochecknoglobals // fixed contract, read-only.
 var OrgVariables = []string{
 	"name", "amount", "due_date", "property", "unit", "org", "next_due_date", "link",
+	// Phase 16 §16.4: the deep link to the renter's Payments tab, where the
+	// pinned "How to pay" card and the proof sheet live. A reminder that says
+	// money is owed and not where to send it is the complaint this variable
+	// answers.
+	"pay_link",
 }
 
 // CustomVariables are the placeholders a landlord's bulk message may use
@@ -181,17 +191,21 @@ var platformTemplates = map[string]Template{
 		EN: "Payment of {{amount}} for {{unit}} at {{org}} received. Thank you. All payments are up to date.",
 		SW: "Tumepokea malipo ya {{amount}} kwa {{unit}} katika {{org}}. Asante. Malipo yako yote yapo sawa.",
 	},
+	// The three rent reminders end with the pay link (Phase 16 §16.4): the
+	// renter is being asked for money, and the sentence now says where to send
+	// it. The wording they replace lives in supersededDefaults below, which is
+	// how an installation seeded before Phase 16 picks the new sentence up.
 	KindReminder7d: {
-		EN: "Hello {{name}}, your rent of {{amount}} for {{unit}} at {{org}} is due on {{due_date}}.",
-		SW: "Habari {{name}}, kodi yako ya {{amount}} kwa {{unit}} katika {{org}} inatakiwa kulipwa ifikapo tarehe {{due_date}}.",
+		EN: "Hello {{name}}, your rent of {{amount}} for {{unit}} at {{org}} is due on {{due_date}}. Pay here: {{pay_link}}",
+		SW: "Habari {{name}}, kodi yako ya {{amount}} kwa {{unit}} katika {{org}} inatakiwa ifikapo tarehe {{due_date}}. Lipa hapa: {{pay_link}}",
 	},
 	KindReminderDue: {
-		EN: "Hello {{name}}, your rent of {{amount}} for {{unit}} at {{org}} is due today, {{due_date}}.",
-		SW: "Habari {{name}}, kodi yako ya {{amount}} kwa {{unit}} katika {{org}} inatakiwa kulipwa leo, tarehe {{due_date}}.",
+		EN: "Hello {{name}}, your rent of {{amount}} for {{unit}} at {{org}} is due today, {{due_date}}. Pay here: {{pay_link}}",
+		SW: "Habari {{name}}, kodi yako ya {{amount}} kwa {{unit}} katika {{org}} inatakiwa leo, tarehe {{due_date}}. Lipa hapa: {{pay_link}}",
 	},
 	KindOverdueDaily: {
-		EN: "Hello {{name}}, your rent of {{amount}} for {{unit}} at {{org}} was due on {{due_date}} and is still outstanding.",
-		SW: "Habari {{name}}, kodi yako ya {{amount}} kwa {{unit}} katika {{org}} ilitakiwa kulipwa tarehe {{due_date}} na bado haijalipwa.",
+		EN: "Hello {{name}}, rent of {{amount}} for {{unit}} at {{org}} was due on {{due_date}} and is still unpaid. Pay: {{pay_link}}",
+		SW: "Habari {{name}}, kodi ya {{amount}} kwa {{unit}} katika {{org}} ilitakiwa {{due_date}} na bado haijalipwa. Lipa: {{pay_link}}",
 	},
 	// The verification code is renter-facing platform text like the rest, so
 	// it lives in this catalogue rather than as a format string in the auth
@@ -205,6 +219,41 @@ var platformTemplates = map[string]Template{
 	KindUnsignedReminder: {
 		EN: "Hello {{name}}, your contract for {{unit}} at {{org}} is still waiting for your signature. Open {{link}}",
 		SW: "Habari {{name}}, mkataba wako wa {{unit}} katika {{org}} bado unasubiri saini yako. Fungua {{link}}",
+	},
+	// `{{reason}}` is platform-only here, as it is for a termination or a
+	// rejected application: the landlord's words for why the claim did not
+	// stand are the point of the message, and an org override that dropped
+	// them would leave the renter with nothing to act on.
+	KindProofRejected: {
+		EN: "Your payment proof of {{amount}} for {{unit}} at {{org}} was not accepted: {{reason}}",
+		SW: "Uthibitisho wako wa malipo ya {{amount}} kwa {{unit}} katika {{org}} haujakubaliwa: {{reason}}",
+	},
+}
+
+// supersededDefaults is the wording a kind used to carry, kept so a changed
+// platform default can reach a catalogue that was seeded with the old one.
+//
+// A platform_templates row is authoritative once it exists (migration 000016
+// wrote them all), so editing the Go map alone would change nothing on a live
+// install. SeedPlatformTemplates therefore re-applies the new sentence to any
+// row that still holds *exactly* this text and has never been versioned — an
+// admin's own wording is never touched, and re-running it is a no-op. That is a
+// data migration expressed as an idempotent startup step rather than a numbered
+// migration, which is what PLAN2 §16.4 asks for.
+//
+//nolint:gochecknoglobals // fixed historical record, read-only.
+var supersededDefaults = map[string]Template{
+	KindReminder7d: {
+		EN: "Hello {{name}}, your rent of {{amount}} for {{unit}} at {{org}} is due on {{due_date}}.",
+		SW: "Habari {{name}}, kodi yako ya {{amount}} kwa {{unit}} katika {{org}} inatakiwa kulipwa ifikapo tarehe {{due_date}}.",
+	},
+	KindReminderDue: {
+		EN: "Hello {{name}}, your rent of {{amount}} for {{unit}} at {{org}} is due today, {{due_date}}.",
+		SW: "Habari {{name}}, kodi yako ya {{amount}} kwa {{unit}} katika {{org}} inatakiwa kulipwa leo, tarehe {{due_date}}.",
+	},
+	KindOverdueDaily: {
+		EN: "Hello {{name}}, your rent of {{amount}} for {{unit}} at {{org}} was due on {{due_date}} and is still outstanding.",
+		SW: "Habari {{name}}, kodi yako ya {{amount}} kwa {{unit}} katika {{org}} ilitakiwa kulipwa tarehe {{due_date}} na bado haijalipwa.",
 	},
 }
 
@@ -295,6 +344,7 @@ func replacerFor(v Vars) *strings.Replacer {
 		"{{org}}", v.Org,
 		"{{next_due_date}}", v.NextDueDate,
 		"{{link}}", v.Link,
+		"{{pay_link}}", v.PayLink,
 		"{{reason}}", v.Reason,
 		"{{start_date}}", v.StartDate,
 		"{{next_amount}}", v.NextAmount,

@@ -6,7 +6,11 @@
 # Stage 1 compiles a static binary (CGO off) so the runtime image needs no
 # libc. Stage 2 is alpine rather than distroless purely so compose can run an
 # HTTP healthcheck with busybox wget — distroless has no shell or wget.
-FROM golang:1.26-alpine AS build
+# The build stage runs on the builder's own platform and cross-compiles for
+# the target (BUILDPLATFORM/TARGETARCH are set by buildx), so an x86_64 image
+# built on Apple Silicon does not go through emulation.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+ARG TARGETOS=linux TARGETARCH=amd64
 WORKDIR /src
 
 # Dependencies first: this layer is cached until go.mod/go.sum change.
@@ -16,7 +20,7 @@ RUN go mod download
 COPY backend/ ./
 # Migrations are embedded (backend/migrations + //go:embed), so the binary
 # carries the schema — no migration files in the runtime image.
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api
 
 FROM alpine:3.22 AS runtime
 RUN apk add --no-cache ca-certificates tzdata \

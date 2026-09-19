@@ -146,6 +146,11 @@ type OrgSettings struct {
 	// until PUT /org/bank-account sets it, and is read through the dedicated
 	// endpoint rather than PATCH /org.
 	BankAccount *BankAccount `json:"bank_account,omitempty"`
+	// MobileMoney is the wallet beside that account (Phase 16 §16.4), written
+	// by the same endpoint and round-tripping through PATCH /org untouched in
+	// exactly the same way. It is a separate key rather than a member of
+	// BankAccount because an org may take mobile money and no bank transfer.
+	MobileMoney *MobileMoney `json:"mobile_money,omitempty"`
 	// Notifications is the Phase 6 messaging configuration — sender name,
 	// send hour, per-kind toggles and template overrides. Absent until
 	// PUT /org/notification-settings writes it; the defaults apply meanwhile.

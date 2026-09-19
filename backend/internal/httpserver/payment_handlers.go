@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -100,156 +101,225 @@ func (s *Server) handleRecordPayment(w http.ResponseWriter, r *http.Request) {
 	settings := parseSettings(org.Settings)
 	brand := s.brandingAssets(r.Context(), p.OrgID, org.Name)
 
-	var (
-		paymentID string
-		affected  []sqlc.PaymentSchedule
-		notifyID  string
-		overpay   *payment.OverpayError
-	)
+	var out allocationOutcome
 	txErr := s.inTx(r.Context(), func(q *sqlc.Queries) error {
-		if contract.Status != contractActive && contract.Status != contractExpiring {
-			return errContractNotPayable
-		}
-		rows, err := q.LockSchedulesForContract(r.Context(), sqlc.LockSchedulesForContractParams{
-			OrgID: p.OrgID, ContractID: contract.ID,
-		})
-		if err != nil {
-			return err
-		}
-		schedules := make([]payment.Schedule, 0, len(rows))
-		for _, row := range rows {
-			schedules = append(schedules, toAllocSchedule(row))
-		}
-
-		// The target is the row the landlord named, or the earliest one that
-		// still owes something (API.md).
-		target := -1
-		if scheduleID.Valid {
-			want := db.UUIDString(scheduleID)
-			for i, sc := range schedules {
-				if sc.ID == want {
-					target = i
-					break
-				}
-			}
-			if target < 0 {
-				return errScheduleNotFound
-			}
-		} else {
-			target = payment.EarliestUnpaid(schedules)
-			if target < 0 {
-				return payment.ErrExceedsContractBalance
-			}
-		}
-
-		applied, err := payment.Allocate(body.Amount, schedules[target], schedules[target+1:], body.AllowOverpayRollover)
-		if err != nil {
-			return err
-		}
-
-		pay, err := q.CreatePayment(r.Context(), sqlc.CreatePaymentParams{
-			OrgID: p.OrgID, ContractID: contract.ID,
-			ScheduleID: db.MustUUID(schedules[target].ID), Amount: body.Amount,
-			Method: method, Reference: reference, PaidAt: db.TS(paidAt),
-			RecordedByUserID: p.UserID, Note: note,
-		})
-		if err != nil {
-			return err
-		}
-		paymentID = db.UUIDString(pay.ID)
-
-		affected = affected[:0]
-		for _, a := range applied {
-			schedID := db.MustUUID(a.ScheduleID)
-			if _, err := q.CreatePaymentAllocation(r.Context(), sqlc.CreatePaymentAllocationParams{
-				OrgID: p.OrgID, PaymentID: pay.ID, ScheduleID: schedID, Amount: a.Amount,
-			}); err != nil {
-				return err
-			}
-			updated, err := q.ApplyPaymentToSchedule(r.Context(), sqlc.ApplyPaymentToScheduleParams{
-				PaidAmount: a.NewPaid, OrgID: p.OrgID, ID: schedID,
-			})
-			if err != nil {
-				return err
-			}
-			affected = append(affected, updated)
-			// Keep the local view in step so the next-due lookup below sees
-			// the state the transaction is committing.
-			for i := range schedules {
-				if schedules[i].ID == a.ScheduleID {
-					schedules[i].PaidAmount = a.NewPaid
-					schedules[i].Status = a.NewStatus
-				}
-			}
-		}
-
-		if err := audit.Record(r.Context(), q, audit.Entry{
-			OrgID:       p.OrgIDString(),
-			ActorUserID: p.UserIDString(),
-			Action:      audit.ActionPaymentRecord,
-			EntityType:  audit.EntityPayment,
-			EntityID:    paymentID,
-			After: map[string]any{
-				"contract_id": db.UUIDString(contract.ID), "amount": body.Amount,
-				"method": method, "paid_at": paidAt.Format(time.RFC3339),
-				"applied": appliedAudit(applied), "rollover": body.AllowOverpayRollover,
-			},
-		}); err != nil {
-			return err
-		}
-
-		// The thank-you names what comes next, or says everything is settled.
-		vars := notify.Vars{
-			Name: contract.RenterName, Amount: formatTZS(body.Amount),
-			Unit: contract.UnitName, Property: contract.PropertyName, Org: brand.DisplayName,
-		}
-		if next := payment.EarliestUnpaid(schedules); next >= 0 {
-			vars.NextDueDate = schedules[next].DueDate
-			vars.NextAmount = formatTZS(schedules[next].Amount - schedules[next].PaidAmount)
-		}
-		notifyID, err = s.queuePaymentSMS(r.Context(), q, paymentMessage{
-			OrgID: p.OrgIDString(), UserID: db.UUIDString(contract.RenterUserID),
-			PaymentID: paymentID, Lang: settings.SMSLanguage,
-			Phone: db.StrVal(contract.RenterPhone), Vars: vars,
-			Overrides: settings.notifyOverrides(),
-			Enabled:   notificationSettingsOf(settings).Kinds.ThankYou.Enabled,
+		var err error
+		out, err = s.allocatePayment(r.Context(), q, allocationRequest{
+			OrgID: p.OrgID, ActorUserID: p.UserID, Contract: contract,
+			ScheduleID: scheduleID, Amount: body.Amount, Method: method,
+			Reference: reference, Note: note, PaidAt: paidAt,
+			AllowOverpayRollover: body.AllowOverpayRollover,
+			Settings:             settings, OrgName: brand.DisplayName,
 		})
 		return err
 	})
-	switch {
-	case txErr == nil:
-	case errors.Is(txErr, errContractNotPayable):
-		conflictCode(w, "contract_not_active", "contract not running",
-			"payments can only be recorded against a running contract")
-		return
-	case errors.Is(txErr, errScheduleNotFound):
-		httpx.WriteProblem(w, http.StatusNotFound, "not found", "no such schedule on this contract")
-		return
-	case errors.Is(txErr, payment.ErrSchedulePaid):
-		conflictCode(w, "schedule_paid", "schedule already settled",
-			"that schedule owes nothing; pick another or omit schedule_id")
-		return
-	case errors.Is(txErr, payment.ErrExceedsContractBalance):
-		conflictCode(w, "exceeds_contract_balance", "more than the contract owes",
-			"the payment is larger than everything still outstanding on this contract")
-		return
-	case errors.As(txErr, &overpay):
-		writeOverpayConfirm(w, overpay)
-		return
-	default:
-		s.serverError(w, r, "payment.record.tx", txErr)
+	if !s.allocationRefused(w, r, txErr, "payment.record.tx") {
 		return
 	}
-	s.enqueueNotifications(r.Context(), notifyID)
+	paymentID, affected := out.PaymentID, out.Affected
+	s.enqueueNotifications(r.Context(), out.NotifyID)
 
-	out, ok := s.reloadPayment(w, r, paymentID, p.OrgID, pgtype.UUID{}, true)
+	outPayment, ok := s.reloadPayment(w, r, paymentID, p.OrgID, pgtype.UUID{}, true)
 	if !ok {
 		return
 	}
 	WriteJSON(w, http.StatusCreated, map[string]any{
-		"payment":   out,
+		"payment":   outPayment,
 		"schedules": affectedItems(affected, contractBlock(contract)),
 	})
+}
+
+// ------------------------------------------------------- the allocator path --
+
+// allocationRequest is one application of money to a contract's schedules.
+//
+// It exists so POST /payments and POST /proofs/{id}/accept share the movement
+// rather than describing it twice: a proof the landlord believes becomes a
+// payment by the same route the landlord's own entry takes, which is the whole
+// reason the overpay confirm and the reversal flow work unchanged on it
+// (PLAN2 §16.1).
+type allocationRequest struct {
+	OrgID       pgtype.UUID
+	ActorUserID pgtype.UUID
+	// Contract is already loaded and org-scoped by the caller; its status is
+	// checked inside the transaction, where it cannot have moved since.
+	Contract sqlc.GetContractRow
+	// ScheduleID is the row the payer aimed at. Invalid means "the earliest
+	// one that still owes something" (API.md Phase 5).
+	ScheduleID           pgtype.UUID
+	Amount               int64
+	Method               string
+	Reference            *string
+	Note                 *string
+	PaidAt               time.Time
+	AllowOverpayRollover bool
+	Settings             OrgSettings
+	// OrgName is the branded display name the SMS says.
+	OrgName string
+}
+
+// allocationOutcome is what the caller needs after the transaction commits.
+type allocationOutcome struct {
+	PaymentID string
+	Affected  []sqlc.PaymentSchedule
+	// NotifyID is the queued thank-you, empty when the kind is switched off,
+	// deduplicated, or the renter has no phone.
+	NotifyID string
+}
+
+// allocatePayment locks the contract's schedules, allocates, writes the
+// payment, its allocations and the audit row, and queues the thank-you — all
+// inside the caller's transaction.
+//
+// Its refusals are returned unchanged (errContractNotPayable,
+// errScheduleNotFound, payment.ErrSchedulePaid, ErrExceedsContractBalance,
+// *payment.OverpayError) so every caller answers with the same status and the
+// same body; allocationRefused is the one place that mapping lives.
+func (s *Server) allocatePayment(
+	ctx context.Context, q *sqlc.Queries, req allocationRequest,
+) (allocationOutcome, error) {
+	var out allocationOutcome
+	contract := req.Contract
+
+	if contract.Status != contractActive && contract.Status != contractExpiring {
+		return out, errContractNotPayable
+	}
+	rows, err := q.LockSchedulesForContract(ctx, sqlc.LockSchedulesForContractParams{
+		OrgID: req.OrgID, ContractID: contract.ID,
+	})
+	if err != nil {
+		return out, err
+	}
+	schedules := make([]payment.Schedule, 0, len(rows))
+	for _, row := range rows {
+		schedules = append(schedules, toAllocSchedule(row))
+	}
+
+	// The target is the row the payer named, or the earliest one that still
+	// owes something (API.md).
+	target := -1
+	if req.ScheduleID.Valid {
+		want := db.UUIDString(req.ScheduleID)
+		for i, sc := range schedules {
+			if sc.ID == want {
+				target = i
+				break
+			}
+		}
+		if target < 0 {
+			return out, errScheduleNotFound
+		}
+	} else {
+		target = payment.EarliestUnpaid(schedules)
+		if target < 0 {
+			return out, payment.ErrExceedsContractBalance
+		}
+	}
+
+	applied, err := payment.Allocate(
+		req.Amount, schedules[target], schedules[target+1:], req.AllowOverpayRollover)
+	if err != nil {
+		return out, err
+	}
+
+	pay, err := q.CreatePayment(ctx, sqlc.CreatePaymentParams{
+		OrgID: req.OrgID, ContractID: contract.ID,
+		ScheduleID: db.MustUUID(schedules[target].ID), Amount: req.Amount,
+		Method: req.Method, Reference: req.Reference, PaidAt: db.TS(req.PaidAt),
+		RecordedByUserID: req.ActorUserID, Note: req.Note,
+	})
+	if err != nil {
+		return out, err
+	}
+	out.PaymentID = db.UUIDString(pay.ID)
+
+	for _, a := range applied {
+		schedID := db.MustUUID(a.ScheduleID)
+		if _, err := q.CreatePaymentAllocation(ctx, sqlc.CreatePaymentAllocationParams{
+			OrgID: req.OrgID, PaymentID: pay.ID, ScheduleID: schedID, Amount: a.Amount,
+		}); err != nil {
+			return out, err
+		}
+		updated, err := q.ApplyPaymentToSchedule(ctx, sqlc.ApplyPaymentToScheduleParams{
+			PaidAmount: a.NewPaid, OrgID: req.OrgID, ID: schedID,
+		})
+		if err != nil {
+			return out, err
+		}
+		out.Affected = append(out.Affected, updated)
+		// Keep the local view in step so the next-due lookup below sees the
+		// state the transaction is committing.
+		for i := range schedules {
+			if schedules[i].ID == a.ScheduleID {
+				schedules[i].PaidAmount = a.NewPaid
+				schedules[i].Status = a.NewStatus
+			}
+		}
+	}
+
+	if err := audit.Record(ctx, q, audit.Entry{
+		OrgID:       db.UUIDString(req.OrgID),
+		ActorUserID: db.UUIDString(req.ActorUserID),
+		Action:      audit.ActionPaymentRecord,
+		EntityType:  audit.EntityPayment,
+		EntityID:    out.PaymentID,
+		After: map[string]any{
+			"contract_id": db.UUIDString(contract.ID), "amount": req.Amount,
+			"method": req.Method, "paid_at": req.PaidAt.Format(time.RFC3339),
+			"applied": appliedAudit(applied), "rollover": req.AllowOverpayRollover,
+		},
+	}); err != nil {
+		return out, err
+	}
+
+	// The thank-you names what comes next, or says everything is settled.
+	vars := notify.Vars{
+		Name: contract.RenterName, Amount: formatTZS(req.Amount),
+		Unit: contract.UnitName, Property: contract.PropertyName, Org: req.OrgName,
+	}
+	if next := payment.EarliestUnpaid(schedules); next >= 0 {
+		vars.NextDueDate = schedules[next].DueDate
+		vars.NextAmount = formatTZS(schedules[next].Amount - schedules[next].PaidAmount)
+	}
+	out.NotifyID, err = s.queuePaymentSMS(ctx, q, paymentMessage{
+		OrgID: db.UUIDString(req.OrgID), UserID: db.UUIDString(contract.RenterUserID),
+		PaymentID: out.PaymentID, Lang: req.Settings.SMSLanguage,
+		Phone: db.StrVal(contract.RenterPhone), Vars: vars,
+		Overrides: req.Settings.notifyOverrides(),
+		Enabled:   notificationSettingsOf(req.Settings).Kinds.ThankYou.Enabled,
+	})
+	return out, err
+}
+
+// allocationRefused turns allocatePayment's refusals into the statuses API.md
+// names, and reports whether the caller may carry on. Every caller of the
+// allocator answers through it, so the proof review sheet sees exactly the
+// bodies the record-payment sheet was written against — the overpay confirm
+// included (PLAN2 §16.1: "propagate unchanged").
+func (s *Server) allocationRefused(
+	w http.ResponseWriter, r *http.Request, txErr error, op string,
+) bool {
+	var overpay *payment.OverpayError
+	switch {
+	case txErr == nil:
+		return true
+	case errors.Is(txErr, errContractNotPayable):
+		conflictCode(w, "contract_not_active", "contract not running",
+			"payments can only be recorded against a running contract")
+	case errors.Is(txErr, errScheduleNotFound):
+		httpx.WriteProblem(w, http.StatusNotFound, "not found", "no such schedule on this contract")
+	case errors.Is(txErr, payment.ErrSchedulePaid):
+		conflictCode(w, "schedule_paid", "schedule already settled",
+			"that schedule owes nothing; pick another or omit schedule_id")
+	case errors.Is(txErr, payment.ErrExceedsContractBalance):
+		conflictCode(w, "exceeds_contract_balance", "more than the contract owes",
+			"the payment is larger than everything still outstanding on this contract")
+	case errors.As(txErr, &overpay):
+		writeOverpayConfirm(w, overpay)
+	default:
+		s.serverError(w, r, op, txErr)
+	}
+	return false
 }
 
 // errScheduleNotFound is an explicit schedule_id that names no row of the
@@ -538,7 +608,16 @@ func (s *Server) handleGetBankAccount(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "org.bank_account.get", err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"bank_account": parseSettings(org.Settings).BankAccount})
+	settings := parseSettings(org.Settings)
+	account, wallet := payInstructions(settings)
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"bank_account": account,
+		// Phase 16 §16.4: the wallet beside the account, and the one flag the
+		// landlord's setup nudge asks about — "can a renter be told where to
+		// pay?" — so the dashboard does not have to infer it from two nulls.
+		"mobile_money":             wallet,
+		"payment_instructions_set": paymentInstructionsSet(settings),
+	})
 }
 
 func (s *Server) handlePutBankAccount(w http.ResponseWriter, r *http.Request) {
@@ -546,7 +625,15 @@ func (s *Server) handlePutBankAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := auth.MustFromContext(r.Context())
-	var body BankAccount
+	var body struct {
+		BankAccount
+		// Phase 16 §16.4. The raw message distinguishes the three things a
+		// client can say about the wallet: nothing (keep what is stored),
+		// `null` (clear it), or an object (replace it). A plain pointer would
+		// collapse the first two, and a landlord editing their bank details
+		// would silently lose their mobile money.
+		MobileMoney json.RawMessage `json:"mobile_money"`
+	}
 	if !DecodeJSON(w, r, &body) {
 		return
 	}
@@ -556,6 +643,19 @@ func (s *Server) handlePutBankAccount(w http.ResponseWriter, r *http.Request) {
 		AccountName:   f.MaxLen("account_name", f.Required("account_name", body.AccountName), bankFieldMax),
 		AccountNumber: f.MaxLen("account_number", f.Required("account_number", body.AccountNumber), bankFieldMax),
 		Instructions:  f.MaxLen("instructions", strings.TrimSpace(body.Instructions), bankInstructionsMax),
+	}
+	var (
+		wallet     *MobileMoney
+		walletSent = len(body.MobileMoney) > 0
+		walletNull = walletSent && string(body.MobileMoney) == "null"
+	)
+	if walletSent && !walletNull {
+		var in MobileMoney
+		if err := json.Unmarshal(body.MobileMoney, &in); err != nil {
+			f.Add("mobile_money", "must be an object with provider, number and name")
+		} else {
+			wallet = validateMobileMoney(f, &in)
+		}
 	}
 	if !f.Empty() {
 		badRequest(w, f)
@@ -568,8 +668,11 @@ func (s *Server) handlePutBankAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	settings := parseSettings(org.Settings)
-	before := settings.BankAccount
+	before := map[string]any{"bank_account": settings.BankAccount, "mobile_money": settings.MobileMoney}
 	settings.BankAccount = &acct
+	if walletSent {
+		settings.MobileMoney = wallet
+	}
 	raw, err := marshalSettings(settings)
 	if err != nil {
 		s.serverError(w, r, "org.bank_account.marshal", err)
@@ -587,13 +690,17 @@ func (s *Server) handlePutBankAccount(w http.ResponseWriter, r *http.Request) {
 			EntityType:  audit.EntityOrg,
 			EntityID:    p.OrgIDString(),
 			Before:      before,
-			After:       acct,
+			After:       map[string]any{"bank_account": acct, "mobile_money": settings.MobileMoney},
 		})
 	}); err != nil {
 		s.serverError(w, r, "org.bank_account.tx", err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"bank_account": acct})
+	account, saved := payInstructions(settings)
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"bank_account": account, "mobile_money": saved,
+		"payment_instructions_set": paymentInstructionsSet(settings),
+	})
 }
 
 // ------------------------------------------- POST /admin/jobs/overdue --
