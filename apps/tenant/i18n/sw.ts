@@ -1651,6 +1651,81 @@ const messages: Messages = {
   'import.err.undo_window_closed': 'Saa 24 za kubatilisha uingizaji huu zimepita.',
   'import.err.rate_limited': 'Ukaguzi mwingi mno saa hii. Jaribu tena baadaye.',
   'import.err.row_failed': 'Mstari {line}, safu {column}: {reason}. Hakuna kilichoandikwa — kagua faili tena.',
+
+  /* ---------------------------------------------------------------- */
+  /* Awamu 19 — kuonyesha NIDA, kusahihisha majina                     */
+  /* ---------------------------------------------------------------- */
+  'renters.nida.show': 'Onyesha namba kamili',
+  'renters.nida.hide': 'Ificha',
+  'renters.nida.hiding_in': 'Inafichwa tena baada ya sekunde {seconds}',
+  'renters.nida.confirm_title': 'Onyesha namba kamili ya NIDA?',
+  'renters.nida.confirm_why':
+    'Mpangaji anaambiwa nani aliiona na lini, na kuiona kunaandikwa katika kumbukumbu za matukio. Ifungue pale unapoihitaji namba yenyewe — taarifa ya polisi, ukaguzi wa mdhamini, au mkataba unaowasilishwa kata.',
+  'renters.nida.reason_label': 'Kwa nini unaihitaji (si lazima)',
+  'renters.nida.reason_hint': '{n}/200 — huhifadhiwa katika kumbukumbu.',
+  'renters.nida.reason_placeholder': 'Taarifa ya polisi kwa kodi isiyolipwa',
+  'renters.nida.reveal': 'Onyesha namba',
+  'renters.nida.revealing': 'Inafungua…',
+  'renters.rename.title': 'Sahihisha jina la mpangaji huyu',
+  'renters.rename.hint':
+    'Kwa kosa la kuandika ulilofanya wakati wa kuingiza data au mtu akiwa mbele yako. Mpangaji hupewa SMS kuhusu mabadiliko. Baada ya kusaini mkataba wowote, yeye tu anaweza kulisahihisha, kutoka kwenye Wasifu wake.',
+  'names.edit': 'Hariri',
+  'names.save': 'Hifadhi jina',
+  'names.field.full_name': 'Jina kamili',
+  'names.field.full_name.hint': 'Herufi kati ya 2 na 80.',
+  'settings.you.heading': 'Wewe',
+  'settings.you.hint':
+    'Jina lililo kwenye orodha ya wafanyakazi, kwenye kumbukumbu za matukio na kwenye sahihi ya mwenye nyumba katika mikataba itakayoanzishwa kuanzia sasa. Mkataba uliokwisha kusainiwa unabaki na jina lililokuwa wakati wa kusaini.',
+  'settings.you.saved': 'Jina lako limehifadhiwa.',
+  'settings.members.edit.title': 'Hariri mfanyakazi',
+  'settings.members.edit.own_role': 'Hauwezi kubadilisha wadhifa wako mwenyewe.',
+
+  /* ---------------------------------------------------------------- */
+  /* Awamu 20 — chanzo cha malipo, kufunga historia                    */
+  /* ---------------------------------------------------------------- */
+  'payments.source.manual': 'Imeandikwa',
+  'payments.source.import': 'Imeingizwa',
+  'payments.source.backfill': 'Historia',
+  'payments.col.source': 'Chanzo',
+  'payments.filter.source': 'Chanzo',
+  'payments.filter.source.all': 'Vyanzo vyote',
+  'backfill.open': 'Funga historia',
+  'backfill.row_action': 'Hii ni historia ya zamani? Ifunge…',
+  'backfill.title': 'Funga historia',
+  'backfill.lead':
+    'Upangaji huu ulianza kabla ya TMS, kwa hiyo daftari la kodi lina vipindi ambavyo hakuna aliyevifunga. Vifunge kwa mara moja na daftari litasema ukweli kuanzia siku ya kuingia.',
+  'backfill.until': 'Imelipwa hadi',
+  'backfill.until.hint':
+    'Kila kipindi kisicholipwa kinachostahili tarehe hii au kabla yake kinafungwa. Chaguo la kawaida ni kipindi kamili cha mwisho kabla ya leo.',
+  'backfill.mode': 'Fedha hizo ziliishia wapi',
+  'backfill.mode.paid': 'Zililipwa',
+  'backfill.mode.waived': 'Ziandikwe kama hasara',
+  'backfill.method': 'Zililipwa vipi',
+  'backfill.paid_at': 'Tarehe kwenye malipo',
+  'backfill.paid_at.due_date': 'Tumia tarehe ya kustahili ya kila kipindi',
+  'backfill.paid_at.fixed': 'Tarehe moja kwa yote',
+  'backfill.paid_at.hint':
+    'Ripoti huhesabu fedha katika kipindi zilizolipwa, kwa hiyo tarehe ya kustahili ya kila kipindi kwa kawaida ni jibu la kweli.',
+  'backfill.reference': 'Kumbukumbu (si lazima)',
+  'backfill.reference.hint': 'Hadi herufi 80 — risiti ya benki, au dokezo lako.',
+  'backfill.note': 'Dokezo (si lazima)',
+  'backfill.note.required': 'Kwa nini inaandikwa kama hasara',
+  'backfill.note.hint': '{n}/500',
+  'backfill.preview': 'Vipindi {count} · {amount}',
+  'backfill.preview.none': 'Hakuna kisicholipwa tarehe hiyo au kabla yake.',
+  'backfill.preview.note':
+    'Imehesabiwa kutoka vipindi vilivyo kwenye ukurasa huu. Seva huamua kinachostahili na kila kipindi kinadaiwa kiasi gani.',
+  'backfill.submit': 'Funga vipindi hivi',
+  'backfill.busy': 'Inafunga…',
+  'backfill.done': 'Vipindi {settled} vimefungwa · {amount}. {skipped} vilikuwa vimefungwa tayari.',
+  'backfill.sms_note': 'Mpangaji hupewa SMS moja kuhusu historia — si moja kwa kila kipindi.',
+  'backfill.blocked': 'Mkataba unatakiwa kuwa hai kabla historia yake kufungwa.',
+  'contracts.new.start_hint':
+    'Upangaji ulioanza kabla ya TMS ni sawa — hadi miaka kumi nyuma. Weka tarehe ya kweli ya kuingia na vipindi vya nyuma vitazalishwa, tayari kufungwa kwa Funga historia.',
+  'import.renters.past_start_hint':
+    'Tarehe ya kuanza iliyopita ni sawa — hadi miaka kumi nyuma. Weka tarehe ya kweli ya kuingia; vipindi vya nyuma vitazalishwa na unavifunga kutoka ukurasa wa mkataba kwa Funga historia.',
+  'import.payments.backfill_hint':
+    'Malipo yaliyo ya zamani kuliko daftari la kodi hayawezi kupangiwa kitu. Weka tarehe ya kuanza ya mkataba iwe tarehe ya kweli ya kuingia, au funga vipindi vya kabla ya TMS kwa Funga historia kwenye ukurasa wa mkataba.',
 };
 
 export default messages;
