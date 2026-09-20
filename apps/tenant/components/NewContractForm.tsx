@@ -239,7 +239,16 @@ export function NewContractForm({ onCreated }: { onCreated: (c: Contract) => voi
           />
         </Field>
 
-        <Field id="c_start" label={t('contracts.new.start')} error={error?.errors.start_date}>
+        {/* Phase 20.3 — a landlord-created contract may start in the past (up
+            to ten years), so an existing tenancy can be entered truthfully. The
+            hint is there because a date picker offering the past looks like a
+            mistake until someone says it is not. */}
+        <Field
+          id="c_start"
+          label={t('contracts.new.start')}
+          hint={t('contracts.new.start_hint')}
+          error={error?.errors.start_date}
+        >
           <input
             id="c_start"
             className="input"

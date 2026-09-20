@@ -18,6 +18,10 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ProblemNote } from "../../../components/FormBits";
 import {
+  BackfillSheet,
+  type BackfillTarget,
+} from "../../../components/BackfillSheet";
+import {
   PaymentsTable,
   ReverseSheet,
   SchedulesTable,
@@ -37,7 +41,9 @@ import {
   schedulesApi,
   toApiError,
   UPCOMING_WINDOWS,
+  PAYMENT_SOURCES,
   type Payment,
+  type PaymentSource,
   type Schedule,
   type UpcomingWindow,
 } from "../../../lib/api";
@@ -115,6 +121,11 @@ function PaymentsBody() {
   const [reverseBusy, setReverseBusy] = useState(false);
   const [reverseError, setReverseError] = useState<ApiError | null>(null);
   const [days, setDays] = useState<UpcomingWindow>(14);
+  /** Phase 20.3 — the history filtered by where the money came from. */
+  const [source, setSource] = useState<PaymentSource | "">("");
+  const [backfillTarget, setBackfillTarget] = useState<BackfillTarget | null>(
+    null,
+  );
 
   const load = useCallback(
     async (which: TabId, signal?: AbortSignal) => {
@@ -126,7 +137,7 @@ function PaymentsBody() {
         }
         if (which === "history") {
           setPayments(null);
-          const res = await paymentsApi.list({ limit: 200 }, signal);
+          const res = await paymentsApi.list({ limit: 200, source }, signal);
           setPayments(res.items ?? []);
         } else if (which === "due_soon") {
           setSchedules(null);
@@ -155,7 +166,7 @@ function PaymentsBody() {
         else setSchedules([]);
       }
     },
-    [days],
+    [days, source],
   );
 
   useEffect(() => {
@@ -287,14 +298,30 @@ function PaymentsBody() {
         ) : null}
 
         {tab === "proofs" ? null : tab === "history" ? (
-          <PaymentsTable
-            items={payments}
-            emptyText={error ? t("common.no_results") : t(EMPTY_KEY.history)}
-            onReverse={(p) => {
-              setReverseError(null);
-              setReversing(p);
-            }}
-          />
+          <>
+            <div style={{ marginBottom: "var(--sp-3)" }}>
+              <FilterTabs<string>
+                value={source}
+                options={[
+                  { value: "", label: t("payments.filter.source.all") },
+                  ...PAYMENT_SOURCES.map((s) => ({
+                    value: s,
+                    label: t(`payments.source.${s}`),
+                  })),
+                ]}
+                onChange={(v) => setSource(v as PaymentSource | "")}
+                label={t("payments.filter.source")}
+              />
+            </div>
+            <PaymentsTable
+              items={payments}
+              emptyText={error ? t("common.no_results") : t(EMPTY_KEY.history)}
+              onReverse={(p) => {
+                setReverseError(null);
+                setReversing(p);
+              }}
+            />
+          </>
         ) : (
           <>
             {tab === "due_soon" && (
@@ -322,6 +349,17 @@ function PaymentsBody() {
                     : undefined,
                 })
               }
+              onBackfill={
+                tab === "overdue"
+                  ? (s) =>
+                      setBackfillTarget({
+                        contractId: s.contract?.id ?? s.contract_id ?? "",
+                        label: s.contract
+                          ? `${s.contract.unit_name} · ${s.contract.property_name} — ${s.contract.renter_name}`
+                          : undefined,
+                      })
+                  : undefined
+              }
             />
           </>
         )}
@@ -332,6 +370,13 @@ function PaymentsBody() {
         target={recordTarget}
         onClose={() => setRecordTarget(null)}
         onRecorded={() => void load(tab)}
+      />
+
+      <BackfillSheet
+        open={backfillTarget !== null}
+        target={backfillTarget}
+        onClose={() => setBackfillTarget(null)}
+        onDone={() => void load(tab)}
       />
 
       <ReverseSheet

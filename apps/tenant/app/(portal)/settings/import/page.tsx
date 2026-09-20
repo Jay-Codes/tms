@@ -313,6 +313,19 @@ function ImportBody() {
               {t('import.columns.heading', { kind: kindLabel(t, kind) })}
             </h2>
             <ColumnReference columns={columns} t={t} onDownload={() => void downloadTemplate()} downloading={downloading} />
+            {/* Phase 20.3 — the two things a landlord bringing an existing book
+                across needs told before they upload: a past start date is
+                allowed, and a payment older than the book belongs in Backfill. */}
+            {kind === 'renters' ? (
+              <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+                {t('import.renters.past_start_hint')}
+              </p>
+            ) : null}
+            {kind === 'payments' ? (
+              <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+                {t('import.payments.backfill_hint')}
+              </p>
+            ) : null}
           </section>
         ) : null}
 
