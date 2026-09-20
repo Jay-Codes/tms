@@ -208,3 +208,75 @@ Why: Beem accepted the OTP and left it `pending`; the renter never got a code an
 **Verified**: `go build ./... && go vet ./...` clean; `go test -p 1 ./...` all packages ok (`internal/httpserver 39.1s`); `make lint` and `make test-isolation` green; migration up/down/up on a scratch database.
 
 **Pending**: 18.2 frontend (tenant `renters/assist` screen, enduser `?assist=` handling, contract "Witness signing" sheet, SW/EN strings) and the UAT checklist row.
+
+
+## Phases 18.2 (enduser) / 19 / 20 — identity visibility, field feedback (20 Sep 2026) — branch `phase-19-20`
+
+Four Opus lanes (backend, admin, tenant, enduser) ran concurrently in the one working tree on a single
+branch, path-disjoint, each committing its own paths — a git worktree per lane would have cut every lane
+off from the running preview it needed to verify in (DECISIONS row).
+
+**Shipped**
+- **18.2 enduser (4 items)**: "Have a unit code?" on the empty home state (Crockford normalise, I/L→1,
+  O→0 → `/u/{code}`); one due card per live tenancy when a renter has more than one (unit · property,
+  own countdown and Send proof), single tenancy keeps the Phase 16 hero; "Show older" cursor paging on
+  the contracts list, payments History and Proofs you sent, de-duplicated by id; Current / collapsed Past
+  on contracts and a collapsed "Past tenancies" on payments, with the overdue total and hero counting
+  live tenancies only. The assist screens (18.2 tenant + `?assist=`) remain the other session's work and
+  are untouched.
+- **19.1 NIDA reveal**: `POST /renters/{user_id}/nida/reveal` (owner+manager, relationship-or-404, 60/h
+  per org) and `POST /admin/users/{id}/nida/reveal` (reason required), both `no-store`, both audited
+  `renter.nida_reveal` without the number; `nida_reveals[]` (last 10) on `GET /me/profile` so the renter
+  sees who looked, reason withheld. Tenant `NidaField` and the admin detail reveal for 60 s with Copy,
+  React state only, cleared on unmount.
+- **19.2 platform user directory**: `GET /admin/users` (phone normalised / e-mail lower / name prefix,
+  kind + status + org filters, cursor paging, **no NIDA field at all**), `GET /admin/users/{id}`
+  (aggregate + `audit_cursor` paging, audited `admin.user_view`), suspend/activate with reason and full
+  session revocation, `PATCH /admin/users/{id}`. Admin app `/users` and `/users/[id]` (Overview ·
+  Tenancies · Payments · Activity), org detail cross-links.
+- **19.3 names**: `PATCH /org/members/me`, `PATCH /org/members/{id}` (owner only, `last_owner` 409),
+  `PATCH /renters/{user_id}` (409 `renter_signed` checked across **all** orgs), `PATCH /admin/users/{id}`
+  with reason. `name_corrected` SMS kind + SW/EN templates; contract snapshot untouched, pinned by a test
+  that the document and verify hash are byte-identical after a rename.
+- **20.1 proofs**: separate "Take photo" and "Choose a file" actions (the second without `capture`, so a
+  PDF is reachable at last); amount is a static line when the sheet comes from a schedule row; backend
+  422 `amount_mismatch {expected}` when a named row's outstanding has moved, and the sheet re-reads.
+- **20.2 logo**: `/org/branding` `logo_url` kept in the theme cache with a 45-min freshness stamp against
+  the 1-hour presign; `LogoTile` 28×28 on a white tile in rail and mobile bar, one refetch on error then
+  the coloured square; the branding page's `adopt()` makes an upload or delete follow with no reload.
+- **20.3 backfill**: migration `000021_payment_source` (`payments.source` manual|import|backfill,
+  existing import rows migrated); landlord-created contracts may start 10 years back while the renter
+  application keeps its 7-day backstop; `POST /contracts/{id}/backfill` (paid | waived, one payment per
+  period at its own due date, paid/waived rows skipped and reported, one `backfill_done` SMS);
+  `last_payment_source` on both schedule lists, `?source=` filter and a `format=csv` export on
+  `GET /payments`; the payments import now points at Backfill when a row predates the rent book.
+
+**Verified** — `make test`, `make lint`, `make build` all green (14 Go packages, three Next apps, i18n
+385/1632 keys in step). Live walk by the orchestrator: admin UI search by phone → detail → reveal (60 s)
+→ suspend (the renter's open session went 401 on the next call) → activate; landlord reveal → the renter's
+profile lists both the landlord (with org name) and the platform reveal; owner self-rename and member
+rename 200, a 1-character name refused; unsigned renter renamed, two signed renters 409 `renter_signed`;
+a test logo uploaded → two `<img>` at 26×26 in rail and mobile bar → deleted, org restored; a Nov-2025
+contract backfilled (two periods settled at their own due dates, `source=backfill`, re-run 0 settled /
+3 skipped, future `until` 422) with **September's collected unchanged at 1,250,000** against 1,260,000 of
+backfilled money dated Feb/May — the report buckets by `paid_at`.
+
+**Review pass (Opus, review-only)**: five findings, four confirmed and fixed with tests that fail before
+the fix — a **last-owner demotion race** that could leave an org with zero owners (two concurrent
+demotions touch different rows, so nothing serialised them; now `LockOrgOwners … FOR UPDATE` first in
+both the demotion and the removal transaction), a payments CSV export that silently truncated at 200 rows
+against its own documented contract (now capped at 10 000 and stated in API.md), a reveal whose `reason`
+was dropped for a chunked request (`Content-Length` gating replaced by `DecodeJSONOptional`), and a
+platform rename that ignored the borrowed org's notification toggle, language and template while spending
+its credits. The fifth (owner count ignoring `org_members.status`) was refuted: nothing ever writes that
+column, so the filter would be a no-op.
+
+**Integration fixes**: two Phase 16 tests the lanes' `-run` filters never executed went red on the full
+suite — the payments-import Backfill hint was keyed on the payment's **date alone**, so it hijacked a row
+that had failed on its **amount** (now needs both: before the first period *and* within that period's
+rent), and the Phase 16 overpay-proof test had to file its overpay without a `schedule_id`, because 20.1
+deliberately removes the ability to overpay a named row.
+
+**Notes**: `apps/admin` has no i18n dictionary (English-only by existing design), so PLAN2's "SW/EN
+strings" for 19.2 does not apply there. `apps/*/tsconfig.tsbuildinfo` is now ignored centrally. Phase 18.2
+assist UI (tenant `renters/assist`, enduser `?assist=`) is still open in a parallel session.
