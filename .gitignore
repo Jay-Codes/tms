@@ -10,3 +10,6 @@ backend/bin/
 .next-build/
 proxy/proxy
 .env.deploy
+
+# TypeScript incremental build state (per app)
+apps/*/tsconfig.tsbuildinfo
