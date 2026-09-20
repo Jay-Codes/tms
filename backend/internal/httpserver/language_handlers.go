@@ -70,17 +70,6 @@ func (s *Server) patchLocale(w http.ResponseWriter, r *http.Request, op string) 
 	if s.dbUnavailable(w) {
 		return
 	}
-	p := auth.MustFromContext(r.Context())
-
-	// Keyed by the user, because the row being changed is theirs: a landlord
-	// with five staff does not spend one budget between them, and a renter
-	// cannot spend anybody's but their own.
-	if res := s.limiter.Allow(r.Context(), "locale:patch:"+p.UserIDString(),
-		localePatchLimit, localePatchWindow); !res.Allowed {
-		tooMany(w, res, "too many language changes; try again shortly")
-		return
-	}
-
 	var body struct {
 		Locale *string `json:"locale"`
 	}
@@ -91,6 +80,30 @@ func (s *Server) patchLocale(w http.ResponseWriter, r *http.Request, op string) 
 	locale := requiredLocale(f, "locale", body.Locale)
 	if !f.Empty() {
 		badRequest(w, f)
+		return
+	}
+	s.patchLocaleValue(w, r, locale, op)
+}
+
+// patchLocaleValue is the write half, split out so PATCH /org/members/me can
+// reach it after decoding a body that may also carry a name (Phase 19 §19.3).
+// The locale-only path through it is byte-for-byte the Phase 13 endpoint.
+func (s *Server) patchLocaleValue(w http.ResponseWriter, r *http.Request, locale, op string) {
+	if s.dbUnavailable(w) {
+		return
+	}
+	p := auth.MustFromContext(r.Context())
+
+	// Keyed by the user, because the row being changed is theirs: a landlord
+	// with five staff does not spend one budget between them, and a renter
+	// cannot spend anybody's but their own.
+	if res := s.limiter.Allow(r.Context(), "locale:patch:"+p.UserIDString(),
+		localePatchLimit, localePatchWindow); !res.Allowed {
+		tooMany(w, res, "too many language changes; try again shortly")
+		return
+	}
+	if locale == "" {
+		badRequest(w, validate.Fields{"locale": "locale is required"})
 		return
 	}
 

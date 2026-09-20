@@ -146,6 +146,10 @@ type scheduleResponse struct {
 	Amount      int64  `json:"amount"`
 	Status      string `json:"status"`
 	PaidAmount  int64  `json:"paid_amount"`
+	// LastPaymentSource is `manual` | `import` | `backfill`, or null when no
+	// live payment has reached this instalment (Phase 20 §20.3). It is what
+	// puts the "imported" and "backfilled" chips on a rent-book row.
+	LastPaymentSource *string `json:"last_payment_source"`
 }
 
 // templateResponse is the `template` shape from API.md.

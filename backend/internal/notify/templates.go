@@ -22,8 +22,18 @@ const (
 	// accepted, and why (PLAN2 §16.1). Acceptance raises no message of its
 	// own: the allocator's existing `thank_you` is the acceptance.
 	KindProofRejected = "proof_rejected"
-	KindCustom        = "custom"
-	KindOTP           = "otp"
+	// KindNameCorrected tells a renter that a landlord or the platform fixed
+	// the spelling of their name (PLAN2 §19.3). It is the check on an edit made
+	// *about* somebody by somebody else: a wrong correction has to be visible
+	// to the person it was made about, or the rename is a silent rewrite of
+	// whose tenancy this is.
+	KindNameCorrected = "name_corrected"
+	// KindBackfillDone is the one message a settlement of pre-TMS history
+	// raises (PLAN2 §20.3). A backfill closes N periods at once and must never
+	// send N texts about money the renter paid last year.
+	KindBackfillDone = "backfill_done"
+	KindCustom       = "custom"
+	KindOTP          = "otp"
 )
 
 // Languages a message may be written in. Every user carries one
@@ -92,6 +102,7 @@ type Vars struct {
 
 	Reason     string // termination / rejection only
 	StartDate  string // welcome only
+	Date       string // backfill only: the date history now runs up to
 	NextAmount string // thank-you only
 	Code       string // OTP only: the six-digit verification code
 
@@ -228,6 +239,18 @@ var platformTemplates = map[string]Template{
 		EN: "Your payment proof of {{amount}} for {{unit}} at {{org}} was not accepted: {{reason}}",
 		SW: "Uthibitisho wako wa malipo ya {{amount}} kwa {{unit}} katika {{org}} haujakubaliwa: {{reason}}",
 	},
+	// Phase 19 §19.3. The renter is told the new spelling and who changed it,
+	// because the point of the message is that they can object to it.
+	KindNameCorrected: {
+		EN: "Your name at {{org}} was corrected to {{name}}. If that is wrong, fix it in your Profile: {{link}}",
+		SW: "Jina lako katika {{org}} limerekebishwa kuwa {{name}}. Kama si sahihi, libadilishe kwenye Wasifu wako: {{link}}",
+	},
+	// Phase 20 §20.3. `{{date}}` is platform-only, like `{{start_date}}`: it is
+	// the one fact this sentence exists to carry, and no other kind has it.
+	KindBackfillDone: {
+		EN: "Your rent book at {{org}} now shows history up to {{date}}. See it here: {{pay_link}}",
+		SW: "Daftari lako la kodi katika {{org}} sasa linaonyesha historia hadi {{date}}. Iangalie hapa: {{pay_link}}",
+	},
 }
 
 // supersededDefaults is the wording a kind used to carry, kept so a changed
@@ -347,6 +370,7 @@ func replacerFor(v Vars) *strings.Replacer {
 		"{{pay_link}}", v.PayLink,
 		"{{reason}}", v.Reason,
 		"{{start_date}}", v.StartDate,
+		"{{date}}", v.Date,
 		"{{next_amount}}", v.NextAmount,
 		"{{code}}", v.Code,
 	)

@@ -189,7 +189,10 @@ func (s *Server) routes() chi.Router {
 			r.Get("/org/members", s.handleListMembers)
 			// Phase 13: an org user's own language. It names no member id —
 			// it is always the caller's own row.
-			r.Patch("/org/members/me", s.handlePatchMemberLocale)
+			// Phase 19 §19.3: the same route now also fixes the member's own
+			// display name. A `{locale}`-only body is the unchanged Phase 13
+			// call, down to the audit action it writes.
+			r.Patch("/org/members/me", s.handlePatchMemberMe)
 			r.Get("/audit-log", s.handleListAuditLog)
 			r.Get("/audit-log/{id}", s.handleGetAuditEntry)
 
@@ -331,6 +334,19 @@ func (s *Server) routes() chi.Router {
 				r.Get("/imports/{id}", s.handleGetImport)
 				r.Post("/imports/{id}/commit", s.handleCommitImport)
 				r.Post("/imports/{id}/undo", s.handleUndoImport)
+
+				// --- Phase 19 §19.1/§19.3: identity and name corrections ---
+				//
+				// Owner and manager, the pair that approves a link request:
+				// revealing a national ID number and correcting the name a
+				// tenancy is held under are both acts on somebody else's
+				// identity, so they sit with the decisions that create the
+				// relationship rather than with the reads that follow it.
+				r.Post("/renters/{user_id}/nida/reveal", s.handleRevealRenterNIDA)
+				r.Patch("/renters/{user_id}", s.handlePatchRenter)
+
+				// --- Phase 20 §20.3: settling history that predates TMS ---
+				r.Post("/contracts/{id}/backfill", s.handleContractBackfill)
 
 				// --- Phase 18: landlord-assisted onboarding (FLOWS 2b) ---
 				//

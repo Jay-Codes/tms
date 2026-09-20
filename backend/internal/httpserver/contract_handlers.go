@@ -341,6 +341,21 @@ func (s *Server) handleCreateContract(w http.ResponseWriter, r *http.Request) {
 		f.Add("term_days", "must be a whole number of days between 1 and 3650")
 	}
 	in.StartDate = requiredDate(f, "start_date", body.StartDate)
+	// Phase 20 §20.3: a landlord-created contract may start up to ten years
+	// back, because a tenancy that predates TMS has to be entered as it really
+	// is — the generator then produces the past periods and Backfill settles
+	// them. The renter's own application keeps the 7-day backstop in
+	// link_handlers: a renter must not be able to draft a back-dated tenancy on
+	// their own. A year ahead is the forward bound, as it is there.
+	if !in.StartDate.IsZero() {
+		today := time.Now().UTC().Truncate(24 * time.Hour)
+		if in.StartDate.Before(today.AddDate(0, 0, -contractStartBackstopDays)) {
+			f.Add("start_date", "must not be more than 10 years in the past")
+		}
+		if in.StartDate.After(today.AddDate(0, 0, startAheadDays)) {
+			f.Add("start_date", "must not be more than a year ahead")
+		}
+	}
 	if body.DueDay != nil && (*body.DueDay < dueDayMin || *body.DueDay > dueDayMax) {
 		f.Add("due_day", "must be a day of the month between 1 and 31")
 	}
@@ -1306,9 +1321,20 @@ func (s *Server) handleContractSchedules(w http.ResponseWriter, r *http.Request)
 		s.serverError(w, r, "contract.schedules", err)
 		return
 	}
+	ids := make([]pgtype.UUID, 0, len(rows))
+	for _, sc := range rows {
+		ids = append(ids, sc.ID)
+	}
+	// Phase 20 §20.3: the chip that says where each settled period's money came
+	// from. One query for the page, like the payments listing's `applied[]`.
+	sources := s.lastPaymentSources(r.Context(), ids)
 	items := make([]scheduleResponse, 0, len(rows))
 	for _, sc := range rows {
-		items = append(items, toSchedule(sc))
+		item := toSchedule(sc)
+		if src, ok := sources[db.UUIDString(sc.ID)]; ok {
+			item.LastPaymentSource = &src
+		}
+		items = append(items, item)
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"items": items})
 }
@@ -1335,6 +1361,12 @@ func (s *Server) handleMySchedules(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	scheduleIDs := make([]pgtype.UUID, 0, len(rows))
+	for _, sc := range rows {
+		scheduleIDs = append(scheduleIDs, sc.ID)
+	}
+	sources := s.lastPaymentSources(r.Context(), scheduleIDs)
 
 	today := time.Now().UTC()
 	// Phase 16 §16.3: the countdown chip is read on the renter's own wall
@@ -1367,6 +1399,14 @@ func (s *Server) handleMySchedules(w http.ResponseWriter, r *http.Request) {
 				"property_name": sc.PropertyName, "org_name": sc.OrgName,
 				"status": sc.ContractStatus,
 			},
+		}
+		// The renter sees the same "imported" / "backfilled" chip the landlord
+		// does: money recorded on their behalf is money they should be able to
+		// see the provenance of.
+		if src, ok := sources[db.UUIDString(sc.ID)]; ok {
+			item["last_payment_source"] = src
+		} else {
+			item["last_payment_source"] = nil
 		}
 		items = append(items, item)
 		if sc.Status == "overdue" && sc.Amount > sc.PaidAmount {

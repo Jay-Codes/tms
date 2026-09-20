@@ -85,8 +85,13 @@ type paymentResponse struct {
 	// ImportBatchID names the CSV import this payment arrived on, and is null
 	// for money the landlord keyed in. It is what puts the "imported" chip on
 	// a ledger row (Phase 16 §16.2).
-	ImportBatchID *string   `json:"import_batch_id"`
-	UnitName      string    `json:"unit_name"`
+	ImportBatchID *string `json:"import_batch_id"`
+	// Source is where the money came from (Phase 20 §20.3): `manual` keyed in
+	// by hand, `import` from a CSV, `backfill` written to close a period that
+	// predates TMS. `import_batch_id` still names *which* file; this says what
+	// kind of movement it was, and is what the ledger filter and the chips read.
+	Source       string    `json:"source"`
+	UnitName     string    `json:"unit_name"`
 	PropertyName  string    `json:"property_name"`
 	RenterName    string    `json:"renter_name"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -114,6 +119,10 @@ type scheduleItem struct {
 	Status      string            `json:"status"`
 	DaysOverdue int               `json:"days_overdue"`
 	Contract    *scheduleContract `json:"contract,omitempty"`
+	// LastPaymentSource is the `source` of the newest live payment allocated to
+	// this instalment, or null when nothing has been. It is a join, not a stored
+	// column — the chip follows the money, so a reversal takes it away.
+	LastPaymentSource *string `json:"last_payment_source,omitempty"`
 }
 
 // BankAccount is the org's collection account: what a renter is told to pay
@@ -147,6 +156,7 @@ func toPayment(r paymentRow, applied []appliedAlloc, withActor bool) paymentResp
 		PaidAt:         r.PaidAt.Time,
 		Note:           r.Note,
 		Status:         r.Status,
+		Source:         r.Source,
 		ReversedAt:     timePtr(r.ReversedAt.Valid, r.ReversedAt.Time),
 		ReversalReason: r.ReversalReason,
 		Applied:        applied,

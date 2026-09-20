@@ -827,6 +827,12 @@ func (s *Server) resolveRenterRows(
 		row.resolved["full_name"] = parsed.FullName
 		row.resolved["phone"] = parsed.Phone
 		row.resolved["locale"] = parsed.Locale
+		// The preview table shows the date the tenancy will be dated from, so a
+		// landlord sees "2024-03-01" before the past periods are generated
+		// rather than after (Phase 20 §20.3).
+		if !parsed.StartDate.IsZero() {
+			row.resolved["start_date"] = parsed.StartDate.Format(dateLayout)
+		}
 
 		if seenPhones[parsed.Phone] {
 			row.errs.Add("phone", "this file already has a row for this number")
@@ -1133,7 +1139,17 @@ func (s *Server) simulateImportPayments(
 		}
 		applied, err := allocateAgainst(book, row.payment.Amount)
 		if err != nil {
-			row.errs.Add("amount", importErrExceedsBalance)
+			// Phase 20 §20.3: the commonest cause of "exceeds contract balance"
+			// on a history import is not a wrong amount at all — it is a payment
+			// dated before the rent book begins, because the contract was
+			// entered with today's start date instead of the real move-in date.
+			// Saying so, and naming Backfill, is the difference between a
+			// landlord fixing it and a landlord giving up.
+			if s.paymentPredatesRentBook(ctx, q, p.OrgID, row.contractID, row.payment.PaidAt) {
+				row.errs.Add("paid_at", importErrBeforeRentBook)
+			} else {
+				row.errs.Add("amount", importErrExceedsBalance)
+			}
 			continue
 		}
 		for _, a := range applied {
@@ -1152,6 +1168,27 @@ func (s *Server) simulateImportPayments(
 // importErrExceedsBalance is the row error PLAN2 names for a payment bigger
 // than everything the contract still owes.
 const importErrExceedsBalance = "exceeds_contract_balance"
+
+// importErrBeforeRentBook is the same refusal, explained, for the case that
+// actually causes it on a history import (Phase 20 §20.3).
+const importErrBeforeRentBook = "this payment predates the rent book — set the " +
+	"contract's start date to the real move-in date, or use Backfill to settle " +
+	"the periods before TMS"
+
+// paymentPredatesRentBook reports whether a payment is dated before the first
+// period the contract's schedule covers, which is the state Backfill exists to
+// fix. A contract with no schedules at all (never activated) is not this case.
+func (s *Server) paymentPredatesRentBook(
+	ctx context.Context, q *sqlc.Queries, orgID, contractID pgtype.UUID, paidAt time.Time,
+) bool {
+	first, err := q.FirstSchedulePeriodStart(ctx, sqlc.FirstSchedulePeriodStartParams{
+		OrgID: orgID, ContractID: contractID,
+	})
+	if err != nil || !first.Valid {
+		return false
+	}
+	return paidAt.Before(first.Time)
+}
 
 // paymentRowOrder is the order money is applied in: by the date it was
 // received, and by the sheet's own order within a day. Allocation walks
@@ -1414,7 +1451,13 @@ func (s *Server) createImportedTenancy(
 	ctx context.Context, q *sqlc.Queries, p auth.Principal, row *importRow, userID pgtype.UUID,
 ) (pgtype.UUID, pgtype.UUID, string, error) {
 	var zero pgtype.UUID
+	// Phase 20 §20.3: the sheet may name the real move-in date, so a landlord
+	// importing an existing book gets a contract whose past periods exist. With
+	// no column value the behaviour is what it was — the tenancy starts today.
 	start := time.Now().UTC().Truncate(24 * time.Hour)
+	if !row.renter.StartDate.IsZero() {
+		start = row.renter.StartDate
+	}
 	term := int32(importTermDays)
 	end := start.AddDate(0, 0, importTermDays)
 
@@ -1502,6 +1545,9 @@ func (s *Server) applyImportedPayment(
 	}
 	applied, err := allocateAgainst(book, row.payment.Amount)
 	if err != nil {
+		if s.paymentPredatesRentBook(ctx, q, p.OrgID, row.contractID, row.payment.PaidAt) {
+			return zero, row.fail("paid_at", importErrBeforeRentBook)
+		}
 		return zero, row.fail("amount", importErrExceedsBalance)
 	}
 
@@ -1512,6 +1558,10 @@ func (s *Server) applyImportedPayment(
 		Method: row.payment.Method, Reference: db.Str(row.payment.Reference),
 		PaidAt: db.TS(row.payment.PaidAt), RecordedByUserID: p.UserID,
 		Note: db.Str(row.payment.Note), ImportBatchID: batch.ID,
+		// Phase 20 §20.3: the chip is a stored value now, not a derivation
+		// from `import_batch_id`, so the one path that sets the batch also
+		// states the source.
+		Source: strPtr(sourceImport),
 	})
 	if err != nil {
 		return zero, err

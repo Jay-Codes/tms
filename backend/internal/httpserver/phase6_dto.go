@@ -69,6 +69,27 @@ type notificationKinds struct {
 	OverdueDaily     kindToggle     `json:"overdue_daily"`
 	ThankYou         kindToggle     `json:"thank_you"`
 	UnsignedReminder kindWithAfter  `json:"unsigned_reminder"`
+	// The two kinds added in Phases 19 and 20 are pointers, unlike the five
+	// above, and for a reason worth stating: `notificationSettingsOf` copies
+	// the stored block wholesale, so a value type would decode an org's
+	// existing settings blob — written before these keys existed — as
+	// `enabled: false` and silently switch both messages off for every org
+	// already on the platform. Nil means "never configured", which resolves to
+	// on (see NameCorrectedEnabled / BackfillDoneEnabled).
+	NameCorrected *kindToggle `json:"name_corrected,omitempty"`
+	BackfillDone  *kindToggle `json:"backfill_done,omitempty"`
+}
+
+// NameCorrectedEnabled reports whether a renter is told when somebody else
+// fixes the spelling of their name (§19.3). Unset means on.
+func (k notificationKinds) NameCorrectedEnabled() bool {
+	return k.NameCorrected == nil || k.NameCorrected.Enabled
+}
+
+// BackfillDoneEnabled reports whether a settlement of pre-TMS history raises
+// its one SMS (§20.3). Unset means on.
+func (k notificationKinds) BackfillDoneEnabled() bool {
+	return k.BackfillDone == nil || k.BackfillDone.Enabled
 }
 
 // NotificationSettings is what is stored under `orgs.settings.notifications`.
@@ -212,6 +233,8 @@ type kindWithAfterPatch struct {
 }
 
 type notificationKindsPatch struct {
+	NameCorrected    *kindTogglePatch     `json:"name_corrected"`
+	BackfillDone     *kindTogglePatch     `json:"backfill_done"`
 	Reminder7d       *kindWithOffsetPatch `json:"reminder_7d"`
 	ReminderDue      *kindTogglePatch     `json:"reminder_due"`
 	OverdueDaily     *kindTogglePatch     `json:"overdue_daily"`
@@ -295,6 +318,12 @@ func applyKindsPatch(k *notificationKinds, p notificationKindsPatch, f validate.
 	}
 	if p.ThankYou != nil && p.ThankYou.Enabled != nil {
 		k.ThankYou.Enabled = *p.ThankYou.Enabled
+	}
+	if p.NameCorrected != nil && p.NameCorrected.Enabled != nil {
+		k.NameCorrected = &kindToggle{Enabled: *p.NameCorrected.Enabled}
+	}
+	if p.BackfillDone != nil && p.BackfillDone.Enabled != nil {
+		k.BackfillDone = &kindToggle{Enabled: *p.BackfillDone.Enabled}
 	}
 	if p.UnsignedReminder != nil {
 		if p.UnsignedReminder.Enabled != nil {

@@ -374,6 +374,11 @@ func (s *Server) handleAdminAuditLog(w http.ResponseWriter, r *http.Request) {
 	if v := strings.TrimSpace(qs.Get("entity_type")); v != "" {
 		params.EntityType = &v
 	}
+	// Phase 19: `action` is exact where `q` is a substring, so the identity
+	// actions can be listed on their own.
+	if v := strings.TrimSpace(qs.Get("action")); v != "" {
+		params.Action = &v
+	}
 	if v := strings.TrimSpace(qs.Get("q")); v != "" {
 		term := escapeLike(v)
 		params.Q = &term
