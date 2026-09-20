@@ -29,6 +29,12 @@ export interface ProblemDetail {
   errors?: Record<string, string>;
   /** Present on some 429s; seconds until the caller may retry. */
   retry_after_seconds?: number;
+  /**
+   * Phase 20.1: the amount the server insists on, sent alongside
+   * `422 amount_mismatch` when a proof's amount no longer matches the
+   * instalment's outstanding balance.
+   */
+  expected?: number;
 }
 
 /** Typed error thrown for any non-2xx response (and for network failures). */
@@ -38,6 +44,8 @@ export class ApiError extends Error {
   readonly detail: string;
   readonly errors: Record<string, string>;
   readonly retryAfterSeconds?: number;
+  /** Phase 20.1: `expected` from a `422 amount_mismatch` problem document. */
+  readonly expected?: number;
   /** RFC-7807 `type`, verbatim. */
   readonly type: string;
   /**
@@ -59,6 +67,7 @@ export class ApiError extends Error {
     this.type = problem.type || '';
     this.retryAfterSeconds =
       typeof problem.retry_after_seconds === 'number' ? problem.retry_after_seconds : undefined;
+    this.expected = typeof problem.expected === 'number' ? problem.expected : undefined;
   }
 
   /**
@@ -342,9 +351,22 @@ export interface RenterProfile {
   updated_at: string;
 }
 
+/**
+ * Phase 19.1: one audited look at the renter's full NIDA number. The renter
+ * cannot stop a reveal — seeing who looked, and when, is the deterrent SPEC §8
+ * asks for. `org_name` is absent when platform support did the looking.
+ */
+export interface NidaReveal {
+  at: string;
+  by_kind: 'landlord' | 'platform_admin' | string;
+  org_name?: string | null;
+}
+
 export interface ProfileResponse {
   user: { id: string; phone: string; full_name: string; email: string };
   profile: RenterProfile;
+  /** Phase 19.1 — last 10 reveals, newest first. Absent on an older API. */
+  nida_reveals?: NidaReveal[];
 }
 
 export interface ProfileInput {
@@ -443,8 +465,16 @@ export const renterApi = {
   /** `GET /me/schedules` — ledger, next due, overdue total, bank account. */
   schedules: (signal?: AbortSignal) => api.get<MySchedulesResponse>('/me/schedules', { signal }),
 
-  /** `GET /me/payments` — the renter's own receipts, newest first. */
-  payments: (signal?: AbortSignal) => api.get<MyPaymentsResponse>('/me/payments', { signal }),
+  /**
+   * `GET /me/payments` — the renter's own receipts, newest first. Phase 18.2:
+   * 50 rows a page; pass the previous response's `next_cursor` for the ones
+   * before them.
+   */
+  payments: (signal?: AbortSignal, cursor?: string | null) =>
+    api.get<MyPaymentsResponse>('/me/payments', {
+      signal,
+      query: cursor ? { cursor } : undefined,
+    }),
 
   /* Phase 16 — proof of payment (API.md Part 2 §16.1). */
 
@@ -459,8 +489,9 @@ export const renterApi = {
   /** `POST /me/proofs` — the claim itself, once the object is in the bucket. */
   createProof: (input: ProofInput) => api.post<{ proof: Proof }>('/me/proofs', input),
 
-  /** `GET /me/proofs` — the renter's own claims, newest first. */
-  proofs: (signal?: AbortSignal) => api.get<MyProofsResponse>('/me/proofs', { signal }),
+  /** `GET /me/proofs` — the renter's own claims, newest first, paged. */
+  proofs: (signal?: AbortSignal, cursor?: string | null) =>
+    api.get<MyProofsResponse>('/me/proofs', { signal, query: cursor ? { cursor } : undefined }),
 
   /** `DELETE /me/proofs/{id}` — withdraw, only while `submitted`. */
   withdrawProof: (id: string) => api.del<void>(`/me/proofs/${encodeURIComponent(id)}`),
@@ -605,6 +636,14 @@ export interface VerifyResponse {
 
 export type ScheduleStatus = 'pending' | 'paid' | 'partial' | 'overdue' | 'waived';
 
+/**
+ * Phase 20.3: how the money on a row reached the ledger. `manual` is a
+ * landlord typing it in, `import` a CSV, `backfill` a tenancy that predates
+ * TMS being settled in one call. The renter only ever reads it — it decides
+ * which chip the row wears, nothing else.
+ */
+export type PaymentSource = 'manual' | 'import' | 'backfill';
+
 export interface PaymentSchedule {
   id: string;
   period_start: string;
@@ -613,6 +652,8 @@ export interface PaymentSchedule {
   amount: number;
   status: ScheduleStatus;
   paid_amount: number;
+  /** Phase 20.3 — the source of this row's most recent payment, if any. */
+  last_payment_source?: PaymentSource | string | null;
 }
 
 /** `GET /me/schedules` rows carry the contract they belong to. */
@@ -656,9 +697,18 @@ export interface SignInput {
   signature_object_key?: string;
 }
 
+export interface MyContractsResponse {
+  items: Contract[];
+  /** Phase 18.2: the cursor for the page before these; null at the end. */
+  next_cursor?: string | null;
+}
+
 export const contractApi = {
-  mine: (signal?: AbortSignal) =>
-    api.get<{ items: Contract[]; next_cursor?: string | null }>('/me/contracts', { signal }),
+  mine: (signal?: AbortSignal, cursor?: string | null) =>
+    api.get<MyContractsResponse>('/me/contracts', {
+      signal,
+      query: cursor ? { cursor } : undefined,
+    }),
 
   get: (id: string, signal?: AbortSignal) =>
     api.get<{ contract: Contract }>(`/contracts/${encodeURIComponent(id)}`, { signal }),
@@ -760,6 +810,8 @@ export interface MyPayment {
   /** Denormalized on the wire so a receipt names its unit without a join. */
   unit_name?: string | null;
   property_name?: string | null;
+  /** Phase 20.3 — how this receipt got here (`manual` when the API omits it). */
+  source?: PaymentSource | string | null;
 }
 
 export interface MyPaymentsResponse {
@@ -773,6 +825,22 @@ export function paymentMethodLabel(t: Translator, method: string): string {
     return t(`payments.method.${method}`);
   }
   return method.replace(/_/g, ' ');
+}
+
+/**
+ * Phase 18.2: the contract statuses that are still a tenancy — the backend's
+ * `isLiveContract` (contract_handlers.go), mirrored here so the renter's own
+ * screens can separate "current" from "past" without another round-trip.
+ */
+export const LIVE_CONTRACT_STATUSES: readonly string[] = [
+  'pending_signature',
+  'active',
+  'expiring',
+];
+
+/** True while a contract is still running (or waiting to be signed). */
+export function isLiveContractStatus(status?: string | null): boolean {
+  return !!status && LIVE_CONTRACT_STATUSES.includes(status);
 }
 
 /** What is still owed on a schedule row. Never negative. */

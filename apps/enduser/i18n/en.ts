@@ -45,6 +45,8 @@ const messages: Messages = {
   'common.yourUnit': 'Your unit',
   'common.days.one': '{count} day',
   'common.days.other': '{count} days',
+  'common.showOlder': 'Show older',
+  'common.loadingOlder': 'Loading older…',
 
   /* ---------------------------------------------------------------- nav */
   'nav.aria': 'Main',
@@ -155,6 +157,15 @@ const messages: Messages = {
   'home.hint.none': 'No tenancy yet — scan your unit’s QR code.',
   'home.hint.qr': 'The sticker on your door opens this app with the unit already filled in.',
   'home.hero.howToPay': 'How to pay',
+  'home.unitCode.title': 'Have a unit code?',
+  'home.unitCode.label': 'Unit code',
+  'home.unitCode.placeholder': 'e.g. 7K2QM4XB9T',
+  'home.unitCode.hint': 'The 10-character code printed under the QR sticker on your door.',
+  'home.unitCode.submit': 'Open this unit',
+  'home.unitCode.error': 'A unit code is 10 letters and numbers.',
+  'home.dues.title': 'Your next payments',
+  'home.dues.lead': 'One card for each unit you rent.',
+  'home.dues.nothing': 'Nothing due on this unit yet.',
 
   /* ------------------------------------------------------------ install */
   'install.text': 'Add Rent Book to your home screen.',
@@ -187,6 +198,10 @@ const messages: Messages = {
   'contract.list.open': 'Open the agreement for {unit}',
   'contract.list.next': 'Next payment {date}.',
   'contract.list.nextWithAmount': 'Next payment {date} · {amount}.',
+  'contract.list.current': 'Current',
+  'contract.list.past': 'Past',
+  'contract.list.pastCount.one': '{count} tenancy that has ended',
+  'contract.list.pastCount.other': '{count} tenancies that have ended',
   'contract.status.awaitingYou': 'Awaiting your signature',
   'contract.status.awaitingLandlord': 'Waiting for landlord to countersign',
   'contract.status.active': 'Active',
@@ -271,6 +286,9 @@ const messages: Messages = {
   'payments.noSchedule': 'No payment schedule yet. It appears here once your contract is active.',
   'payments.history': 'History',
   'payments.noHistory': 'Nothing received yet.',
+  'payments.past.title': 'Past tenancies',
+  'payments.past.count.one': '{count} tenancy that has ended',
+  'payments.past.count.other': '{count} tenancies that have ended',
   'payments.received': 'Received',
   'payments.reversed': 'Reversed',
   'payments.method.cash': 'Cash',
@@ -292,6 +310,8 @@ const messages: Messages = {
   'schedule.paidAmount': '{amount} paid',
   'schedule.daysLate.one': '{count} day late',
   'schedule.daysLate.other': '{count} days late',
+  'schedule.source.import': 'Imported',
+  'schedule.source.backfill': 'Backfilled',
 
   /* -------------------------------------------------------------- proof */
   'proof.send': 'Send proof',
@@ -299,11 +319,14 @@ const messages: Messages = {
   'proof.title': 'Send proof of payment',
   'proof.lead': 'Already paid? Send the receipt and your landlord will confirm it here.',
   'proof.amount': 'Amount you paid',
+  'proof.amountLocked': 'This period’s balance.',
   'proof.paidAt': 'Day you paid',
   'proof.method': 'How you paid',
   'proof.reference': 'Reference (optional)',
   'proof.note': 'Note (optional)',
   'proof.file': 'Photo or PDF of the receipt',
+  'proof.takePhoto': 'Take photo',
+  'proof.chooseFile': 'Choose a file',
   'proof.fileHint': 'JPEG, PNG or PDF, up to 5 MB.',
   'proof.filePreviewAlt': 'The receipt you chose',
   'proof.instructions': 'Where to pay',
@@ -328,6 +351,7 @@ const messages: Messages = {
   'proof.error.fileRequired': 'Choose a photo or PDF of your receipt.',
   'proof.error.fileType': 'Choose a JPEG, PNG or PDF file.',
   'proof.error.fileSize': 'That file is larger than 5 MB. Choose a smaller one.',
+  'proof.error.amountMismatch': 'The balance on this period is now {amount}. We have corrected the amount — send it again.',
 
   /* ------------------------------------------------------------ profile */
   'profile.eyebrow': 'Profile',
@@ -340,6 +364,12 @@ const messages: Messages = {
   'profile.loading': 'Loading your details…',
   'profile.logout': 'Log out',
   'profile.loggingOut': 'Signing out…',
+  'profile.reveals.title': 'Who has seen your NIDA',
+  'profile.reveals.lead': 'Your full number is normally masked. Every time a landlord or our support team looks at it, the look is recorded here.',
+  'profile.reveals.none': 'Nobody has looked at your full NIDA number.',
+  'profile.reveals.landlord': '{org} · your landlord',
+  'profile.reveals.landlordUnknown': 'Your landlord',
+  'profile.reveals.admin': 'Rent Book support',
 
   /* ---------------------------------------------------------------- kyc */
   'kyc.heading': 'Your details',

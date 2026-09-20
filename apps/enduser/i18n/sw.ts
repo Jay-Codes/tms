@@ -40,6 +40,8 @@ const messages: Messages = {
   'common.yourUnit': 'Chumba chako',
   'common.days.one': 'siku {count}',
   'common.days.other': 'siku {count}',
+  'common.showOlder': 'Onyesha za zamani',
+  'common.loadingOlder': 'Inapakia za zamani…',
 
   /* ---------------------------------------------------------------- nav */
   'nav.aria': 'Menyu kuu',
@@ -150,6 +152,15 @@ const messages: Messages = {
   'home.hint.none': 'Bado huna upangaji — piga skani msimbo wa QR wa chumba chako.',
   'home.hint.qr': 'Kibandiko kilichopo mlangoni kwako hufungua programu hii na chumba kikiwa tayari kimejazwa.',
   'home.hero.howToPay': 'Jinsi ya kulipa',
+  'home.unitCode.title': 'Una namba ya chumba?',
+  'home.unitCode.label': 'Namba ya chumba',
+  'home.unitCode.placeholder': 'mfano 7K2QM4XB9T',
+  'home.unitCode.hint': 'Namba ya herufi 10 iliyochapishwa chini ya kibandiko cha QR mlangoni kwako.',
+  'home.unitCode.submit': 'Fungua chumba hiki',
+  'home.unitCode.error': 'Namba ya chumba ni herufi na tarakimu 10.',
+  'home.dues.title': 'Malipo yako yanayofuata',
+  'home.dues.lead': 'Kadi moja kwa kila chumba unachopanga.',
+  'home.dues.nothing': 'Hakuna kinachodaiwa kwa chumba hiki bado.',
 
   /* ------------------------------------------------------------ install */
   'install.text': 'Weka Kitabu cha kodi kwenye skrini yako ya mwanzo.',
@@ -182,6 +193,10 @@ const messages: Messages = {
   'contract.list.open': 'Fungua mkataba wa {unit}',
   'contract.list.next': 'Malipo yanayofuata {date}.',
   'contract.list.nextWithAmount': 'Malipo yanayofuata {date} · {amount}.',
+  'contract.list.current': 'Za sasa',
+  'contract.list.past': 'Za zamani',
+  'contract.list.pastCount.one': 'Upangaji {count} umeisha',
+  'contract.list.pastCount.other': 'Upangaji {count} umeisha',
   'contract.status.awaitingYou': 'Inasubiri saini yako',
   'contract.status.awaitingLandlord': 'Inasubiri mwenye nyumba asaini',
   'contract.status.active': 'Unatumika',
@@ -266,6 +281,9 @@ const messages: Messages = {
   'payments.noSchedule': 'Bado hakuna ratiba ya malipo. Itaonekana hapa mkataba wako utakapoanza kutumika.',
   'payments.history': 'Historia',
   'payments.noHistory': 'Bado hakuna malipo yaliyopokelewa.',
+  'payments.past.title': 'Upangaji uliopita',
+  'payments.past.count.one': 'Upangaji {count} umeisha',
+  'payments.past.count.other': 'Upangaji {count} umeisha',
   'payments.received': 'Imepokelewa',
   'payments.reversed': 'Imefutwa',
   'payments.method.cash': 'Fedha taslimu',
@@ -287,6 +305,8 @@ const messages: Messages = {
   'schedule.paidAmount': '{amount} zimelipwa',
   'schedule.daysLate.one': 'imechelewa siku {count}',
   'schedule.daysLate.other': 'imechelewa siku {count}',
+  'schedule.source.import': 'Imeingizwa',
+  'schedule.source.backfill': 'Imerekodiwa ya zamani',
 
   /* -------------------------------------------------------------- proof */
   'proof.send': 'Tuma uthibitisho',
@@ -294,11 +314,14 @@ const messages: Messages = {
   'proof.title': 'Tuma uthibitisho wa malipo',
   'proof.lead': 'Umeshalipa? Tuma risiti na mwenye nyumba atathibitisha hapa.',
   'proof.amount': 'Kiasi ulicholipa',
+  'proof.amountLocked': 'Salio la kipindi hiki.',
   'proof.paidAt': 'Siku uliyolipa',
   'proof.method': 'Ulilipaje',
   'proof.reference': 'Kumbukumbu (si lazima)',
   'proof.note': 'Maelezo (si lazima)',
   'proof.file': 'Picha au PDF ya risiti',
+  'proof.takePhoto': 'Piga picha',
+  'proof.chooseFile': 'Chagua faili',
   'proof.fileHint': 'JPEG, PNG au PDF, hadi MB 5.',
   'proof.filePreviewAlt': 'Risiti uliyochagua',
   'proof.instructions': 'Mahali pa kulipa',
@@ -323,6 +346,7 @@ const messages: Messages = {
   'proof.error.fileRequired': 'Chagua picha au PDF ya risiti yako.',
   'proof.error.fileType': 'Chagua faili la JPEG, PNG au PDF.',
   'proof.error.fileSize': 'Faili hilo ni kubwa kuliko MB 5. Chagua dogo zaidi.',
+  'proof.error.amountMismatch': 'Salio la kipindi hiki sasa ni {amount}. Tumesahihisha kiasi — tuma tena.',
 
   /* ------------------------------------------------------------ profile */
   'profile.eyebrow': 'Wasifu',
@@ -335,6 +359,12 @@ const messages: Messages = {
   'profile.loading': 'Inapakia taarifa zako…',
   'profile.logout': 'Toka',
   'profile.loggingOut': 'Inakutoa…',
+  'profile.reveals.title': 'Nani aliona NIDA yako',
+  'profile.reveals.lead': 'Namba yako kamili kwa kawaida imefichwa. Kila mara mwenye nyumba au timu yetu ya usaidizi anaiona, tunaandika hapa.',
+  'profile.reveals.none': 'Hakuna aliyeona namba yako kamili ya NIDA.',
+  'profile.reveals.landlord': '{org} · mwenye nyumba wako',
+  'profile.reveals.landlordUnknown': 'Mwenye nyumba wako',
+  'profile.reveals.admin': 'Usaidizi wa Rent Book',
 
   /* ---------------------------------------------------------------- kyc */
   'kyc.heading': 'Taarifa zako',
