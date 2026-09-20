@@ -8,6 +8,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AssistSession struct {
+	ID              pgtype.UUID        `json:"id"`
+	OrgID           pgtype.UUID        `json:"org_id"`
+	UnitID          pgtype.UUID        `json:"unit_id"`
+	Phone           string             `json:"phone"`
+	Purpose         string             `json:"purpose"`
+	StartedByUserID pgtype.UUID        `json:"started_by_user_id"`
+	RenterUserID    pgtype.UUID        `json:"renter_user_id"`
+	LinkRequestID   pgtype.UUID        `json:"link_request_id"`
+	Status          string             `json:"status"`
+	CodeIssuedCount int32              `json:"code_issued_count"`
+	LastCodeAt      pgtype.Timestamptz `json:"last_code_at"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	ClosedAt        pgtype.Timestamptz `json:"closed_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type AuditLog struct {
 	ID          pgtype.UUID        `json:"id"`
 	OrgID       pgtype.UUID        `json:"org_id"`
@@ -65,6 +83,7 @@ type ContractSignature struct {
 	SignedAt           pgtype.Timestamptz `json:"signed_at"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	WitnessedByUserID  pgtype.UUID        `json:"witnessed_by_user_id"`
 }
 
 type ContractTemplate struct {

@@ -34,6 +34,15 @@ const (
 	prefixOTP        = "otp:"
 	prefixOTPCooldwn = "otp:cooldown:"
 	prefixOTPToken   = "otptok:"
+	// prefixAssist marks a slot whose code was shown on a landlord's screen
+	// rather than sent (Phase 18, FLOWS 2b). The value is the assist session
+	// id, so the register/login handlers can stamp the session the renter
+	// just came from without the renter's device ever carrying it.
+	prefixAssist = "otp:assist:"
+	// prefixWitness marks a contract whose signing code was shown in person.
+	// The value is the org user who showed it, which becomes
+	// contract_signatures.witnessed_by_user_id.
+	prefixWitness = "otp:witness:"
 	// PrefixEmailVerify keys email-verification tokens.
 	PrefixEmailVerify = "emailverify:"
 	// PrefixInvite keys staff invite tokens.
@@ -91,6 +100,90 @@ func (s *Store) PutOTP(ctx context.Context, purpose, phone, code string) error {
 		return ErrCacheUnavailable
 	}
 	return nil
+}
+
+// PutOTPAssisted stores a code for (purpose, phone) the way the landlord's
+// screen issues one (Phase 18, SPEC §5.15).
+//
+// It differs from PutOTP in exactly one respect: it neither checks nor arms
+// the per-phone resend cooldown. The cooldown exists to stop a stranger
+// walking a number's inbox from a public endpoint; an assisted code is issued
+// by an authenticated org user who is standing next to the renter, and is
+// limited per org (30/h) and per session (10) instead. It overwrites whatever
+// is in the slot, so a text still in flight carries a dead code — which is the
+// documented edge case, not a bug (FLOWS 2b).
+func (s *Store) PutOTPAssisted(ctx context.Context, purpose, phone, code string) error {
+	if s == nil || s.Redis == nil {
+		return ErrCacheUnavailable
+	}
+	if err := s.Redis.Set(ctx, prefixOTP+purpose+":"+phone, code, OTPTTL).Err(); err != nil {
+		return ErrCacheUnavailable
+	}
+	return nil
+}
+
+// SetAssistMarker records that the live code for (purpose, phone) was shown in
+// person by the given assist session. It expires with the code.
+func (s *Store) SetAssistMarker(ctx context.Context, purpose, phone, sessionID string) error {
+	if s == nil || s.Redis == nil {
+		return ErrCacheUnavailable
+	}
+	if err := s.Redis.Set(ctx, prefixAssist+purpose+":"+phone, sessionID, OTPTTL).Err(); err != nil {
+		return ErrCacheUnavailable
+	}
+	return nil
+}
+
+// PeekAssistMarker reads the marker without spending it. The `register` flow
+// reads it twice — once at verify, when the account does not exist yet, and
+// once at registration, when it does — so the verify half must leave it.
+func (s *Store) PeekAssistMarker(ctx context.Context, purpose, phone string) string {
+	if s == nil || s.Redis == nil {
+		return ""
+	}
+	v, err := s.Redis.Get(ctx, prefixAssist+purpose+":"+phone).Result()
+	if err != nil {
+		return ""
+	}
+	return v
+}
+
+// TakeAssistMarker reads and spends the marker. A missing or unreadable marker
+// is an empty string: the assisted stamp is a nicety on top of a flow that has
+// already succeeded, so it never fails the request.
+func (s *Store) TakeAssistMarker(ctx context.Context, purpose, phone string) string {
+	if s == nil || s.Redis == nil {
+		return ""
+	}
+	v, err := s.Redis.GetDel(ctx, prefixAssist+purpose+":"+phone).Result()
+	if err != nil {
+		return ""
+	}
+	return v
+}
+
+// SetWitnessMarker records the org user who showed a contract's signing code.
+func (s *Store) SetWitnessMarker(ctx context.Context, contractID, userID string) error {
+	if s == nil || s.Redis == nil {
+		return ErrCacheUnavailable
+	}
+	if err := s.Redis.Set(ctx, prefixWitness+contractID, userID, OTPTTL).Err(); err != nil {
+		return ErrCacheUnavailable
+	}
+	return nil
+}
+
+// TakeWitnessMarker spends the witness marker for a contract, returning the org
+// user who showed the code (empty when the code came by SMS).
+func (s *Store) TakeWitnessMarker(ctx context.Context, contractID string) string {
+	if s == nil || s.Redis == nil {
+		return ""
+	}
+	v, err := s.Redis.GetDel(ctx, prefixWitness+contractID).Result()
+	if err != nil {
+		return ""
+	}
+	return v
 }
 
 // CheckOTP compares a submitted code against the stored one. A correct code is

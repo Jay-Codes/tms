@@ -584,6 +584,11 @@ func (s *Server) handleContractDocument(w http.ResponseWriter, r *http.Request) 
 			"party": sg.Party, "name": sg.SignerName,
 			"signed_at": sg.SignedAt.Time, "method": sg.Method,
 			"phone_masked": maskPhone(db.StrVal(sg.SignerPhone)), "signature_image_url": nil,
+			// Phase 18: the document's signature block says who was standing
+			// there when an in-person code was used, so "witnessed by Neema
+			// Said" is part of the evidence bundle rather than a fact only the
+			// audit trail holds.
+			"witnessed_by": witnessOf(sg.WitnessedByUserID, sg.WitnessName),
 		}
 		if sg.SignatureObjectKey != nil && *sg.SignatureObjectKey != "" && s.deps.Storage != nil {
 			if url, err := s.deps.Storage.PresignGet(
@@ -907,16 +912,38 @@ func (s *Server) handleSignContract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Phase 18 (FLOWS 2b.6): the code may have been shown on a landlord's
+	// screen rather than texted. The marker is spent here, beside the code it
+	// belongs to, and names the org user who was standing there. It changes
+	// nothing about the signature itself — the renter signed, on their own
+	// device — only who the document records as having witnessed it.
+	var witness pgtype.UUID
+	witnessAfter := ""
+	if id := s.store.TakeWitnessMarker(r.Context(), db.UUIDString(row.ID)); id != "" {
+		if parsed, pErr := db.ParseUUID(id); pErr == nil {
+			witness, witnessAfter = parsed, id
+		}
+	}
+
 	info := audit.RequestInfoFrom(r.Context())
 	otpRef := "sign:" + db.UUIDString(row.ID)
 	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
 		if _, err := q.CreateContractSignature(r.Context(), sqlc.CreateContractSignatureParams{
 			OrgID: row.OrgID, ContractID: row.ID, Party: partyRenter, UserID: p.UserID,
 			Method: method, OtpRef: &otpRef, SignatureObjectKey: storedKey,
-			SnapshotHash: db.StrVal(row.SnapshotHash),
-			Ip:           db.Str(info.IP), UserAgent: db.Str(info.UserAgent),
+			SnapshotHash:      db.StrVal(row.SnapshotHash),
+			Ip:                db.Str(info.IP),
+			UserAgent:         db.Str(info.UserAgent),
+			WitnessedByUserID: witness,
 		}); err != nil {
 			return err
+		}
+		after := map[string]any{
+			"party": partyRenter, "method": method,
+			"snapshot_hash": db.StrVal(row.SnapshotHash), "has_image": storedKey != nil,
+		}
+		if witnessAfter != "" {
+			after["witnessed_by_user_id"] = witnessAfter
 		}
 		return audit.Record(r.Context(), q, audit.Entry{
 			OrgID:       db.UUIDString(row.OrgID),
@@ -924,10 +951,7 @@ func (s *Server) handleSignContract(w http.ResponseWriter, r *http.Request) {
 			Action:      audit.ActionContractSign,
 			EntityType:  audit.EntityContract,
 			EntityID:    db.UUIDString(row.ID),
-			After: map[string]any{
-				"party": partyRenter, "method": method,
-				"snapshot_hash": db.StrVal(row.SnapshotHash), "has_image": storedKey != nil,
-			},
+			After:       after,
 		})
 	}); err != nil {
 		if isUnique(err) {

@@ -169,6 +169,19 @@ const (
 	ActionProofAccept   = "proof.accept"
 	ActionProofReject   = "proof.reject"
 	ActionProofView     = "proof.view"
+
+	// Phase 18 — landlord-assisted onboarding (PLAN2 Phase 18, FLOWS 2b).
+	//
+	// Every reveal is its own row. A one-time code shown on a landlord's
+	// screen is the one place in the product where a member of staff holds a
+	// renter's credential for a moment, so "who showed a code for this
+	// number, how many times, and when?" must be answerable from the trail
+	// alone — `renter.assist_code` carries `n`, the session's running count.
+	// The code itself never appears in a payload.
+	ActionAssistStart        = "renter.assist_start"
+	ActionAssistCode         = "renter.assist_code"
+	ActionAssistClose        = "renter.assist_close"
+	ActionContractWitnessOTP = "contract.witness_otp"
 )
 
 // Entity types.
@@ -204,6 +217,9 @@ const (
 
 	// EntityImportBatch is one uploaded spreadsheet (Phase 16 §16.2).
 	EntityImportBatch = "import_batch"
+
+	// EntityAssistSession is one landlord-assisted onboarding (Phase 18).
+	EntityAssistSession = "assist_session"
 )
 
 type ctxKey int

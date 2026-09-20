@@ -284,6 +284,72 @@ func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotification
 	return i, err
 }
 
+const insertShownNotification = `-- name: InsertShownNotification :one
+
+INSERT INTO notification_log (
+    org_id, user_id, kind, channel, dedupe_key, payload, to_phone, body,
+    language, status
+)
+VALUES (
+    $1, $2, $3, 'in_person',
+    $4, $5, $6, '',
+    $7, 'shown'
+)
+ON CONFLICT (dedupe_key) DO NOTHING
+RETURNING id, org_id, user_id, kind, channel, dedupe_key, payload, provider_msg_id, status, sent_at, created_at, updated_at, to_phone, body, error, attempts, batch_id, language
+`
+
+type InsertShownNotificationParams struct {
+	OrgID     pgtype.UUID `json:"org_id"`
+	UserID    pgtype.UUID `json:"user_id"`
+	Kind      string      `json:"kind"`
+	DedupeKey string      `json:"dedupe_key"`
+	Payload   []byte      `json:"payload"`
+	ToPhone   string      `json:"to_phone"`
+	Language  string      `json:"language"`
+}
+
+// ------------------------------------------- Phase 18: the in-person code --
+// InsertShownNotification records a code the landlord showed on their own
+// screen instead of sending (Phase 18, SPEC §5.15). The row exists so that
+// "a code was revealed for this number" is findable in the delivery log; the
+// code itself is never written, so `body` is empty by construction. The status
+// is `shown`, which no worker claims — ClaimNotification requires `queued` —
+// and the channel is `in_person`, which debits no credit.
+func (q *Queries) InsertShownNotification(ctx context.Context, arg InsertShownNotificationParams) (NotificationLog, error) {
+	row := q.db.QueryRow(ctx, insertShownNotification,
+		arg.OrgID,
+		arg.UserID,
+		arg.Kind,
+		arg.DedupeKey,
+		arg.Payload,
+		arg.ToPhone,
+		arg.Language,
+	)
+	var i NotificationLog
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.UserID,
+		&i.Kind,
+		&i.Channel,
+		&i.DedupeKey,
+		&i.Payload,
+		&i.ProviderMsgID,
+		&i.Status,
+		&i.SentAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ToPhone,
+		&i.Body,
+		&i.Error,
+		&i.Attempts,
+		&i.BatchID,
+		&i.Language,
+	)
+	return i, err
+}
+
 const listActiveOrgs = `-- name: ListActiveOrgs :many
 
 SELECT o.id, o.name, o.settings,

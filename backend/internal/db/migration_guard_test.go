@@ -21,6 +21,7 @@ var schemaMigrations = []struct{ up, down string }{
 	{"../../migrations/000012_part2_foundations.up.sql", "../../migrations/000012_part2_foundations.down.sql"},
 	{"../../migrations/000018_payment_proofs.up.sql", "../../migrations/000018_payment_proofs.down.sql"},
 	{"../../migrations/000019_imports.up.sql", "../../migrations/000019_imports.down.sql"},
+	{"../../migrations/000020_assist_sessions.up.sql", "../../migrations/000020_assist_sessions.down.sql"},
 }
 
 // guardExemptTables carry an org_id column but are deliberately absent from

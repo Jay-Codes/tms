@@ -253,3 +253,25 @@ UPDATE notification_log
 SET status = 'queued', error = NULL
 WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND status = 'failed'
 RETURNING id;
+
+
+-- ------------------------------------------- Phase 18: the in-person code --
+
+-- InsertShownNotification records a code the landlord showed on their own
+-- screen instead of sending (Phase 18, SPEC §5.15). The row exists so that
+-- "a code was revealed for this number" is findable in the delivery log; the
+-- code itself is never written, so `body` is empty by construction. The status
+-- is `shown`, which no worker claims — ClaimNotification requires `queued` —
+-- and the channel is `in_person`, which debits no credit.
+-- name: InsertShownNotification :one
+INSERT INTO notification_log (
+    org_id, user_id, kind, channel, dedupe_key, payload, to_phone, body,
+    language, status
+)
+VALUES (
+    sqlc.arg(org_id), sqlc.narg(user_id), sqlc.arg(kind), 'in_person',
+    sqlc.arg(dedupe_key), sqlc.arg(payload), sqlc.arg(to_phone), '',
+    sqlc.arg(language), 'shown'
+)
+ON CONFLICT (dedupe_key) DO NOTHING
+RETURNING *;

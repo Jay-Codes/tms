@@ -6,12 +6,13 @@
 -- name: CreateContractSignature :one
 INSERT INTO contract_signatures (
     org_id, contract_id, party, user_id, method, otp_ref,
-    signature_object_key, snapshot_hash, ip, user_agent
+    signature_object_key, snapshot_hash, ip, user_agent, witnessed_by_user_id
 )
 VALUES (
     sqlc.arg(org_id), sqlc.arg(contract_id), sqlc.arg(party), sqlc.narg(user_id),
     sqlc.arg(method), sqlc.narg(otp_ref), sqlc.narg(signature_object_key),
-    sqlc.arg(snapshot_hash), sqlc.narg(ip), sqlc.narg(user_agent)
+    sqlc.arg(snapshot_hash), sqlc.narg(ip), sqlc.narg(user_agent),
+    sqlc.narg(witnessed_by_user_id)
 )
 RETURNING *;
 
@@ -19,9 +20,12 @@ RETURNING *;
 SELECT sg.id, sg.org_id, sg.contract_id, sg.party, sg.user_id, sg.method,
        sg.otp_ref, sg.signature_object_key, sg.snapshot_hash, sg.signed_at,
        COALESCE(u.full_name, '')::text AS signer_name,
-       u.phone AS signer_phone
+       u.phone AS signer_phone,
+       sg.witnessed_by_user_id,
+       COALESCE(w.full_name, '')::text AS witness_name
 FROM contract_signatures sg
 LEFT JOIN users u ON u.id = sg.user_id
+LEFT JOIN users w ON w.id = sg.witnessed_by_user_id
 WHERE sg.org_id = sqlc.arg(org_id) AND sg.contract_id = sqlc.arg(contract_id)
 ORDER BY sg.signed_at, sg.party;
 
@@ -38,9 +42,12 @@ WHERE org_id = sqlc.arg(org_id) AND contract_id = sqlc.arg(contract_id)
 SELECT sg.id, sg.org_id, sg.contract_id, sg.party, sg.user_id, sg.method,
        sg.otp_ref, sg.signature_object_key, sg.snapshot_hash, sg.signed_at,
        COALESCE(u.full_name, '')::text AS signer_name,
-       u.phone AS signer_phone
+       u.phone AS signer_phone,
+       sg.witnessed_by_user_id,
+       COALESCE(w.full_name, '')::text AS witness_name
 FROM contract_signatures sg
 LEFT JOIN users u ON u.id = sg.user_id
+LEFT JOIN users w ON w.id = sg.witnessed_by_user_id
 WHERE sg.org_id = sqlc.arg(org_id) AND sg.contract_id = ANY (sqlc.arg(contract_ids)::uuid[])
 ORDER BY sg.contract_id, sg.signed_at, sg.party;
 
@@ -52,8 +59,11 @@ ORDER BY sg.contract_id, sg.signed_at, sg.party;
 SELECT sg.id, sg.org_id, sg.contract_id, sg.party, sg.user_id, sg.method,
        sg.otp_ref, sg.signature_object_key, sg.snapshot_hash, sg.signed_at,
        COALESCE(u.full_name, '')::text AS signer_name,
-       u.phone AS signer_phone
+       u.phone AS signer_phone,
+       sg.witnessed_by_user_id,
+       COALESCE(w.full_name, '')::text AS witness_name
 FROM contract_signatures sg
 LEFT JOIN users u ON u.id = sg.user_id
+LEFT JOIN users w ON w.id = sg.witnessed_by_user_id
 WHERE sg.contract_id = ANY (sqlc.arg(contract_ids)::uuid[])
 ORDER BY sg.contract_id, sg.signed_at, sg.party;

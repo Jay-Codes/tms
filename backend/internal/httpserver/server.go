@@ -331,6 +331,23 @@ func (s *Server) routes() chi.Router {
 				r.Get("/imports/{id}", s.handleGetImport)
 				r.Post("/imports/{id}/commit", s.handleCommitImport)
 				r.Post("/imports/{id}/undo", s.handleUndoImport)
+
+				// --- Phase 18: landlord-assisted onboarding (FLOWS 2b) ---
+				//
+				// Owner and manager, the two roles that already onboard a
+				// renter: opening a session shows a one-time code for somebody
+				// else's number, which is the most sensitive thing a member of
+				// staff can be handed, so it is the same pair that approves a
+				// link request and not a wider set.
+				r.Post("/assist", s.handleCreateAssist)
+				r.Get("/assist", s.handleListAssist)
+				r.Get("/assist/{id}", s.handleGetAssist)
+				r.Post("/assist/{id}/code", s.handleAssistCode)
+				r.Post("/assist/{id}/close", s.handleCloseAssist)
+				// The signing half of the same encounter. The renter still
+				// signs on their own device through the unchanged
+				// POST /contracts/{id}/sign.
+				r.Post("/contracts/{id}/witness-otp", s.handleContractWitnessOTP)
 			})
 
 			// --- Phase 4: branding ---
@@ -422,6 +439,10 @@ func (s *Server) routes() chi.Router {
 		r.Get("/public/units/{unit_code}", s.publicRateLimited(s.handlePublicUnit))
 		// --- Phase 12: the shipped theme presets (public, cacheable) ---
 		r.Get("/themes/presets", s.publicRateLimited(s.handleThemePresets))
+		// --- Phase 18: the renter's own device resolving an assist link ---
+		// The QR carries a session id and nothing else; the answer is the unit
+		// code and the purpose, never the phone (SPEC §5.15).
+		r.Get("/public/assist/{id}", s.publicRateLimited(s.handlePublicAssist))
 		r.Group(func(r chi.Router) {
 			r.Use(s.sessions.RequireOrg(auth.RoleOwner))
 			r.Post("/org/members", s.handleCreateMember)

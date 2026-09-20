@@ -232,13 +232,23 @@ func (s *Server) handleOTPVerify(w http.ResponseWriter, r *http.Request) {
 	if u, uErr := s.q.GetUserByPhone(r.Context(), &phone); uErr == nil {
 		actorID = db.UUIDString(u.ID)
 	}
+	// Phase 18: was this code shown on a landlord's screen? The marker is only
+	// read here, never spent: for `register` the account does not exist yet,
+	// so POST /auth/register/renter is the half that spends it and stamps the
+	// session. Either way the trail records which encounter the code came
+	// from (FLOWS 2b).
+	assistSessionID := s.assistSessionForAudit(r.Context(), purpose, phone)
+	after := map[string]any{"phone": phone, "purpose": purpose}
+	if assistSessionID != "" {
+		after["assist_session_id"] = assistSessionID
+	}
 	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
 		return audit.Record(r.Context(), q, audit.Entry{
 			ActorUserID: actorID,
 			Action:      audit.ActionOTPVerify,
 			EntityType:  audit.EntityUser,
 			EntityID:    actorID,
-			After:       map[string]any{"phone": phone, "purpose": purpose},
+			After:       after,
 		})
 	}); err != nil {
 		s.serverError(w, r, "otp.verify.audit", err)
@@ -276,6 +286,11 @@ func (s *Server) handleOTPVerify(w http.ResponseWriter, r *http.Request) {
 		if user.Status != "active" {
 			httpx.WriteProblem(w, http.StatusForbidden, "forbidden", "this account is not active")
 			return
+		}
+		// The account already exists, so the assisted stamp can be made here
+		// and the marker spent: a login has no second half to wait for.
+		if sid := s.store.TakeAssistMarker(r.Context(), purpose, phone); sid != "" {
+			s.stampAssistRenter(r.Context(), sid, user.ID)
 		}
 		s.finishLogin(w, r, user, "", "", nil)
 
@@ -345,6 +360,15 @@ func (s *Server) handleRegisterRenter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Phase 18: the landlord-assisted marker, read before the transaction so
+	// the audit row can name the encounter, and spent after it commits so a
+	// failed registration leaves the session still waiting (FLOWS 2b).
+	assistSessionID := s.assistSessionForAudit(r.Context(), "register", phone)
+	registerAfter := map[string]any{"phone": phone, "full_name": fullName}
+	if assistSessionID != "" {
+		registerAfter["assist_session_id"] = assistSessionID
+	}
+
 	var (
 		user    sqlc.User
 		token   string
@@ -368,12 +392,13 @@ func (s *Server) handleRegisterRenter(w http.ResponseWriter, r *http.Request) {
 		}); err != nil {
 			return err
 		}
+		registerAfter["locale"] = user.Locale
 		if err := audit.Record(r.Context(), q, audit.Entry{
 			ActorUserID: db.UUIDString(user.ID),
 			Action:      audit.ActionRegisterRenter,
 			EntityType:  audit.EntityUser,
 			EntityID:    db.UUIDString(user.ID),
-			After:       map[string]any{"phone": phone, "full_name": fullName, "locale": user.Locale},
+			After:       registerAfter,
 		}); err != nil {
 			return err
 		}
@@ -388,6 +413,12 @@ func (s *Server) handleRegisterRenter(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.serverError(w, r, "register.tx", err)
 		return
+	}
+
+	// The account is durable: spend the marker and move the landlord's screen
+	// from "Waiting" to "Registered".
+	if sid := s.store.TakeAssistMarker(r.Context(), "register", phone); sid != "" {
+		s.stampAssistRenter(r.Context(), sid, user.ID)
 	}
 
 	s.sessions.Cache(r.Context(), session)

@@ -34,14 +34,15 @@ const createContractSignature = `-- name: CreateContractSignature :one
 
 INSERT INTO contract_signatures (
     org_id, contract_id, party, user_id, method, otp_ref,
-    signature_object_key, snapshot_hash, ip, user_agent
+    signature_object_key, snapshot_hash, ip, user_agent, witnessed_by_user_id
 )
 VALUES (
     $1, $2, $3, $4,
     $5, $6, $7,
-    $8, $9, $10
+    $8, $9, $10,
+    $11
 )
-RETURNING id, org_id, contract_id, party, user_id, method, otp_ref, signature_object_key, snapshot_hash, ip, user_agent, signed_at, created_at, updated_at
+RETURNING id, org_id, contract_id, party, user_id, method, otp_ref, signature_object_key, snapshot_hash, ip, user_agent, signed_at, created_at, updated_at, witnessed_by_user_id
 `
 
 type CreateContractSignatureParams struct {
@@ -55,6 +56,7 @@ type CreateContractSignatureParams struct {
 	SnapshotHash       string      `json:"snapshot_hash"`
 	Ip                 *string     `json:"ip"`
 	UserAgent          *string     `json:"user_agent"`
+	WitnessedByUserID  pgtype.UUID `json:"witnessed_by_user_id"`
 }
 
 // contract_signatures is append-only evidence: one row per party, carrying the
@@ -73,6 +75,7 @@ func (q *Queries) CreateContractSignature(ctx context.Context, arg CreateContrac
 		arg.SnapshotHash,
 		arg.Ip,
 		arg.UserAgent,
+		arg.WitnessedByUserID,
 	)
 	var i ContractSignature
 	err := row.Scan(
@@ -90,6 +93,7 @@ func (q *Queries) CreateContractSignature(ctx context.Context, arg CreateContrac
 		&i.SignedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WitnessedByUserID,
 	)
 	return i, err
 }
@@ -98,9 +102,12 @@ const listContractSignatures = `-- name: ListContractSignatures :many
 SELECT sg.id, sg.org_id, sg.contract_id, sg.party, sg.user_id, sg.method,
        sg.otp_ref, sg.signature_object_key, sg.snapshot_hash, sg.signed_at,
        COALESCE(u.full_name, '')::text AS signer_name,
-       u.phone AS signer_phone
+       u.phone AS signer_phone,
+       sg.witnessed_by_user_id,
+       COALESCE(w.full_name, '')::text AS witness_name
 FROM contract_signatures sg
 LEFT JOIN users u ON u.id = sg.user_id
+LEFT JOIN users w ON w.id = sg.witnessed_by_user_id
 WHERE sg.org_id = $1 AND sg.contract_id = $2
 ORDER BY sg.signed_at, sg.party
 `
@@ -123,6 +130,8 @@ type ListContractSignaturesRow struct {
 	SignedAt           pgtype.Timestamptz `json:"signed_at"`
 	SignerName         string             `json:"signer_name"`
 	SignerPhone        *string            `json:"signer_phone"`
+	WitnessedByUserID  pgtype.UUID        `json:"witnessed_by_user_id"`
+	WitnessName        string             `json:"witness_name"`
 }
 
 func (q *Queries) ListContractSignatures(ctx context.Context, arg ListContractSignaturesParams) ([]ListContractSignaturesRow, error) {
@@ -147,6 +156,8 @@ func (q *Queries) ListContractSignatures(ctx context.Context, arg ListContractSi
 			&i.SignedAt,
 			&i.SignerName,
 			&i.SignerPhone,
+			&i.WitnessedByUserID,
+			&i.WitnessName,
 		); err != nil {
 			return nil, err
 		}
@@ -162,9 +173,12 @@ const listContractSignaturesForContracts = `-- name: ListContractSignaturesForCo
 SELECT sg.id, sg.org_id, sg.contract_id, sg.party, sg.user_id, sg.method,
        sg.otp_ref, sg.signature_object_key, sg.snapshot_hash, sg.signed_at,
        COALESCE(u.full_name, '')::text AS signer_name,
-       u.phone AS signer_phone
+       u.phone AS signer_phone,
+       sg.witnessed_by_user_id,
+       COALESCE(w.full_name, '')::text AS witness_name
 FROM contract_signatures sg
 LEFT JOIN users u ON u.id = sg.user_id
+LEFT JOIN users w ON w.id = sg.witnessed_by_user_id
 WHERE sg.org_id = $1 AND sg.contract_id = ANY ($2::uuid[])
 ORDER BY sg.contract_id, sg.signed_at, sg.party
 `
@@ -187,6 +201,8 @@ type ListContractSignaturesForContractsRow struct {
 	SignedAt           pgtype.Timestamptz `json:"signed_at"`
 	SignerName         string             `json:"signer_name"`
 	SignerPhone        *string            `json:"signer_phone"`
+	WitnessedByUserID  pgtype.UUID        `json:"witnessed_by_user_id"`
+	WitnessName        string             `json:"witness_name"`
 }
 
 // ListContractSignaturesForContracts fills the signature block of every
@@ -215,6 +231,8 @@ func (q *Queries) ListContractSignaturesForContracts(ctx context.Context, arg Li
 			&i.SignedAt,
 			&i.SignerName,
 			&i.SignerPhone,
+			&i.WitnessedByUserID,
+			&i.WitnessName,
 		); err != nil {
 			return nil, err
 		}
@@ -230,9 +248,12 @@ const listContractSignaturesForContractsAnyOrg = `-- name: ListContractSignature
 SELECT sg.id, sg.org_id, sg.contract_id, sg.party, sg.user_id, sg.method,
        sg.otp_ref, sg.signature_object_key, sg.snapshot_hash, sg.signed_at,
        COALESCE(u.full_name, '')::text AS signer_name,
-       u.phone AS signer_phone
+       u.phone AS signer_phone,
+       sg.witnessed_by_user_id,
+       COALESCE(w.full_name, '')::text AS witness_name
 FROM contract_signatures sg
 LEFT JOIN users u ON u.id = sg.user_id
+LEFT JOIN users w ON w.id = sg.witnessed_by_user_id
 WHERE sg.contract_id = ANY ($1::uuid[])
 ORDER BY sg.contract_id, sg.signed_at, sg.party
 `
@@ -250,6 +271,8 @@ type ListContractSignaturesForContractsAnyOrgRow struct {
 	SignedAt           pgtype.Timestamptz `json:"signed_at"`
 	SignerName         string             `json:"signer_name"`
 	SignerPhone        *string            `json:"signer_phone"`
+	WitnessedByUserID  pgtype.UUID        `json:"witnessed_by_user_id"`
+	WitnessName        string             `json:"witness_name"`
 }
 
 // ListContractSignaturesForContractsAnyOrg serves GET /me/contracts, which
@@ -278,6 +301,8 @@ func (q *Queries) ListContractSignaturesForContractsAnyOrg(ctx context.Context, 
 			&i.SignedAt,
 			&i.SignerName,
 			&i.SignerPhone,
+			&i.WitnessedByUserID,
+			&i.WitnessName,
 		); err != nil {
 			return nil, err
 		}

@@ -270,6 +270,12 @@ func (s *Server) handleCreateLinkRequest(w http.ResponseWriter, r *http.Request)
 	// Redis only learns about the messages once the rows are durable.
 	s.enqueueNotifications(r.Context(), queuedID, contractQueuedID)
 
+	// Phase 18: if a landlord opened an assist session for this renter and
+	// this unit, their screen moves from "Registered" to "Request received"
+	// (FLOWS 2b.5). Best effort — the application is already filed.
+	s.stampAssistLinkRequest(r.Context(), unit.OrgID, unit.ID, p.UserID,
+		db.StrVal(renter.Phone), db.UUIDString(created.ID))
+
 	row, err := s.q.GetLinkRequest(r.Context(), sqlc.GetLinkRequestParams{
 		ID: created.ID, RenterUserID: p.UserID,
 	})

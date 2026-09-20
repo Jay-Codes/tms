@@ -1129,3 +1129,12 @@ Hooks in existing endpoints (no contract change): `POST /auth/otp/verify` (`regi
 **Phase 18 audit actions:** `renter.assist_start` · `renter.assist_code` · `renter.assist_close` (entity `assist_session`) · `contract.witness_otp` (entity `contract`).
 
 **Phase 18 migration:** `000020_assist_sessions` — `assist_sessions` table, `contract_signatures.witnessed_by_user_id`, `notification_log.channel` CHECK widened to `('sms','in_person')`, `status` CHECK gains `shown`.
+
+**Deviations (Phase 18 backend, 20 Sep 2026)** — implemented as written above except:
+
+| Endpoint | Deviation | Why |
+|---|---|---|
+| `GET /assist` | Each item is the full `GET /assist/{id}` shape (`{session, status_detail, renter, link_request}`), not a bare `session`. | The landlord's list screen shows the same status line as the detail screen; returning it inline saves one fetch per row on a 5 s poll. Additive — a `session` object is still inside each item. |
+| `POST /assist/{id}/code` | Response carries `expires_at` (the session's extended window) beside `{code, code_expires_at, code_issued_count}`. | The refresh is what pushes the 30-minute window out, so the countdown the screen is already showing has to be told. |
+| all session reads | A session past `expires_at` reports `status: "closed"` (and `status_detail: "closed"`) although the stored column is still `open`. | No sweep runs; expiry and closure are one event from the landlord's screen, and the partial unique index on `(org_id, phone) WHERE status='open'` is released by the `expires_at > now()` filter every lookup carries. |
+| `POST /contracts/{id}/witness-otp` | Also writes a `notification_log` row (`kind=otp, channel=in_person, status=shown`, empty body, `dedupe_key = assist:witness:{contract_id}:{nonce}`). | A witnessed signing code is a revealed code like any other; leaving it out of the delivery log would make the one reveal that binds a contract the one reveal an operator cannot find. The key carries a random nonce because a contract has no running count to key on. |
