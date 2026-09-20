@@ -229,7 +229,9 @@ export function BackfillSheet({
 
           <div className="field">
             <label htmlFor="bf_mode">{t('backfill.mode')}</label>
-            <div className="segmented" role="group" aria-label={t('backfill.mode')} style={{ alignSelf: 'start' }}>
+            {/* `.field` is a grid, so the inline control needs `justifySelf`
+                or it stretches into something that reads like a text box. */}
+            <div className="segmented" role="group" aria-label={t('backfill.mode')} style={{ justifySelf: 'start' }}>
               <button
                 type="button"
                 id="bf_mode"
