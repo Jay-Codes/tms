@@ -655,7 +655,7 @@ func (q *Queries) ListImportRows(ctx context.Context, arg ListImportRowsParams) 
 
 const listImportedPayments = `-- name: ListImportedPayments :many
 
-SELECT id, org_id, contract_id, schedule_id, amount, method, reference, paid_at, recorded_by_user_id, note, status, created_at, updated_at, deleted_at, reversed_at, reversal_reason, reversed_by_user_id, import_batch_id FROM payments
+SELECT id, org_id, contract_id, schedule_id, amount, method, reference, paid_at, recorded_by_user_id, note, status, created_at, updated_at, deleted_at, reversed_at, reversal_reason, reversed_by_user_id, import_batch_id, source FROM payments
 WHERE org_id = $1 AND import_batch_id = $2
   AND status = 'recorded' AND deleted_at IS NULL
 ORDER BY paid_at, id
@@ -698,6 +698,7 @@ func (q *Queries) ListImportedPayments(ctx context.Context, arg ListImportedPaym
 			&i.ReversalReason,
 			&i.ReversedByUserID,
 			&i.ImportBatchID,
+			&i.Source,
 		); err != nil {
 			return nil, err
 		}

@@ -15,14 +15,15 @@ const createPayment = `-- name: CreatePayment :one
 
 INSERT INTO payments (
     org_id, contract_id, schedule_id, amount, method, reference, paid_at,
-    recorded_by_user_id, note, import_batch_id
+    recorded_by_user_id, note, import_batch_id, source
 )
 VALUES (
     $1, $2, $3, $4,
     $5, $6, $7,
-    $8, $9, $10
+    $8, $9, $10,
+    COALESCE($11::text, 'manual')
 )
-RETURNING id, org_id, contract_id, schedule_id, amount, method, reference, paid_at, recorded_by_user_id, note, status, created_at, updated_at, deleted_at, reversed_at, reversal_reason, reversed_by_user_id, import_batch_id
+RETURNING id, org_id, contract_id, schedule_id, amount, method, reference, paid_at, recorded_by_user_id, note, status, created_at, updated_at, deleted_at, reversed_at, reversal_reason, reversed_by_user_id, import_batch_id, source
 `
 
 type CreatePaymentParams struct {
@@ -36,6 +37,7 @@ type CreatePaymentParams struct {
 	RecordedByUserID pgtype.UUID        `json:"recorded_by_user_id"`
 	Note             *string            `json:"note"`
 	ImportBatchID    pgtype.UUID        `json:"import_batch_id"`
+	Source           *string            `json:"source"`
 }
 
 // A payment is money the landlord received outside the system and recorded
@@ -47,8 +49,9 @@ type CreatePaymentParams struct {
 // may read their own. The dual-scoped queries take one or the other, never
 // neither.
 // `import_batch_id` is NULL for money a landlord keys in and set for a row that
-// arrived on a CSV import (Phase 16 §16.2), which is what puts the "imported"
-// chip on a ledger row and what the 24 h undo walks.
+// arrived on a CSV import (Phase 16 §16.2), which is what the 24 h undo walks.
+// `source` (Phase 20 §20.3) is the wider question the chip actually asks —
+// `manual`, `import` or `backfill` — and every write states it.
 func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (Payment, error) {
 	row := q.db.QueryRow(ctx, createPayment,
 		arg.OrgID,
@@ -61,6 +64,7 @@ func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (P
 		arg.RecordedByUserID,
 		arg.Note,
 		arg.ImportBatchID,
+		arg.Source,
 	)
 	var i Payment
 	err := row.Scan(
@@ -82,6 +86,7 @@ func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (P
 		&i.ReversalReason,
 		&i.ReversedByUserID,
 		&i.ImportBatchID,
+		&i.Source,
 	)
 	return i, err
 }
@@ -120,7 +125,7 @@ func (q *Queries) CreatePaymentAllocation(ctx context.Context, arg CreatePayment
 }
 
 const getPayment = `-- name: GetPayment :one
-SELECT p.id, p.org_id, p.contract_id, p.schedule_id, p.amount, p.method, p.reference, p.paid_at, p.recorded_by_user_id, p.note, p.status, p.created_at, p.updated_at, p.deleted_at, p.reversed_at, p.reversal_reason, p.reversed_by_user_id, p.import_batch_id,
+SELECT p.id, p.org_id, p.contract_id, p.schedule_id, p.amount, p.method, p.reference, p.paid_at, p.recorded_by_user_id, p.note, p.status, p.created_at, p.updated_at, p.deleted_at, p.reversed_at, p.reversal_reason, p.reversed_by_user_id, p.import_batch_id, p.source,
        c.renter_user_id, c.unit_id,
        u.name AS unit_name, pr.name AS property_name,
        ru.full_name AS renter_name,
@@ -161,6 +166,7 @@ type GetPaymentRow struct {
 	ReversalReason   *string            `json:"reversal_reason"`
 	ReversedByUserID pgtype.UUID        `json:"reversed_by_user_id"`
 	ImportBatchID    pgtype.UUID        `json:"import_batch_id"`
+	Source           string             `json:"source"`
 	RenterUserID     pgtype.UUID        `json:"renter_user_id"`
 	UnitID           pgtype.UUID        `json:"unit_id"`
 	UnitName         string             `json:"unit_name"`
@@ -192,6 +198,7 @@ func (q *Queries) GetPayment(ctx context.Context, arg GetPaymentParams) (GetPaym
 		&i.ReversalReason,
 		&i.ReversedByUserID,
 		&i.ImportBatchID,
+		&i.Source,
 		&i.RenterUserID,
 		&i.UnitID,
 		&i.UnitName,
@@ -296,7 +303,7 @@ func (q *Queries) ListAllocationsForPaymentsAnyOrg(ctx context.Context, paymentI
 }
 
 const listPayments = `-- name: ListPayments :many
-SELECT p.id, p.org_id, p.contract_id, p.schedule_id, p.amount, p.method, p.reference, p.paid_at, p.recorded_by_user_id, p.note, p.status, p.created_at, p.updated_at, p.deleted_at, p.reversed_at, p.reversal_reason, p.reversed_by_user_id, p.import_batch_id,
+SELECT p.id, p.org_id, p.contract_id, p.schedule_id, p.amount, p.method, p.reference, p.paid_at, p.recorded_by_user_id, p.note, p.status, p.created_at, p.updated_at, p.deleted_at, p.reversed_at, p.reversal_reason, p.reversed_by_user_id, p.import_batch_id, p.source,
        c.renter_user_id, c.unit_id,
        u.name AS unit_name, pr.name AS property_name,
        ru.full_name AS renter_name,
@@ -312,12 +319,13 @@ WHERE p.deleted_at IS NULL
   AND ($2::uuid IS NULL OR c.renter_user_id = $2::uuid)
   AND ($3::uuid IS NULL OR p.contract_id = $3::uuid)
   AND ($4::text IS NULL OR p.method = $4::text)
-  AND ($5::timestamptz IS NULL OR p.paid_at >= $5::timestamptz)
-  AND ($6::timestamptz IS NULL OR p.paid_at <= $6::timestamptz)
-  AND ($7::timestamptz IS NULL
-       OR (p.paid_at, p.id) < ($7::timestamptz, $8::uuid))
+  AND ($5::text IS NULL OR p.source = $5::text)
+  AND ($6::timestamptz IS NULL OR p.paid_at >= $6::timestamptz)
+  AND ($7::timestamptz IS NULL OR p.paid_at <= $7::timestamptz)
+  AND ($8::timestamptz IS NULL
+       OR (p.paid_at, p.id) < ($8::timestamptz, $9::uuid))
 ORDER BY p.paid_at DESC, p.id DESC
-LIMIT $9
+LIMIT $10
 `
 
 type ListPaymentsParams struct {
@@ -325,6 +333,7 @@ type ListPaymentsParams struct {
 	RenterUserID pgtype.UUID        `json:"renter_user_id"`
 	ContractID   pgtype.UUID        `json:"contract_id"`
 	Method       *string            `json:"method"`
+	Source       *string            `json:"source"`
 	PaidFrom     pgtype.Timestamptz `json:"paid_from"`
 	PaidTo       pgtype.Timestamptz `json:"paid_to"`
 	CursorAt     pgtype.Timestamptz `json:"cursor_at"`
@@ -351,6 +360,7 @@ type ListPaymentsRow struct {
 	ReversalReason   *string            `json:"reversal_reason"`
 	ReversedByUserID pgtype.UUID        `json:"reversed_by_user_id"`
 	ImportBatchID    pgtype.UUID        `json:"import_batch_id"`
+	Source           string             `json:"source"`
 	RenterUserID     pgtype.UUID        `json:"renter_user_id"`
 	UnitID           pgtype.UUID        `json:"unit_id"`
 	UnitName         string             `json:"unit_name"`
@@ -366,6 +376,7 @@ func (q *Queries) ListPayments(ctx context.Context, arg ListPaymentsParams) ([]L
 		arg.RenterUserID,
 		arg.ContractID,
 		arg.Method,
+		arg.Source,
 		arg.PaidFrom,
 		arg.PaidTo,
 		arg.CursorAt,
@@ -398,6 +409,7 @@ func (q *Queries) ListPayments(ctx context.Context, arg ListPaymentsParams) ([]L
 			&i.ReversalReason,
 			&i.ReversedByUserID,
 			&i.ImportBatchID,
+			&i.Source,
 			&i.RenterUserID,
 			&i.UnitID,
 			&i.UnitName,
@@ -422,7 +434,7 @@ SET status = 'reversed', reversed_at = now(),
     reversed_by_user_id = $2
 WHERE org_id = $3 AND id = $4
   AND status = 'recorded' AND deleted_at IS NULL
-RETURNING id, org_id, contract_id, schedule_id, amount, method, reference, paid_at, recorded_by_user_id, note, status, created_at, updated_at, deleted_at, reversed_at, reversal_reason, reversed_by_user_id, import_batch_id
+RETURNING id, org_id, contract_id, schedule_id, amount, method, reference, paid_at, recorded_by_user_id, note, status, created_at, updated_at, deleted_at, reversed_at, reversal_reason, reversed_by_user_id, import_batch_id, source
 `
 
 type ReversePaymentParams struct {
@@ -461,6 +473,7 @@ func (q *Queries) ReversePayment(ctx context.Context, arg ReversePaymentParams) 
 		&i.ReversalReason,
 		&i.ReversedByUserID,
 		&i.ImportBatchID,
+		&i.Source,
 	)
 	return i, err
 }
