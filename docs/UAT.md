@@ -890,6 +890,127 @@ Run after P0's preconditions, as `demo@jjne.test` (landlord) and Asha
 
 ---
 
+# Phases 18.2 / 19 / 20 — renter self-service, identity visibility, field feedback
+
+Run after P0's preconditions, as `owner@jjne.test` (landlord), Asha (renter) on
+the phone and `admin@tms.local` (platform). Planned scope: PLAN2 §18.2 enduser
+items, §19, §20; FLOWS 3, 7 and 11.
+
+## P15. Renter self-service (18.2 enduser)
+
+- [ ] **P15.1** As a renter with **no** tenancy, `{BASE}/enduser` → the empty
+      state offers **"Have a unit code?"**; type a unit's 10-character code in
+      lower case with spaces → it uppercases and trims, and lands on that unit's
+      page. A wrong code lands on the unit's own "not found" copy, not an error.
+- [ ] **P15.2** As a renter with **two live tenancies** → home shows **one due
+      card per tenancy** (unit · property, its own countdown chip and **Send
+      proof**), not a single hero. A renter with one tenancy sees the Phase 16
+      hero unchanged.
+- [ ] **P15.3** Payments → **History** and **Proofs you sent**, and the
+      contracts list, each show **"Show older"** when there is a next page, and
+      the button disappears on the last one. No row is repeated.
+- [ ] **P15.4** Contracts → **Current** and a collapsed **Past** with a count;
+      a past row still opens the document and `/verify` still matches. Payments
+      → ended tenancies sit under a collapsed **"Past tenancies"**, and the
+      overdue total and the hero count **live** tenancies only.
+      *Evidence: 375 px screenshots of home (two cards), contracts and payments.*
+
+## P16. NIDA reveal (19.1, flow 3)
+
+- [ ] **P16.1** As the landlord, renter detail → the NIDA stays masked with
+      **"Show full number"**; the confirm sheet says what is recorded. Reveal →
+      the full number for **60 s** with Copy, then it re-masks on its own.
+      Repeat on a link-request detail.
+- [ ] **P16.2** As Asha, Profile → **"Who has seen your NIDA"** lists that
+      reveal with the org's name and the date; a platform reveal appears as the
+      platform, and **no reason text** is shown to the renter.
+- [ ] **P16.3** The org audit log carries `renter.nida_reveal` with the actor;
+      no log line, list response or CSV anywhere contains the number.
+      *Evidence: the renter's list showing both a landlord and a platform row.*
+
+## P17. Platform user directory (19.2, flow 11)
+
+- [ ] **P17.1** As platform admin, **Users** → search the renter's phone, then
+      an e-mail, then a name prefix; each finds the account. Kind and status
+      filters narrow it, **"Show older"** pages, and **no NIDA** appears on the
+      list.
+- [ ] **P17.2** Open the detail → Overview (identity, KYC, orgs), Tenancies,
+      Payments and Activity; **Reveal NIDA** needs a reason and behaves as
+      P16.1. `admin.user_view` is in the audit.
+- [ ] **P17.3** **Suspend** with a reason → the renter's open session is
+      refused immediately (they are signed out on their next tap) and the
+      account reads SUSPENDED. **Activate** → they can sign in again.
+- [ ] **P17.4** As a landlord, `{BASE}/admin` refuses the session.
+      *Evidence: search by phone, the suspended stamp, the renter signed out.*
+
+## P18. Name corrections (19.3)
+
+- [ ] **P18.1** As the owner, Settings → **You**: fix your own name; the staff
+      list, audit rows and new contracts follow it.
+- [ ] **P18.2** Settings → Staff → **Edit** a manager's name and role. Demoting
+      the **last owner** is refused with the server's message; a manager sees no
+      Edit at all.
+- [ ] **P18.3** Renter detail → **Edit name** on a renter who has **not**
+      signed → saved, and the renter gets the `name_corrected` SMS (check
+      `make api-log`). On a renter who **has** signed → refused with "ask the
+      renter to fix it in their Profile".
+- [ ] **P18.4** Open a **signed** contract before and after any rename → the
+      document text and the `/verify` hash are **identical**; only the live
+      parties header follows the account.
+- [ ] **P18.5** As platform admin, rename any user with a reason; the audit
+      carries before, after and the reason.
+      *Evidence: the 409 on a signed renter, the unchanged verify hash.*
+
+## P19. Proof uploads (20.1, flow 7)
+
+- [ ] **P19.1** As Asha on the phone, **Send proof** from a schedule row → two
+      actions, **Take photo** (opens the camera) and **Choose a file** (opens
+      the file picker); send a **PDF** through the second one.
+- [ ] **P19.2** From a schedule row the amount is a **static line**, not a box.
+      From the generic **Send proof** button it is still editable.
+- [ ] **P19.3** Record a payment against that row from the landlord side, then
+      submit the renter's stale sheet → **422**, and the sheet re-reads and
+      shows the amount the server expects.
+      *Evidence: the PDF claim in the landlord's Proofs tab.*
+
+## P20. Landlord logo (20.2)
+
+- [ ] **P20.1** Settings → Branding: upload a logo → it appears in the rail
+      (desktop) and the mobile bar **without a reload**; delete it → both fall
+      back to the coloured square.
+- [ ] **P20.2** Sign in fresh → the logo paints on the first frame (from the
+      theme cache), and a logo whose link has expired refetches once and falls
+      back to the square rather than showing a broken image.
+      *Evidence: rail and mobile-bar screenshots with the logo.*
+
+## P21. Historical payments backfill (20.3, flow 7)
+
+- [ ] **P21.1** Create a contract with a **start date two years back** (the
+      form allows it and explains why); activate it → the rent book carries
+      every past period, overdue.
+- [ ] **P21.2** Contract page → **Backfill history** → pick a date, choose
+      **Paid** with "use each period's own due date" → the preview counts the
+      periods and the total, and confirming settles exactly those rows. Rows
+      already paid are **skipped** and reported.
+- [ ] **P21.3** Re-run the same backfill → **0 settled**, everything skipped;
+      nothing is double-paid.
+- [ ] **P21.4** Repeat with **Waived** and a reason on another contract → the
+      rows read waived, no payments are written.
+- [ ] **P21.5** Exactly **one** `backfill_done` SMS goes out (not one per
+      period), and turning the kind off in Notification settings silences it.
+- [ ] **P21.6** The settled rows carry the **"backfilled"** chip on both the
+      landlord's schedule and the renter's rent book; Payments → **Source**
+      filter shows them, and the CSV export carries the column.
+- [ ] **P21.7** **Reports**: the backfilled money appears in the months its
+      `paid_at` falls in, and the current month's collected figure is
+      **unchanged** by the backfill.
+- [ ] **P21.8** Import a payments CSV with a row dated before the rent book →
+      the preview error names **Backfill**; a row that is merely too large keeps
+      the plain "exceeds contract balance" error.
+      *Evidence: the preview total, the two report windows, the single SMS.*
+
+---
+
 ## Recording the run
 
 Tick each box as you go, in Part 1 and Part 2 alike. For a failure, note the
