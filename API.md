@@ -1138,3 +1138,131 @@ Hooks in existing endpoints (no contract change): `POST /auth/otp/verify` (`regi
 | `POST /assist/{id}/code` | Response carries `expires_at` (the session's extended window) beside `{code, code_expires_at, code_issued_count}`. | The refresh is what pushes the 30-minute window out, so the countdown the screen is already showing has to be told. |
 | all session reads | A session past `expires_at` reports `status: "closed"` (and `status_detail: "closed"`) although the stored column is still `open`. | No sweep runs; expiry and closure are one event from the landlord's screen, and the partial unique index on `(org_id, phone) WHERE status='open'` is released by the `expires_at > now()` filter every lookup carries. |
 | `POST /contracts/{id}/witness-otp` | Also writes a `notification_log` row (`kind=otp, channel=in_person, status=shown`, empty body, `dedupe_key = assist:witness:{contract_id}:{nonce}`). | A witnessed signing code is a revealed code like any other; leaving it out of the delivery log would make the one reveal that binds a contract the one reveal an operator cannot find. The key carries a random nonce because a contract has no running count to key on. |
+
+---
+
+## Part 2 — Phase 19 (planned): NIDA reveal, platform user directory, name corrections
+
+Conventions are Part 2's: audience cookies (`tms_o` org, `tms_r` renter, `tms_a`
+platform admin), RFC-7807 problems with the machine-readable code in `type`,
+**400** for a malformed field with `errors` populated, **404** for an id outside
+the caller's scope, **409** for a business conflict, **422** for a request that
+parsed but cannot be honoured, and one audit row per mutation. New codes:
+`last_owner`, `renter_signed`.
+
+### 19.1 NIDA reveal (landlord)
+
+A reveal is a **POST**, never a query flag on a GET: the number must never sit in
+a URL, a browser cache, a prefetch or a log line, and the audit row must be
+unmissable.
+
+| Endpoint | Contract |
+|---|---|
+| `POST /renters/{user_id}/nida/reveal` | Org audience, **owner + manager**. Body `{reason?: string ≤200}` (body may be absent). → `200 {nida_number, full_name, revealed_at}`. The renter must have a relationship with the caller's org — a `unit_link_requests` row in **any** status, or any contract, in this org — otherwise the same **404 `not found` / "no such renter"** the rest of the renter directory gives, so the endpoint never confirms an account exists elsewhere on the platform. A renter whose profile holds no NIDA → **404** with detail "no NIDA on file". Rate limited **60 per hour per org** (`nida:reveal`, 429 with `Retry-After`) so bulk scraping is loud. Audited `renter.nida_reveal`, entity `user`, org scope, `after:{reason?, actor_kind:"org_user"}` — **never** the number. |
+| `POST /admin/users/{id}/nida/reveal` | Platform admin. Body `{reason: string 1…200}` — **required** here (support cases are justified in writing). Same 200 shape, same 404s, no relationship check, no org limiter (the limiter key is the admin's own user id, 60/h). Audited `renter.nida_reveal` with `after.actor_kind:"platform_admin"` and **no** `org_id`. |
+| `GET /me/profile` | Gains **`nida_reveals: [{at, by_kind:"landlord"\|"platform_admin", org_name?}]`** — the renter's own list of who looked, **last 10**, newest first, read from `audit_log`. `org_name` is present for a landlord reveal and absent for a platform one. `reason` is **not** exposed to the renter. |
+
+The masked value (`nida_masked`, `••••••••1234`) on every existing endpoint is
+unchanged; nothing else ever returns the full number.
+
+### 19.2 Platform user directory (admin)
+
+Audience **platform admin** (`tms_a`); an org user or renter gets the usual 401/403.
+
+| Endpoint | Contract |
+|---|---|
+| `GET /admin/users?q=&kind=&status=&org_id=&cursor=&limit=` | → `{items:[user_row], next_cursor}`, newest first, shared `(created_at, id)` cursor encoding, `limit` 1…100 (default 25). `q` (≤120) matches **phone normalised the way registration normalises it** (`0755…` → `+255755…`), **e-mail lower-cased exact-prefix**, and **full name `ILIKE` prefix** — wildcards in the value are escaped. `kind` is `renter\|org_user\|platform_admin`, `status` is `active\|suspended`, `org_id` narrows to users connected to that org (members for `org_user`, link requests or contracts for `renter`). **No NIDA field of any kind, masked or full, appears on the list.** |
+| `GET /admin/users/{id}` | → the aggregate below. Reading it is audited **`admin.user_view`** (entity `user`, no org): the page assembles cross-org PII, so the read is a recorded event. Unknown id → 404. |
+| `POST /admin/users/{id}/suspend` | `{reason: string 1…200}` → `200 {user}` with `status:"suspended"`; **every session of that user is revoked**, the same way `POST /admin/orgs/{id}/suspend` revokes an org's. Already suspended → 409 `already_suspended`. Audited `admin.user_suspend`. |
+| `POST /admin/users/{id}/activate` | `{reason: string 1…200}` → `200 {user}` with `status:"active"`. Already active → 409 `already_active`. Audited `admin.user_activate`. |
+
+```jsonc
+// user_row  (the list row; the detail's `user` is the same shape plus nida_masked)
+{ "id": "…", "kind": "renter",               // renter | org_user | platform_admin
+  "full_name": "Asha Mrisho", "phone": "+255755000111", "email": null,
+  "status": "active",                        // active | suspended
+  "created_at": "2026-09-01T07:12:00Z", "last_seen_at": null,
+  "orgs": [{"id":"…","name":"JJnE Rentals",
+            "role": null,                    // org_user only: owner | manager
+            "relationship": "renting"}],     // renter only: renting | applied | past
+  "contracts_live": 1,                       // renter only
+  "kyc_status": "verified" }                 // renter only: none|submitted|verified|rejected
+
+// GET /admin/users/{id}
+{ "user": { …user_row…, "nida_masked": "••••••••1234" },   // renter only, null when none
+  "link_requests": [ … last 10 Phase 3 link_request shapes, with org_name … ],
+  "contracts":     [ {"id","org_id","org_name","unit_name","property_name","status",
+                      "start_date","end_date","rent_amount"} … all … ],
+  "payments":      {"count": 12, "total": 1800000, "last_paid_at": "2026-09-01"},
+  "memberships":   [ {"org_id","org_name","org_status","role","created_at"} … ],  // org_user
+  "audit":         {"items": [ …last 50 rows where this user is actor OR entity… ],
+                   "next_cursor": null} }
+```
+
+`GET /admin/users/{id}?audit_cursor=` pages the audit block alone, reusing the
+`GET /admin/audit-log` row shape and cursor. The admin audit filter's `action`
+allow-list gains `renter.nida_reveal`, `admin.user_view`, `admin.user_suspend`,
+`admin.user_activate` and `admin.user_update`.
+
+### 19.3 Name corrections
+
+Every rename writes **`users.full_name`**, and for a renter **`renter_profiles.full_name`**
+as well, in one transaction with its audit row (`before`/`after` carrying the two
+names). Bounds are the profile's: **2…80 characters after trimming**, collapsed
+inner whitespace; anything else is a **400** naming `full_name`.
+
+| Endpoint | Contract |
+|---|---|
+| `PATCH /org/members/me` | Org audience, any role, the caller's own row. Body `{full_name?, locale?}` — **the Phase 13 locale-only body still works unchanged**, and either key may be sent alone. → `200 {member}`. Audited `member.update` (a locale-only call keeps writing `user.locale_update`, as before). |
+| `PATCH /org/members/{id}` | Org audience, **owner only**. `{full_name?, role?}`, at least one. `role` is `owner\|manager`. Cannot change **own** role (409 `cannot_change_own_role`), cannot demote the **last owner** (409 `last_owner`). A member id outside the org → 404. → `200 {member}`. Audited `member.update`. |
+| `PATCH /renters/{user_id}` | Org audience, **owner + manager**. `{full_name}`. Relationship check and 404 are `GET /renters/{user_id}`'s. Refused once the renter has signed a contract **anywhere** — any `contract_signatures` row by this user, in any org → **409 `renter_signed`** with detail "ask the renter to correct it in their Profile". → `200 {renter, profile}` (the `GET /renters/{user_id}` blocks). Audited `renter.update`. Queues the renter SMS **`name_corrected`** (new kind, SW/EN, org-overridable, credits apply, disable-able in Notification settings). |
+| `PATCH /admin/users/{id}` | Platform admin, any user kind, **no** signed-contract restriction. `{full_name, reason: string 1…200}`. → `200 {user}` (the `user_row` shape). Audited `admin.user_update` with `before`, `after` and `reason`. Notifies the renamed account the same way: `name_corrected` SMS for a renter, the existing mailer for an org user or admin. |
+
+**The contract document is untouched by every one of these.** The rendered terms
+are a snapshot (`{{renter_name}}` frozen at creation and covered by the hash), so
+`GET /contracts/{id}/document` and `GET /contracts/{id}/verify` return the same
+bytes and the same hash after a rename; only the live `parties.*.name` on the
+list/detail views follows the account. A test pins the bytes and the hash.
+
+**Phase 19 audit actions:** `renter.nida_reveal` (entity `user`) · `admin.user_view` ·
+`admin.user_suspend` · `admin.user_activate` · `admin.user_update` (entity `user`) ·
+`member.update` (entity `org_member`) · `renter.update` (entity `user`).
+
+---
+
+## Part 2 — Phase 20 (planned): proof amount lock, shell logo, payment backfill
+
+### 20.1 Proof of payment: locked amount
+
+| `POST /me/proofs` | Unchanged except: when **`schedule_id` is given**, `amount` must equal that instalment's outstanding balance (`amount − paid_amount`) at submit time, or the answer is **422 `amount_mismatch`** with `{"expected": 150000}` beside the RFC-7807 fields. The client re-reads the row and re-submits. Without `schedule_id` the existing rule stands (1 ≤ `amount` ≤ contract balance). A schedule already `paid` or `waived` has an outstanding of 0 and therefore always mismatches. |
+|---|---|
+
+20.2 (landlord logo in the app shell) is frontend-only and adds no endpoint;
+`GET /org/branding` already carries `logo_url`.
+
+### 20.3 Historical payments backfill
+
+A tenancy that predates TMS is represented **truthfully**: the contract's
+`start_date` is the real move-in date, the generator produces the past periods,
+and the landlord settles them.
+
+| Endpoint | Contract |
+|---|---|
+| `POST /contracts` | `start_date` may now be up to **10 years** in the past (`3650` days) for a **landlord-created** contract — the manual form and the `renters` import both. Further back → 400 naming `start_date`. The **renter application** `POST /units/{unit_code}/link` keeps its **7-day** backstop: a renter may not draft a back-dated tenancy alone. Activation generates the full span; past-due rows come out `overdue`, which is the truth until a backfill settles them. |
+| `POST /contracts/{id}/backfill` | Org audience, **owner + manager**. `{until: "YYYY-MM-DD", mode: "paid"\|"waived", paid_at?: "YYYY-MM-DD"\|"due_date", method?, reference?, note?}` → `200 {settled, skipped, total, schedules:[…]}`. Closes every schedule row of the contract with `due_date ≤ until` that is still unsettled (`pending\|partial\|overdue`). `paid`: **one payment per row** for that row's outstanding, `source:"backfill"`, `paid_at` defaulting to the row's own `due_date` (`paid_at:"due_date"` states that explicitly; a date applies the same date to every row), `method` defaulting to `cash` and limited to `cash\|bank_transfer\|mobile_money_manual`, `reference` ≤80, `note` ≤500; each payment is audited `payment.record` with `after.source:"backfill"`. `waived`: the rows become `waived` with the note (`note` required, ≤500). Rows already `paid` or `partial`… a `partial` row is settled for its **remainder**; rows already `paid` or `waived` are **skipped and counted**. `total` is the money the call moved (0 for `waived`). Contract not `active\|expiring` → **409 `contract_not_active`**. `until` in the future, or before the contract's `start_date` → **422** naming `until`. Nothing due on or before `until` → `200 {settled:0, skipped:n, total:0}`. One audit `contract.backfill` row carries the counts beside the per-payment rows. Queues **one** `backfill_done` SMS (new kind, SW/EN, `{{org}}`/`{{date}}`, credits apply, disable-able in Notification settings) — **never** one per row. |
+| `GET /contracts/{id}/schedules`, `GET /me/schedules` | Each schedule row gains **`last_payment_source`**: `"manual"\|"import"\|"backfill"\|null` — the `source` of the newest live payment allocated to that row, `null` when nothing has been allocated. It is a join, not a stored column. |
+| `GET /payments?source=manual\|import\|backfill` | New filter, combinable with the existing ones; an unknown value is a 400 naming `source`. The `payment` shape gains **`source`** beside `import_batch_id` (which stays, and is still what names the batch). The payments CSV export gains a **`source`** column after `reference`. |
+| `POST /imports/preview` (`kind=payments`) | When a row's `paid_at` falls **before the contract's first schedule period**, the row error on `paid_at` reads "this payment predates the rent book — set the contract's start date to the real move-in date, or use Backfill to settle the periods before TMS" instead of the generic `exceeds_contract_balance`. |
+
+**Reports** bucket collected money by **`paid_at`**, not `created_at`, so a
+backfilled year lands in the periods it was actually paid in; `source` is a
+filter, not an exclusion. A test asserts it with a contract backfilled across a
+year.
+
+**Phase 20 audit actions:** `contract.backfill` (entity `contract`), beside the
+ordinary `payment.record` rows the settlement writes.
+
+**Phase 20 migration:** `000021_payment_source` — `payments.source TEXT NOT NULL
+DEFAULT 'manual' CHECK (source IN ('manual','import','backfill'))`, backfilled
+`'import'` for every row with an `import_batch_id`, plus an index on
+`(org_id, source)`. No schedules-side column: `last_payment_source` is a join.
