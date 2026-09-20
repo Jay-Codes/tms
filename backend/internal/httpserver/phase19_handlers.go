@@ -164,7 +164,10 @@ func (s *Server) revealReason(w http.ResponseWriter, r *http.Request, required b
 	var body struct {
 		Reason string `json:"reason"`
 	}
-	if r.ContentLength > 0 && !DecodeJSON(w, r, &body) {
+	// Decoded from the body itself, never from Content-Length: a chunked request
+	// reports -1, and a length test would answer "reason is required" to a
+	// reveal that carried one.
+	if !DecodeJSONOptional(w, r, &body) {
 		return "", false
 	}
 	f := validate.Fields{}
@@ -427,14 +430,19 @@ func (s *Server) handlePatchMember(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if role != "" && role != member.Role {
+			// The owner set is locked *before* the write: the guard is a
+			// read-then-write across different rows, so the row's own UPDATE
+			// serialises nothing against a concurrent demotion of the other
+			// owner. With the lock held, the second transaction waits and then
+			// counts the first one's demotion.
+			if _, err := q.LockOrgOwners(r.Context(), p.OrgID); err != nil {
+				return err
+			}
 			if _, err := q.SetOrgMemberRole(r.Context(), sqlc.SetOrgMemberRoleParams{
 				OrgID: p.OrgID, ID: memberID, Role: role,
 			}); err != nil {
 				return err
 			}
-			// Counted *after* the write, inside the transaction: the row is
-			// locked by its own UPDATE, so two concurrent demotions cannot both
-			// read "two owners" and both commit.
 			owners, err := q.CountActiveOwners(r.Context(), p.OrgID)
 			if err != nil {
 				return err

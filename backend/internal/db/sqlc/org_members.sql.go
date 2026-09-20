@@ -194,6 +194,39 @@ func (q *Queries) ListOrgMembers(ctx context.Context, orgID pgtype.UUID) ([]List
 	return items, nil
 }
 
+const lockOrgOwners = `-- name: LockOrgOwners :many
+SELECT id FROM org_members
+WHERE org_id = $1 AND role = 'org_owner' AND deleted_at IS NULL
+FOR UPDATE
+`
+
+// LockOrgOwners serialises the owner set of one org. The last-owner guard is a
+// read-then-write across *different* rows — demoting A while counting B — so
+// under Read Committed two concurrent demotions (or removals) would each still
+// see the other's owner and both commit, leaving the org with none. Taking this
+// lock as the transaction's first statement makes the second transaction wait,
+// and Postgres re-evaluates the predicate after the lock is released, so the
+// row the first one demoted is gone from the second one's count.
+func (q *Queries) LockOrgOwners(ctx context.Context, orgID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, lockOrgOwners, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const softDeleteOrgMember = `-- name: SoftDeleteOrgMember :one
 UPDATE org_members SET deleted_at = now()
 WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL

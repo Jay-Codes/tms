@@ -417,6 +417,34 @@ func TestPhase20PaymentsCSVCarriesTheSource(t *testing.T) {
 	}
 }
 
+// TestPhase20PaymentsCSVIgnoresTheScreensPageLimit: the export is the whole
+// filtered ledger (API.md), so it must ignore the 200-row page limit as well as
+// the cursor. A spreadsheet quietly cut at the newest 200 payments reconciles
+// against nothing, and says nothing about what it left out.
+func TestPhase20PaymentsCSVIgnoresTheScreensPageLimit(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newPaymentFixture(t, "CSVWhole", "0720004000", "+255720004001")
+	const extra = 260
+	h.padPayments(t, fix.contractID, extra)
+
+	// The screen still pages: 200 rows and a cursor to follow.
+	page := fix.owner.do(http.MethodGet, "/payments?limit=200", nil).
+		mustStatus(t, http.StatusOK, "payments page")
+	if n := len(listOf(t, page)); n != 200 {
+		t.Fatalf("page rows = %d, want the 200-row page limit", n)
+	}
+	if page.Body["next_cursor"] == nil {
+		t.Error("a truncated page carries no next_cursor")
+	}
+
+	csv := fix.owner.do(http.MethodGet, "/payments?format=csv", nil).
+		mustStatus(t, http.StatusOK, "payments CSV")
+	rows := len(strings.Split(strings.TrimSpace(csv.Raw), "\n")) - 1 // less the header
+	if rows != extra {
+		t.Errorf("CSV rows = %d, want all %d payments", rows, extra)
+	}
+}
+
 // TestPhase20ImportPointsAtBackfillForMoneyBeforeTheRentBook: the hint that
 // makes the failure fixable instead of mysterious.
 func TestPhase20ImportPointsAtBackfillForMoneyBeforeTheRentBook(t *testing.T) {
@@ -534,5 +562,19 @@ func TestPhase20RentersImportAcceptsARealMoveInDate(t *testing.T) {
 	badRows := arrayOf(t, badPreview, "rows")
 	if errs, _ := badRows[0]["errors"].(map[string]any); errs == nil || errs["start_date"] == nil {
 		t.Errorf("an eleven-year-old start date was accepted: %v", badRows[0])
+	}
+}
+
+// padPayments writes n plain cash payments against a contract straight into the
+// table. The export's bound is what is under test, not the recording path, and
+// 260 POSTs would make the test slow for no extra proof.
+func (h *harness) padPayments(t *testing.T, contractID string, n int) {
+	t.Helper()
+	if _, err := h.pool.Exec(context.Background(),
+		`INSERT INTO payments (org_id, contract_id, amount, method, paid_at)
+		 SELECT c.org_id, c.id, 1000, 'cash', now() - (g || ' minutes')::interval
+		   FROM contracts c, generate_series(1, $2::int) AS g
+		  WHERE c.id = $1`, contractID, n); err != nil {
+		t.Fatalf("pad payments: %v", err)
 	}
 }

@@ -2,11 +2,16 @@ package httpserver_test
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
+	"tms/backend/internal/httpserver"
 	"tms/backend/internal/notify"
 )
 
@@ -514,7 +519,219 @@ func TestPhase19AdminRenamesAnyoneWithAReason(t *testing.T) {
 	}
 }
 
+// TestPhase19RevealReadsAChunkedReason: a client that streams the body sends
+// `Transfer-Encoding: chunked`, and Go then reports Content-Length -1. A handler
+// that decides whether to read the body from the length therefore drops it, and
+// answers "reason is required" to a reveal that stated one.
+func TestPhase19RevealReadsAChunkedReason(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newContractFixture(t, "ChunkedReason", "0719004500", "+255719004501")
+	admin := h.adminClient(t)
+
+	admin.chunked(http.MethodPost, "/admin/users/"+fix.renterID+"/nida/reveal",
+		`{"reason":"ticket 9001"}`).
+		mustStatus(t, http.StatusOK, "chunked platform reveal")
+	rows := h.auditPayloads(t, "renter.nida_reveal")
+	if len(rows) != 1 || !strings.Contains(rows[0], "ticket 9001") {
+		t.Errorf("reveal audit rows = %v, want one carrying the chunked reason", rows)
+	}
+
+	// The optional case keeps its old manners: a chunked body that is in fact
+	// empty is not an error where the reason is optional.
+	fix.owner.chunked(http.MethodPost, "/renters/"+fix.renterID+"/nida/reveal", "").
+		mustStatus(t, http.StatusOK, "chunked landlord reveal with no reason")
+}
+
+// TestPhase19AdminRenameObeysTheBorrowedOrgsNotificationSettings: a platform
+// rename spends the home org's SMS credits, so it is that org's `name_corrected`
+// toggle and wording that decide the message. Sending regardless would let a
+// support action text from an org that had switched the kind off.
+func TestPhase19AdminRenameObeysTheBorrowedOrgsNotificationSettings(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newContractFixture(t, "BorrowedCfg", "0719004600", "+255719004601")
+	admin := h.adminClient(t)
+
+	fix.owner.do(http.MethodPut, "/org/notification-settings", map[string]any{
+		"kinds": map[string]any{"name_corrected": map[string]any{"enabled": false}},
+	}).mustStatus(t, http.StatusOK, "org switches name_corrected off")
+
+	admin.do(http.MethodPatch, "/admin/users/"+fix.renterID,
+		map[string]any{"full_name": "Quiet Fix", "reason": "ticket 9100"}).
+		mustStatus(t, http.StatusOK, "platform rename")
+	if sent := ofKind(h.notifications(t), notify.KindNameCorrected); len(sent) != 0 {
+		t.Fatalf("name_corrected messages = %d, want 0 — the org's toggle was bypassed", len(sent))
+	}
+
+	// Switched back on, with the org's own wording: the same rename sends that
+	// wording, not the platform's.
+	fix.owner.do(http.MethodPut, "/org/notification-settings", map[string]any{
+		"kinds": map[string]any{"name_corrected": map[string]any{"enabled": true}},
+		"templates": map[string]any{"name_corrected": map[string]any{
+			"en": "Records now read {{name}}.", "sw": "Records now read {{name}}.",
+		}},
+	}).mustStatus(t, http.StatusOK, "org switches it back on with an override")
+
+	admin.do(http.MethodPatch, "/admin/users/"+fix.renterID,
+		map[string]any{"full_name": "Loud Fix", "reason": "ticket 9101"}).
+		mustStatus(t, http.StatusOK, "platform rename again")
+	sent := ofKind(h.notifications(t), notify.KindNameCorrected)
+	if len(sent) != 1 {
+		t.Fatalf("name_corrected messages = %d, want 1", len(sent))
+	}
+	if !strings.Contains(sent[0].Body, "Records now read Loud Fix") {
+		t.Errorf("name_corrected body = %q, want the org's own wording", sent[0].Body)
+	}
+}
+
+// ------------------------------------------------ the last-owner guard race --
+
+// TestPhase19LastOwnerDemotionIsSerialised is the guard's real test. The count
+// runs after the demotion's own UPDATE, and under Read Committed a rival
+// transaction demoting the *other* owner is invisible: two overlapping
+// demotions would each count one owner left and both commit, leaving an org
+// with none — and nobody who can invite, remove or rename staff.
+//
+// The rival is a real second transaction demoting the other owner's row and
+// nothing else, which is exactly what the other request would hold. The demotion
+// under test must wait for it and then refuse.
+func TestPhase19LastOwnerDemotionIsSerialised(t *testing.T) {
+	h := newHarness(t)
+	fix, firstID, secondID := h.twoOwnerOrg(t, "OwnerRace", "ownerrace@jjne.test", "0719004700")
+
+	ctx := context.Background()
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin the rival transaction: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx,
+		`UPDATE org_members SET role = 'org_manager' WHERE id = $1`, firstID); err != nil {
+		t.Fatalf("rival demotion: %v", err)
+	}
+
+	done := make(chan response, 1)
+	go func() {
+		done <- fix.client.do(http.MethodPatch, "/org/members/"+secondID,
+			map[string]any{"role": "org_manager"})
+	}()
+	select {
+	case got := <-done:
+		t.Fatalf("demotion answered %d without waiting for the rival transaction — "+
+			"the owner set is not locked: %s", got.Code, got.Raw)
+	case <-time.After(750 * time.Millisecond):
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit the rival transaction: %v", err)
+	}
+
+	got := <-done
+	if got.Code != http.StatusConflict {
+		t.Fatalf("second demotion status = %d, want 409 — body: %s", got.Code, got.Raw)
+	}
+	if n := h.ownerCount(t, fix.orgID); n != 1 {
+		t.Errorf("owners left = %d, want 1 — the org lost every owner", n)
+	}
+}
+
+// TestPhase19LastOwnerRemovalIsSerialised is the same race on DELETE, which
+// counted owners before its transaction even opened.
+func TestPhase19LastOwnerRemovalIsSerialised(t *testing.T) {
+	h := newHarness(t)
+	fix, firstID, secondID := h.twoOwnerOrg(t, "OwnerRaceDel", "ownerracedel@jjne.test", "0719004800")
+
+	ctx := context.Background()
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin the rival transaction: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx,
+		`UPDATE org_members SET role = 'org_manager' WHERE id = $1`, firstID); err != nil {
+		t.Fatalf("rival demotion: %v", err)
+	}
+
+	done := make(chan response, 1)
+	go func() { done <- fix.client.do(http.MethodDelete, "/org/members/"+secondID, nil) }()
+	select {
+	case got := <-done:
+		t.Fatalf("removal answered %d without waiting for the rival transaction — "+
+			"the owner set is not locked: %s", got.Code, got.Raw)
+	case <-time.After(750 * time.Millisecond):
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit the rival transaction: %v", err)
+	}
+
+	got := <-done
+	if got.Code != http.StatusConflict {
+		t.Fatalf("removal status = %d, want 409 — body: %s", got.Code, got.Raw)
+	}
+	if n := h.ownerCount(t, fix.orgID); n != 1 {
+		t.Errorf("owners left = %d, want 1 — the org lost every owner", n)
+	}
+}
+
 // ----------------------------------------------------------------- helpers --
+
+// twoOwnerOrg builds an org with two owners and returns their member ids: the
+// founder's first, then the promoted one's.
+func (h *harness) twoOwnerOrg(t *testing.T, name, email, phone string) (orgFixture, string, string) {
+	t.Helper()
+	fix := h.newOrgWithUnits(name, email, phone, []string{"Room 1"}, 250_000)
+	created := fix.client.do(http.MethodPost, "/org/members", map[string]any{
+		"email": "second@" + strings.ToLower(name) + ".test",
+		"full_name": "Second Owner", "role": "org_manager",
+	}).mustStatus(t, http.StatusCreated, "invite the second member")
+	secondID := created.str(t, "member", "id")
+	fix.client.do(http.MethodPatch, "/org/members/"+secondID,
+		map[string]any{"role": "org_owner"}).
+		mustStatus(t, http.StatusOK, "promote to owner")
+
+	var firstID string
+	for _, m := range listOf(t, fix.client.do(http.MethodGet, "/org/members", nil).
+		mustStatus(t, http.StatusOK, "members")) {
+		if id, _ := m["id"].(string); id != secondID {
+			firstID = id
+		}
+	}
+	if firstID == "" {
+		t.Fatal("the founding owner is missing from the staff list")
+	}
+	return fix, firstID, secondID
+}
+
+// ownerCount is how many live owners an org has, read straight from the table.
+func (h *harness) ownerCount(t *testing.T, orgID string) int {
+	t.Helper()
+	var n int
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM org_members
+		   WHERE org_id = $1 AND role = 'org_owner' AND deleted_at IS NULL`, orgID).Scan(&n); err != nil {
+		t.Fatalf("count owners: %v", err)
+	}
+	return n
+}
+
+// chunked issues a request whose body arrives with no Content-Length, the way a
+// streaming client's does. Go reports -1 for such a request.
+func (c *client) chunked(method, path, body string) response {
+	c.h.t.Helper()
+	req := httptest.NewRequest(method, httpserver.APIPrefix+path,
+		io.NopCloser(strings.NewReader(body)))
+	req.Header.Set("Content-Type", "application/json")
+	req.TransferEncoding = []string{"chunked"}
+	req.ContentLength = -1
+	for _, ck := range c.cookies {
+		req.AddCookie(ck)
+	}
+	rec := httptest.NewRecorder()
+	c.h.srv.Handler().ServeHTTP(rec, req)
+	out := response{Code: rec.Code, Raw: rec.Body.String(), Header: rec.Header()}
+	if len(out.Raw) > 0 {
+		_ = json.Unmarshal([]byte(out.Raw), &out.Body)
+	}
+	return out
+}
 
 // containsUserID reports whether a directory page holds one user id.
 func containsUserID(t *testing.T, r response, id string) bool {

@@ -439,6 +439,39 @@ func (s *Server) handleAdminPatchUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A `notification_log` row belongs to an org — the platform has no SMS budget
+	// of its own — so the message goes out through the org whose rent book
+	// actually carries this name, which is also the org the renter would query if
+	// the correction were wrong. A renter with no tenancy anywhere is simply not
+	// texted; there is nobody to send as, and the name is not yet on any
+	// document. Because it is that org's credits that are spent, it is that org's
+	// `name_corrected` toggle, SMS language and template that decide the message:
+	// borrowing the budget while ignoring the configuration would let a support
+	// action text in the wrong language, or at all where the org had turned the
+	// kind off.
+	var (
+		homeOrgID, homeOrgName string
+		homeSettings           OrgSettings
+		homeEnabled            bool
+	)
+	if row.Kind == userKindRenter {
+		homeOrgID, homeOrgName = s.renterHomeOrg(r, row.ID)
+		if homeOrgID != "" {
+			orgUUID, err := db.ParseUUID(homeOrgID)
+			if err != nil {
+				s.serverError(w, r, "admin.users.patch.org", err)
+				return
+			}
+			org, err := s.q.GetOrg(r.Context(), orgUUID)
+			if err != nil {
+				s.serverError(w, r, "admin.users.patch.org", err)
+				return
+			}
+			homeSettings = parseSettings(org.Settings)
+			homeEnabled = notificationSettingsOf(homeSettings).Kinds.NameCorrectedEnabled()
+		}
+	}
+
 	var notifyID string
 	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
 		updated, err := q.SetUserFullName(r.Context(), sqlc.SetUserFullNameParams{
@@ -468,19 +501,14 @@ func (s *Server) handleAdminPatchUser(w http.ResponseWriter, r *http.Request) {
 		// a correction made about somebody by somebody else has to be visible to
 		// them, or it is a silent rewrite of whose tenancy this is.
 		if row.Kind == userKindRenter {
-			// A `notification_log` row belongs to an org — the platform has no
-			// SMS budget of its own — so the message goes out through the org
-			// whose rent book actually carries this name, which is also the org
-			// the renter would query if the correction were wrong. A renter with
-			// no tenancy anywhere is simply not texted; there is nobody to send
-			// as, and the name is not yet on any document.
-			orgID, orgName := s.renterHomeOrg(r, row.ID)
-			if orgID == "" {
+			if homeOrgID == "" {
 				return nil
 			}
 			notifyID, err = s.queueNameCorrected(r.Context(), q, nameCorrectedMessage{
-				OrgID: orgID, UserID: db.UUIDString(row.ID), Phone: db.StrVal(row.Phone),
-				Name: name, OrgName: orgName, Enabled: true,
+				OrgID: homeOrgID, UserID: db.UUIDString(row.ID), Phone: db.StrVal(row.Phone),
+				Name: name, OrgName: homeOrgName,
+				Lang: homeSettings.SMSLanguage, Overrides: homeSettings.notifyOverrides(),
+				Enabled: homeEnabled,
 			})
 			return err
 		}

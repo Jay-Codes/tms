@@ -502,8 +502,12 @@ func (s *Server) listPayments(w http.ResponseWriter, r *http.Request, renterScop
 	csvWanted := strings.EqualFold(strings.TrimSpace(qs.Get("format")), "csv")
 	if csvWanted {
 		// An export is a whole ledger, not a page of one: the cursor is the
-		// screen's affordance and would silently truncate a spreadsheet.
-		params.RowLimit = listMaxLimit
+		// screen's affordance and would silently truncate a spreadsheet. The
+		// screen's 200-row page limit would truncate it just as quietly, so the
+		// export carries its own bound — the same 10 000 rows the expenses
+		// export is capped at (API.md) — which is what keeps "the whole ledger"
+		// from meaning "the whole database".
+		params.RowLimit = paymentCSVMaxRows
 		params.CursorAt = pgtype.Timestamptz{}
 		params.CursorID = pgtype.UUID{}
 	}
