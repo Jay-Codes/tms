@@ -3,6 +3,7 @@ import '@tms/ui/tokens.css';
 import { RegisterSW } from '../components/RegisterSW';
 import { AuthProvider } from '../lib/auth';
 import { LocaleProvider } from '../lib/locale';
+import { BASE_PATH } from '../lib/basePath';
 
 // Landlord portal is org-themed like the enduser app: same whitelisted
 // fonts, org branding applied at runtime via applyOrgTheme().
@@ -17,11 +18,11 @@ const hanken = Hanken_Grotesk({ subsets: ['latin'], variable: '--font-hanken', p
 
 export const metadata = {
   title: 'TMS — Landlord',
-  manifest: '/tenant/manifest.webmanifest',
+  manifest: `${BASE_PATH}/manifest.webmanifest`,
   appleWebApp: { capable: true, title: 'TMS', statusBarStyle: 'default' as const },
   icons: {
-    icon: [{ url: '/tenant/icons/icon-192.png', sizes: '192x192', type: 'image/png' }],
-    apple: [{ url: '/tenant/icons/icon-192.png', sizes: '192x192', type: 'image/png' }],
+    icon: [{ url: `${BASE_PATH}/icons/icon-192.png`, sizes: '192x192', type: 'image/png' }],
+    apple: [{ url: `${BASE_PATH}/icons/icon-192.png`, sizes: '192x192', type: 'image/png' }],
   },
 };
 

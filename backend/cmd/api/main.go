@@ -202,7 +202,7 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 	// overdue chase, and the nudge for a contract still unsigned — and queues
 	// each send under a dedupe key so a repeat tick costs nothing (SPEC §2.2).
 	go notify.RunScheduler(ctx, deps.Pool, redisOf(redisClient), logger, notify.Options{
-		BaseURL:  cfg.PublicBaseURL,
+		BaseURL:  cfg.EnduserURL(),
 		Settings: httpserver.SchedulerSettings,
 	})
 

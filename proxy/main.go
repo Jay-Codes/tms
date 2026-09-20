@@ -17,6 +17,9 @@
 //	TLS_CERT_FILE      (unset)
 //	TLS_KEY_FILE       (unset)
 //
+// An UPSTREAM_* value of "off" disables that prefix (404). The server deploy
+// uses it for the three app prefixes, which Vercel serves instead.
+//
 // With TLS_CERT_FILE and TLS_KEY_FILE both set the proxy serves HTTPS on
 // PROXY_HTTPS_ADDR and the HTTP listener becomes a 308 redirect to it;
 // otherwise it serves plain HTTP only.
@@ -49,28 +52,43 @@ func mustProxy(target string) *httputil.ReverseProxy {
 	return httputil.NewSingleHostReverseProxy(u)
 }
 
-// routes builds the prefix table from the environment.
+// upstreamOff is the UPSTREAM_* value that removes a prefix from the table.
+const upstreamOff = "off"
+
+// routes builds the prefix table from the environment. Prefixes whose
+// upstream is "off" are left out, so they fall through to 404.
 func routes() map[string]*httputil.ReverseProxy {
+	table := map[string]*httputil.ReverseProxy{}
+	add := func(prefix, envKey, def string) *httputil.ReverseProxy {
+		target := getenv(envKey, def)
+		if strings.EqualFold(target, upstreamOff) {
+			log.Printf("route %s disabled (%s=off)", prefix, envKey)
+			return nil
+		}
+		p := mustProxy(target)
+		table[prefix] = p
+		return p
+	}
+	add("/enduser", "UPSTREAM_ENDUSER", "http://localhost:3001")
+	add("/tenant", "UPSTREAM_TENANT", "http://localhost:3002")
+	add("/admin", "UPSTREAM_ADMIN", "http://localhost:3003")
+	// Go REST API. The backend serves under /api/v1 itself, so the path
+	// is forwarded unchanged.
+	add("/api", "UPSTREAM_API", "http://localhost:8081")
+
 	minioProxy := mustProxy(getenv("UPSTREAM_MINIO", "http://localhost:9000"))
-	return map[string]*httputil.ReverseProxy{
-		"/enduser": mustProxy(getenv("UPSTREAM_ENDUSER", "http://localhost:3001")),
-		"/tenant":  mustProxy(getenv("UPSTREAM_TENANT", "http://localhost:3002")),
-		"/admin":   mustProxy(getenv("UPSTREAM_ADMIN", "http://localhost:3003")),
-		// Go REST API. The backend serves under /api/v1 itself, so the path
-		// is forwarded unchanged.
-		"/api": mustProxy(getenv("UPSTREAM_API", "http://localhost:8081")),
+	for _, prefix := range []string{
 		// MinIO buckets. Presigned URLs are signed against the public origin
 		// (MINIO_PUBLIC_URL), so the path and the Host header must both reach
 		// MinIO unchanged or the V4 signature will not validate.
 		// httputil.NewSingleHostReverseProxy's director rewrites only
 		// req.URL.{Scheme,Host}; it leaves req.Host alone, so the inbound Host
 		// is forwarded as-is.
-		"/branding":   minioProxy,
-		"/qrcodes":    minioProxy,
-		"/kyc":        minioProxy,
-		"/signatures": minioProxy,
-		"/receipts":   minioProxy,
+		"/branding", "/qrcodes", "/kyc", "/signatures", "/receipts", "/proofs",
+	} {
+		table[prefix] = minioProxy
 	}
+	return table
 }
 
 func handler() http.Handler {

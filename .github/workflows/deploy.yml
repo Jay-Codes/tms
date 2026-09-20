@@ -1,0 +1,37 @@
+# Manual rollout only. Images are built and pushed from a laptop with
+# `make docker-publish`; this just tells the server to pull a tag and restart.
+#
+# Vars:    DEPLOY_HOST, DEPLOY_USER (root), DEPLOY_PATH (/opt/tms)
+# Secrets: DEPLOY_SSH_KEY
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to roll out (from make docker-publish), e.g. a1b2c3d or v1.2.0"
+        required: true
+        default: latest
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Roll out on the server
+        env:
+          HOST: ${{ vars.DEPLOY_HOST }}
+          USER: ${{ vars.DEPLOY_USER || 'root' }}
+          DIR: ${{ vars.DEPLOY_PATH || '/opt/tms' }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new "$USER@$HOST" bash -s <<EOS
+            set -euo pipefail
+            cd "$DIR"
+            git pull --ff-only
+            make docker-deploy TAG=$TAG
+          EOS

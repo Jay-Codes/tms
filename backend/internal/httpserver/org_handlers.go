@@ -495,7 +495,7 @@ func (s *Server) handleCreateMember(w http.ResponseWriter, r *http.Request) {
 	if tokErr != nil {
 		s.logger.Warn("invite token not issued (cache unavailable)", "error", tokErr)
 	} else {
-		link := fmt.Sprintf("%s/tenant/invite?token=%s", s.cfg.AppBaseURL, token)
+		link := fmt.Sprintf("%s/invite?token=%s", s.cfg.TenantURL(), token)
 		if _, mailErr := s.deps.Email.Send(r.Context(), email,
 			"You have been invited to TMS", link,
 			fmt.Sprintf("%s invited you to join their team on TMS. Set your password to continue.", fullName)); mailErr != nil {

@@ -11,7 +11,7 @@
 
 const VERSION = 'tms-admin-v1';
 const SHELL_CACHE = `${VERSION}-shell`;
-const BASE = '/admin';
+const BASE = self.location.pathname.replace(/\/sw\.js$/, ''); // '' at the domain root, '/x' behind the dev proxy
 
 /** Precached so a cold offline start still paints the console chrome. */
 const SHELL_ASSETS = [
@@ -47,7 +47,7 @@ function isShellAsset(url) {
   return (
     url.pathname.startsWith(`${BASE}/_next/static/`) ||
     url.pathname === `${BASE}/manifest.webmanifest` ||
-    /^\/admin\/icon-[\w-]+\.png$/.test(url.pathname)
+    url.pathname.startsWith(`${BASE}/icon-`)
   );
 }
 

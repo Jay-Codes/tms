@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"net/http"
 	"testing"
 
 	"tms/backend/internal/config"
@@ -74,5 +75,56 @@ func TestLoadMinioPublicURLFromEnv(t *testing.T) {
 	t.Setenv("MINIO_PUBLIC_URL", "http://localhost:8080")
 	if got := config.Load().MinioPublicURL; got != "http://localhost:8080" {
 		t.Errorf("MinioPublicURL = %q", got)
+	}
+}
+
+func TestAppURLsDeriveFromPublicOrigin(t *testing.T) {
+	c := config.Config{AppBaseURL: "http://localhost:8080/"}
+	if got := c.EnduserURL(); got != "http://localhost:8080/enduser" {
+		t.Fatalf("EnduserURL = %q", got)
+	}
+	if got := c.TenantURL(); got != "http://localhost:8080/tenant" {
+		t.Fatalf("TenantURL = %q", got)
+	}
+	c.PublicBaseURL = "https://pub.example"
+	if got := c.EnduserURL(); got != "https://pub.example/enduser" {
+		t.Fatalf("EnduserURL with PublicBaseURL = %q", got)
+	}
+}
+
+func TestAppURLsExplicitOverride(t *testing.T) {
+	t.Setenv("ENDUSER_BASE_URL", "https://tms.kuzo.co.tz/")
+	t.Setenv("TENANT_BASE_URL", "https://lms.kuzo.co.tz")
+	t.Setenv("CORS_ALLOWED_ORIGINS", " https://tms.kuzo.co.tz, https://lms.kuzo.co.tz ,,https://tms-admin.kuzo.co.tz")
+	t.Setenv("COOKIE_SAME_SITE", "None")
+	t.Setenv("COOKIE_SECURE", "1")
+	c := config.Load()
+	if got := c.EnduserURL(); got != "https://tms.kuzo.co.tz" {
+		t.Fatalf("EnduserURL = %q", got)
+	}
+	if got := c.TenantURL(); got != "https://lms.kuzo.co.tz" {
+		t.Fatalf("TenantURL = %q", got)
+	}
+	if len(c.CORSAllowedOrigins) != 3 || c.CORSAllowedOrigins[1] != "https://lms.kuzo.co.tz" {
+		t.Fatalf("CORSAllowedOrigins = %v", c.CORSAllowedOrigins)
+	}
+	if c.CookieSameSite() != http.SameSiteNoneMode {
+		t.Fatalf("CookieSameSite = %v", c.CookieSameSite())
+	}
+	if !c.CookieSecure() {
+		t.Fatal("COOKIE_SECURE=1 should force Secure in dev")
+	}
+}
+
+func TestCookieDefaultsLaxNotSecure(t *testing.T) {
+	c := config.Load()
+	if c.CookieSameSite() != http.SameSiteLaxMode {
+		t.Fatalf("default SameSite = %v", c.CookieSameSite())
+	}
+	if c.CookieSecure() {
+		t.Fatal("dev default must not be Secure")
+	}
+	if len(c.CORSAllowedOrigins) != 0 {
+		t.Fatalf("default CORS list = %v", c.CORSAllowedOrigins)
 	}
 }

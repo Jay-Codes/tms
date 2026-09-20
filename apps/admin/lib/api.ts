@@ -1,3 +1,4 @@
+import { API_ORIGIN } from './basePath';
 /**
  * Thin fetch wrapper for the Go REST API — platform admin audience.
  *
@@ -11,7 +12,11 @@
  *  - No business logic here; the backend is the only source of truth.
  */
 
-export const API_BASE = '/api/v1';
+// Same origin by default (the dev proxy routes /api). NEXT_PUBLIC_API_URL
+// (e.g. https://api.tms.kuzo.co.tz) makes every call cross-origin; the API
+// then needs this app's origin in CORS_ALLOWED_ORIGINS and its cookies
+// SameSite=None, and `credentials: 'include'` below carries them.
+export const API_BASE = `${API_ORIGIN}/api/v1`;
 
 /** Every call from this app carries the admin audience. */
 export const AUDIENCE = 'admin';

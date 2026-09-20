@@ -67,7 +67,9 @@ type Options struct {
 	// ForceHour ignores the org's send-hour gate, so a tester does not have to
 	// wait until 09:00 to watch the timeline fire.
 	ForceHour bool
-	// BaseURL is the origin the `{{link}}` variable is built against.
+	// BaseURL is the renter app base (origin plus basePath, e.g.
+	// https://tms.kuzo.co.tz or http://localhost:8080/enduser) the `{{link}}`
+	// and `{{pay_link}}` variables are built against.
 	BaseURL string
 	// Settings parses one org's settings blob; required.
 	Settings SettingsFor
@@ -297,12 +299,12 @@ func queueOne(ctx context.Context, q *sqlc.Queries, res *Result, m Msg) {
 // `{{pay_link}}` variable of Phase 16 §16.4, resolved against the platform's
 // configured public origin.
 func PayLink(baseURL string) string {
-	return strings.TrimRight(baseURL, "/") + "/enduser/payments"
+	return strings.TrimRight(baseURL, "/") + "/payments"
 }
 
 // contractLink builds the renter-facing link to a contract.
 func contractLink(baseURL, contractID string) string {
-	return strings.TrimRight(baseURL, "/") + "/enduser/contract/" + contractID
+	return strings.TrimRight(baseURL, "/") + "/contract/" + contractID
 }
 
 // LocalDate is the calendar day t names, as a UTC midnight. t must already be

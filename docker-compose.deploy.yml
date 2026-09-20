@@ -1,0 +1,151 @@
+# Server deploy: Go API + edge proxy only. The three Next.js apps live on
+# Vercel and are not part of this file.
+#
+#   make docker-deploy              # reuse an existing postgres/redis/minio
+#   make docker-deploy INFRA=own    # also run our own postgres/redis/minio
+#
+# Images are pulled from the registry (API_IMAGE / EDGE_IMAGE in ENV_FILE,
+# default josephchuchu/tms-{api,edge}:latest). They are built and pushed from
+# a laptop with `make docker-publish` (x86_64 buildx builder); nothing is
+# compiled on the server.
+#
+# Both modes read ENV_FILE (default .env.deploy, copy from .env.deploy.example)
+# for interpolation *and* as the API container's environment. Nothing here
+# rewrites DATABASE_URL / REDIS_URL / MINIO_ENDPOINT: they are taken verbatim,
+# so pointing at another project's containers is a matter of editing the file.
+#
+# Networking. Every service joins one docker network, INFRA_NETWORK (default
+# `tms-infra`, created by `make docker-network`). To reuse the postgres/redis/
+# minio of another compose project on the same host, set INFRA_NETWORK to that
+# project's network (`docker network ls`, e.g. kyohuo_default) and use its
+# service names as hosts (postgres, redis, minio). No ports need publishing.
+#
+# Ports. The only published port is the edge proxy, bound to loopback
+# (127.0.0.1:${TMS_EDGE_PORT}) for the host reverse proxy (Caddy/nginx) that
+# owns 80/443 on the box — same convention as the other stacks on the server.
+
+name: ${COMPOSE_PROJECT_NAME:-tms}
+
+networks:
+  infra:
+    external: true
+    name: ${INFRA_NETWORK:-tms-infra}
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
+
+services:
+  api:
+    image: ${API_IMAGE:-josephchuchu/tms-api:latest}
+    pull_policy: always
+    env_file: ${ENV_FILE:-.env.deploy}
+    environment:
+      API_PORT: "8081"
+      # Migrations run in-process before the listener binds.
+      MIGRATE_ON_START: "1"
+      # The edge container is the only hop in front of the API; its address
+      # comes from the docker bridge, so trust RFC1918 rather than a fixed IP.
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-172.16.0.0/12,10.0.0.0/8,192.168.0.0/16,127.0.0.0/8}
+    networks: [infra]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  edge:
+    image: ${EDGE_IMAGE:-josephchuchu/tms-edge:latest}
+    pull_policy: always
+    environment:
+      PROXY_HTTP_ADDR: ":80"
+      UPSTREAM_API: http://api:8081
+      # Bucket prefixes (/branding, /qrcodes, ...) go straight to MinIO with
+      # Host unchanged so presigned V4 signatures validate.
+      UPSTREAM_MINIO: http://${MINIO_ENDPOINT:-minio:9000}
+      # Frontends are on Vercel: disable those routes ("off" = 404).
+      UPSTREAM_ENDUSER: "off"
+      UPSTREAM_TENANT: "off"
+      UPSTREAM_ADMIN: "off"
+    ports:
+      - "${TMS_EDGE_BIND:-127.0.0.1}:${TMS_EDGE_PORT:-3300}:80"
+    networks: [infra]
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  # --- optional own infra (INFRA=own / --profile infra) -------------------
+  # No host ports: only reachable on the compose network. Data in named
+  # volumes under this project (tms_pgdata etc.), separate from the dev loop.
+
+  postgres:
+    profiles: ["infra"]
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tms}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.deploy}
+      POSTGRES_DB: ${POSTGRES_DB:-tms}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [infra]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tms}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    profiles: ["infra"]
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redisdata:/data
+    networks: [infra]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  minio:
+    profiles: ["infra"]
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-tms}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env.deploy}
+    volumes:
+      - miniodata:/data
+    networks: [infra]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # Creates the buckets the API expects. Runs against whichever MinIO
+  # MINIO_ENDPOINT names (own or reused) using MINIO_ROOT_USER/PASSWORD — in
+  # reuse mode those are a service account with bucket-create rights, not the
+  # shared server's root. `make docker-buckets` runs it with --no-deps.
+  minio-init:
+    profiles: ["infra", "init"]
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set tms http://$${MINIO_ENDPOINT} $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing tms/branding tms/qrcodes tms/kyc tms/signatures tms/receipts tms/proofs &&
+      echo buckets ready
+      "
+    environment:
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-tms}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env.deploy}
+    networks: [infra]
+    restart: "no"

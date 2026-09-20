@@ -22,3 +22,4 @@ backend/bin
 Dockerfile
 **/Dockerfile
 .dockerignore
+.env.deploy

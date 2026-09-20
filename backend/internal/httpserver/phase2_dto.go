@@ -187,7 +187,7 @@ type unitRow struct {
 func unitRowOfList(r sqlc.ListUnitsRow) unitRow { return unitRow(r) }
 func unitRowOfGet(r sqlc.GetUnitRow) unitRow    { return unitRow(r) }
 func (s *Server) scanURL(code string) string {
-	return strings.TrimRight(s.cfg.AppBaseURL, "/") + "/enduser/u/" + code
+	return s.cfg.EnduserURL() + "/u/" + code
 }
 
 func (s *Server) toUnit(r unitRow) unitResponse {

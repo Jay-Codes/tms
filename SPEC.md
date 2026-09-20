@@ -98,7 +98,7 @@ Notification scheduling and overdue detection run as a **scheduler goroutine ins
 
 - **Renters:** phone-number-first. Register with phone → OTP via Beem SMS → set PIN/password. Login = phone + PIN (OTP fallback).
 - **Landlord users & admins:** email + password; email verification link. Optional OTP step later.
-- Sessions: opaque token in **httpOnly, Secure, SameSite=Lax cookie**, session data in Redis with Postgres fallback table (`sessions`) so Redis flush doesn't log everyone out.
+- Sessions: opaque token in **httpOnly, Secure, SameSite=Lax cookie** (SameSite=None + Secure when the apps are served from other origins than the API — `COOKIE_SAME_SITE`, `COOKIE_SECURE`, with the app origins in `CORS_ALLOWED_ORIGINS`), session data in Redis with Postgres fallback table (`sessions`) so Redis flush doesn't log everyone out.
 - Passwords/PINs: argon2id. OTPs: 6-digit, 5-min TTL in Redis, rate-limited (Redis counters: 3 sends / 10 min per phone, 5 verify attempts).
 - RBAC roles: `org_owner`, `org_manager` (org scope); `renter`; `platform_admin`. Middleware enforces role + org scope per route.
 

@@ -5,6 +5,7 @@
 package config
 
 import (
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -56,6 +57,24 @@ type Config struct {
 	// PublicBaseURL is the origin used when building public links (QR codes,
 	// verification links). Defaults to AppBaseURL when unset.
 	PublicBaseURL string
+	// EnduserBaseURL / TenantBaseURL are where the renter and landlord apps
+	// live, including any basePath. In dev they are derived from the single
+	// proxy origin (…/enduser, …/tenant); deployed on separate domains each
+	// is set explicitly (ENDUSER_BASE_URL, TENANT_BASE_URL). Read them via
+	// EnduserURL() / TenantURL(), which apply the fallback.
+	EnduserBaseURL string
+	TenantBaseURL  string
+
+	// CORSAllowedOrigins is the allowlist for cross-origin browser calls
+	// (CORS_ALLOWED_ORIGINS, comma-separated origins). Empty disables CORS
+	// entirely — the dev loop is same-origin behind the proxy.
+	CORSAllowedOrigins []string
+	// CookieSecureFlag forces the Secure attribute on session cookies even
+	// outside ENV=prod (COOKIE_SECURE). SameSite=None needs it.
+	CookieSecureFlag bool
+	// CookieSameSiteMode is "lax" (default), "none" (apps on other origins
+	// than the API) or "strict" (COOKIE_SAME_SITE).
+	CookieSameSiteMode string
 
 	SessionTTLHours int
 
@@ -118,11 +137,69 @@ func Load() Config {
 		SMSCreditExemptKinds: getenv("SMS_CREDIT_EXEMPT_KINDS", ""),
 
 		TrustedProxyCIDRs: getenv("TRUSTED_PROXY_CIDRS", DefaultTrustedProxyCIDRs),
+
+		EnduserBaseURL: getenv("ENDUSER_BASE_URL", ""),
+		TenantBaseURL:  getenv("TENANT_BASE_URL", ""),
+
+		CORSAllowedOrigins: splitList(getenv("CORS_ALLOWED_ORIGINS", "")),
+		CookieSecureFlag:   getbool("COOKIE_SECURE", false),
+		CookieSameSiteMode: strings.ToLower(getenv("COOKIE_SAME_SITE", "lax")),
 	}
 	if c.PublicBaseURL == "" {
 		c.PublicBaseURL = c.AppBaseURL
 	}
 	return c
+}
+
+// EnduserURL is the origin (plus basePath) of the renter app, no trailing
+// slash: ENDUSER_BASE_URL, else "{PublicBaseURL or AppBaseURL}/enduser" —
+// the dev proxy layout. Renter links (QR targets, contract and payment links
+// in SMS) are built on it.
+func (c Config) EnduserURL() string {
+	if v := strings.TrimRight(strings.TrimSpace(c.EnduserBaseURL), "/"); v != "" {
+		return v
+	}
+	return c.publicOrigin() + "/enduser"
+}
+
+// TenantURL is the same for the landlord app: TENANT_BASE_URL, else
+// "{PublicBaseURL or AppBaseURL}/tenant". Invite and verify links use it.
+func (c Config) TenantURL() string {
+	if v := strings.TrimRight(strings.TrimSpace(c.TenantBaseURL), "/"); v != "" {
+		return v
+	}
+	return c.publicOrigin() + "/tenant"
+}
+
+func (c Config) publicOrigin() string {
+	if v := strings.TrimRight(strings.TrimSpace(c.PublicBaseURL), "/"); v != "" {
+		return v
+	}
+	return strings.TrimRight(strings.TrimSpace(c.AppBaseURL), "/")
+}
+
+// CookieSameSite maps COOKIE_SAME_SITE to the http.SameSite the session
+// cookies carry. Unknown values fall back to Lax.
+func (c Config) CookieSameSite() http.SameSite {
+	switch c.CookieSameSiteMode {
+	case "none":
+		return http.SameSiteNoneMode
+	case "strict":
+		return http.SameSiteStrictMode
+	default:
+		return http.SameSiteLaxMode
+	}
+}
+
+// splitList parses a comma-separated env value into trimmed, non-empty items.
+func splitList(v string) []string {
+	var out []string
+	for _, item := range strings.Split(v, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 // DefaultMinioPublicURL is used when neither MINIO_PUBLIC_URL nor APP_BASE_URL
@@ -153,8 +230,10 @@ func (c Config) SessionTTL() time.Duration {
 	return time.Duration(c.SessionTTLHours) * time.Hour
 }
 
-// CookieSecure reports whether session cookies must carry the Secure flag.
-func (c Config) CookieSecure() bool { return !c.IsDev() }
+// CookieSecure reports whether session cookies must carry the Secure flag:
+// always in prod, and in dev when COOKIE_SECURE asks for it (a SameSite=None
+// cookie is rejected by browsers without it).
+func (c Config) CookieSecure() bool { return !c.IsDev() || c.CookieSecureFlag }
 
 func getenv(key, def string) string {
 	if v, ok := os.LookupEnv(key); ok && strings.TrimSpace(v) != "" {

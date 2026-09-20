@@ -298,7 +298,7 @@ func (s *Server) createContractTx(
 		Overrides: settings.notifyOverrides(),
 		Vars: notify.Vars{
 			Name: renter.FullName, Unit: unit.Name, Org: displayName,
-			Link: s.cfg.AppBaseURL + "/enduser/contract/" + db.UUIDString(created.ID),
+			Link: s.cfg.EnduserURL() + "/contract/" + db.UUIDString(created.ID),
 		},
 	})
 	return created, notifyID, err

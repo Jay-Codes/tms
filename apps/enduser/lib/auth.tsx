@@ -12,7 +12,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useRouter } from 'next/navigation';
 import { ApiError, authApi, type Org, type User } from './api';
 
-export const BASE_PATH = '/enduser';
+export { BASE_PATH } from './basePath';
+import { BASE_PATH } from './basePath';
 
 export type AuthStatus = 'loading' | 'authenticated' | 'anonymous';
 

@@ -289,7 +289,7 @@ func TestSchedulerTimeline(t *testing.T) {
 	h.parkSchedules(t, unsigned.contractID)
 	h.backdateContract(t, unsigned.contractID, 8)
 
-	res := h.runScheduler(t, notify.Options{ForceHour: true, BaseURL: "http://localhost:8080"})
+	res := h.runScheduler(t, notify.Options{ForceHour: true, BaseURL: "http://localhost:8080/enduser"})
 
 	date := today.Format(testDateLayout)
 	want := map[string][]string{
@@ -322,7 +322,7 @@ func TestSchedulerTimeline(t *testing.T) {
 	}
 
 	// A second sweep on the same day queues nothing: the keys already exist.
-	again := h.runScheduler(t, notify.Options{ForceHour: true, BaseURL: "http://localhost:8080"})
+	again := h.runScheduler(t, notify.Options{ForceHour: true, BaseURL: "http://localhost:8080/enduser"})
 	if again.Total() != 0 {
 		t.Errorf("a repeat sweep queued %v, want nothing", again.Queued)
 	}

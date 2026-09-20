@@ -91,6 +91,10 @@ The first platform admin is seeded on startup from `ADMIN_EMAIL` / `ADMIN_PASSWO
 
 `make deploy` builds and runs the same three apps + API + proxy as images under the compose `full` profile — see [README.md](README.md#deploy-full-stack-compose). It shares the dev Postgres/Redis/MinIO volumes, so the data is the same data. `make tls-selfsigned` writes a cert/key pair into `.dev/tls` (mounted read-only at `/etc/tms/tls` in the proxy container); set `TLS_CERT_FILE` and `TLS_KEY_FILE` to those paths to make the proxy serve 443 and redirect 80 → 443.
 
+## Server deploy
+
+Production runs only the API + edge from `docker-compose.deploy.yml` (frontends on Vercel): `make docker-deploy` — see [docs/DEPLOY.md](docs/DEPLOY.md).
+
 ## Notes
 
 - Free ngrok URL changes on every restart — `make url` after each `make preview`. **The new URL has to go into `.env` as both `APP_BASE_URL` and `MINIO_PUBLIC_URL`, then `make api-restart`.** Skipping it leaves QR targets and presigned links pointing at the dead tunnel: the QR PNG 403s and `/enduser/u/{code}` opens the wrong origin.

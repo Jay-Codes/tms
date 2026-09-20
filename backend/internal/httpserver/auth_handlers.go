@@ -730,7 +730,7 @@ func (s *Server) sendVerificationEmail(ctx context.Context, user sqlc.User) erro
 	if err != nil {
 		return err
 	}
-	link := fmt.Sprintf("%s/tenant/verify?token=%s", s.cfg.AppBaseURL, token)
+	link := fmt.Sprintf("%s/verify?token=%s", s.cfg.TenantURL(), token)
 	_, err = s.deps.Email.Send(ctx, *user.Email, "Verify your TMS email address", link,
 		"Confirm your email address to finish setting up your TMS account.")
 	return err

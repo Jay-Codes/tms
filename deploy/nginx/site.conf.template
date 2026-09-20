@@ -1,0 +1,39 @@
+# TMS API ingress — rendered by `make server-nginx` (envsubst on ${DOMAIN},
+# ${TMS_EDGE_PORT}) into /etc/nginx/sites-available/${DOMAIN}.conf.
+#
+# Plain HTTP only: `make server-cert` (certbot --nginx) adds the 443 server
+# block and the 80 -> 443 redirect in place, and keeps them renewed.
+#
+# Everything is forwarded to the TMS edge container on loopback, which routes
+# /api, /healthz and the MinIO bucket prefixes. Host must reach it unchanged:
+# presigned MinIO URLs are signed against MINIO_PUBLIC_URL and validate on it.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN};
+
+    # Uploads: proofs of payment, KYC scans, branding assets, CSV imports.
+    client_max_body_size 25m;
+
+    # Reports / CSV export and import can run long.
+    proxy_read_timeout 120s;
+    proxy_send_timeout 120s;
+
+    location / {
+        proxy_pass http://127.0.0.1:${TMS_EDGE_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+        proxy_redirect off;
+    }
+
+    # Certbot's HTTP-01 challenge. The nginx plugin injects its own location
+    # during issuance; this keeps webroot-mode renewals working too.
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+}

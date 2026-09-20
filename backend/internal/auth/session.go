@@ -94,7 +94,18 @@ type Manager struct {
 	Redis  *redis.Client
 	TTL    time.Duration
 	Secure bool
-	Logger *slog.Logger
+	// SameSite for the audience cookies. Zero value means Lax (the apps share
+	// the API's origin); None when the apps are served from other origins,
+	// which browsers accept only together with Secure.
+	SameSite http.SameSite
+	Logger   *slog.Logger
+}
+
+func (m *Manager) sameSite() http.SameSite {
+	if m.SameSite == 0 {
+		return http.SameSiteLaxMode
+	}
+	return m.SameSite
 }
 
 func (m *Manager) logger() *slog.Logger {
@@ -274,7 +285,7 @@ func (m *Manager) SetCookie(w http.ResponseWriter, audience, token string) {
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   m.Secure,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: m.sameSite(),
 		MaxAge:   int(m.TTL.Seconds()),
 	})
 }
@@ -287,7 +298,7 @@ func (m *Manager) ClearCookie(w http.ResponseWriter, audience string) {
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   m.Secure,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: m.sameSite(),
 		MaxAge:   -1,
 	})
 }
