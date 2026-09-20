@@ -99,6 +99,8 @@ var columns = map[string][]Column{
 		{Name: "locale", Required: false, Example: "sw", Help: "sw or en (default sw)"},
 		{Name: "property", Required: false, Example: "Block A", Help: "property of the unit below"},
 		{Name: "unit", Required: false, Example: "A1", Help: "when given, a contract is drawn up for signing"},
+		{Name: "start_date", Required: false, Example: "2024-03-01",
+			Help: "the real move-in date, up to 10 years back (default today)"},
 	},
 	KindPayments: {
 		{Name: "unit", Required: true, Example: "A1", Help: "unit name; must be unique across the org"},
@@ -458,7 +460,16 @@ type RenterRow struct {
 	Locale   string
 	Property string
 	Unit     string
+	// StartDate is the real move-in date of a tenancy that predates TMS (Phase
+	// 20 §20.3). Zero means "today", which is what every import did before. It
+	// may reach ten years back — a landlord joining mid-tenancy has to be able
+	// to say when the tenancy actually began, or the rent book starts with a
+	// lie and there is nothing for the past rent to settle against.
+	StartDate time.Time
 }
+
+// StartBackstopDays is how far back a landlord-supplied start date may reach.
+const StartBackstopDays = 3650
 
 // ParseRenterRow applies the `renters` rules to one line's cells.
 func ParseRenterRow(raw map[string]string) (RenterRow, RowErrors) {
@@ -481,6 +492,19 @@ func ParseRenterRow(raw map[string]string) (RenterRow, RowErrors) {
 			errs.Add("locale", "must be sw or en")
 		} else {
 			out.Locale = v
+		}
+	}
+	if v := strings.TrimSpace(raw["start_date"]); v != "" {
+		t, ok := parsePaidAt(v)
+		switch {
+		case !ok:
+			errs.Add("start_date", "must be a date (YYYY-MM-DD)")
+		case t.After(time.Now().UTC().AddDate(1, 0, 0)):
+			errs.Add("start_date", "must not be more than a year ahead")
+		case t.Before(time.Now().UTC().AddDate(0, 0, -StartBackstopDays)):
+			errs.Add("start_date", "must not be more than 10 years in the past")
+		default:
+			out.StartDate = t.Truncate(24 * time.Hour)
 		}
 	}
 	return out, errs

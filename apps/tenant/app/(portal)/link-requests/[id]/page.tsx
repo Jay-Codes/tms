@@ -11,6 +11,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { Field, Note, ProblemNote } from '../../../../components/FormBits';
+import { NidaField } from '../../../../components/NidaField';
 import { Facts, KycStamp, LinkStatusStamp, ViewIdDocButton, localeLabel } from '../../../../components/RenterBits';
 import { PageHead } from '../../../../components/PageHead';
 import { Sheet } from '../../../../components/Sheet';
@@ -236,9 +237,13 @@ function RequestBody({ id }: { id: string }) {
               [t('renters.locale'), localeLabel(t, request.renter?.locale)],
               [
                 t('renters.field.nida'),
-                <span key="nida" className="num" style={{ letterSpacing: '0.08em' }}>
-                  {profile?.nida_masked ?? '—'}
-                </span>,
+                renterId ? (
+                  <NidaField key="nida" userId={renterId} masked={profile?.nida_masked} />
+                ) : (
+                  <span key="nida" className="num" style={{ letterSpacing: '0.08em' }}>
+                    {profile?.nida_masked ?? '—'}
+                  </span>
+                ),
               ],
               [t('renters.field.next_of_kin'), profile?.next_of_kin_name ?? '—'],
               [t('renters.field.next_of_kin_phone'), profile?.next_of_kin_phone ?? '—'],

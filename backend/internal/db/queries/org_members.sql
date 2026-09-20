@@ -39,3 +39,15 @@ RETURNING *;
 -- name: CountActiveOwners :one
 SELECT count(*) FROM org_members
 WHERE org_id = sqlc.arg(org_id) AND role = 'org_owner' AND deleted_at IS NULL;
+
+-- LockOrgOwners serialises the owner set of one org. The last-owner guard is a
+-- read-then-write across *different* rows — demoting A while counting B — so
+-- under Read Committed two concurrent demotions (or removals) would each still
+-- see the other's owner and both commit, leaving the org with none. Taking this
+-- lock as the transaction's first statement makes the second transaction wait,
+-- and Postgres re-evaluates the predicate after the lock is released, so the
+-- row the first one demoted is gone from the second one's count.
+-- name: LockOrgOwners :many
+SELECT id FROM org_members
+WHERE org_id = sqlc.arg(org_id) AND role = 'org_owner' AND deleted_at IS NULL
+FOR UPDATE;

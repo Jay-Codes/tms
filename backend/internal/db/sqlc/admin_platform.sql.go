@@ -97,15 +97,19 @@ WHERE ($1::uuid IS NULL OR a.org_id = $1::uuid)
   AND ($2::uuid IS NULL OR a.actor_user_id = $2::uuid)
   AND ($3::text IS NULL OR a.entity_type = $3::text)
   AND ($4::uuid IS NULL OR a.entity_id = $4::uuid)
-  AND ($5::text IS NULL
-       OR a.action ILIKE '%' || $5::text || '%'
-       OR a.entity_type ILIKE '%' || $5::text || '%')
-  AND ($6::timestamptz IS NULL OR a.at >= $6::timestamptz)
-  AND ($7::timestamptz IS NULL OR a.at <= $7::timestamptz)
-  AND ($8::timestamptz IS NULL
-       OR (a.at, a.id) < ($8::timestamptz, $9::uuid))
+  -- Phase 19: an exact action filter beside the ` + "`" + `q` + "`" + ` substring. The reveal
+  -- actions are the reason — "show me every NIDA reveal" must not also match
+  -- ` + "`" + `admin.user_view` + "`" + ` because both contain the word "user".
+  AND ($5::text IS NULL OR a.action = $5::text)
+  AND ($6::text IS NULL
+       OR a.action ILIKE '%' || $6::text || '%'
+       OR a.entity_type ILIKE '%' || $6::text || '%')
+  AND ($7::timestamptz IS NULL OR a.at >= $7::timestamptz)
+  AND ($8::timestamptz IS NULL OR a.at <= $8::timestamptz)
+  AND ($9::timestamptz IS NULL
+       OR (a.at, a.id) < ($9::timestamptz, $10::uuid))
 ORDER BY a.at DESC, a.id DESC
-LIMIT $10
+LIMIT $11
 `
 
 type AdminListAuditLogParams struct {
@@ -113,6 +117,7 @@ type AdminListAuditLogParams struct {
 	ActorUserID pgtype.UUID        `json:"actor_user_id"`
 	EntityType  *string            `json:"entity_type"`
 	EntityID    pgtype.UUID        `json:"entity_id"`
+	Action      *string            `json:"action"`
 	Q           *string            `json:"q"`
 	FromAt      pgtype.Timestamptz `json:"from_at"`
 	ToAt        pgtype.Timestamptz `json:"to_at"`
@@ -146,6 +151,7 @@ func (q *Queries) AdminListAuditLog(ctx context.Context, arg AdminListAuditLogPa
 		arg.ActorUserID,
 		arg.EntityType,
 		arg.EntityID,
+		arg.Action,
 		arg.Q,
 		arg.FromAt,
 		arg.ToAt,

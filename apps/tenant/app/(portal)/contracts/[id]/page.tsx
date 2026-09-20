@@ -28,7 +28,8 @@ import {
 } from '../../../../components/ContractBits';
 import { DocumentPaper, PrintStyles } from '../../../../components/DocumentPaper';
 import { Field, Note, ProblemNote } from '../../../../components/FormBits';
-import { DaysOverdue, PaymentsTable, ReverseSheet } from '../../../../components/PaymentBits';
+import { BackfillSheet, needsBackfill } from '../../../../components/BackfillSheet';
+import { DaysOverdue, PaymentsTable, ReverseSheet, SourceChip } from '../../../../components/PaymentBits';
 import { ProofsFor } from '../../../../components/ProofBits';
 import { RecordPaymentSheet, type RecordPaymentTarget } from '../../../../components/RecordPaymentSheet';
 import { PageHead } from '../../../../components/PageHead';
@@ -229,6 +230,7 @@ function ContractBody({ id }: { id: string }) {
   const [verifying, setVerifying] = useState(false);
   const [behalfOpen, setBehalfOpen] = useState(false);
   const [terminateOpen, setTerminateOpen] = useState(false);
+  const [backfillOpen, setBackfillOpen] = useState(false);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -548,17 +550,26 @@ function ContractBody({ id }: { id: string }) {
                 {t('contracts.schedule.lead')}
               </p>
             </div>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              disabled={!canRecord || rows.length === 0}
-              title={
-                canRecord ? t('contracts.schedule.record_hint') : t('contracts.schedule.record_blocked')
-              }
-              onClick={() => openRecord()}
-            >
-              <Icon icon="solar:wallet-money-linear" width={20} /> {t('contracts.schedule.record')}
-            </button>
+            <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+              {/* Phase 20.3 — only while something past its due date is still
+                  open, which is exactly the state a pre-TMS tenancy lands in. */}
+              {canRecord && needsBackfill(rows) ? (
+                <button type="button" className="btn btn-quiet" onClick={() => setBackfillOpen(true)}>
+                  <Icon icon="solar:history-linear" width={20} /> {t('backfill.open')}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={!canRecord || rows.length === 0}
+                title={
+                  canRecord ? t('contracts.schedule.record_hint') : t('contracts.schedule.record_blocked')
+                }
+                onClick={() => openRecord()}
+              >
+                <Icon icon="solar:wallet-money-linear" width={20} /> {t('contracts.schedule.record')}
+              </button>
+            </div>
           </div>
 
           <TableScroll label={t('contracts.schedule.table_label')}>
@@ -606,6 +617,7 @@ function ContractBody({ id }: { id: string }) {
                             {t('contracts.schedule.still_owing', { amount: fmtTZS(remainingOn(s)) })}
                           </div>
                         ) : null}
+                        <SourceChip source={s.last_payment_source} />
                       </td>
                       <td>
                         {canRecord && isUnsettled(s) ? (
@@ -774,6 +786,13 @@ function ContractBody({ id }: { id: string }) {
         target={recordTarget}
         onClose={() => setRecordTarget(null)}
         onRecorded={() => void load()}
+      />
+
+      <BackfillSheet
+        open={backfillOpen}
+        target={{ contractId: id, label: contractLabel, schedules: schedules ?? undefined }}
+        onClose={() => setBackfillOpen(false)}
+        onDone={() => void load()}
       />
 
       <ReverseSheet

@@ -8,17 +8,19 @@
 -- neither.
 
 -- `import_batch_id` is NULL for money a landlord keys in and set for a row that
--- arrived on a CSV import (Phase 16 §16.2), which is what puts the "imported"
--- chip on a ledger row and what the 24 h undo walks.
+-- arrived on a CSV import (Phase 16 §16.2), which is what the 24 h undo walks.
+-- `source` (Phase 20 §20.3) is the wider question the chip actually asks —
+-- `manual`, `import` or `backfill` — and every write states it.
 -- name: CreatePayment :one
 INSERT INTO payments (
     org_id, contract_id, schedule_id, amount, method, reference, paid_at,
-    recorded_by_user_id, note, import_batch_id
+    recorded_by_user_id, note, import_batch_id, source
 )
 VALUES (
     sqlc.arg(org_id), sqlc.arg(contract_id), sqlc.narg(schedule_id), sqlc.arg(amount),
     sqlc.arg(method), sqlc.narg(reference), sqlc.arg(paid_at),
-    sqlc.narg(recorded_by_user_id), sqlc.narg(note), sqlc.narg(import_batch_id)
+    sqlc.narg(recorded_by_user_id), sqlc.narg(note), sqlc.narg(import_batch_id),
+    COALESCE(sqlc.narg(source)::text, 'manual')
 )
 RETURNING *;
 
@@ -73,6 +75,7 @@ WHERE p.deleted_at IS NULL
   AND (sqlc.narg(renter_user_id)::uuid IS NULL OR c.renter_user_id = sqlc.narg(renter_user_id)::uuid)
   AND (sqlc.narg(contract_id)::uuid IS NULL OR p.contract_id = sqlc.narg(contract_id)::uuid)
   AND (sqlc.narg(method)::text IS NULL OR p.method = sqlc.narg(method)::text)
+  AND (sqlc.narg(source)::text IS NULL OR p.source = sqlc.narg(source)::text)
   AND (sqlc.narg(paid_from)::timestamptz IS NULL OR p.paid_at >= sqlc.narg(paid_from)::timestamptz)
   AND (sqlc.narg(paid_to)::timestamptz IS NULL OR p.paid_at <= sqlc.narg(paid_to)::timestamptz)
   AND (sqlc.narg(cursor_at)::timestamptz IS NULL

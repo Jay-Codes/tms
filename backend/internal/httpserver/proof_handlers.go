@@ -283,6 +283,25 @@ func (s *Server) handleCreateProof(w http.ResponseWriter, r *http.Request) {
 			s.serverError(w, r, "proof.create.schedule", err)
 			return
 		}
+		// Phase 20 §20.1: a proof filed *against an instalment* must claim that
+		// instalment's outstanding balance exactly. The renter's sheet renders
+		// the figure as a static line rather than an editable box, so a
+		// mismatch here means the row moved between opening the sheet and
+		// sending it — a landlord recorded a payment, or another proof was
+		// accepted. The client re-reads the row and re-submits; it does not
+		// guess. Without a schedule_id there is nothing to lock the amount to,
+		// and the Phase 16 rule (1 … contract balance) stands unchanged.
+		outstanding := sched.Amount - sched.PaidAmount
+		if outstanding < 0 {
+			outstanding = 0
+		}
+		if body.Amount != outstanding {
+			httpx.WriteProblemExtra(w, http.StatusUnprocessableEntity, "amount_mismatch",
+				"amount does not match this instalment",
+				"this period's outstanding balance has changed; re-read the row and send the amount it shows",
+				map[string]any{"expected": outstanding})
+			return
+		}
 	}
 
 	// The daily ceiling again, in Postgres. The Redis limiter fails open when

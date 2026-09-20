@@ -182,6 +182,39 @@ const (
 	ActionAssistCode         = "renter.assist_code"
 	ActionAssistClose        = "renter.assist_close"
 	ActionContractWitnessOTP = "contract.witness_otp"
+
+	// Phase 19 — identity visibility and name corrections (PLAN2 Phase 19).
+	//
+	// `renter.nida_reveal` is its own action rather than a flag on a read of
+	// the renter card, for the reason `kyc.view` is one: the full national ID
+	// number is the most sensitive field in the product, and "who has seen
+	// this person's NIDA?" must be answerable by filtering the trail on the
+	// action alone — from the org's audit page, from the platform's, and from
+	// the renter's own profile. The number itself never appears in a payload;
+	// the row carries the optional reason and `actor_kind` only.
+	//
+	// `admin.user_view` is the one *read* outside the identity surface that is
+	// audited, because the page it backs aggregates one person's tenancies,
+	// payments and memberships across every tenant on the platform.
+	//
+	// The three rename actions are separate because the authority behind each
+	// is different: a member fixing their own name, an owner fixing a member's,
+	// and a landlord or the platform fixing somebody else's entirely.
+	ActionNidaReveal       = "renter.nida_reveal"
+	ActionMemberUpdate     = "member.update"
+	ActionRenterUpdate     = "renter.update"
+	ActionAdminUserView    = "admin.user_view"
+	ActionAdminUserUpdate  = "admin.user_update"
+	ActionAdminUserSuspend = "admin.user_suspend"
+	ActionAdminUserActive  = "admin.user_activate"
+
+	// Phase 20 — the backfill of pre-TMS history (PLAN2 §20.3).
+	//
+	// One row for the whole call, carrying the counts, beside the ordinary
+	// `payment.record` rows the settlement writes: the question the trail has
+	// to answer is "who decided that a year of this tenancy was settled?", and
+	// that is one decision however many periods it closed.
+	ActionContractBackfill = "contract.backfill"
 )
 
 // Entity types.

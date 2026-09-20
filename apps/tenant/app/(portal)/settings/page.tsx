@@ -5,10 +5,14 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { TableScroll, useT, type Translator } from '@tms/ui';
 import { Field, Note, ProblemNote } from '../../../components/FormBits';
+import { EditNameButton, nameLooksValid, NAME_MAX } from '../../../components/NameEdit';
 import { PageHead } from '../../../components/PageHead';
+import { Sheet } from '../../../components/Sheet';
 import {
   ApiError,
+  membersApi,
   orgApi,
+  toApiError,
   unwrapOrg,
   type Member,
   type Org,
@@ -167,12 +171,183 @@ function OrgProfile({ org, onSaved }: { org: Org; onSaved: (o: Org) => void }) {
   );
 }
 
+/* ------------------------------- own name -------------------------------- */
+
+/**
+ * Phase 19.3 — the name typed on the invite is no longer final: any org user
+ * can fix their own display name (`PATCH /org/members/me`). It is the name on
+ * the staff list, on audit rows, and in the landlord signature block of every
+ * contract activated after the change — never on one already signed.
+ */
+function OwnName() {
+  const t = useT();
+  const { user, refresh } = useMe();
+  const [name, setName] = useState('');
+  const [error, setError] = useState<ApiError | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  // The session is the source of truth; follow it until the box is touched.
+  useEffect(() => {
+    setName(user?.full_name ?? '');
+  }, [user?.full_name]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      await membersApi.updateMe({ full_name: name.trim() });
+      await refresh();
+      setSaved(true);
+    } catch (err) {
+      setError(toApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} style={{ display: 'grid', gap: 'var(--sp-4)', maxWidth: 640 }} noValidate>
+      <ProblemNote error={error} />
+      {saved ? <Note>{t('settings.you.saved')}</Note> : null}
+      <Field
+        id="own_name"
+        label={t('names.field.full_name')}
+        hint={t('settings.you.hint')}
+        error={error?.errors.full_name}
+      >
+        <input
+          id="own_name"
+          className="input"
+          maxLength={NAME_MAX}
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+            setSaved(false);
+          }}
+        />
+      </Field>
+      <div>
+        <button type="submit" className="btn btn-primary" disabled={busy || !nameLooksValid(name)}>
+          {busy ? t('common.saving') : t('names.save')}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 /* -------------------------------- members -------------------------------- */
+
+/**
+ * Phase 19.3 — the owner's correction desk for a colleague: the display name
+ * and the role, in one sheet. Both bounds are the server's, and so is the
+ * refusal to demote the last owner (409 `last_owner`) or to change your own
+ * role (409 `cannot_change_own_role`); this form just prints what came back.
+ */
+function MemberEditSheet({
+  member,
+  isSelf,
+  busy,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  member: Member | null;
+  isSelf: boolean;
+  busy: boolean;
+  error: ApiError | null;
+  onClose: () => void;
+  onSubmit: (body: { full_name?: string; role?: OrgRole }) => void;
+}) {
+  const t = useT();
+  const [name, setName] = useState('');
+  const [role, setRole] = useState<OrgRole>('org_manager');
+
+  useEffect(() => {
+    if (!member) return;
+    setName(member.full_name ?? '');
+    setRole(member.role);
+  }, [member]);
+
+  return (
+    <Sheet open={member !== null} title={t('settings.members.edit.title')} onClose={onClose} width={480}>
+      {member ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const body: { full_name?: string; role?: OrgRole } = {};
+            if (name.trim() !== member.full_name) body.full_name = name.trim();
+            if (role !== member.role) body.role = role;
+            onSubmit(body);
+          }}
+          style={{ display: 'grid', gap: 'var(--sp-4)' }}
+          noValidate
+        >
+          <ProblemNote error={error} />
+          <p style={{ color: 'var(--ink-soft)' }}>{member.email}</p>
+          <Field
+            id="me_name"
+            label={t('names.field.full_name')}
+            hint={t('names.field.full_name.hint')}
+            error={error?.errors.full_name}
+          >
+            <input
+              id="me_name"
+              className="input"
+              maxLength={NAME_MAX}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </Field>
+          <Field
+            id="me_role"
+            label={t('settings.members.col.role')}
+            hint={isSelf ? t('settings.members.edit.own_role') : t('settings.members.role_hint')}
+            error={error?.errors.role}
+          >
+            <select
+              id="me_role"
+              className="input"
+              value={role}
+              disabled={isSelf}
+              onChange={(e) => setRole(e.target.value as OrgRole)}
+            >
+              <option value="org_manager">{t('settings.members.role.manager')}</option>
+              <option value="org_owner">{t('settings.members.role.owner')}</option>
+            </select>
+          </Field>
+          <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={
+                busy ||
+                !nameLooksValid(name) ||
+                (name.trim() === member.full_name && role === member.role)
+              }
+            >
+              {busy ? t('common.saving') : t('names.save')}
+            </button>
+            <button type="button" className="btn btn-quiet" onClick={onClose} disabled={busy}>
+              {t('common.cancel')}
+            </button>
+          </div>
+        </form>
+      ) : null}
+    </Sheet>
+  );
+}
 
 function Members({ canManage }: { canManage: boolean }) {
   const t = useT();
+  const { user, refresh } = useMe();
   const [items, setItems] = useState<Member[] | null>(null);
   const [loadError, setLoadError] = useState<ApiError | null>(null);
+  const [editing, setEditing] = useState<Member | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState<ApiError | null>(null);
   const [form, setForm] = useState({ email: '', full_name: '', role: 'org_manager' as OrgRole });
   const [formError, setFormError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
@@ -207,6 +382,23 @@ function Members({ canManage }: { canManage: boolean }) {
       setFormError(err instanceof ApiError ? err : new ApiError(0, { detail: String(err) }));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const saveMember = async (body: { full_name?: string; role?: OrgRole }) => {
+    if (!editing) return;
+    setEditBusy(true);
+    setEditError(null);
+    try {
+      await membersApi.update(editing.id, body);
+      setEditing(null);
+      await load();
+      // A rename of your own row is also a rename of the session's name.
+      if (editing.user_id === user?.id) await refresh();
+    } catch (err) {
+      setEditError(toApiError(err));
+    } finally {
+      setEditBusy(false);
     }
   };
 
@@ -258,9 +450,17 @@ function Members({ canManage }: { canManage: boolean }) {
                 <td className="pencil">{memberStatus(t, m.status)}</td>
                 <td className="num">
                   {canManage ? (
-                    <button type="button" className="btn btn-quiet" onClick={() => void remove(m)} style={{ minHeight: 32 }}>
-                      {t('common.remove')}
-                    </button>
+                    <span className="wrap-sm" style={{ display: 'inline-flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                      <EditNameButton
+                        onClick={() => {
+                          setEditError(null);
+                          setEditing(m);
+                        }}
+                      />
+                      <button type="button" className="btn btn-quiet" onClick={() => void remove(m)} style={{ minHeight: 32 }}>
+                        {t('common.remove')}
+                      </button>
+                    </span>
                   ) : null}
                 </td>
               </tr>
@@ -317,6 +517,15 @@ function Members({ canManage }: { canManage: boolean }) {
           {t('settings.members.owner_only')}
         </p>
       )}
+
+      <MemberEditSheet
+        member={editing}
+        isSelf={editing?.user_id === user?.id}
+        busy={editBusy}
+        error={editError}
+        onClose={() => setEditing(null)}
+        onSubmit={(body) => void saveMember(body)}
+      />
     </div>
   );
 }
@@ -392,6 +601,12 @@ function SettingsBody() {
         ) : error ? null : (
           <p style={{ color: 'var(--ink-soft)' }}>{t('common.loading')}</p>
         )}
+      </section>
+
+      <section style={{ paddingTop: 'var(--sp-7)' }}>
+        <hr className="rule rule-strong" />
+        <h2 style={{ fontSize: 'var(--text-lg)', margin: 'var(--sp-4) 0' }}>{t('settings.you.heading')}</h2>
+        <OwnName />
       </section>
 
       <SettingsCard

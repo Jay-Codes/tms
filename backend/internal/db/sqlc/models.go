@@ -256,6 +256,7 @@ type Payment struct {
 	ReversalReason   *string            `json:"reversal_reason"`
 	ReversedByUserID pgtype.UUID        `json:"reversed_by_user_id"`
 	ImportBatchID    pgtype.UUID        `json:"import_batch_id"`
+	Source           string             `json:"source"`
 }
 
 type PaymentAllocation struct {

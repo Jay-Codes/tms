@@ -2,14 +2,58 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useT } from '@tms/ui';
-import { authApi, renterApi, type RenterProfile } from '../../lib/api';
+import { useLocale, useT } from '@tms/ui';
+import { authApi, renterApi, type NidaReveal, type RenterProfile } from '../../lib/api';
 import { useMe } from '../../lib/auth';
-import { displayPhone, errorMessage } from '../../lib/format';
+import { displayPhone, errorMessage, formatDate } from '../../lib/format';
 import { Protected } from '../../components/Protected';
 import { Notice, Screen, ScreenHeader } from '../../components/Screen';
 import { LanguageToggle } from '../../components/LanguageToggle';
 import { KycForm } from './KycForm';
+
+/**
+ * Phase 19.1 — "Who has seen your NIDA".
+ *
+ * A landlord can ask the API for the renter's full national ID number, and SPEC
+ * §8 lets them: a police report or a lease filed at the ward office needs the
+ * real digits. What it does not let them do is look unseen. Every reveal is
+ * audited, and `GET /me/profile` hands the last ten of them back here, so the
+ * renter can see exactly who looked and when. That visibility *is* the control.
+ */
+function NidaReveals({ reveals }: { reveals: NidaReveal[] }) {
+  const t = useT();
+  const locale = useLocale();
+  return (
+    <section style={{ display: 'grid', gap: 'var(--sp-2)' }}>
+      <h2 style={{ fontSize: 'var(--text-lg)' }}>{t('profile.reveals.title')}</h2>
+      <p style={{ margin: 0, color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+        {t('profile.reveals.lead')}
+      </p>
+      {reveals.length === 0 ? (
+        <p className="pencil">{t('profile.reveals.none')}</p>
+      ) : (
+        <table className="ledger">
+          <tbody>
+            {reveals.map((r, i) => (
+              <tr key={`${r.at}-${i}`}>
+                <td>
+                  {r.by_kind === 'platform_admin'
+                    ? t('profile.reveals.admin')
+                    : r.org_name
+                      ? t('profile.reveals.landlord', { org: r.org_name })
+                      : t('profile.reveals.landlordUnknown')}
+                </td>
+                <td className="num">
+                  <span style={{ fontSize: 'var(--text-sm)' }}>{formatDate(locale, r.at)}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}
 
 function ProfileContent() {
   const t = useT();
@@ -19,6 +63,7 @@ function ProfileContent() {
   const [error, setError] = useState<string | null>(null);
 
   const [profile, setProfile] = useState<RenterProfile | null>(null);
+  const [reveals, setReveals] = useState<NidaReveal[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -37,6 +82,8 @@ function ProfileContent() {
         const res = await renterApi.profile(ac.signal);
         if (!live) return;
         setProfile(res.profile);
+        // Absent on an API older than Phase 19 — then the list is simply empty.
+        setReveals(res.nida_reveals ?? []);
         setLoadError(null);
       } catch (err) {
         if (!live || (err instanceof DOMException && err.name === 'AbortError')) return;
@@ -119,6 +166,9 @@ function ProfileContent() {
           </tr>
         </tbody>
       </table>
+
+      {/* §19.1: only worth a section once the renter has a number to look at. */}
+      {!loading && !loadError && profile?.nida_masked && <NidaReveals reveals={reveals} />}
 
       {!loading && !loadError && (
         <KycForm

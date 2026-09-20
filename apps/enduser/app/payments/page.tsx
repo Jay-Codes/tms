@@ -16,6 +16,11 @@
  * `GET /me/proofs`; nothing is computed here that the server also computes.
  * The history lists are best-effort — a rent book that cannot reach them
  * still shows what is owed.
+ *
+ * Phase 18.2: the two history lists are paged (`next_cursor` → "Show older"),
+ * and the schedule groups of ended or terminated tenancies fold away under
+ * "Past tenancies" — their unpaid tail is a record, not a bill, so the overdue
+ * banner and the "next payment" card count live tenancies only.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -24,6 +29,7 @@ import { Icon } from '@iconify/react';
 import { useLocale, useT } from '@tms/ui';
 import {
   ApiError,
+  isLiveContractStatus,
   paymentMethodLabel,
   renterApi,
   scheduleOutstanding,
@@ -37,7 +43,12 @@ import { errorMessage, formatDate, money, proofErrorMessage } from '../../lib/fo
 import { Protected } from '../../components/Protected';
 import { Money } from '../../components/Money';
 import { PayDetails } from '../../components/PayDetails';
-import { CountdownChip, ProofChip, ScheduleMark } from '../../components/PaymentStatus';
+import {
+  CountdownChip,
+  ProofChip,
+  ScheduleMark,
+  SourceChip,
+} from '../../components/PaymentStatus';
 import { ProofSheet, type ProofTarget } from '../../components/ProofSheet';
 import { Notice, Screen, ScreenHeader } from '../../components/Screen';
 
@@ -49,6 +60,10 @@ interface ContractGroup {
   id: string;
   unitName: string;
   propertyName: string | null;
+  /** `contract.status` off the schedule rows — what decides live from past. */
+  status: string | null;
+  /** §18.2: false once the tenancy is `ended` or `terminated`. */
+  live: boolean;
   rows: MySchedule[];
 }
 
@@ -59,10 +74,15 @@ function groupByContract(items: MySchedule[], unitFallback: string): ContractGro
     const id = s.contract?.id ?? 'unknown';
     let g = groups.get(id);
     if (!g) {
+      const status = s.contract?.status ?? null;
       g = {
         id,
         unitName: s.contract?.unit_name ?? unitFallback,
         propertyName: s.contract?.property_name ?? null,
+        status,
+        // An unknown status is treated as live: better a stale row in the
+        // open list than a live tenancy folded out of sight.
+        live: !status || isLiveContractStatus(status),
         rows: [],
       };
       groups.set(id, g);
@@ -225,6 +245,12 @@ function PaymentRow({ payment }: { payment: MyPayment }) {
         ) : (
           <span className="stamp stamp-paid">{t('payments.received')}</span>
         )}
+        {payment.source && payment.source !== 'manual' && (
+          <>
+            <br />
+            <SourceChip source={payment.source} />
+          </>
+        )}
       </td>
     </tr>
   );
@@ -283,6 +309,129 @@ function ProofRow({
   );
 }
 
+/**
+ * One tenancy's rent book. Rendered the same whether the tenancy is running or
+ * archived — a past row keeps its stamp, its dates and its chips, because the
+ * record of what was paid is the whole point of keeping it.
+ */
+function ScheduleGroup({
+  group,
+  proofBySchedule,
+  onSendProof,
+}: {
+  group: ContractGroup;
+  proofBySchedule: Map<string, Proof>;
+  onSendProof: (target: ProofTarget) => void;
+}) {
+  const t = useT();
+  const locale = useLocale();
+  const openProof = onSendProof;
+  return (
+    <section style={{ display: 'grid', gap: 'var(--sp-2)' }}>
+      <h2 style={{ fontSize: 'var(--text-lg)' }}>
+        {group.unitName}
+        {group.propertyName && (
+          <>
+            {' '}
+            <span
+              style={{
+                color: 'var(--ink-soft)',
+                fontSize: 'var(--text-sm)',
+                fontWeight: 400,
+              }}
+            >
+              · {group.propertyName}
+            </span>
+          </>
+        )}
+      </h2>
+      <table className="ledger">
+        <thead>
+          <tr>
+            <th scope="col">{t('common.due')}</th>
+            <th scope="col" className="num">
+              {t('common.amount')}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {group.rows.map((row) => {
+            // `next_due` carries its own proof; every other row is joined
+            // client-side from `GET /me/proofs`.
+            const proof = proofBySchedule.get(row.id) ?? null;
+            const awaiting = row.proof?.status === 'submitted' || proof?.status === 'submitted';
+            const rejected = proof?.status === 'rejected' ? proof : null;
+            return (
+              <tr key={row.id}>
+                <td>
+                  {formatDate(locale, row.due_date)}
+                  <br />
+                  <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+                    {formatDate(locale, row.period_start)} –{' '}
+                    {formatDate(locale, row.period_end)}
+                  </span>
+                  {rejected && (
+                    <>
+                      <br />
+                      <span
+                        style={{ color: 'var(--stamp-overdue)', fontSize: 'var(--text-sm)' }}
+                      >
+                        {rejected.rejection_reason
+                          ? t('proof.rejected.reason', { reason: rejected.rejection_reason })
+                          : t('proof.status.rejected')}
+                      </span>
+                      <br />
+                      <button
+                        type="button"
+                        className="btn btn-quiet"
+                        style={{
+                          width: 'auto',
+                          height: 'var(--touch-min)',
+                          paddingInline: 0,
+                        }}
+                        onClick={() =>
+                          openProof({
+                            contractId: group.id,
+                            contractLabel: [group.unitName, group.propertyName]
+                              .filter(Boolean)
+                              .join(' · '),
+                            scheduleId: row.id,
+                            amount: scheduleOutstanding(row),
+                          })
+                        }
+                      >
+                        {t('proof.sendAgain')}
+                      </button>
+                    </>
+                  )}
+                </td>
+                <td className="num">
+                  <Money amount={row.amount} />
+                  <br />
+                  {awaiting ? (
+                    <CountdownChip schedule={row} awaiting />
+                  ) : (
+                    <ScheduleMark schedule={row} />
+                  )}
+                  {/* §20.3: how the money on this row reached the ledger,
+                      when it was not the landlord typing it in. */}
+                  {row.last_payment_source && row.last_payment_source !== 'manual' && (
+                    <>
+                      <br />
+                      <SourceChip source={row.last_payment_source} />
+                    </>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+
 /* ------------------------------------------------------------------ */
 /* Screen                                                              */
 /* ------------------------------------------------------------------ */
@@ -292,11 +441,15 @@ function PaymentsContent() {
   const locale = useLocale();
   const [schedules, setSchedules] = useState<MySchedule[]>([]);
   const [nextDue, setNextDue] = useState<MySchedule | null>(null);
-  const [overdueTotal, setOverdueTotal] = useState(0);
   const [bankAccount, setBankAccount] = useState<BankAccount | null>(null);
   const [mobileMoney, setMobileMoney] = useState<MobileMoney | null>(null);
   const [payments, setPayments] = useState<MyPayment[]>([]);
+  const [paymentsCursor, setPaymentsCursor] = useState<string | null>(null);
+  const [paymentsMore, setPaymentsMore] = useState(false);
   const [proofs, setProofs] = useState<Proof[]>([]);
+  const [proofsCursor, setProofsCursor] = useState<string | null>(null);
+  const [proofsMore, setProofsMore] = useState(false);
+  const [pastOpen, setPastOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -308,18 +461,29 @@ function PaymentsContent() {
     // History and proofs are additions to the ledger, not the ledger itself.
     void renterApi
       .payments(signal)
-      .then((res) => setPayments(res.items ?? []))
-      .catch(() => setPayments([]));
+      .then((res) => {
+        setPayments(res.items ?? []);
+        setPaymentsCursor(res.next_cursor ?? null);
+      })
+      .catch(() => {
+        setPayments([]);
+        setPaymentsCursor(null);
+      });
     void renterApi
       .proofs(signal)
-      .then((res) => setProofs(res.items ?? []))
-      .catch(() => setProofs([]));
+      .then((res) => {
+        setProofs(res.items ?? []);
+        setProofsCursor(res.next_cursor ?? null);
+      })
+      .catch(() => {
+        setProofs([]);
+        setProofsCursor(null);
+      });
 
     try {
       const res = await renterApi.schedules(signal);
       setSchedules(res.items ?? []);
       setNextDue(res.next_due ?? null);
-      setOverdueTotal(res.overdue_total ?? 0);
       setBankAccount(res.bank_account ?? null);
       setMobileMoney(res.mobile_money ?? res.bank_account?.mobile_money ?? null);
       setError(null);
@@ -344,7 +508,25 @@ function PaymentsContent() {
     [schedules, unitFallback],
   );
   const proofBySchedule = useMemo(() => newestProofBySchedule(proofs), [proofs]);
-  const reference = nextDue?.contract?.unit_name ?? groups[0]?.unitName ?? '';
+  const liveGroups = useMemo(() => groups.filter((g) => g.live), [groups]);
+  const pastGroups = useMemo(() => groups.filter((g) => !g.live), [groups]);
+  /* §18.2: the overdue banner is a bill, so it only counts live tenancies.
+     `overdue_total` from the API includes an ended tenancy's unpaid tail, which
+     no landlord is collecting and no renter can settle here. */
+  const overdueTotal = useMemo(
+    () =>
+      liveGroups.reduce(
+        (sum, g) =>
+          sum +
+          g.rows.reduce(
+            (rowSum, row) => rowSum + (row.status === 'overdue' ? scheduleOutstanding(row) : 0),
+            0,
+          ),
+        0,
+      ),
+    [liveGroups],
+  );
+  const reference = nextDue?.contract?.unit_name ?? liveGroups[0]?.unitName ?? '';
 
   /** The tenancy a proof defaults to: the one the next payment belongs to. */
   const defaultTarget: ProofTarget | null = useMemo(() => {
@@ -358,17 +540,56 @@ function PaymentsContent() {
         amount: scheduleOutstanding(nextDue),
       };
     }
-    const g = groups.find((group) => group.id !== 'unknown');
+    const g = liveGroups.find((group) => group.id !== 'unknown');
     if (!g) return null;
     return {
       contractId: g.id,
       contractLabel: [g.unitName, g.propertyName].filter(Boolean).join(' · '),
     };
-  }, [nextDue, groups]);
+  }, [nextDue, liveGroups]);
 
   function openProof(target: ProofTarget | null) {
     setProofTarget(target);
     setProofOpen(true);
+  }
+
+  /* Older pages append. `GET /me/payments` and `GET /me/proofs` hand back 50
+     rows and a `next_cursor`; before §18.2 the cursor was ignored and a renter
+     past 50 receipts quietly lost the oldest of them. */
+  async function showOlderPayments() {
+    if (!paymentsCursor || paymentsMore) return;
+    setPaymentsMore(true);
+    try {
+      const res = await renterApi.payments(undefined, paymentsCursor);
+      const older = res.items ?? [];
+      setPayments((prev) => {
+        const seen = new Set(prev.map((r) => r.id));
+        return [...prev, ...older.filter((r) => !seen.has(r.id))];
+      });
+      setPaymentsCursor(res.next_cursor ?? null);
+    } catch (err) {
+      setError(errorMessage(t, err));
+    } finally {
+      setPaymentsMore(false);
+    }
+  }
+
+  async function showOlderProofs() {
+    if (!proofsCursor || proofsMore) return;
+    setProofsMore(true);
+    try {
+      const res = await renterApi.proofs(undefined, proofsCursor);
+      const older = res.items ?? [];
+      setProofs((prev) => {
+        const seen = new Set(prev.map((r) => r.id));
+        return [...prev, ...older.filter((r) => !seen.has(r.id))];
+      });
+      setProofsCursor(res.next_cursor ?? null);
+    } catch (err) {
+      setError(errorMessage(t, err));
+    } finally {
+      setProofsMore(false);
+    }
   }
 
   async function withdraw(id: string) {
@@ -441,6 +662,12 @@ function PaymentsContent() {
                   <Money amount={scheduleOutstanding(nextDue)} />
                   <br />
                   <ScheduleMark schedule={nextDue} />
+                  {nextDue.last_payment_source && nextDue.last_payment_source !== 'manual' && (
+                    <>
+                      <br />
+                      <SourceChip source={nextDue.last_payment_source} />
+                    </>
+                  )}
                 </td>
               </tr>
             ) : (
@@ -455,101 +682,67 @@ function PaymentsContent() {
         </table>
       </section>
 
-      {groups.map((group) => (
-        <section key={group.id} style={{ display: 'grid', gap: 'var(--sp-2)' }}>
-          <h2 style={{ fontSize: 'var(--text-lg)' }}>
-            {group.unitName}
-            {group.propertyName && (
-              <>
-                {' '}
-                <span
-                  style={{
-                    color: 'var(--ink-soft)',
-                    fontSize: 'var(--text-sm)',
-                    fontWeight: 400,
-                  }}
-                >
-                  · {group.propertyName}
-                </span>
-              </>
-            )}
-          </h2>
-          <table className="ledger">
-            <thead>
-              <tr>
-                <th scope="col">{t('common.due')}</th>
-                <th scope="col" className="num">
-                  {t('common.amount')}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {group.rows.map((row) => {
-                // `next_due` carries its own proof; every other row is joined
-                // client-side from `GET /me/proofs`.
-                const proof = proofBySchedule.get(row.id) ?? null;
-                const awaiting = row.proof?.status === 'submitted' || proof?.status === 'submitted';
-                const rejected = proof?.status === 'rejected' ? proof : null;
-                return (
-                  <tr key={row.id}>
-                    <td>
-                      {formatDate(locale, row.due_date)}
-                      <br />
-                      <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-                        {formatDate(locale, row.period_start)} –{' '}
-                        {formatDate(locale, row.period_end)}
-                      </span>
-                      {rejected && (
-                        <>
-                          <br />
-                          <span
-                            style={{ color: 'var(--stamp-overdue)', fontSize: 'var(--text-sm)' }}
-                          >
-                            {rejected.rejection_reason
-                              ? t('proof.rejected.reason', { reason: rejected.rejection_reason })
-                              : t('proof.status.rejected')}
-                          </span>
-                          <br />
-                          <button
-                            type="button"
-                            className="btn btn-quiet"
-                            style={{
-                              width: 'auto',
-                              height: 'var(--touch-min)',
-                              paddingInline: 0,
-                            }}
-                            onClick={() =>
-                              openProof({
-                                contractId: group.id,
-                                contractLabel: [group.unitName, group.propertyName]
-                                  .filter(Boolean)
-                                  .join(' · '),
-                                scheduleId: row.id,
-                                amount: scheduleOutstanding(row),
-                              })
-                            }
-                          >
-                            {t('proof.sendAgain')}
-                          </button>
-                        </>
-                      )}
-                    </td>
-                    <td className="num">
-                      <Money amount={row.amount} />
-                      <br />
-                      {awaiting ? (
-                        <CountdownChip schedule={row} awaiting />
-                      ) : (
-                        <ScheduleMark schedule={row} />
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </section>
+      {liveGroups.map((group) => (
+        <ScheduleGroup
+          key={group.id}
+          group={group}
+          proofBySchedule={proofBySchedule}
+          onSendProof={openProof}
+        />
       ))}
+
+      {/* §18.2: an ended tenancy's rent book stays readable — it is the record
+          of what was paid — but it folds away so it cannot be mistaken for
+          money owed today. */}
+      {pastGroups.length > 0 && (
+        <section style={{ display: 'grid', gap: 'var(--sp-2)' }}>
+          <button
+            type="button"
+            onClick={() => setPastOpen((v) => !v)}
+            aria-expanded={pastOpen}
+            aria-controls="past-tenancies"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 'var(--sp-3)',
+              width: '100%',
+              minHeight: 'var(--touch-min)',
+              padding: 0,
+              background: 'transparent',
+              border: 0,
+              color: 'inherit',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+          >
+            <span>
+              <span style={{ fontSize: 'var(--text-lg)', fontWeight: 600 }}>
+                {t('payments.past.title')}
+              </span>
+              <br />
+              <span className="pencil">{t.n('payments.past.count', pastGroups.length)}</span>
+            </span>
+            <Icon
+              icon={pastOpen ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'}
+              width={22}
+              aria-hidden
+            />
+          </button>
+          {pastOpen && (
+            <div id="past-tenancies" style={{ display: 'grid', gap: 'var(--sp-4)' }}>
+              {pastGroups.map((group) => (
+                <ScheduleGroup
+                  key={group.id}
+                  group={group}
+                  proofBySchedule={proofBySchedule}
+                  onSendProof={openProof}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {!loading && groups.length === 0 && (
         <p className="pencil">{t('payments.noSchedule')}</p>
@@ -560,13 +753,25 @@ function PaymentsContent() {
         {payments.length === 0 ? (
           <p className="pencil">{t('payments.noHistory')}</p>
         ) : (
-          <table className="ledger">
-            <tbody>
-              {payments.map((p) => (
-                <PaymentRow key={p.id} payment={p} />
-              ))}
-            </tbody>
-          </table>
+          <>
+            <table className="ledger">
+              <tbody>
+                {payments.map((p) => (
+                  <PaymentRow key={p.id} payment={p} />
+                ))}
+              </tbody>
+            </table>
+            {paymentsCursor && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={paymentsMore}
+                onClick={() => void showOlderPayments()}
+              >
+                {paymentsMore ? t('common.loadingOlder') : t('common.showOlder')}
+              </button>
+            )}
+          </>
         )}
       </section>
 
@@ -575,18 +780,30 @@ function PaymentsContent() {
         {proofs.length === 0 ? (
           <p className="pencil">{t('proof.none')}</p>
         ) : (
-          <table className="ledger">
-            <tbody>
-              {proofs.map((p) => (
-                <ProofRow
-                  key={p.id}
-                  proof={p}
-                  busy={withdrawing === p.id}
-                  onWithdraw={(id) => void withdraw(id)}
-                />
-              ))}
-            </tbody>
-          </table>
+          <>
+            <table className="ledger">
+              <tbody>
+                {proofs.map((p) => (
+                  <ProofRow
+                    key={p.id}
+                    proof={p}
+                    busy={withdrawing === p.id}
+                    onWithdraw={(id) => void withdraw(id)}
+                  />
+                ))}
+              </tbody>
+            </table>
+            {proofsCursor && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={proofsMore}
+                onClick={() => void showOlderProofs()}
+              >
+                {proofsMore ? t('common.loadingOlder') : t('common.showOlder')}
+              </button>
+            )}
+          </>
         )}
       </section>
 

@@ -62,7 +62,7 @@ The landlord's phone becomes the code channel. Nothing is sent by SMS; the rente
 ## 3. Link approval & contract activation (landlord)
 
 1. Dashboard badge: pending link requests.
-2. Open request → renter KYC details, chosen duration, start date.
+2. Open request → renter KYC details, chosen duration, start date. NIDA shows masked; **"Show full number"** reveals it for 60 s after a confirm sheet (optional reason) — audited, rate-limited, and listed back to the renter in their profile. Same button on the renter detail page.
 3. Approve → contract created from template (terms + price **snapshotted**, hash computed), status `pending_signature`, renter SMS'd to sign.
 4. Reject (with reason) → renter notified by SMS.
 5. Renter signs (OTP + optional drawn signature; or a **witnessed** code shown on the landlord's screen — Flow 2b step 6) → landlord sees "Ready to countersign" → **Activate** records the landlord signature, generates payment schedules for the whole span, unit → occupied.
@@ -118,6 +118,7 @@ The landlord's phone becomes the code channel. Nothing is sent by SMS; the rente
 2. Full amount → schedule `paid`; underpayment → `partial` (remainder tracked); overpayment → applied to next schedule (confirm prompt).
 3. System sends **thank-you SMS** with next due date.
 4. Mistake → **reverse payment** (audited), schedule reverts. An accepted proof stays accepted — the claim was answered; the reversal is a fact about the payment.
+4a. **A tenancy older than TMS.** A landlord-created contract may start up to **10 years** in the past (a renter's own application still may not), so the real move-in date generates the real rent book and the past periods come out `overdue` — the truth until they are settled. **Backfill history** on the contract page (also offered from the Overdue list) closes every unpaid row up to a chosen date in one call: *Paid* records one payment per row at its own due date, stamped `source=backfill` and chipped "backfilled" beside "imported" on both landlord and renter screens, or *Waived* marks the rows waived with a note. Rows already paid or partial are skipped and reported back. No text per row — one `backfill_done` SMS, "your rent book now shows history up to {date}". Reports count that money in the period its `paid_at` falls in, not the day it was typed.
 5. Dashboard card **"Due in the next 7 days"** (count + total, top 5 rows) links to Payments → **Due soon**, a 14-day window by default with a 7 / 14 / 30 picker. The Renters list carries a sortable **Next due** column tinted when overdue, the renter's header shows Next due / Overdue above the tabs, and occupied cards on the units board carry a "Due 3 Oct" chip.
 
 **System:**
@@ -189,6 +190,9 @@ Dashboard (layout per org's saved **dashboard preferences**):
 1. Admin logs into `apps/admin`.
 2. Org list: activate / suspend orgs, view platform metrics (orgs, renters, SMS volume, failed sends).
 3. Cross-org audit search for support cases.
+4. **User directory**: search any user by phone, e-mail or name → detail page (identity, orgs, tenancies, payments,
+   activity). Suspend / activate with a reason (sessions revoked), fix a mistyped name with a reason, and reveal a
+   renter's NIDA for a support case — every one of those audited, the reveal visible to the renter.
 
 ---
 

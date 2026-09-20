@@ -74,6 +74,11 @@ func (s *Server) handleGetMyProfile(w http.ResponseWriter, r *http.Request) {
 			"locale": user.Locale,
 		},
 		"profile": toProfile(profile, user.Email),
+		// Phase 19 §19.1: who has looked at this renter's NIDA number, last
+		// ten. It is the deterrent the reveal endpoint is paired with — a
+		// landlord who opens a number knows the renter can see that they did.
+		// The reason the actor typed is deliberately not included.
+		"nida_reveals": s.myNidaReveals(r, p.UserID),
 	})
 }
 

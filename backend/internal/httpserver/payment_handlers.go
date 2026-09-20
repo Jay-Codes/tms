@@ -489,6 +489,28 @@ func (s *Server) listPayments(w http.ResponseWriter, r *http.Request, renterScop
 		}
 		params.Method = &v
 	}
+	// Phase 20 §20.3: where the money came from. It is a filter, never an
+	// exclusion — a backfilled payment is ordinary cash in every total, and this
+	// is how a landlord separates "what came in this month" from "what I entered
+	// to reconstruct last year".
+	if v := strings.TrimSpace(qs.Get("source")); v != "" {
+		if !paymentSources[v] {
+			f.Add("source", "must be manual, import or backfill")
+		}
+		params.Source = &v
+	}
+	csvWanted := strings.EqualFold(strings.TrimSpace(qs.Get("format")), "csv")
+	if csvWanted {
+		// An export is a whole ledger, not a page of one: the cursor is the
+		// screen's affordance and would silently truncate a spreadsheet. The
+		// screen's 200-row page limit would truncate it just as quietly, so the
+		// export carries its own bound — the same 10 000 rows the expenses
+		// export is capped at (API.md) — which is what keeps "the whole ledger"
+		// from meaning "the whole database".
+		params.RowLimit = paymentCSVMaxRows
+		params.CursorAt = pgtype.Timestamptz{}
+		params.CursorID = pgtype.UUID{}
+	}
 	if renterScope {
 		params.RenterUserID = p.UserID
 	} else {
@@ -519,6 +541,10 @@ func (s *Server) listPayments(w http.ResponseWriter, r *http.Request, renterScop
 	for _, row := range rows {
 		pr := paymentRowOfList(row)
 		items = append(items, toPayment(pr, byPayment[db.UUIDString(row.ID)], !renterScope))
+	}
+	if csvWanted {
+		writePaymentsCSV(w, items)
+		return
 	}
 	var next *string
 	if len(rows) > 0 {

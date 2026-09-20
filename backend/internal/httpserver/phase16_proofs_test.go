@@ -242,15 +242,23 @@ func TestAcceptProofAllocatesPayment(t *testing.T) {
 // TestAcceptProofOverpayPassesThroughUnchanged: the allocator's confirm
 // prompt reaches the review sheet verbatim, which is what lets the UI reuse
 // the record-payment confirm (PLAN2 §16.1).
+//
+// The overpayment arrives *without* a `schedule_id`, which is the only way a
+// renter can now file one: Phase 20 §20.1 locks the amount to the row's
+// outstanding balance whenever a `schedule_id` is given, so a claim naming a
+// row and a larger figure is refused at submit time with 422 `amount_mismatch`
+// (TestPhase20ProofAmountMustMatchTheInstalment guards that). An unaimed claim
+// keeps the Phase 16 rule — any amount within the contract balance — so the
+// money reaches the allocator, which aims it at the earliest unpaid row and
+// raises the confirm this test is about.
 func TestAcceptProofOverpayPassesThroughUnchanged(t *testing.T) {
 	h := newHarness(t)
 	fix := h.newProofFixture(t, "ProofOverpay", "0716120140", "+255716120141")
 	fix.requireStorage(t)
 
 	over := fix.amounts[0] + 50_000
-	filed := fix.submitProof(t, 2048, map[string]any{
-		"amount": over, "schedule_id": fix.scheduleIDs[0],
-	}).mustStatus(t, http.StatusCreated, "file an overpaying proof")
+	filed := fix.submitProof(t, 2048, map[string]any{"amount": over}).
+		mustStatus(t, http.StatusCreated, "file an overpaying proof")
 	proofID := filed.str(t, "proof", "id")
 
 	refused := fix.owner.do(http.MethodPost, "/proofs/"+proofID+"/accept", map[string]any{})

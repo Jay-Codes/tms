@@ -106,6 +106,34 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	return true
 }
 
+// DecodeJSONOptional decodes a body that the caller may legitimately omit. An
+// absent or whitespace-only body leaves dst untouched and succeeds; anything
+// else is decoded, and rejected, exactly as DecodeJSON would. It reads the body
+// rather than trusting Content-Length, because a chunked request reports -1 and
+// a length test would silently drop a body that was in fact sent.
+func DecodeJSONOptional(w http.ResponseWriter, r *http.Request, dst any) bool {
+	if r.Body == nil {
+		return true
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			WriteProblem(w, http.StatusRequestEntityTooLarge, "request body too large",
+				fmt.Sprintf("the request body must not exceed %d bytes", MaxBodyBytes))
+			return false
+		}
+		WriteProblem(w, http.StatusBadRequest, "invalid request body", err.Error())
+		return false
+	}
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return true
+	}
+	r.Body = io.NopCloser(strings.NewReader(string(raw)))
+	return DecodeJSON(w, r, dst)
+}
+
 // ProxyTrust decides whether the direct peer of a request is allowed to set
 // X-Forwarded-For / X-Real-IP on the caller's behalf. Anything outside the
 // trusted set has its forwarded headers ignored, so audit IPs and rate-limit

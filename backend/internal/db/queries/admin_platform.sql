@@ -101,6 +101,10 @@ WHERE (sqlc.narg(org_id)::uuid IS NULL OR a.org_id = sqlc.narg(org_id)::uuid)
   AND (sqlc.narg(actor_user_id)::uuid IS NULL OR a.actor_user_id = sqlc.narg(actor_user_id)::uuid)
   AND (sqlc.narg(entity_type)::text IS NULL OR a.entity_type = sqlc.narg(entity_type)::text)
   AND (sqlc.narg(entity_id)::uuid IS NULL OR a.entity_id = sqlc.narg(entity_id)::uuid)
+  -- Phase 19: an exact action filter beside the `q` substring. The reveal
+  -- actions are the reason — "show me every NIDA reveal" must not also match
+  -- `admin.user_view` because both contain the word "user".
+  AND (sqlc.narg(action)::text IS NULL OR a.action = sqlc.narg(action)::text)
   AND (sqlc.narg(q)::text IS NULL
        OR a.action ILIKE '%' || sqlc.narg(q)::text || '%'
        OR a.entity_type ILIKE '%' || sqlc.narg(q)::text || '%')

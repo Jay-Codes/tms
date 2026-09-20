@@ -549,21 +549,26 @@ func (s *Server) handleDeleteMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if existing.Role == auth.RoleOwner {
-		owners, err := s.q.CountActiveOwners(r.Context(), p.OrgID)
-		if err != nil {
-			s.serverError(w, r, "members.owners", err)
-			return
-		}
-		if owners <= 1 {
-			httpx.WriteProblem(w, http.StatusConflict, "last owner",
-				"an organisation must always have at least one owner")
-			return
-		}
-	}
-
 	var revoked []string
 	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
+		// The last-owner guard runs inside the transaction, behind a lock on the
+		// org's owner rows: counted outside it, two concurrent removals — or a
+		// removal racing a demotion — would each see the other's owner and both
+		// commit, leaving the org with nobody who can invite, remove or rename
+		// staff. The lock is the transaction's first statement so the second
+		// transaction waits and then counts what the first one did.
+		if existing.Role == auth.RoleOwner {
+			if _, err := q.LockOrgOwners(r.Context(), p.OrgID); err != nil {
+				return err
+			}
+			owners, err := q.CountActiveOwners(r.Context(), p.OrgID)
+			if err != nil {
+				return err
+			}
+			if owners <= 1 {
+				return errLastOwner
+			}
+		}
 		if _, err := q.SoftDeleteOrgMember(r.Context(), sqlc.SoftDeleteOrgMemberParams{
 			OrgID: p.OrgID, ID: memberID,
 		}); err != nil {
@@ -589,6 +594,11 @@ func (s *Server) handleDeleteMember(w http.ResponseWriter, r *http.Request) {
 			},
 		})
 	}); err != nil {
+		if isLastOwner(err) {
+			httpx.WriteProblem(w, http.StatusConflict, "last owner",
+				"an organisation must always have at least one owner")
+			return
+		}
 		s.serverError(w, r, "members.delete.tx", err)
 		return
 	}

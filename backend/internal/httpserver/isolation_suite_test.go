@@ -127,6 +127,12 @@ var isoRoutes = []isoCase{
 		body: map[string]any{"locale": "sw"}, want: []int{200},
 	},
 	{
+		// Phase 19 §19.3. Owner-only, and it names a member id — org A's
+		// manager must be a 404 through org B's session, not a rename.
+		method: "PATCH", pattern: "/org/members/{id}", aud: isoOrg,
+		path: "/org/members/{memberA}", body: map[string]any{"full_name": "Hijacked Name"},
+	},
+	{
 		method: "POST", pattern: "/org/members", aud: isoOrg,
 		body: map[string]any{"email": "iso-staff@beta.test", "full_name": "Beta Staff", "role": "org_manager"},
 		want: []int{201},
@@ -215,6 +221,17 @@ var isoRoutes = []isoCase{
 	{method: "GET", pattern: "/renters", aud: isoOrg, want: []int{200}},
 	{method: "GET", pattern: "/renters/{user_id}", aud: isoOrg, path: "/renters/{renterUserA}"},
 	{method: "GET", pattern: "/renters/{user_id}/kyc-doc", aud: isoOrg, path: "/renters/{renterUserA}/kyc-doc"},
+	{
+		// Phase 19 §19.1. The most sensitive read in the product: org B naming
+		// org A's renter must get the directory's 404, never a national ID.
+		method: "POST", pattern: "/renters/{user_id}/nida/reveal", aud: isoOrg,
+		path: "/renters/{renterUserA}/nida/reveal", body: map[string]any{"reason": "hijack"},
+	},
+	{
+		// Phase 19 §19.3.
+		method: "PATCH", pattern: "/renters/{user_id}", aud: isoOrg,
+		path: "/renters/{renterUserA}", body: map[string]any{"full_name": "Hijacked Renter"},
+	},
 
 	// -------------------------------------------------- contract templates --
 	{method: "GET", pattern: "/contract-templates", aud: isoOrg, want: []int{200}},
@@ -243,6 +260,13 @@ var isoRoutes = []isoCase{
 		},
 	},
 	{method: "POST", pattern: "/contracts/{id}/activate", aud: isoOrg, path: "/contracts/{contractA}/activate"},
+	{
+		// Phase 20 §20.3. Settling another org's history is the same 404 as
+		// terminating their contract.
+		method: "POST", pattern: "/contracts/{id}/backfill", aud: isoOrg,
+		path: "/contracts/{contractA}/backfill",
+		body: map[string]any{"until": "{today}", "mode": "waived", "note": "hijack"},
+	},
 	{
 		method: "POST", pattern: "/contracts/{id}/terminate", aud: isoOrg,
 		path: "/contracts/{contractA}/terminate",
@@ -565,6 +589,32 @@ var isoRoutes = []isoCase{
 	{method: "POST", pattern: "/admin/orgs/{id}/activate", aud: isoAdmin, path: "/admin/orgs/{orgA}/activate"},
 	{method: "GET", pattern: "/admin/metrics", aud: isoAdmin},
 	{method: "GET", pattern: "/admin/audit-log", aud: isoAdmin},
+
+	// --------------------------- Phase 19 §19.2: the user directory --
+	//
+	// Cross-org by design and reachable only with the `tms_a` cookie: an org
+	// owner or a renter gets a 401, because the admin audience is a different
+	// cookie and not a stronger role. The list carries no NIDA field of any
+	// kind, which TestPhase19AdminDirectory asserts on the body.
+	{method: "GET", pattern: "/admin/users", aud: isoAdmin},
+	{method: "GET", pattern: "/admin/users/{id}", aud: isoAdmin, path: "/admin/users/{renterUserA}"},
+	{
+		method: "PATCH", pattern: "/admin/users/{id}", aud: isoAdmin,
+		path: "/admin/users/{renterUserA}",
+		body: map[string]any{"full_name": "Hijacked", "reason": "hijack"},
+	},
+	{
+		method: "POST", pattern: "/admin/users/{id}/nida/reveal", aud: isoAdmin,
+		path: "/admin/users/{renterUserA}/nida/reveal", body: map[string]any{"reason": "hijack"},
+	},
+	{
+		method: "POST", pattern: "/admin/users/{id}/suspend", aud: isoAdmin,
+		path: "/admin/users/{renterUserA}/suspend", body: map[string]any{"reason": "hijack"},
+	},
+	{
+		method: "POST", pattern: "/admin/users/{id}/activate", aud: isoAdmin,
+		path: "/admin/users/{renterUserA}/activate", body: map[string]any{"reason": "hijack"},
+	},
 
 	// ----------------------------------- Phase 14: credits and templates --
 	//
