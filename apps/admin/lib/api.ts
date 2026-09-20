@@ -437,15 +437,22 @@ export interface AdminUserDetailUser extends AdminUserRow {
   suspended_reason?: string | null;
 }
 
+/**
+ * API.md 19.2 sends "the Phase 3 link_request shapes, with org_name" — those
+ * nest `unit` and `org`, so both the nested and the flat spelling are accepted
+ * and `unitOf`/`orgOf` below read whichever arrived.
+ */
 export interface AdminUserLinkRequest {
   id: string;
+  status: string;
   org_id?: string | null;
   org_name?: string | null;
-  unit_code?: string | null;
-  unit_label?: string | null;
+  org?: { id?: string | null; name?: string | null; slug?: string | null } | null;
+  unit?: { id?: string | null; name?: string | null; property_name?: string | null } | null;
+  unit_name?: string | null;
   property_name?: string | null;
-  status: string;
   start_date?: string | null;
+  end_date?: string | null;
   created_at?: string | null;
 }
 
@@ -453,13 +460,32 @@ export interface AdminUserContract {
   id: string;
   org_id?: string | null;
   org_name?: string | null;
-  unit_code?: string | null;
-  unit_label?: string | null;
+  unit_name?: string | null;
   property_name?: string | null;
   status: string;
   start_date?: string | null;
   end_date?: string | null;
   rent_amount?: number | null;
+}
+
+/** `A2 · Mikocheni Flats` from either the nested or the flat spelling. */
+export function unitOf(row: AdminUserLinkRequest | AdminUserContract): string {
+  const r = row as AdminUserLinkRequest;
+  const unit = r.unit?.name ?? row.unit_name ?? '';
+  const property = r.unit?.property_name ?? row.property_name ?? '';
+  if (unit && property) return `${unit} · ${property}`;
+  return unit || property || '—';
+}
+
+export function orgOf(row: AdminUserLinkRequest | AdminUserContract): {
+  id: string | null;
+  name: string | null;
+} {
+  const r = row as AdminUserLinkRequest;
+  return {
+    id: row.org_id ?? r.org?.id ?? null,
+    name: row.org_name ?? r.org?.name ?? null,
+  };
 }
 
 /** Payments summary across every org — cash the platform has seen for a user. */
@@ -531,22 +557,15 @@ export const adminUsers = {
     api.get<AdminUserDetail | AdminUserDetailUser>(`/admin/users/${id}`, { signal }),
 
   /**
-   * The Activity tab's second page. PLAN2 19.2 says the detail's audit block
-   * takes `?cursor=` for more; a dedicated sub-resource is the tidier shape, so
-   * try that first and fall back to the detail call when the API answers 404.
+   * The Activity tab's second page: `GET /admin/users/{id}?audit_cursor=` pages
+   * the audit block alone (API.md 19.2).
    */
   auditPage: async (id: string, cursor: string, signal?: AbortSignal): Promise<AdminUserAuditPage> => {
-    try {
-      return await api.get<AdminUserAuditPage>(`/admin/users/${id}/audit`, {
-        query: { cursor },
-        signal,
-      });
-    } catch (e) {
-      const err = toApiError(e);
-      if (err.status !== 404) throw e;
-      const res = await api.get<AdminUserDetail>(`/admin/users/${id}`, { query: { cursor }, signal });
-      return res.audit ?? { items: [] };
-    }
+    const res = await api.get<AdminUserDetail>(`/admin/users/${id}`, {
+      query: { audit_cursor: cursor },
+      signal,
+    });
+    return res.audit ?? { items: [] };
   },
 
   /** Revokes the user's sessions, like an org suspension does. */

@@ -21,8 +21,10 @@ import { KindChip, KycStamp } from '../../../../components/UserBits';
 import {
   ApiError,
   adminUsers,
+  orgOf,
   orgRoleLabel,
   toApiError,
+  unitOf,
   unwrapAdminUser,
   unwrapUserDetail,
   userKindLabel,
@@ -66,11 +68,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       {children}
     </section>
   );
-}
-
-function unitLabel(row: { unit_label?: string | null; unit_code?: string | null; property_name?: string | null }) {
-  const unit = row.unit_label || row.unit_code || '—';
-  return row.property_name ? `${unit} · ${row.property_name}` : unit;
 }
 
 function OrgLink({ id, name }: { id?: string | null; name?: string | null }) {
@@ -658,9 +655,9 @@ function UserDetailBody({ id }: { id: string }) {
                   {contracts.map((c) => (
                     <tr key={c.id}>
                       <td>
-                        <OrgLink id={c.org_id} name={c.org_name} />
+                        <OrgLink id={orgOf(c).id} name={orgOf(c).name} />
                       </td>
-                      <td>{unitLabel(c)}</td>
+                      <td>{unitOf(c)}</td>
                       <td>{c.status}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>{fmtDate(c.start_date)}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>{fmtDate(c.end_date)}</td>
@@ -690,9 +687,9 @@ function UserDetailBody({ id }: { id: string }) {
                   {linkRequests.map((r) => (
                     <tr key={r.id}>
                       <td>
-                        <OrgLink id={r.org_id} name={r.org_name} />
+                        <OrgLink id={orgOf(r).id} name={orgOf(r).name} />
                       </td>
-                      <td>{unitLabel(r)}</td>
+                      <td>{unitOf(r)}</td>
                       <td>{r.status}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>{fmtDate(r.start_date)}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>{fmtDate(r.created_at)}</td>
@@ -720,11 +717,11 @@ function UserDetailBody({ id }: { id: string }) {
             The rent book itself belongs to the organization — open the org to see the schedules and
             receipts behind these figures.
           </p>
-          {contracts.some((c) => c.org_id) ? (
+          {contracts.some((c) => orgOf(c).id) ? (
             <ul style={{ marginTop: 'var(--sp-3)', display: 'grid', gap: 'var(--sp-2)', listStyle: 'none', padding: 0 }}>
-              {Array.from(new Map(contracts.filter((c) => c.org_id).map((c) => [c.org_id, c])).values()).map((c) => (
-                <li key={c.org_id}>
-                  <OrgLink id={c.org_id} name={c.org_name} />
+              {Array.from(new Map(contracts.filter((c) => orgOf(c).id).map((c) => [orgOf(c).id, c])).values()).map((c) => (
+                <li key={orgOf(c).id}>
+                  <OrgLink id={orgOf(c).id} name={orgOf(c).name} />
                 </li>
               ))}
             </ul>
