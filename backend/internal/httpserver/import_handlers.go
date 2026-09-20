@@ -1145,7 +1145,7 @@ func (s *Server) simulateImportPayments(
 			// entered with today's start date instead of the real move-in date.
 			// Saying so, and naming Backfill, is the difference between a
 			// landlord fixing it and a landlord giving up.
-			if s.paymentPredatesRentBook(ctx, q, p.OrgID, row.contractID, row.payment.PaidAt) {
+			if s.backfillHintApplies(ctx, q, p.OrgID, row, book) {
 				row.errs.Add("paid_at", importErrBeforeRentBook)
 			} else {
 				row.errs.Add("amount", importErrExceedsBalance)
@@ -1188,6 +1188,26 @@ func (s *Server) paymentPredatesRentBook(
 		return false
 	}
 	return paidAt.Before(first.Time)
+}
+
+// backfillHintApplies decides which of the two labels an allocator refusal
+// earns. Allocation never looks at `paid_at` (it walks from the earliest
+// unpaid period), so the date alone cannot explain a refusal: a row dated
+// before the rent book allocates fine whenever the amount fits. The Backfill
+// hint is therefore honest only when both hold — the payment predates the
+// first period the book covers, AND it is small enough that a single missing
+// period could have absorbed it, i.e. no more than the first period's
+// `rent_amount` (the book is ordered by due date, so book[0] is that period).
+// A row that predates the book but is wildly over the balance failed on its
+// amount, and keeps `amount: exceeds_contract_balance`.
+func (s *Server) backfillHintApplies(
+	ctx context.Context, q *sqlc.Queries, orgID pgtype.UUID,
+	row *importRow, book []payment.Schedule,
+) bool {
+	if len(book) == 0 || row.payment.Amount > book[0].Amount {
+		return false
+	}
+	return s.paymentPredatesRentBook(ctx, q, orgID, row.contractID, row.payment.PaidAt)
 }
 
 // paymentRowOrder is the order money is applied in: by the date it was
@@ -1545,7 +1565,7 @@ func (s *Server) applyImportedPayment(
 	}
 	applied, err := allocateAgainst(book, row.payment.Amount)
 	if err != nil {
-		if s.paymentPredatesRentBook(ctx, q, p.OrgID, row.contractID, row.payment.PaidAt) {
+		if s.backfillHintApplies(ctx, q, p.OrgID, row, book) {
 			return zero, row.fail("paid_at", importErrBeforeRentBook)
 		}
 		return zero, row.fail("amount", importErrExceedsBalance)

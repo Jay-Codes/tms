@@ -457,6 +457,41 @@ func TestPhase20ImportPointsAtBackfillForMoneyBeforeTheRentBook(t *testing.T) {
 	}
 }
 
+// TestPhase20ImportKeepsTheAmountErrorForAnAbsurdEarlyPayment is the other side
+// of the hint. Allocation never reads `paid_at`, so an early date can only
+// *explain* a refusal when the figure is one a single missing period could have
+// absorbed. A row for thousands of times the rent failed on its amount, whatever
+// date it carries, and must keep saying so — otherwise a typo in the amount
+// column is answered with advice about the contract's start date.
+func TestPhase20ImportKeepsTheAmountErrorForAnAbsurdEarlyPayment(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newPaymentFixture(t, "ImportAbsurd", "0720003100", "+255720003101")
+
+	// Dated before the rent book begins, exactly like the hint's own case, but
+	// for far more than the whole contract owes.
+	lastYear := time.Now().UTC().AddDate(-1, 0, 0).Format("2006-01-02")
+	absurd := fix.amounts[0] * 3600
+	body := "unit,renter_phone,amount,paid_at,method\n" +
+		"Room 1," + fix.renterPhone + "," + strconv.FormatInt(absurd, 10) + "," + lastYear + ",cash\n"
+	preview := fix.owner.importPreview(t, "payments", "absurd.csv", body).
+		mustStatus(t, http.StatusCreated, "preview payments")
+
+	rows := arrayOf(t, preview, "rows")
+	if len(rows) != 1 {
+		t.Fatalf("preview rows = %d, want 1 — body: %s", len(rows), preview.Raw)
+	}
+	errs, _ := rows[0]["errors"].(map[string]any)
+	if errs == nil {
+		t.Fatalf("the row was accepted; 3600x the rent cannot be — body: %s", preview.Raw)
+	}
+	if got, _ := errs["amount"].(string); got != "exceeds_contract_balance" {
+		t.Errorf("amount error = %q, want exceeds_contract_balance — body: %s", got, preview.Raw)
+	}
+	if _, ok := errs["paid_at"]; ok {
+		t.Errorf("an amount failure must not be labelled on paid_at: %s", preview.Raw)
+	}
+}
+
 // TestPhase20RentersImportAcceptsARealMoveInDate: a landlord loading an existing
 // book gets contracts whose past periods exist.
 func TestPhase20RentersImportAcceptsARealMoveInDate(t *testing.T) {
