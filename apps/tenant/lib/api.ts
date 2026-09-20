@@ -291,9 +291,22 @@ export function creditsAreLow(c: SmsCredits | null): boolean {
  * so a landlord's language choice follows the account, not the browser.
  */
 export const membersApi = {
+  /**
+   * Phase 19.3 adds `full_name` beside the Phase 13 `locale`; either key may be
+   * sent alone, and the answer is `{member}` (older builds answered `{user}`),
+   * so the return type tolerates both and `unwrapMember` sorts it out.
+   */
   updateMe: (body: { locale?: Locale; full_name?: string }) =>
-    api.patch<{ user: User } | User>('/org/members/me', body),
+    api.patch<{ member: Member } | { user: User } | User>('/org/members/me', body),
+  /** `PATCH /org/members/{id}` — owner only; 409 `last_owner` / `cannot_change_own_role`. */
+  update: (id: string, body: { full_name?: string; role?: OrgRole }) =>
+    api.patch<{ member: Member } | Member>(`/org/members/${id}`, body),
 };
+
+/** `PATCH /org/members/*` may answer `{member}` or a bare member; normalise. */
+export function unwrapMember(res: { member: Member } | Member): Member {
+  return 'member' in res && res.member ? res.member : (res as Member);
+}
 
 /** `PATCH /org` may answer `{org}` or a bare org; normalise. */
 export function unwrapOrg(res: { org: Org } | Org): Org {
@@ -653,6 +666,20 @@ export const linkRequestsApi = {
     api.post<{ request: LinkRequest } | LinkRequest>(`/link-requests/${id}/reject`, { reason }),
 };
 
+/**
+ * `POST /renters/{user_id}/nida/reveal` (API.md Phase 19.1). A POST, never a
+ * query flag: the number must not sit in a URL, a cache or a prefetch, and the
+ * audit row must be unmissable. Nothing here is ever persisted client-side.
+ */
+export interface NidaReveal {
+  nida_number: string;
+  full_name: string;
+  revealed_at: string;
+}
+
+/** How long a revealed number stays on screen before it re-masks itself. */
+export const NIDA_REVEAL_MS = 60_000;
+
 export const rentersApi = {
   list: (
     query: { q?: string; kyc_status?: KycStatus | ''; cursor?: string; limit?: number } = {},
@@ -661,6 +688,14 @@ export const rentersApi = {
   get: (userId: string, signal?: AbortSignal) =>
     api.get<RenterDetail>(`/renters/${userId}`, { signal }),
   kycDoc: (userId: string) => api.get<{ url: string }>(`/renters/${userId}/kyc-doc`),
+  /** Phase 19.1. `reason` is optional for a landlord (required for admin). */
+  revealNida: (userId: string, reason?: string) =>
+    api.post<NidaReveal>(`/renters/${userId}/nida/reveal`, reason ? { reason } : {}),
+  /** Phase 19.3. 409 `renter_signed` once the renter has signed anywhere. */
+  rename: (userId: string, fullName: string) =>
+    api.patch<Pick<RenterDetail, 'renter' | 'profile'>>(`/renters/${userId}`, {
+      full_name: fullName,
+    }),
 };
 
 export const unwrapRequest = (res: { request: LinkRequest } | LinkRequest) =>
@@ -818,6 +853,13 @@ export interface ScheduleRow {
   amount: number;
   status: ScheduleStatus | string;
   paid_amount: number;
+  /**
+   * Phase 20.3 — where the newest live payment against this row came from, so
+   * the "imported" / "backfilled" chip renders on the landlord and the renter
+   * side from the same field. A join, not a stored column; `null`/absent when
+   * nothing has been allocated.
+   */
+  last_payment_source?: PaymentSource | null;
 }
 
 export interface ContractVerification {
@@ -963,7 +1005,33 @@ export const contractsApi = {
     api.post<{ contract: Contract } | Contract>(`/contracts/${id}/activate`, body),
   terminate: (id: string, body: { reason: string; effective_date?: string }) =>
     api.post<{ contract: Contract } | Contract>(`/contracts/${id}/terminate`, body),
+  /**
+   * Phase 20.3 — settle (or waive) every unsettled row due on or before
+   * `until` in one call. The server decides which rows qualify, what each one
+   * owes and what the total is; the sheet only shows what it answered.
+   */
+  backfill: (id: string, body: BackfillInput) =>
+    api.post<BackfillResult>(`/contracts/${id}/backfill`, body),
 };
+
+/** `POST /contracts/{id}/backfill` body (API.md Phase 20.3). */
+export interface BackfillInput {
+  until: string;
+  mode: 'paid' | 'waived';
+  /** A date applies to every row; `"due_date"` uses each row's own due date. */
+  paid_at?: string;
+  method?: PaymentMethod;
+  reference?: string;
+  note?: string;
+}
+
+/** `200 {settled, skipped, total, schedules}`. */
+export interface BackfillResult {
+  settled: number;
+  skipped: number;
+  total: number;
+  schedules?: ScheduleRow[];
+}
 
 export const brandingApi = {
   /** Public: the eight platform presets. No session needed. */
@@ -1038,6 +1106,15 @@ export async function uploadToPresignedUrl(ticket: UploadTicket, file: File): Pr
 export type PaymentMethod = 'cash' | 'bank_transfer' | 'mobile_money_manual';
 export type PaymentStatus = 'recorded' | 'reversed';
 
+/**
+ * Phase 20.3 — how a payment reached the book. `manual` is a landlord (or an
+ * accepted proof) at the Record payment sheet, `import` a committed CSV batch,
+ * `backfill` the one-call settlement of periods that predate TMS. The chip is
+ * for the eye; the filter is what the column is for.
+ */
+export type PaymentSource = 'manual' | 'import' | 'backfill';
+export const PAYMENT_SOURCES: readonly PaymentSource[] = ['manual', 'import', 'backfill'] as const;
+
 /** Every method the MVP records. Gateway entry is post-MVP (SPEC §5.7). */
 export const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: 'cash', label: 'Cash' },
@@ -1089,6 +1166,9 @@ export interface Payment {
   reversal_reason: string | null;
   applied: PaymentAllocation[] | null;
   created_at: string;
+  /** Phase 20.3; absent on payloads written before the column existed. */
+  source?: PaymentSource | null;
+  import_batch_id?: string | null;
   /**
    * `GET /payments` denormalises the contract onto the payment itself rather
    * than nesting it the way `GET /schedules` does. Both are tolerated —
@@ -1226,6 +1306,8 @@ export const paymentsApi = {
       contract_id?: string;
       renter_user_id?: string;
       method?: PaymentMethod | '';
+      /** Phase 20.3 — manual | import | backfill. */
+      source?: PaymentSource | '';
       from?: string;
       to?: string;
       cursor?: string;

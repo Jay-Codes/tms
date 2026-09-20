@@ -16,7 +16,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useT, type Translator } from '@tms/ui';
 import { ApiError, authApi } from '../lib/api';
 import { RequireAuth, useMe } from '../lib/auth';
-import { loadAndApplyOrgTheme } from '../lib/branding';
+import { loadAndApplyOrgTheme, refreshOrgMark, useOrgMark } from '../lib/branding';
 import { LanguageToggle } from './LanguageToggle';
 import { pendingLabel, useNavBadges, type Badges } from './NavBadges';
 
@@ -151,15 +151,77 @@ function VerifyBanner() {
   );
 }
 
+/**
+ * The 28px mark beside the org name (Phase 20.2). The landlord's own logo when
+ * there is one — on a white tile, because a dark logo has to survive a dark
+ * primary — and the plain primary square when there is not.
+ *
+ * A presigned URL expires (API.md: one hour), so an `onError` is not a broken
+ * file: it is a stale link. The mark asks `/org/branding` for a fresh one
+ * **once**, and falls back to the square if that does not help either.
+ */
+function LogoTile({ url }: { url: string | null }) {
+  const [failed, setFailed] = useState(false);
+  const [retried, setRetried] = useState(false);
+
+  // A new URL (upload, delete, refresh) deserves a fresh chance to paint.
+  useEffect(() => {
+    setFailed(false);
+  }, [url]);
+
+  const square = (
+    <span
+      aria-hidden
+      style={{ width: 28, height: 28, borderRadius: 'var(--radius-sm)', background: 'var(--primary)', flexShrink: 0 }}
+    />
+  );
+  if (!url || failed) return square;
+
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: 28,
+        height: 28,
+        borderRadius: 'var(--radius-sm)',
+        background: '#fff',
+        border: '1px solid var(--rule)',
+        flexShrink: 0,
+        display: 'grid',
+        placeItems: 'center',
+        overflow: 'hidden',
+      }}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element -- presigned MinIO URL */}
+      <img
+        src={url}
+        alt=""
+        width={28}
+        height={28}
+        style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+        onError={() => {
+          if (retried) {
+            setFailed(true);
+            return;
+          }
+          setRetried(true);
+          void refreshOrgMark().then((m) => {
+            // Same URL back means the link was not the problem.
+            if (!m.logo_url || m.logo_url === url) setFailed(true);
+          });
+        }}
+      />
+    </span>
+  );
+}
+
 function OrgMark() {
   const { org } = useMe();
+  const mark = useOrgMark();
   const t = useT();
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', minWidth: 0 }}>
-      <span
-        aria-hidden
-        style={{ width: 28, height: 28, borderRadius: 'var(--radius-sm)', background: 'var(--primary)', flexShrink: 0 }}
-      />
+      <LogoTile url={mark.logo_url} />
       <div style={{ lineHeight: 1.15, minWidth: 0 }}>
         <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{org?.name ?? '—'}</div>
         <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
