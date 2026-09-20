@@ -12,8 +12,13 @@
  */
 
 import type { Locale, ThemePreset, ThemeTokens } from '@tms/ui';
+import { API_ORIGIN } from './basePath';
 
-export const API_BASE = '/api/v1';
+// Same origin by default (the dev proxy routes /api). NEXT_PUBLIC_API_URL
+// (e.g. https://api.tms.kuzo.co.tz) makes every call cross-origin; the API
+// then needs this app's origin in CORS_ALLOWED_ORIGINS and its cookies
+// SameSite=None, and `credentials: 'include'` below carries them.
+export const API_BASE = `${API_ORIGIN}/api/v1`;
 
 export interface Problem {
   type?: string;

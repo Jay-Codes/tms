@@ -15,7 +15,7 @@
  * There are no offline writes: nothing is queued, nothing is replayed.
  */
 
-const BASE = '/enduser';
+const BASE = self.location.pathname.replace(/\/sw\.js$/, ''); // '' at the domain root, '/x' behind the dev proxy
 const SHELL_URL = `${BASE}/`;
 const CACHE = 'tms-enduser-shell-v1';
 

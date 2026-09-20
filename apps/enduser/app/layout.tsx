@@ -4,6 +4,7 @@ import './enduser.css';
 import { AuthProvider } from '../lib/auth';
 import { LocaleProvider } from '../lib/locale';
 import { ServiceWorker } from '../components/ServiceWorker';
+import { BASE_PATH } from '../lib/basePath';
 
 // Whitelisted org-selectable fonts (see @tms/ui theme.ts). Only the
 // active one is used; the rest load lazily without preload cost.
@@ -26,13 +27,13 @@ const hanken = Hanken_Grotesk({ subsets: ['latin'], variable: '--font-hanken', p
 export const metadata = {
   title: 'Kitabu cha kodi',
   applicationName: 'Kitabu cha kodi',
-  manifest: '/enduser/manifest.webmanifest',
+  manifest: `${BASE_PATH}/manifest.webmanifest`,
   icons: {
     icon: [
-      { url: '/enduser/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-      { url: '/enduser/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+      { url: `${BASE_PATH}/icons/icon-192.png`, sizes: '192x192', type: 'image/png' },
+      { url: `${BASE_PATH}/icons/icon-512.png`, sizes: '512x512', type: 'image/png' },
     ],
-    apple: [{ url: '/enduser/icons/icon-192.png', sizes: '192x192', type: 'image/png' }],
+    apple: [{ url: `${BASE_PATH}/icons/icon-192.png`, sizes: '192x192', type: 'image/png' }],
   },
   appleWebApp: { capable: true, title: 'Kitabu cha kodi', statusBarStyle: 'default' as const },
   // `appleWebApp.capable` emits the modern `mobile-web-app-capable`; older

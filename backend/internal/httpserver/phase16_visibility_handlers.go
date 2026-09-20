@@ -99,19 +99,12 @@ func validateMobileMoney(f validate.Fields, in *MobileMoney) *MobileMoney {
 	return &out
 }
 
-// publicBaseURL is the origin renter-facing links are built against — the one
-// `{{pay_link}}` resolves to (§16.4).
-//
-// config.Load defaults PUBLIC_BASE_URL to APP_BASE_URL, but a Server can be
-// built from a Config literal (the test harness does), and a link that reads
-// "/enduser/payments" with no origin in front of it is not one a renter can
-// open from an SMS. The fallback lives here so both paths agree.
-func (s *Server) publicBaseURL() string {
-	if v := strings.TrimSpace(s.cfg.PublicBaseURL); v != "" {
-		return strings.TrimRight(v, "/")
-	}
-	return strings.TrimRight(strings.TrimSpace(s.cfg.AppBaseURL), "/")
-}
+// publicBaseURL is the renter app's base renter-facing links are built
+// against — the one `{{pay_link}}` resolves to (§16.4). config.EnduserURL
+// carries the fallback chain (ENDUSER_BASE_URL, then the public origin plus
+// /enduser), so a Server built from a Config literal (the test harness) still
+// yields a link a renter can open from an SMS.
+func (s *Server) publicBaseURL() string { return s.cfg.EnduserURL() }
 
 // --------------------------------------------------------- days_until_due --
 

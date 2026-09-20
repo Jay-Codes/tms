@@ -4,11 +4,12 @@
 #   docker build -f proxy/Dockerfile -t tms-proxy .
 #
 # The proxy has no module dependencies, so the build stage is a single compile.
-FROM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+ARG TARGETOS=linux TARGETARCH=amd64
 WORKDIR /src
 COPY proxy/go.mod ./
 COPY proxy/ ./
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/proxy .
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/proxy .
 
 FROM alpine:3.22 AS runtime
 RUN apk add --no-cache ca-certificates \

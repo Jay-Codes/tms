@@ -89,11 +89,12 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) *Server {
 	}
 	var redisClient = redisOf(deps.Cache)
 	s.sessions = &auth.Manager{
-		Q:      s.q,
-		Redis:  redisClient,
-		TTL:    cfg.SessionTTL(),
-		Secure: cfg.CookieSecure(),
-		Logger: logger,
+		Q:        s.q,
+		Redis:    redisClient,
+		TTL:      cfg.SessionTTL(),
+		Secure:   cfg.CookieSecure(),
+		SameSite: cfg.CookieSameSite(),
+		Logger:   logger,
 	}
 	s.store = &auth.Store{Redis: redisClient}
 	// One catalogue per process, installed for notify.Render to resolve
@@ -150,6 +151,9 @@ func (s *Server) routes() chi.Router {
 	r.Use(SlogLogger(s.logger))
 	r.Use(middleware.Recoverer)
 	r.Use(RequestContext(s.proxyTrust))
+	// Cross-origin apps (CORS_ALLOWED_ORIGINS). Before routing so preflights
+	// never reach the 405 handler.
+	r.Use(CORS(s.cfg.CORSAllowedOrigins))
 
 	r.NotFound(NotFound)
 	r.MethodNotAllowed(MethodNotAllowed)

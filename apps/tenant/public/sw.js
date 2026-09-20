@@ -15,8 +15,9 @@
  */
 
 const VERSION = 'tms-tenant-v1';
-const SHELL_URL = '/tenant/';
-const PRECACHE = [SHELL_URL, '/tenant/manifest.webmanifest', '/tenant/icons/icon-192.png', '/tenant/icons/icon-512.png'];
+const BASE = self.location.pathname.replace(/\/sw\.js$/, ''); // '' at the domain root, '/x' behind the dev proxy
+const SHELL_URL = `${BASE}/`;
+const PRECACHE = [SHELL_URL, `${BASE}/manifest.webmanifest`, `${BASE}/icons/icon-192.png`, `${BASE}/icons/icon-512.png`];
 
 /** Paths that must always go to the network, whatever the connection. */
 const NETWORK_ONLY = ['/api/', '/branding/', '/qrcodes/', '/kyc/', '/signatures/'];
@@ -24,10 +25,10 @@ const NETWORK_ONLY = ['/api/', '/branding/', '/qrcodes/', '/kyc/', '/signatures/
 /** Paths safe to serve from cache first. */
 function isShellAsset(pathname) {
   return (
-    pathname.startsWith('/tenant/_next/static/') ||
+    pathname.startsWith(`${BASE}/_next/static/`) ||
     pathname.startsWith('/_next/static/') ||
-    pathname === '/tenant/manifest.webmanifest' ||
-    pathname.startsWith('/tenant/icons/')
+    pathname === `${BASE}/manifest.webmanifest` ||
+    pathname.startsWith(`${BASE}/icons/`)
   );
 }
 

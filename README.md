@@ -106,7 +106,21 @@ make migrate      # apply pending migrations
 - One binary does three jobs: `api` serves, `api migrate up|down` migrates, and `MIGRATE_ON_START=1` makes the serving process apply migrations before it binds (used by the container image).
 - Background workers started with the server: SMS queue drain, notification scheduler, contract lifecycle sweep, overdue-payment sweep.
 
-## Deploy (full-stack compose)
+## Deploy (server: API + edge, frontends on Vercel)
+
+`docker-compose.deploy.yml` runs only the Go API and the edge proxy, bound to `127.0.0.1:3300` for the host's reverse proxy; Postgres/Redis/MinIO are reused from another compose project on the box (default) or run under `INFRA=own`. Config in `.env.deploy` (copy `.env.deploy.example`). Full walkthrough: [docs/DEPLOY.md](docs/DEPLOY.md).
+
+```bash
+make docker-builder             # once: x86_64 buildx builder
+make docker-publish             # push josephchuchu/tms-{api,edge}:<sha>,latest (linux/amd64)
+make docker-deploy              # server: pull + run (reuse existing infra); TAG=… pins
+make docker-deploy INFRA=own    # own postgres/redis/minio too
+make server-setup               # server: nginx + Let's Encrypt for api.tms.kuzo.co.tz (DOMAIN=…)
+make docker-logs                # tail
+make docker-down                # remove api + edge
+```
+
+## Deploy (full-stack compose, all-in-one)
 
 `docker-compose.yml` carries a `full` profile with built images for the API, the three Next.js apps (standalone output) and the proxy. Infra (Postgres, Redis, MinIO) is the same set of services and the same volumes the dev loop uses.
 

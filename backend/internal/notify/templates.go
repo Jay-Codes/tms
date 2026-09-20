@@ -88,7 +88,7 @@ type Vars struct {
 	Org         string // the org's display name (branding, falling back to its name)
 	NextDueDate string // YYYY-MM-DD, empty when everything is settled
 	Link        string // an absolute link into the enduser app
-	PayLink     string // the renter's Payments tab: {base}/enduser/payments
+	PayLink     string // the renter's Payments tab: {enduser base}/payments
 
 	Reason     string // termination / rejection only
 	StartDate  string // welcome only

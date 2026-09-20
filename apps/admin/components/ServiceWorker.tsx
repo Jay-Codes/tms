@@ -11,7 +11,7 @@
 
 import { useEffect } from 'react';
 
-const BASE = '/admin';
+import { BASE_PATH as BASE } from '../lib/basePath';
 
 export function ServiceWorker() {
   useEffect(() => {

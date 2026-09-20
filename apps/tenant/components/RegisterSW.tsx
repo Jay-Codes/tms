@@ -10,6 +10,7 @@
  */
 
 import { useEffect } from 'react';
+import { BASE_PATH } from '../lib/basePath';
 
 const ENABLED =
   process.env.NODE_ENV === 'production' || process.env.NEXT_PUBLIC_ENABLE_SW === '1';
@@ -18,7 +19,7 @@ export function RegisterSW() {
   useEffect(() => {
     if (!ENABLED) return;
     if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
-    navigator.serviceWorker.register('/tenant/sw.js', { scope: '/tenant/' }).catch(() => undefined);
+    navigator.serviceWorker.register(`${BASE_PATH}/sw.js`, { scope: `${BASE_PATH}/` }).catch(() => undefined);
   }, []);
 
   return null;

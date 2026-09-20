@@ -55,6 +55,7 @@ Canonical tech stack for TMS. All architecture and implementation decisions must
 - Docker Compose is the deployment mechanism for every environment (dev infra and full-stack deploys).
 - Dev: `docker-compose.yml` runs Postgres, Redis, MinIO (+ bucket init) — `make up` / `make down`. App processes run on the host via `make preview`.
 - Full stack (`--profile full`): built images for the Go API, the three Next.js apps, and the Go proxy; TLS terminates at the proxy.
+- Server (`docker-compose.deploy.yml`, `make docker-deploy`): Go API + edge proxy only, bound to loopback behind the host's TLS reverse proxy; Next.js apps on Vercel; Postgres/Redis/MinIO reused from the host or run under `INFRA=own`.
 - Configuration via `.env` (gitignored; `.env.example` committed). Data lives in named volumes.
 
 ## Rules
