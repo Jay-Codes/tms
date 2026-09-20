@@ -11,14 +11,23 @@
  * waiting for a signature (`GET /me/contracts`) and the next payment due
  * (`GET /me/schedules`). Both are best-effort — a rent book that cannot reach
  * one endpoint still shows the rest.
+ *
+ * Phase 18.2 splits the hero. A renter may rent two units at once (there is no
+ * renter-side uniqueness — only one live contract per *unit*), and a single
+ * "next due" hero made the second unit's rent invisible until the first was
+ * paid. With more than one live tenancy the screen shows one due card per
+ * tenancy, each with its own countdown and its own proof target; with one, the
+ * hero is exactly what it was. It also offers a way in for a renter holding a
+ * unit code they never scanned.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Icon } from '@iconify/react';
 import {
   ApiError,
   contractApi,
+  isLiveContractStatus,
   needsRenterSignature,
   renterApi,
   scheduleOutstanding,
@@ -35,12 +44,59 @@ import { forgetScannedUnit, readScannedUnit } from '../lib/scan';
 import { Protected } from '../components/Protected';
 import { InstallPrompt } from '../components/InstallPrompt';
 import { Money } from '../components/Money';
-import { CountdownChip } from '../components/PaymentStatus';
+import { CountdownChip, SourceChip } from '../components/PaymentStatus';
+import { UnitCodeForm } from '../components/UnitCodeForm';
 import { ProofSheet, type ProofTarget } from '../components/ProofSheet';
 import { Notice, Screen, ScreenHeader } from '../components/Screen';
 
 function firstName(fullName: string): string {
   return fullName.trim().split(/\s+/)[0] || '';
+}
+
+/** One live tenancy's place in the rent book: what it owes next, and how late. */
+interface TenancyDue {
+  contractId: string;
+  /** "A2 · Mikocheni Flats" — the label every proof sheet and card repeats. */
+  label: string;
+  unitName: string;
+  propertyName: string | null;
+  /** Earliest instalment still owed; `null` once the whole book is settled. */
+  row: MySchedule | null;
+  /** Outstanding on this tenancy's overdue rows only. */
+  overdue: number;
+}
+
+/**
+ * Per-tenancy next due, derived from the `/me/schedules` rows the screen has
+ * already loaded (PLAN2 §18.2 — no new endpoint). Only live contracts count:
+ * an ended tenancy's unpaid tail is history, not something to pay today.
+ */
+function tenancyDues(items: MySchedule[], unitFallback: string): TenancyDue[] {
+  const byContract = new Map<string, TenancyDue>();
+  const sorted = [...items].sort((a, b) => a.due_date.localeCompare(b.due_date));
+  for (const row of sorted) {
+    const id = row.contract?.id;
+    if (!id || !isLiveContractStatus(row.contract?.status)) continue;
+    let due = byContract.get(id);
+    if (!due) {
+      const unitName = row.contract?.unit_name || unitFallback;
+      const propertyName = row.contract?.property_name ?? null;
+      due = {
+        contractId: id,
+        label: [unitName, propertyName].filter(Boolean).join(' · '),
+        unitName,
+        propertyName,
+        row: null,
+        overdue: 0,
+      };
+      byContract.set(id, due);
+    }
+    const unsettled =
+      row.status === 'pending' || row.status === 'partial' || row.status === 'overdue';
+    if (unsettled && !due.row) due.row = row;
+    if (row.status === 'overdue') due.overdue += scheduleOutstanding(row);
+  }
+  return [...byContract.values()];
 }
 
 function statusMark(t: Translator, request: LinkRequest) {
@@ -119,11 +175,12 @@ function HomeContent() {
 
   const [requests, setRequests] = useState<LinkRequest[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
+  const [schedules, setSchedules] = useState<MySchedule[]>([]);
   const [nextDue, setNextDue] = useState<MySchedule | null>(null);
-  const [overdueTotal, setOverdueTotal] = useState(0);
   const [bankAccount, setBankAccount] = useState<BankAccount | null>(null);
   const [mobileMoney, setMobileMoney] = useState<MobileMoney | null>(null);
   const [proofOpen, setProofOpen] = useState(false);
+  const [proofTarget, setProofTarget] = useState<ProofTarget | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<string | null>(null);
@@ -139,14 +196,14 @@ function HomeContent() {
     void renterApi
       .schedules(signal)
       .then((res) => {
+        setSchedules(res.items ?? []);
         setNextDue(res.next_due ?? null);
-        setOverdueTotal(res.overdue_total ?? 0);
         setBankAccount(res.bank_account ?? null);
         setMobileMoney(res.mobile_money ?? res.bank_account?.mobile_money ?? null);
       })
       .catch(() => {
+        setSchedules([]);
         setNextDue(null);
-        setOverdueTotal(0);
         setBankAccount(null);
         setMobileMoney(null);
       });
@@ -192,9 +249,21 @@ function HomeContent() {
     (c) => c.status === 'pending_signature' && !needsRenterSignature(c),
   );
 
+  const unitFallback = t('common.yourUnit');
+  const dues = useMemo(() => tenancyDues(schedules, unitFallback), [schedules, unitFallback]);
+  /* §18.2: what is owed *now*. `overdue_total` from the API counts every
+     overdue row, an ended tenancy's tail included; the hero is about money the
+     renter can still act on, so the live rows are summed here instead. */
+  const overdueTotal = useMemo(
+    () => dues.reduce((sum, d) => sum + d.overdue, 0),
+    [dues],
+  );
+  /* Two or more live tenancies get a card each; one keeps the Phase 16 hero. */
+  const perTenancy = dues.length > 1;
+
   /* Proof is only offered against a running tenancy — without a `next_due`
      there is no contract to attach a claim to (API.md 409 `contract_not_active`). */
-  const proofTarget: ProofTarget | null = nextDue?.contract?.id
+  const heroTarget: ProofTarget | null = nextDue?.contract?.id
     ? {
         contractId: nextDue.contract.id,
         contractLabel: [nextDue.contract.unit_name, nextDue.contract.property_name]
@@ -205,6 +274,57 @@ function HomeContent() {
       }
     : null;
   const payReference = nextDue?.contract?.unit_name ?? '';
+
+  function openProof(target: ProofTarget | null) {
+    if (!target) return;
+    setProofTarget(target);
+    setProofOpen(true);
+  }
+
+  function dueTarget(due: TenancyDue): ProofTarget {
+    return {
+      contractId: due.contractId,
+      contractLabel: due.label,
+      ...(due.row ? { scheduleId: due.row.id, amount: scheduleOutstanding(due.row) } : {}),
+    };
+  }
+
+  /* The one line under the hero that tells a renter what happens next. A
+     renter with no tenancy at all also gets a way in: the unit code from the
+     sticker, typed, when the camera was never involved (§18.2). */
+  const hintKey = nextDue
+    ? 'home.hint.pay'
+    : toSign.length > 0
+      ? 'home.hint.sign'
+      : signedWaiting
+        ? 'home.hint.signedWaiting'
+        : open.some((r) => r.status === 'approved')
+          ? 'home.hint.approved'
+          : 'home.hint.none';
+
+  const hints = (
+    <div style={{ display: 'grid', gap: 'var(--sp-3)', paddingTop: 'var(--sp-4)' }}>
+      <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{t(hintKey)}</p>
+      <p
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--sp-2)',
+          color: 'var(--ink-soft)',
+          fontSize: 'var(--text-sm)',
+        }}
+      >
+        <Icon icon="solar:qr-code-linear" width={20} aria-hidden />
+        {t('home.hint.qr')}
+      </p>
+      {hintKey === 'home.hint.none' && !loading && (
+        <>
+          <hr className="rule" />
+          <UnitCodeForm />
+        </>
+      )}
+    </div>
+  );
 
   return (
     <Screen bottomBar>
@@ -305,93 +425,173 @@ function HomeContent() {
       )}
 
       {/* The hero (Phase 16 §16.3): the date, the amount, how long there is
-          left, and the two things a renter can do about it. */}
-      <section className="sheet" style={{ padding: 'var(--sp-4)' }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'baseline',
-            justifyContent: 'space-between',
-            gap: 'var(--sp-3)',
-            flexWrap: 'wrap',
-          }}
-        >
-          <h2 style={{ fontSize: 'var(--text-lg)' }}>{t('payment.next.title')}</h2>
-          <CountdownChip schedule={nextDue} />
-        </div>
-
-        {nextDue ? (
-          <div style={{ display: 'grid', gap: 'var(--sp-1)', paddingTop: 'var(--sp-3)' }}>
-            <p style={{ margin: 0, fontSize: 'var(--text-lg)', fontWeight: 600 }}>
-              {formatDate(locale, nextDue.due_date)}
-            </p>
-            <Money
-              amount={scheduleOutstanding(nextDue)}
-              style={{ fontSize: 'var(--text-2xl)', lineHeight: 1.1 }}
-            />
+          left, and the two things a renter can do about it. Phase 18.2: with
+          more than one live tenancy it becomes one card per tenancy, because
+          the second unit's rent must not wait for the first to be paid. */}
+      {perTenancy ? (
+        <section style={{ display: 'grid', gap: 'var(--sp-3)' }}>
+          <div>
+            <h2 style={{ fontSize: 'var(--text-lg)' }}>{t('home.dues.title')}</h2>
             <p style={{ margin: 0, color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-              {nextDue.contract?.unit_name ?? t('common.yourUnit')}
-              {nextDue.contract?.property_name ? ` · ${nextDue.contract.property_name}` : ''}
+              {t('home.dues.lead')}
             </p>
           </div>
-        ) : (
-          <p style={{ margin: 'var(--sp-3) 0 0', color: 'var(--ink-soft)' }}>
-            {t('common.nothingToPayYet')}
-          </p>
-        )}
 
-        {overdueTotal > 0 && (
-          <p
-            role="alert"
-            style={{
-              margin: 'var(--sp-3) 0 0',
-              color: 'var(--stamp-overdue)',
-              fontSize: 'var(--text-sm)',
-              fontWeight: 600,
-            }}
-          >
-            {t('payment.overdueShort', { amount: money(overdueTotal) })}
-          </p>
-        )}
+          {dues.map((due) => (
+            <div key={due.contractId} className="sheet" style={{ padding: 'var(--sp-4)' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  justifyContent: 'space-between',
+                  gap: 'var(--sp-3)',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <h3 style={{ fontSize: 'var(--text-md)', margin: 0 }}>
+                  {due.unitName}
+                  {due.propertyName && (
+                    <>
+                      {' '}
+                      <span
+                        style={{
+                          color: 'var(--ink-soft)',
+                          fontSize: 'var(--text-sm)',
+                          fontWeight: 400,
+                        }}
+                      >
+                        · {due.propertyName}
+                      </span>
+                    </>
+                  )}
+                </h3>
+                <CountdownChip schedule={due.row} />
+              </div>
 
-        <div style={{ display: 'grid', gap: 'var(--sp-3)', paddingTop: 'var(--sp-4)' }}>
-          <Link className="btn btn-secondary" href="/payments#how-to-pay">
-            {t('home.hero.howToPay')}
-          </Link>
-          {proofTarget && (
-            <button type="button" className="btn btn-primary" onClick={() => setProofOpen(true)}>
-              <Icon icon="solar:camera-linear" width={20} aria-hidden />
-              {t('proof.send')}
-            </button>
-          )}
-        </div>
+              {due.row ? (
+                <div style={{ display: 'grid', gap: 'var(--sp-1)', paddingTop: 'var(--sp-3)' }}>
+                  <p style={{ margin: 0, fontSize: 'var(--text-md)', fontWeight: 600 }}>
+                    {formatDate(locale, due.row.due_date)}
+                  </p>
+                  <Money
+                    amount={scheduleOutstanding(due.row)}
+                    style={{ fontSize: 'var(--text-xl)', lineHeight: 1.1 }}
+                  />
+                  <SourceChip source={due.row.last_payment_source} />
+                </div>
+              ) : (
+                <p style={{ margin: 'var(--sp-3) 0 0', color: 'var(--ink-soft)' }}>
+                  {t('home.dues.nothing')}
+                </p>
+              )}
 
-        <div style={{ display: 'grid', gap: 'var(--sp-3)', paddingTop: 'var(--sp-4)' }}>
-          <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-            {nextDue
-              ? t('home.hint.pay')
-              : toSign.length > 0
-                ? t('home.hint.sign')
-                : signedWaiting
-                  ? t('home.hint.signedWaiting')
-                  : open.some((r) => r.status === 'approved')
-                    ? t('home.hint.approved')
-                    : t('home.hint.none')}
-          </p>
-          <p
+              {due.overdue > 0 && (
+                <p
+                  role="alert"
+                  style={{
+                    margin: 'var(--sp-3) 0 0',
+                    color: 'var(--stamp-overdue)',
+                    fontSize: 'var(--text-sm)',
+                    fontWeight: 600,
+                  }}
+                >
+                  {t('payment.overdueShort', { amount: money(due.overdue) })}
+                </p>
+              )}
+
+              {due.row && (
+                <div style={{ display: 'grid', paddingTop: 'var(--sp-4)' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => openProof(dueTarget(due))}
+                  >
+                    <Icon icon="solar:camera-linear" width={20} aria-hidden />
+                    {t('proof.send')}
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+
+          <div className="sheet" style={{ padding: 'var(--sp-4)' }}>
+            <div style={{ display: 'grid', gap: 'var(--sp-3)' }}>
+              <Link className="btn btn-secondary" href="/payments#how-to-pay">
+                {t('home.hero.howToPay')}
+              </Link>
+            </div>
+            {hints}
+          </div>
+        </section>
+      ) : (
+        <section className="sheet" style={{ padding: 'var(--sp-4)' }}>
+          <div
             style={{
               display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--sp-2)',
-              color: 'var(--ink-soft)',
-              fontSize: 'var(--text-sm)',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              gap: 'var(--sp-3)',
+              flexWrap: 'wrap',
             }}
           >
-            <Icon icon="solar:qr-code-linear" width={20} aria-hidden />
-            {t('home.hint.qr')}
-          </p>
-        </div>
-      </section>
+            <h2 style={{ fontSize: 'var(--text-lg)' }}>{t('payment.next.title')}</h2>
+            <CountdownChip schedule={nextDue} />
+          </div>
+
+          {nextDue ? (
+            <div style={{ display: 'grid', gap: 'var(--sp-1)', paddingTop: 'var(--sp-3)' }}>
+              <p style={{ margin: 0, fontSize: 'var(--text-lg)', fontWeight: 600 }}>
+                {formatDate(locale, nextDue.due_date)}
+              </p>
+              <Money
+                amount={scheduleOutstanding(nextDue)}
+                style={{ fontSize: 'var(--text-2xl)', lineHeight: 1.1 }}
+              />
+              <p style={{ margin: 0, color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+                {nextDue.contract?.unit_name ?? t('common.yourUnit')}
+                {nextDue.contract?.property_name ? ` · ${nextDue.contract.property_name}` : ''}
+              </p>
+              <SourceChip source={nextDue.last_payment_source} />
+            </div>
+          ) : (
+            <p style={{ margin: 'var(--sp-3) 0 0', color: 'var(--ink-soft)' }}>
+              {t('common.nothingToPayYet')}
+            </p>
+          )}
+
+          {overdueTotal > 0 && (
+            <p
+              role="alert"
+              style={{
+                margin: 'var(--sp-3) 0 0',
+                color: 'var(--stamp-overdue)',
+                fontSize: 'var(--text-sm)',
+                fontWeight: 600,
+              }}
+            >
+              {t('payment.overdueShort', { amount: money(overdueTotal) })}
+            </p>
+          )}
+
+          <div style={{ display: 'grid', gap: 'var(--sp-3)', paddingTop: 'var(--sp-4)' }}>
+            <Link className="btn btn-secondary" href="/payments#how-to-pay">
+              {t('home.hero.howToPay')}
+            </Link>
+            {heroTarget && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => openProof(heroTarget)}
+              >
+                <Icon icon="solar:camera-linear" width={20} aria-hidden />
+                {t('proof.send')}
+              </button>
+            )}
+          </div>
+
+          {hints}
+        </section>
+      )}
 
       <ProofSheet
         open={proofOpen}
