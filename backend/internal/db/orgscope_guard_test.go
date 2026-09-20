@@ -49,6 +49,10 @@ var orgScopedTables = []string{
 	// the guard can check every statement rather than trusting the join.
 	"import_batches",
 	"import_rows",
+	// Part 2 (Phase 18): landlord-assisted onboarding sessions. The two hooks
+	// that run outside an org context (the auth handlers, which have none)
+	// carry a `guard-exempt` line naming why.
+	"assist_sessions",
 }
 
 var (

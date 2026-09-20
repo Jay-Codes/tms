@@ -189,7 +189,10 @@ func (s *Server) routes() chi.Router {
 			r.Get("/org/members", s.handleListMembers)
 			// Phase 13: an org user's own language. It names no member id —
 			// it is always the caller's own row.
-			r.Patch("/org/members/me", s.handlePatchMemberLocale)
+			// Phase 19 §19.3: the same route now also fixes the member's own
+			// display name. A `{locale}`-only body is the unchanged Phase 13
+			// call, down to the audit action it writes.
+			r.Patch("/org/members/me", s.handlePatchMemberMe)
 			r.Get("/audit-log", s.handleListAuditLog)
 			r.Get("/audit-log/{id}", s.handleGetAuditEntry)
 
@@ -331,6 +334,36 @@ func (s *Server) routes() chi.Router {
 				r.Get("/imports/{id}", s.handleGetImport)
 				r.Post("/imports/{id}/commit", s.handleCommitImport)
 				r.Post("/imports/{id}/undo", s.handleUndoImport)
+
+				// --- Phase 19 §19.1/§19.3: identity and name corrections ---
+				//
+				// Owner and manager, the pair that approves a link request:
+				// revealing a national ID number and correcting the name a
+				// tenancy is held under are both acts on somebody else's
+				// identity, so they sit with the decisions that create the
+				// relationship rather than with the reads that follow it.
+				r.Post("/renters/{user_id}/nida/reveal", s.handleRevealRenterNIDA)
+				r.Patch("/renters/{user_id}", s.handlePatchRenter)
+
+				// --- Phase 20 §20.3: settling history that predates TMS ---
+				r.Post("/contracts/{id}/backfill", s.handleContractBackfill)
+
+				// --- Phase 18: landlord-assisted onboarding (FLOWS 2b) ---
+				//
+				// Owner and manager, the two roles that already onboard a
+				// renter: opening a session shows a one-time code for somebody
+				// else's number, which is the most sensitive thing a member of
+				// staff can be handed, so it is the same pair that approves a
+				// link request and not a wider set.
+				r.Post("/assist", s.handleCreateAssist)
+				r.Get("/assist", s.handleListAssist)
+				r.Get("/assist/{id}", s.handleGetAssist)
+				r.Post("/assist/{id}/code", s.handleAssistCode)
+				r.Post("/assist/{id}/close", s.handleCloseAssist)
+				// The signing half of the same encounter. The renter still
+				// signs on their own device through the unchanged
+				// POST /contracts/{id}/sign.
+				r.Post("/contracts/{id}/witness-otp", s.handleContractWitnessOTP)
 			})
 
 			// --- Phase 4: branding ---
@@ -402,6 +435,19 @@ func (s *Server) routes() chi.Router {
 			r.Get("/admin/metrics", s.handleAdminMetrics)
 			r.Get("/admin/audit-log", s.handleAdminAuditLog)
 
+			// --- Phase 19 §19.2: the platform user directory ---
+			//
+			// Cross-org by design, behind the `tms_a` cookie. The list carries
+			// no NIDA field of any kind; the full number has its own POST, and
+			// opening a detail page is itself audited (`admin.user_view`),
+			// because the page aggregates one person's PII across every tenant.
+			r.Get("/admin/users", s.handleAdminListUsers)
+			r.Get("/admin/users/{id}", s.handleAdminGetUser)
+			r.Patch("/admin/users/{id}", s.handleAdminPatchUser)
+			r.Post("/admin/users/{id}/nida/reveal", s.handleAdminRevealNIDA)
+			r.Post("/admin/users/{id}/suspend", s.handleAdminSuspendUser)
+			r.Post("/admin/users/{id}/activate", s.handleAdminActivateUser)
+
 			// --- Phase 14: prepaid SMS credits per org ---
 			r.Get("/admin/orgs/{id}/sms", s.handleAdminOrgSMS)
 			r.Patch("/admin/orgs/{id}/sms", s.handleAdminOrgSMSWatermark)
@@ -422,9 +468,17 @@ func (s *Server) routes() chi.Router {
 		r.Get("/public/units/{unit_code}", s.publicRateLimited(s.handlePublicUnit))
 		// --- Phase 12: the shipped theme presets (public, cacheable) ---
 		r.Get("/themes/presets", s.publicRateLimited(s.handleThemePresets))
+		// --- Phase 18: the renter's own device resolving an assist link ---
+		// The QR carries a session id and nothing else; the answer is the unit
+		// code and the purpose, never the phone (SPEC §5.15).
+		r.Get("/public/assist/{id}", s.publicRateLimited(s.handlePublicAssist))
 		r.Group(func(r chi.Router) {
 			r.Use(s.sessions.RequireOrg(auth.RoleOwner))
 			r.Post("/org/members", s.handleCreateMember)
+			// Phase 19 §19.3: an owner fixes a colleague's name or role. It
+			// cannot empty the org of owners (409 `last_owner`) and cannot
+			// change the caller's own role.
+			r.Patch("/org/members/{id}", s.handlePatchMember)
 			r.Delete("/org/members/{id}", s.handleDeleteMember)
 		})
 	})

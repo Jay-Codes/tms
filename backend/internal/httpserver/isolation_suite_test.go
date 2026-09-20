@@ -104,6 +104,13 @@ var isoRoutes = []isoCase{
 		method: "GET", pattern: "/themes/presets", aud: isoOpen, want: []int{200},
 		note: "the eight shipped presets are platform data, identical for every org (PLAN2 Phase 12)",
 	},
+	{
+		method: "GET", pattern: "/public/assist/{id}", aud: isoOpen, path: "/public/assist/{assistA}",
+		want: []int{200},
+		note: "deliberately public: the renter's own device resolves the assist link before " +
+			"they have an account. The projection is the unit code and the purpose alone — " +
+			"no phone, no org rows (SPEC §5.15)",
+	},
 
 	// ------------------------------------------ org: the caller's own org --
 	{method: "GET", pattern: "/org", aud: isoOrg, want: []int{200}},
@@ -118,6 +125,12 @@ var isoRoutes = []isoCase{
 		// user cannot move another member's preference through it.
 		method: "PATCH", pattern: "/org/members/me", aud: isoOrg,
 		body: map[string]any{"locale": "sw"}, want: []int{200},
+	},
+	{
+		// Phase 19 §19.3. Owner-only, and it names a member id — org A's
+		// manager must be a 404 through org B's session, not a rename.
+		method: "PATCH", pattern: "/org/members/{id}", aud: isoOrg,
+		path: "/org/members/{memberA}", body: map[string]any{"full_name": "Hijacked Name"},
 	},
 	{
 		method: "POST", pattern: "/org/members", aud: isoOrg,
@@ -208,6 +221,17 @@ var isoRoutes = []isoCase{
 	{method: "GET", pattern: "/renters", aud: isoOrg, want: []int{200}},
 	{method: "GET", pattern: "/renters/{user_id}", aud: isoOrg, path: "/renters/{renterUserA}"},
 	{method: "GET", pattern: "/renters/{user_id}/kyc-doc", aud: isoOrg, path: "/renters/{renterUserA}/kyc-doc"},
+	{
+		// Phase 19 §19.1. The most sensitive read in the product: org B naming
+		// org A's renter must get the directory's 404, never a national ID.
+		method: "POST", pattern: "/renters/{user_id}/nida/reveal", aud: isoOrg,
+		path: "/renters/{renterUserA}/nida/reveal", body: map[string]any{"reason": "hijack"},
+	},
+	{
+		// Phase 19 §19.3.
+		method: "PATCH", pattern: "/renters/{user_id}", aud: isoOrg,
+		path: "/renters/{renterUserA}", body: map[string]any{"full_name": "Hijacked Renter"},
+	},
 
 	// -------------------------------------------------- contract templates --
 	{method: "GET", pattern: "/contract-templates", aud: isoOrg, want: []int{200}},
@@ -236,6 +260,13 @@ var isoRoutes = []isoCase{
 		},
 	},
 	{method: "POST", pattern: "/contracts/{id}/activate", aud: isoOrg, path: "/contracts/{contractA}/activate"},
+	{
+		// Phase 20 §20.3. Settling another org's history is the same 404 as
+		// terminating their contract.
+		method: "POST", pattern: "/contracts/{id}/backfill", aud: isoOrg,
+		path: "/contracts/{contractA}/backfill",
+		body: map[string]any{"until": "{today}", "mode": "waived", "note": "hijack"},
+	},
 	{
 		method: "POST", pattern: "/contracts/{id}/terminate", aud: isoOrg,
 		path: "/contracts/{contractA}/terminate",
@@ -361,6 +392,28 @@ var isoRoutes = []isoCase{
 	{
 		method: "POST", pattern: "/imports/{id}/undo", aud: isoOrg,
 		path: "/imports/{importBatchA}/undo",
+	},
+
+	// ----------------------------------- assisted onboarding (Phase 18) --
+	//
+	// A session is a renter's phone number and the code slot it owns, so org
+	// B must not be able to read one, refresh one, or close one. The listing
+	// and the open answer 200 with nothing of A's in them; every path naming
+	// A's session is a 404, which is what stops the session id in a QR link
+	// from becoming a cross-tenant handle.
+	{method: "GET", pattern: "/assist", aud: isoOrg, want: []int{200}},
+	{
+		method: "POST", pattern: "/assist", aud: isoOrg,
+		body: map[string]any{"phone": "+255715080299", "unit_id": "{unitA}"},
+		// Org B's own session for its own number would be a 201; naming org
+		// A's unit is a 404, because the unit is not org B's to onboard into.
+	},
+	{method: "GET", pattern: "/assist/{id}", aud: isoOrg, path: "/assist/{assistA}"},
+	{method: "POST", pattern: "/assist/{id}/code", aud: isoOrg, path: "/assist/{assistA}/code"},
+	{method: "POST", pattern: "/assist/{id}/close", aud: isoOrg, path: "/assist/{assistA}/close"},
+	{
+		method: "POST", pattern: "/contracts/{id}/witness-otp", aud: isoOrg,
+		path: "/contracts/{contractA}/witness-otp",
 	},
 
 	// ------------------------------------------------------ notifications --
@@ -536,6 +589,32 @@ var isoRoutes = []isoCase{
 	{method: "POST", pattern: "/admin/orgs/{id}/activate", aud: isoAdmin, path: "/admin/orgs/{orgA}/activate"},
 	{method: "GET", pattern: "/admin/metrics", aud: isoAdmin},
 	{method: "GET", pattern: "/admin/audit-log", aud: isoAdmin},
+
+	// --------------------------- Phase 19 §19.2: the user directory --
+	//
+	// Cross-org by design and reachable only with the `tms_a` cookie: an org
+	// owner or a renter gets a 401, because the admin audience is a different
+	// cookie and not a stronger role. The list carries no NIDA field of any
+	// kind, which TestPhase19AdminDirectory asserts on the body.
+	{method: "GET", pattern: "/admin/users", aud: isoAdmin},
+	{method: "GET", pattern: "/admin/users/{id}", aud: isoAdmin, path: "/admin/users/{renterUserA}"},
+	{
+		method: "PATCH", pattern: "/admin/users/{id}", aud: isoAdmin,
+		path: "/admin/users/{renterUserA}",
+		body: map[string]any{"full_name": "Hijacked", "reason": "hijack"},
+	},
+	{
+		method: "POST", pattern: "/admin/users/{id}/nida/reveal", aud: isoAdmin,
+		path: "/admin/users/{renterUserA}/nida/reveal", body: map[string]any{"reason": "hijack"},
+	},
+	{
+		method: "POST", pattern: "/admin/users/{id}/suspend", aud: isoAdmin,
+		path: "/admin/users/{renterUserA}/suspend", body: map[string]any{"reason": "hijack"},
+	},
+	{
+		method: "POST", pattern: "/admin/users/{id}/activate", aud: isoAdmin,
+		path: "/admin/users/{renterUserA}/activate", body: map[string]any{"reason": "hijack"},
+	},
 
 	// ----------------------------------- Phase 14: credits and templates --
 	//
@@ -743,6 +822,9 @@ var isoSecretIDs = []string{
 	"proofA",
 	// Phase 16 §16.2: an import batch is a file of one org's records.
 	"importBatchA",
+	// Phase 18: an assist session is a renter's phone number and the code slot
+	// it owns; its id is the handle to both.
+	"assistA",
 }
 
 func (f *isoFixture) secrets() map[string]string {
@@ -832,6 +914,13 @@ func newIsoFixture(t *testing.T, h *harness) *isoFixture {
 	f.ids["importBatchA"] = base.owner.importPreview(t, "units",
 		"iso-alpha.csv", "property,unit,rent_amount\nIso Alpha Block,Z9,150000\n").
 		mustStatus(t, http.StatusCreated, "org A import preview").str(t, "batch", "id")
+
+	// An open assist session (Phase 18): one org's in-person onboarding, with
+	// the renter's phone number on it, for the other org to try to read,
+	// refresh and close.
+	f.ids["assistA"] = base.owner.do(http.MethodPost, "/assist", map[string]any{
+		"phone": "+255715080150", "unit_id": f.ids["unitVacantA"],
+	}).mustStatus(t, http.StatusCreated, "org A assist session").str(t, "session", "id")
 
 	// A staff member to remove.
 	f.ids["memberA"] = base.owner.do(http.MethodPost, "/org/members", map[string]any{

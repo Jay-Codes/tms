@@ -18,12 +18,13 @@ import { Sheet } from './Sheet';
 import {
   type ApiError,
   type Payment,
+  type PaymentSource,
   paymentWho,
   type Schedule,
   isUnsettled,
   remainingOn,
 } from '../lib/api';
-import { fmtDate, fmtDateTime, fmtTZS } from '../lib/format';
+import { fmtDate, fmtDateTime, fmtTZS, todayISO } from '../lib/format';
 import { TableScroll, useT, type Translator } from '@tms/ui';
 
 /**
@@ -42,6 +43,22 @@ export function PaymentStatusStamp({ status }: { status: string }) {
   const t = useT();
   if (status === 'reversed') return <span className="stamp stamp-overdue">{t('payments.status.reversed')}</span>;
   return <span className="stamp stamp-paid">{t('payments.status.recorded')}</span>;
+}
+
+/**
+ * Where the money came from (Phase 20.3), pencilled beside the stamp: a CSV
+ * batch ("Imported") or a one-call settlement of periods that predate TMS
+ * ("Backfilled"). An ordinary landlord-recorded payment says nothing — that is
+ * the normal case, and the ledger is quieter for not repeating it.
+ */
+export function SourceChip({ source }: { source: PaymentSource | null | undefined }) {
+  const t = useT();
+  if (!source || source === 'manual') return null;
+  return (
+    <div className="pencil" style={{ fontSize: 'var(--text-xs)' }}>
+      {t(`payments.source.${source}`)}
+    </div>
+  );
 }
 
 /** "12 days late" under an overdue row; nothing at all when it is not. */
@@ -76,15 +93,23 @@ export function SchedulesTable({
   loading,
   emptyText,
   onRecord,
+  onBackfill,
 }: {
   items: Schedule[] | null;
   loading?: boolean;
   emptyText?: string;
   onRecord?: (s: Schedule) => void;
+  /**
+   * Phase 20.3 — offered on a row whose due date has already passed, because
+   * that is the row a landlord who joined mid-tenancy is staring at: not a
+   * defaulter, just a period from before TMS that nobody has closed.
+   */
+  onBackfill?: (s: Schedule) => void;
 }) {
   const t = useT();
   const cols = 7;
   const rows = items ?? [];
+  const today = todayISO();
   const empty = emptyText ?? t('payments.schedules.empty');
   return (
     <TableScroll label={t('payments.schedules.table_label')}>
@@ -145,18 +170,31 @@ export function SchedulesTable({
                       {t('payments.amount_still_owing', { amount: fmtTZS(remainingOn(s)) })}
                     </div>
                   ) : null}
+                  <SourceChip source={s.last_payment_source} />
                 </td>
                 <td>
-                  {onRecord && isUnsettled(s) ? (
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ minHeight: 36 }}
-                      onClick={() => onRecord(s)}
-                    >
-                      {t('payments.record.action')}
-                    </button>
-                  ) : null}
+                  <span className="wrap-sm" style={{ display: 'inline-flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                    {onRecord && isUnsettled(s) ? (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ minHeight: 36 }}
+                        onClick={() => onRecord(s)}
+                      >
+                        {t('payments.record.action')}
+                      </button>
+                    ) : null}
+                    {onBackfill && isUnsettled(s) && s.due_date < today ? (
+                      <button
+                        type="button"
+                        className="btn btn-quiet"
+                        style={{ minHeight: 36 }}
+                        onClick={() => onBackfill(s)}
+                      >
+                        {t('backfill.row_action')}
+                      </button>
+                    ) : null}
+                  </span>
                 </td>
               </tr>
             ))}
@@ -331,6 +369,7 @@ export function PaymentsTable({
                   </td>
                   <td>
                     <PaymentStatusStamp status={String(p.status)} />
+                    <SourceChip source={p.source} />
                     {reversed && p.reversal_reason ? (
                       <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
                         {p.reversal_reason}

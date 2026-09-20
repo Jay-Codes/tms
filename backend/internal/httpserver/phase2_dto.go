@@ -24,6 +24,9 @@ const (
 	unitsPerPropertyLimit = 500
 	// bulkUnitsMax is the cap on POST /properties/{id}/units/bulk.
 	bulkUnitsMax = 200
+	// paymentCSVMaxRows bounds GET /payments?format=csv, which ignores the
+	// cursor and the screen's page limit. It matches the expenses export.
+	paymentCSVMaxRows = 10_000
 )
 
 // unit statuses.

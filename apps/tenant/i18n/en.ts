@@ -1653,6 +1653,81 @@ const messages: Messages = {
   'import.err.undo_window_closed': 'The 24 hours for undoing this import have passed.',
   'import.err.rate_limited': 'Too many previews this hour. Try again later.',
   'import.err.row_failed': 'Line {line}, column {column}: {reason}. Nothing was written — preview the file again.',
+
+  /* ---------------------------------------------------------------- */
+  /* Phase 19 — NIDA reveal, name corrections                          */
+  /* ---------------------------------------------------------------- */
+  'renters.nida.show': 'Show full number',
+  'renters.nida.hide': 'Hide it',
+  'renters.nida.hiding_in': 'Hidden again in {seconds}s',
+  'renters.nida.confirm_title': 'Show the full NIDA number?',
+  'renters.nida.confirm_why':
+    'The renter is told who looked and when, and the view is written to your audit log. Open it when you need the number itself — a police report, a guarantor check, a lease filed with the ward office.',
+  'renters.nida.reason_label': 'Why you need it (optional)',
+  'renters.nida.reason_hint': '{n}/200 — kept on the audit row.',
+  'renters.nida.reason_placeholder': 'Police report for unpaid rent',
+  'renters.nida.reveal': 'Show the number',
+  'renters.nida.revealing': 'Opening…',
+  'renters.rename.title': 'Correct this renter’s name',
+  'renters.rename.hint':
+    'For a typo you made on import or in person. The renter is sent an SMS about the change. Once they have signed a contract anywhere, only they can fix it, from their own Profile.',
+  'names.edit': 'Edit',
+  'names.save': 'Save name',
+  'names.field.full_name': 'Full name',
+  'names.field.full_name.hint': 'Between 2 and 80 characters.',
+  'settings.you.heading': 'You',
+  'settings.you.hint':
+    'The name on the staff list, on audit rows and in the landlord signature of contracts activated from now on. A contract already signed keeps the name it was signed with.',
+  'settings.you.saved': 'Your name is saved.',
+  'settings.members.edit.title': 'Edit staff member',
+  'settings.members.edit.own_role': 'You cannot change your own role.',
+
+  /* ---------------------------------------------------------------- */
+  /* Phase 20 — payment source, historical backfill                    */
+  /* ---------------------------------------------------------------- */
+  'payments.source.manual': 'Recorded',
+  'payments.source.import': 'Imported',
+  'payments.source.backfill': 'Backfilled',
+  'payments.col.source': 'Source',
+  'payments.filter.source': 'Source',
+  'payments.filter.source.all': 'All sources',
+  'backfill.open': 'Backfill history',
+  'backfill.row_action': 'This is old history? Backfill…',
+  'backfill.title': 'Backfill history',
+  'backfill.lead':
+    'This tenancy started before TMS, so the rent book carries periods nobody has closed. Settle them in one go and the book tells the truth from the move-in date onwards.',
+  'backfill.until': 'Settled up to',
+  'backfill.until.hint':
+    'Every unpaid period due on or before this date is closed. The default is the last full period before today.',
+  'backfill.mode': 'What happened to that money',
+  'backfill.mode.paid': 'It was paid',
+  'backfill.mode.waived': 'Write it off',
+  'backfill.method': 'How it was paid',
+  'backfill.paid_at': 'Date on the payments',
+  'backfill.paid_at.due_date': 'Use each period’s own due date',
+  'backfill.paid_at.fixed': 'One date for all of them',
+  'backfill.paid_at.hint':
+    'Reports count money in the period it was paid in, so each period’s own due date is usually the truthful answer.',
+  'backfill.reference': 'Reference (optional)',
+  'backfill.reference.hint': 'Up to 80 characters — a bank slip, or a note to yourself.',
+  'backfill.note': 'Note (optional)',
+  'backfill.note.required': 'Why it is written off',
+  'backfill.note.hint': '{n}/500',
+  'backfill.preview': '{count} periods · {amount}',
+  'backfill.preview.none': 'Nothing is unpaid on or before that date.',
+  'backfill.preview.note':
+    'Counted from the periods already on this page. The server decides what qualifies and what each period owes.',
+  'backfill.submit': 'Backfill these periods',
+  'backfill.busy': 'Backfilling…',
+  'backfill.done': '{settled} periods settled · {amount}. {skipped} were already closed.',
+  'backfill.sms_note': 'The renter gets one SMS about the history — never one per period.',
+  'backfill.blocked': 'A contract has to be active before its history can be backfilled.',
+  'contracts.new.start_hint':
+    'A tenancy that started before TMS is fine — up to ten years back. Put the real move-in date and the past periods are generated, ready to settle with Backfill.',
+  'import.renters.past_start_hint':
+    'A start date in the past is fine — up to ten years back. Put the real move-in date; the past periods are generated and you settle them from the contract page with Backfill.',
+  'import.payments.backfill_hint':
+    'A payment older than the rent book cannot be allocated to anything. Set the contract’s start date to the real move-in date, or settle the periods before TMS with Backfill on the contract page.',
 };
 
 export default messages;

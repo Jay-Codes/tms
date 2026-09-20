@@ -3,6 +3,8 @@ package httpserver
 import (
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"tms/backend/internal/contract"
 	"tms/backend/internal/db"
 	"tms/backend/internal/db/sqlc"
@@ -72,6 +74,25 @@ type signatureBlock struct {
 	Method      string    `json:"method"`
 	PhoneMasked *string   `json:"phone_masked"`
 	HasImage    bool      `json:"has_image"`
+	// WitnessedBy is the org user who showed the signing code in person
+	// (Phase 18, FLOWS 2b.6). Null for every signature made from a code that
+	// arrived by SMS, which is what makes the in-person path visible on the
+	// document rather than indistinguishable from the ordinary one.
+	WitnessedBy *witnessRef `json:"witnessed_by"`
+}
+
+// witnessRef names the org user who witnessed a signature.
+type witnessRef struct {
+	ID       string `json:"id"`
+	FullName string `json:"full_name"`
+}
+
+// witnessOf builds the witness reference from a signature row's join.
+func witnessOf(id pgtype.UUID, name string) *witnessRef {
+	if !id.Valid {
+		return nil
+	}
+	return &witnessRef{ID: db.UUIDString(id), FullName: name}
 }
 
 // schedulesSummary is the money view of a contract without loading its rows.
@@ -125,6 +146,10 @@ type scheduleResponse struct {
 	Amount      int64  `json:"amount"`
 	Status      string `json:"status"`
 	PaidAmount  int64  `json:"paid_amount"`
+	// LastPaymentSource is `manual` | `import` | `backfill`, or null when no
+	// live payment has reached this instalment (Phase 20 §20.3). It is what
+	// puts the "imported" and "backfilled" chips on a rent-book row.
+	LastPaymentSource *string `json:"last_payment_source"`
 }
 
 // templateResponse is the `template` shape from API.md.
@@ -225,6 +250,7 @@ func toSignatures(rows []sqlc.ListContractSignaturesRow) []signatureBlock {
 			Method:      sg.Method,
 			PhoneMasked: maskPhone(db.StrVal(sg.SignerPhone)),
 			HasImage:    sg.SignatureObjectKey != nil && *sg.SignatureObjectKey != "",
+			WitnessedBy: witnessOf(sg.WitnessedByUserID, sg.WitnessName),
 		})
 	}
 	return out

@@ -148,3 +148,17 @@ export function ProofChip({ status }: { status: ProofStatus }) {
   }
   return <span className="pencil">{t('proof.status.submitted')}</span>;
 }
+
+/**
+ * Phase 20.3: where a settled row's money came from. `manual` is the ordinary
+ * case and wears no chip at all — only the two that explain a row a renter
+ * might not remember get one: a CSV `import` of the landlord's old book, and a
+ * `backfill` that closed periods predating TMS. Pencil, not stamp: the stamp
+ * beside it already says the money landed; this only says how it got here.
+ */
+export function SourceChip({ source }: { source?: string | null }) {
+  const t = useT();
+  if (source === 'import') return <span className="pencil">{t('schedule.source.import')}</span>;
+  if (source === 'backfill') return <span className="pencil">{t('schedule.source.backfill')}</span>;
+  return null;
+}

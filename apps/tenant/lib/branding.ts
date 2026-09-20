@@ -18,6 +18,7 @@
  * Ledger preset.
  */
 
+import { useEffect, useState } from 'react';
 import {
   applyOrgTheme,
   deriveTokens,
@@ -30,6 +31,14 @@ import {
 import { brandingApi, unwrapBranding, type BrandingTheme, type OrgBranding } from './api';
 
 export const THEME_CACHE_KEY = 'tms.tenant.theme';
+
+/**
+ * How long a cached `logo_url` is trusted. `GET /org/branding` presigns its
+ * URLs for an hour (API.md Branding) and does not say when they expire, so the
+ * cache stamps its own read time and treats the URL as stale well inside that
+ * hour — a stale one only costs a re-fetch, an expired one costs a broken tile.
+ */
+const LOGO_TTL_MS = 45 * 60 * 1000;
 
 export function fontId(value: string | null | undefined): FontId {
   return (FONT_IDS as readonly string[]).includes(String(value))
@@ -65,30 +74,42 @@ export function resolveTheme(branding: OrgBranding | null | undefined): Resolved
  * any of the colour maths.
  */
 interface ThemeCacheEntry {
-  v: 2;
+  v: 2 | 3;
   theme: ResolvedTheme;
   vars: Record<string, string>;
+  /** v3 (Phase 20.2): the presigned logo, so the mark paints on first frame. */
+  logo_url?: string | null;
+  display_name?: string | null;
+  /** Epoch ms after which `logo_url` is not to be trusted. */
+  logo_expires_at?: number;
 }
 
-export function readCachedTheme(): ResolvedTheme | null {
+function readCacheEntry(): ThemeCacheEntry | null {
   if (typeof window === 'undefined') return null;
   try {
     const raw = window.localStorage.getItem(THEME_CACHE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as ThemeCacheEntry;
-    return parsed?.theme?.tokens ? toResolvedTheme(parsed.theme) : null;
+    return JSON.parse(raw) as ThemeCacheEntry;
   } catch {
     return null;
   }
 }
 
-export function cacheTheme(theme: ResolvedTheme): void {
+export function readCachedTheme(): ResolvedTheme | null {
+  const parsed = readCacheEntry();
+  return parsed?.theme?.tokens ? toResolvedTheme(parsed.theme) : null;
+}
+
+export function cacheTheme(theme: ResolvedTheme, mark?: OrgMark): void {
   if (typeof window === 'undefined') return;
   try {
     const entry: ThemeCacheEntry = {
-      v: 2,
+      v: 3,
       theme,
       vars: deriveTokens(theme.tokens, theme.font_id),
+      logo_url: mark?.logo_url ?? null,
+      display_name: mark?.display_name ?? null,
+      logo_expires_at: mark?.logo_url ? Date.now() + LOGO_TTL_MS : undefined,
     };
     window.localStorage.setItem(THEME_CACHE_KEY, JSON.stringify(entry));
   } catch {
@@ -96,20 +117,103 @@ export function cacheTheme(theme: ResolvedTheme): void {
   }
 }
 
+/* -------------------------------- the mark ------------------------------- */
+
+/** What `OrgMark` in the shell draws: the logo, and the name beside it. */
+export interface OrgMark {
+  logo_url: string | null;
+  display_name: string | null;
+}
+
+/**
+ * The mark lives in a module-level slot rather than a context because the shell
+ * mounts once for the session and the branding page (a route under it) has to
+ * be able to push a new logo into it after an upload or a delete.
+ */
+let currentMark: OrgMark = { logo_url: null, display_name: null };
+let markLoaded = false;
+const markListeners = new Set<(m: OrgMark) => void>();
+
+function setMark(next: OrgMark): void {
+  currentMark = next;
+  markLoaded = true;
+  for (const fn of markListeners) fn(next);
+}
+
+/** The cached mark, or nothing when the cache is empty or the URL went stale. */
+function cachedMark(): OrgMark {
+  const entry = readCacheEntry();
+  if (!entry) return { logo_url: null, display_name: null };
+  const fresh = !entry.logo_expires_at || entry.logo_expires_at > Date.now();
+  return {
+    logo_url: fresh ? (entry.logo_url ?? null) : null,
+    display_name: entry.display_name ?? null,
+  };
+}
+
+/**
+ * Subscribe to the org mark. Seeded from the cache so the logo is on screen
+ * before `GET /org/branding` answers, exactly as the colours are.
+ */
+export function useOrgMark(): OrgMark {
+  const [mark, setLocal] = useState<OrgMark>(() => (markLoaded ? currentMark : cachedMark()));
+  useEffect(() => {
+    if (!markLoaded) {
+      const seeded = cachedMark();
+      currentMark = seeded;
+      setLocal(seeded);
+    } else {
+      setLocal(currentMark);
+    }
+    markListeners.add(setLocal);
+    return () => {
+      markListeners.delete(setLocal);
+    };
+  }, []);
+  return mark;
+}
+
+/**
+ * Re-read `/org/branding` for a fresh presigned logo. Called once when the
+ * `<img>` errors (an expired URL is a 403, not a broken file); the caller falls
+ * back to the plain square if this answers with nothing.
+ */
+export async function refreshOrgMark(): Promise<OrgMark> {
+  try {
+    const branding = unwrapBranding(await brandingApi.get());
+    applyBranding(branding);
+    return currentMark;
+  } catch {
+    setMark({ logo_url: null, display_name: currentMark.display_name });
+    return currentMark;
+  }
+}
+
 /** Paint the cached theme, if any. Called before the branding fetch resolves. */
 export function applyCachedTheme(): void {
   const cached = readCachedTheme();
   if (cached) applyOrgTheme(cached);
+  if (!markLoaded) setMark(cachedMark());
 }
 
 /* -------------------------------- applying ------------------------------- */
 
-/** Apply a branding record and remember it for the next page load. */
+/**
+ * Apply a branding record and remember it for the next page load — the theme
+ * and, since Phase 20.2, the logo the shell's mark draws. The branding page
+ * calls this after every save, upload and delete, which is what makes the rail
+ * and the mobile bar follow a logo change without a reload.
+ */
 export function applyBranding(branding: OrgBranding | null | undefined): void {
   if (typeof document === 'undefined') return;
   const theme = resolveTheme(branding);
   applyOrgTheme(theme);
-  cacheTheme(theme);
+  const mark: OrgMark = {
+    logo_url: branding?.logo_url ?? null,
+    display_name: branding?.display_name ?? null,
+  };
+  cacheTheme(theme, mark);
+  setMark(mark);
 }
 
 /** Apply a candidate while the landlord is editing; nothing is cached. */

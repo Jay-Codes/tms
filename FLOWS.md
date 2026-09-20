@@ -39,6 +39,22 @@ Companion to [SPEC.md](SPEC.md). Actors: **Renter** (`apps/enduser`), **Landlord
 
 **Alternate entries:** landlord manually adds renter (sends SMS invite link with the same flow, unit pre-linked); renter with existing account scans a new QR → jumps straight to step 5.
 
+**Landlord-assisted entry (in person, no SMS)** — Flow 2b below. Used when the OTP text does not arrive (provider stuck, network blackhole, no credit) and landlord and renter are in the same room.
+
+### 2b. Landlord-assisted onboarding (in person)
+
+The landlord's phone becomes the code channel. Nothing is sent by SMS; the renter still acts on their **own** device, so the account, PIN and signature stay theirs.
+
+1. Landlord (owner or manager): unit page → **Onboard in person**, or Renters → **Add renter** → "In person". Enters the renter's phone.
+2. Backend opens an **assist session** for (org, unit, phone): a fresh 6-digit code stored under the same key the SMS path uses (`register`, or `login` when the number already has an account), **no SMS**. Returns the code, its expiry, and a link.
+3. Landlord screen: big code, QR of the link, 5-min countdown, **New code** button, and the live status line "Waiting for renter…". The renter scans the QR (or the landlord reads the link) and lands on `/enduser/u/{unit_code}?assist={session_id}`.
+4. Renter: enters their phone → the "Send code" step is skipped, straight to "Enter the code your landlord shows you" → PIN → KYC → period / term / start date → link request (Flow 2 steps 4–6, unchanged). An existing account is asked to log in with PIN, or with the shown code as the OTP fallback.
+5. Landlord screen flips as the renter progresses: **Registered** → **Request received** (button "Review & approve", the ordinary Flow 3 approval) → **Approved**. Session ends 30 min after it was opened or when the landlord closes it.
+6. Signing: landlord opens the contract → **Witness signing** → a signing code is shown on the landlord's screen (same key the `contract_sign_otp` SMS would fill) → renter enters it in **Accept & sign** on their own device → signature row `otp_accept` plus `witnessed_by`. The landlord cannot sign for the renter here — that stays the no-phone `landlord_recorded` path (Flow 3.6).
+
+**Edge cases:** the SMS path and the assisted path share one code slot per (purpose, phone) — issuing an assisted code replaces any code still in flight, so a late-arriving text carries a dead code; code reveals and refreshes are audited per event (`renter.assist_code`); refreshes are limited per org (30/h) rather than per phone, because the landlord vouches for the number; the verify-attempt limit (5) is unchanged; a phone that belongs to a **staff/admin** account is refused (`not_a_renter_phone`); the public session lookup returns only the unit code and purpose, never the phone.
+
+
 **Edge cases:** QR of occupied unit → show "unit occupied — contact landlord" unless landlord enabled waitlist; wrong unit scanned → renter cancels request; OTP retries rate-limited with resend cooldown.
 
 ---
@@ -46,10 +62,10 @@ Companion to [SPEC.md](SPEC.md). Actors: **Renter** (`apps/enduser`), **Landlord
 ## 3. Link approval & contract activation (landlord)
 
 1. Dashboard badge: pending link requests.
-2. Open request → renter KYC details, chosen duration, start date.
+2. Open request → renter KYC details, chosen duration, start date. NIDA shows masked; **"Show full number"** reveals it for 60 s after a confirm sheet (optional reason) — audited, rate-limited, and listed back to the renter in their profile. Same button on the renter detail page.
 3. Approve → contract created from template (terms + price **snapshotted**, hash computed), status `pending_signature`, renter SMS'd to sign.
 4. Reject (with reason) → renter notified by SMS.
-5. Renter signs (OTP + optional drawn signature) → landlord sees "Ready to countersign" → **Activate** records the landlord signature, generates payment schedules for the whole span, unit → occupied.
+5. Renter signs (OTP + optional drawn signature; or a **witnessed** code shown on the landlord's screen — Flow 2b step 6) → landlord sees "Ready to countersign" → **Activate** records the landlord signature, generates payment schedules for the whole span, unit → occupied.
 6. Contract visible to both parties as an in-app document (org letterhead + logo, resolved terms, parties, schedule summary, signature block with names/timestamps/phone last-4/drawn signatures, verification hash). "Print / Save as PDF" uses the browser. Landlord can also **manually add a renter** and sign on their behalf only if the renter has no phone — flagged as `landlord_recorded` in the audit log (no renter signature row); avoid where possible.
 
 **Edge cases:** renter doesn't sign within N days (org setting, default 7) → reminder SMS, then landlord can cancel; renter disputes → landlord terminates and issues a new contract (old one kept, never edited).
@@ -102,6 +118,7 @@ Companion to [SPEC.md](SPEC.md). Actors: **Renter** (`apps/enduser`), **Landlord
 2. Full amount → schedule `paid`; underpayment → `partial` (remainder tracked); overpayment → applied to next schedule (confirm prompt).
 3. System sends **thank-you SMS** with next due date.
 4. Mistake → **reverse payment** (audited), schedule reverts. An accepted proof stays accepted — the claim was answered; the reversal is a fact about the payment.
+4a. **A tenancy older than TMS.** A landlord-created contract may start up to **10 years** in the past (a renter's own application still may not), so the real move-in date generates the real rent book and the past periods come out `overdue` — the truth until they are settled. **Backfill history** on the contract page (also offered from the Overdue list) closes every unpaid row up to a chosen date in one call: *Paid* records one payment per row at its own due date, stamped `source=backfill` and chipped "backfilled" beside "imported" on both landlord and renter screens, or *Waived* marks the rows waived with a note. Rows already paid or partial are skipped and reported back. No text per row — one `backfill_done` SMS, "your rent book now shows history up to {date}". Reports count that money in the period its `paid_at` falls in, not the day it was typed.
 5. Dashboard card **"Due in the next 7 days"** (count + total, top 5 rows) links to Payments → **Due soon**, a 14-day window by default with a 7 / 14 / 30 picker. The Renters list carries a sortable **Next due** column tinted when overdue, the renter's header shows Next due / Overdue above the tabs, and occupied cards on the units board carry a "Due 3 Oct" chip.
 
 **System:**
@@ -173,6 +190,9 @@ Dashboard (layout per org's saved **dashboard preferences**):
 1. Admin logs into `apps/admin`.
 2. Org list: activate / suspend orgs, view platform metrics (orgs, renters, SMS volume, failed sends).
 3. Cross-org audit search for support cases.
+4. **User directory**: search any user by phone, e-mail or name → detail page (identity, orgs, tenancies, payments,
+   activity). Suspend / activate with a reason (sessions revoked), fix a mistyped name with a reason, and reveal a
+   renter's NIDA for a support case — every one of those audited, the reveal visible to the renter.
 
 ---
 

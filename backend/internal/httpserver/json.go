@@ -23,3 +23,8 @@ func WriteRawJSON(w http.ResponseWriter, v any) { httpx.EncodeJSON(w, v) }
 func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	return httpx.DecodeJSON(w, r, dst)
 }
+
+// DecodeJSONOptional is DecodeJSON for a body the caller may omit entirely.
+func DecodeJSONOptional(w http.ResponseWriter, r *http.Request, dst any) bool {
+	return httpx.DecodeJSONOptional(w, r, dst)
+}

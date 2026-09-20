@@ -18,10 +18,12 @@ import { PageHead } from '../../../../components/PageHead';
 import {
   ApiError,
   adminApi,
+  adminUsers,
   toApiError,
   unwrapAdminOrg,
   unwrapOrgDetail,
   type AdminOrgDetail,
+  type AdminUserRow,
 } from '../../../../lib/api';
 import { fmtDate, fmtDateTime, fmtNum } from '../../../../lib/format';
 
@@ -57,6 +59,99 @@ function SettingValue({ value }: { value: unknown }) {
 function humanKey(key: string): string {
   const s = key.replace(/_/g, ' ');
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/**
+ * Phase 19.2 — the org's renters, from `GET /admin/users?org_id=&kind=renter`.
+ * A preview only: the first page, with the directory one click away for the
+ * search and filters. Errors stay local so a missing endpoint cannot take the
+ * org page down with it.
+ */
+const RENTER_PREVIEW = 25;
+
+function OrgRenters({ orgId }: { orgId: string }) {
+  const [items, setItems] = useState<AdminUserRow[]>([]);
+  const [more, setMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await adminUsers.list(
+          { org_id: orgId, kind: 'renter', limit: RENTER_PREVIEW },
+          ac.signal,
+        );
+        setItems(res.items ?? []);
+        setMore(Boolean(res.next_cursor));
+        setError(null);
+      } catch (e) {
+        if (e instanceof DOMException && e.name === 'AbortError') return;
+        setError(toApiError(e));
+        setItems([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+    return () => ac.abort();
+  }, [orgId]);
+
+  return (
+    <section style={{ marginTop: 'var(--sp-6)' }}>
+      <h2 style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--sp-3)' }}>Renters</h2>
+      <ProblemNote error={error} />
+      <table className="ledger">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Phone</th>
+            <th>Relationship</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.length === 0 && !loading ? (
+            <tr>
+              <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
+                No renter has applied to or rented a unit here yet.
+              </td>
+            </tr>
+          ) : (
+            items.map((r) => (
+              <tr key={r.id}>
+                <td style={{ fontWeight: 500 }}>
+                  <Link href={`/users/${r.id}`} style={{ color: 'inherit' }}>
+                    {r.full_name || 'no name'}
+                  </Link>
+                </td>
+                <td style={{ whiteSpace: 'nowrap' }}>{r.phone || <span className="pencil">—</span>}</td>
+                <td>
+                  {r.orgs?.find((o) => o.id === orgId)?.relationship ?? <span className="pencil">—</span>}
+                </td>
+                <td>
+                  <StatusStamp status={r.status} />
+                </td>
+              </tr>
+            ))
+          )}
+          {loading ? (
+            <tr>
+              <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
+                Loading…
+              </td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+      {more ? (
+        <p style={{ marginTop: 'var(--sp-3)', fontSize: 'var(--text-sm)' }}>
+          <Link href={`/users?org_id=${orgId}&kind=renter`}>All renters of this organization →</Link>
+        </p>
+      ) : null}
+    </section>
+  );
 }
 
 function OrgDetailBody({ id }: { id: string }) {
@@ -266,7 +361,16 @@ function OrgDetailBody({ id }: { id: string }) {
                 ) : (
                   detail?.members.map((m, i) => (
                     <tr key={m.user_id ?? m.id ?? `${m.email}-${i}`}>
-                      <td style={{ fontWeight: 500 }}>{m.full_name}</td>
+                      <td style={{ fontWeight: 500 }}>
+                        {/* Phase 19.2: the member row is the way into the platform user record. */}
+                        {m.user_id ? (
+                          <Link href={`/users/${m.user_id}`} style={{ color: 'inherit' }}>
+                            {m.full_name}
+                          </Link>
+                        ) : (
+                          m.full_name
+                        )}
+                      </td>
                       <td>{m.email}</td>
                       <td>{m.role === 'org_owner' ? 'Owner' : m.role === 'org_manager' ? 'Manager' : m.role}</td>
                       <td>{m.status}</td>
@@ -277,6 +381,8 @@ function OrgDetailBody({ id }: { id: string }) {
               </tbody>
             </table>
           </section>
+
+          <OrgRenters orgId={org.id} />
 
           <section style={{ marginTop: 'var(--sp-6)', maxWidth: 720 }}>
             <h2 style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--sp-3)' }}>Settings summary</h2>

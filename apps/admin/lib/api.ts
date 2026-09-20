@@ -393,6 +393,241 @@ export function unwrapTemplate(res: AdminTemplateSaveResult | AdminTemplate): Ad
 }
 
 /* ------------------------------------------------------------------ */
+/* Phase 19 — platform user directory (API.md "Phase 19")               */
+/* ------------------------------------------------------------------ */
+
+export type AdminUserStatus = 'active' | 'suspended' | string;
+
+/** How a renter or org user is attached to one org on a directory row. */
+export interface AdminUserOrgRef {
+  id: string;
+  name: string;
+  slug?: string | null;
+  /** org_user rows: `org_owner` | `org_manager`. */
+  role?: string | null;
+  /** renter rows: currently renting, applied only, or a past tenancy. */
+  relationship?: 'renting' | 'applied' | 'past' | string | null;
+}
+
+/**
+ * One row of `GET /admin/users`. Deliberately carries **no** NIDA field of any
+ * kind — masked or full — because a list is a bulk read (PLAN2 19.2). The
+ * masked value appears on the detail payload only, and the full number only
+ * ever comes back from the audited reveal POST.
+ */
+export interface AdminUserRow {
+  id: string;
+  kind: UserKind;
+  full_name: string;
+  phone: string | null;
+  email: string | null;
+  status: AdminUserStatus;
+  created_at: string;
+  last_seen_at?: string | null;
+  orgs?: AdminUserOrgRef[] | null;
+  /** renter only. */
+  contracts_live?: number | null;
+  kyc_status?: string | null;
+}
+
+/** The detail header: the list row plus the renter's masked NIDA. */
+export interface AdminUserDetailUser extends AdminUserRow {
+  nida_masked?: string | null;
+  suspended_at?: string | null;
+  suspended_reason?: string | null;
+}
+
+/**
+ * API.md 19.2 sends "the Phase 3 link_request shapes, with org_name" — those
+ * nest `unit` and `org`, so both the nested and the flat spelling are accepted
+ * and `unitOf`/`orgOf` below read whichever arrived.
+ */
+export interface AdminUserLinkRequest {
+  id: string;
+  status: string;
+  org_id?: string | null;
+  org_name?: string | null;
+  org?: { id?: string | null; name?: string | null; slug?: string | null } | null;
+  unit?: { id?: string | null; name?: string | null; property_name?: string | null } | null;
+  unit_name?: string | null;
+  property_name?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  created_at?: string | null;
+}
+
+export interface AdminUserContract {
+  id: string;
+  org_id?: string | null;
+  org_name?: string | null;
+  unit_name?: string | null;
+  property_name?: string | null;
+  status: string;
+  start_date?: string | null;
+  end_date?: string | null;
+  rent_amount?: number | null;
+}
+
+/** `A2 · Mikocheni Flats` from either the nested or the flat spelling. */
+export function unitOf(row: AdminUserLinkRequest | AdminUserContract): string {
+  const r = row as AdminUserLinkRequest;
+  const unit = r.unit?.name ?? row.unit_name ?? '';
+  const property = r.unit?.property_name ?? row.property_name ?? '';
+  if (unit && property) return `${unit} · ${property}`;
+  return unit || property || '—';
+}
+
+export function orgOf(row: AdminUserLinkRequest | AdminUserContract): {
+  id: string | null;
+  name: string | null;
+} {
+  const r = row as AdminUserLinkRequest;
+  return {
+    id: row.org_id ?? r.org?.id ?? null,
+    name: row.org_name ?? r.org?.name ?? null,
+  };
+}
+
+/** Payments summary across every org — cash the platform has seen for a user. */
+export interface AdminUserPayments {
+  count?: number | null;
+  total?: number | null;
+  last_paid_at?: string | null;
+}
+
+export interface AdminUserMembership {
+  org_id: string;
+  org_name?: string | null;
+  org_slug?: string | null;
+  org_status?: string | null;
+  role: string;
+  status?: string | null;
+  created_at?: string | null;
+}
+
+export interface AdminUserAuditPage {
+  items: AdminAuditEntry[];
+  next_cursor?: string | null;
+}
+
+/** `GET /admin/users/{id}` — aggregate; writes an `admin.user_view` audit row. */
+export interface AdminUserDetail {
+  user: AdminUserDetailUser;
+  link_requests?: AdminUserLinkRequest[] | null;
+  contracts?: AdminUserContract[] | null;
+  payments?: AdminUserPayments | null;
+  memberships?: AdminUserMembership[] | null;
+  audit?: AdminUserAuditPage | null;
+}
+
+/**
+ * `POST /admin/users/{id}/nida/reveal` — the only payload in the whole app that
+ * carries a full NIDA number. It is held in component state for 60 s and then
+ * dropped: never a URL, never localStorage/sessionStorage, never a console log.
+ */
+export interface AdminNidaReveal {
+  nida_number: string;
+  full_name?: string | null;
+  revealed_at?: string | null;
+}
+
+export const adminUsers = {
+  /**
+   * `q` matches phone (normalised), e-mail (lower) or name (prefix) — the
+   * backend decides which; nothing is filtered in the browser so "Show older"
+   * continues the same query the API answered.
+   */
+  list: (
+    query: {
+      q?: string;
+      kind?: UserKind | '';
+      status?: AdminUserStatus;
+      org_id?: string;
+      cursor?: string;
+      limit?: number;
+    } = {},
+    signal?: AbortSignal,
+  ) =>
+    api.get<{ items: AdminUserRow[]; next_cursor?: string | null }>('/admin/users', {
+      query,
+      signal,
+    }),
+
+  get: (id: string, signal?: AbortSignal) =>
+    api.get<AdminUserDetail | AdminUserDetailUser>(`/admin/users/${id}`, { signal }),
+
+  /**
+   * The Activity tab's second page: `GET /admin/users/{id}?audit_cursor=` pages
+   * the audit block alone (API.md 19.2).
+   */
+  auditPage: async (id: string, cursor: string, signal?: AbortSignal): Promise<AdminUserAuditPage> => {
+    const res = await api.get<AdminUserDetail>(`/admin/users/${id}`, {
+      query: { audit_cursor: cursor },
+      signal,
+    });
+    return res.audit ?? { items: [] };
+  },
+
+  /** Revokes the user's sessions, like an org suspension does. */
+  suspend: (id: string, reason: string) =>
+    api.post<{ user: AdminUserDetailUser } | AdminUserDetailUser>(`/admin/users/${id}/suspend`, {
+      reason,
+    }),
+
+  activate: (id: string, reason: string) =>
+    api.post<{ user: AdminUserDetailUser } | AdminUserDetailUser>(`/admin/users/${id}/activate`, {
+      reason,
+    }),
+
+  /** `PATCH /admin/users/{id}` — name typo fix, reason required (PLAN2 19.3). */
+  rename: (id: string, full_name: string, reason: string) =>
+    api.patch<{ user: AdminUserDetailUser } | AdminUserDetailUser>(`/admin/users/${id}`, {
+      full_name,
+      reason,
+    }),
+
+  /** POST, not GET: never cached, never prefetched, never in a URL. */
+  revealNida: (id: string, reason: string) =>
+    api.post<AdminNidaReveal>(`/admin/users/${id}/nida/reveal`, { reason }),
+};
+
+/** `{user}` or a flat user — both shapes have been on the wire for orgs. */
+export const unwrapAdminUser = (res: { user: AdminUserDetailUser } | AdminUserDetailUser) =>
+  unwrap<AdminUserDetailUser>(res, 'user');
+
+/** Normalise `GET /admin/users/{id}` into the aggregate the detail page renders. */
+export function unwrapUserDetail(res: AdminUserDetail | AdminUserDetailUser): AdminUserDetail {
+  const o = res as unknown as Record<string, unknown>;
+  const user = (o.user ?? res) as AdminUserDetailUser;
+  const flat = user as unknown as Record<string, unknown>;
+  const pick = <T,>(key: string, fallback: T): T => (o[key] ?? flat[key] ?? fallback) as T;
+  const audit = pick<AdminUserAuditPage | null>('audit', null);
+  return {
+    user,
+    link_requests: pick<AdminUserLinkRequest[]>('link_requests', []),
+    contracts: pick<AdminUserContract[]>('contracts', []),
+    payments: pick<AdminUserPayments | null>('payments', null),
+    memberships: pick<AdminUserMembership[]>('memberships', []),
+    audit: audit && Array.isArray(audit.items) ? audit : { items: [] },
+  };
+}
+
+/** `renter` → `Renter`; the chip next to a user's name. */
+export function userKindLabel(kind: UserKind | string): string {
+  if (kind === 'renter') return 'Renter';
+  if (kind === 'org_user') return 'Landlord staff';
+  if (kind === 'platform_admin') return 'Platform admin';
+  return String(kind);
+}
+
+export function orgRoleLabel(role: string | null | undefined): string {
+  if (!role) return '';
+  if (role === 'org_owner') return 'Owner';
+  if (role === 'org_manager') return 'Manager';
+  return role;
+}
+
+/* ------------------------------------------------------------------ */
 /* Phase 7 endpoint helpers (audience admin)                            */
 /* ------------------------------------------------------------------ */
 

@@ -11,6 +11,8 @@ import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { ContractsTable } from '../../../../components/ContractBits';
 import { ProblemNote } from '../../../../components/FormBits';
+import { EditNameButton, EditNameSheet } from '../../../../components/NameEdit';
+import { NidaField } from '../../../../components/NidaField';
 import { NotificationLogTable } from '../../../../components/NotificationBits';
 import { PaymentsTable } from '../../../../components/PaymentBits';
 import { ProofsFor } from '../../../../components/ProofBits';
@@ -50,6 +52,14 @@ function RenterBody({ userId }: { userId: string }) {
   const [payments, setPayments] = useState<Payment[] | null>(null);
   const [messages, setMessages] = useState<NotificationLogEntry[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
+
+  // Phase 19.3 — the landlord's own typo, fixed while the renter has signed
+  // nothing. Whether they have is the server's call: a 409 `renter_signed` is
+  // what turns the button off, and the hint it carries is what explains it.
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameError, setRenameError] = useState<ApiError | null>(null);
+  const [renameBlocked, setRenameBlocked] = useState<string | null>(null);
 
   // Last twenty SMS to this renter (API.md Phase 6). Its own read, so a
   // notification outage cannot take the KYC record down with it.
@@ -104,6 +114,22 @@ function RenterBody({ userId }: { userId: string }) {
     void load(ac.signal);
     return () => ac.abort();
   }, [load]);
+
+  const rename = async (fullName: string) => {
+    setRenameBusy(true);
+    setRenameError(null);
+    try {
+      await rentersApi.rename(userId, fullName);
+      setRenameOpen(false);
+      await load();
+    } catch (e) {
+      const err = toApiError(e);
+      setRenameError(err);
+      if (err.code === 'renter_signed') setRenameBlocked(err.detail);
+    } finally {
+      setRenameBusy(false);
+    }
+  };
 
   if (error && !data) {
     return (
@@ -179,15 +205,28 @@ function RenterBody({ userId }: { userId: string }) {
         <div style={{ display: 'grid', gap: 'var(--sp-4)', maxWidth: 640 }}>
           <Facts
             rows={[
-              [t('renters.field.full_name'), profile?.full_name ?? renter?.full_name ?? '—'],
+              [
+                t('renters.field.full_name'),
+                <span
+                  key="name"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' }}
+                >
+                  {profile?.full_name ?? renter?.full_name ?? '—'}
+                  <EditNameButton
+                    blockedReason={renameBlocked}
+                    onClick={() => {
+                      setRenameError(null);
+                      setRenameOpen(true);
+                    }}
+                  />
+                </span>,
+              ],
               [t('common.phone'), renter?.phone ?? '—'],
               [t('common.email'), profile?.email ?? renter?.email ?? '—'],
               [t('renters.locale'), localeLabel(t, renter?.locale)],
               [
                 t('renters.field.nida'),
-                <span key="nida" className="num" style={{ letterSpacing: '0.08em' }}>
-                  {profile?.nida_masked ?? '—'}
-                </span>,
+                <NidaField key="nida" userId={userId} masked={profile?.nida_masked} />,
               ],
               [t('renters.field.next_of_kin'), profile?.next_of_kin_name ?? '—'],
               [t('renters.field.next_of_kin_phone'), profile?.next_of_kin_phone ?? '—'],
@@ -318,6 +357,17 @@ function RenterBody({ userId }: { userId: string }) {
           </p>
         </div>
       </Section>
+
+      <EditNameSheet
+        open={renameOpen}
+        title={t('renters.rename.title')}
+        currentName={profile?.full_name ?? renter?.full_name ?? ''}
+        busy={renameBusy}
+        error={renameError}
+        hint={t('renters.rename.hint')}
+        onClose={() => setRenameOpen(false)}
+        onSubmit={(name) => void rename(name)}
+      />
     </>
   );
 }
