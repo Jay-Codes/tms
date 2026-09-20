@@ -404,7 +404,19 @@ GET /audit-log?entity=&actor=&from=&to=      (org-scoped; admin sees all)
 ```
 GET /admin/orgs                   list/suspend/activate orgs
 GET /admin/metrics                platform health
+GET /admin/users?q=&kind=&status=&org_id=&cursor=&limit=
+                                  cross-org user directory; q matches phone (normalised),
+                                  e-mail (lower) and full name (ILIKE prefix). No NIDA field,
+                                  masked or full, on the list
+GET /admin/users/{id}             aggregate: identity (+ nida_masked for renters), orgs/memberships,
+                                  link requests, contracts, payments summary, audit rows where the
+                                  user is actor or entity (paged). Audited admin.user_view
+POST /admin/users/{id}/nida/reveal   {reason} required → {nida_number, full_name, revealed_at}
+POST /admin/users/{id}/suspend    {reason} — sessions revoked, like org suspend
+POST /admin/users/{id}/activate   {reason}
+PATCH /admin/users/{id}           {full_name, reason} — any user kind, no signed-contract restriction
 ```
+Out of scope for the directory: editing any other user field, resetting PINs/passwords, deleting users.
 
 ### 5.11 Expenses (landlord)
 ```
@@ -528,7 +540,7 @@ Buckets: `branding` (logos, letterheads), `qrcodes` (unit QR PNGs; S3 requires �
 
 - Every mutating handler emits an append-only `audit_log` row (actor, action, entity, before/after diff, ip, UA). DB role for the app has no UPDATE/DELETE on `audit_log`.
 - Org isolation tested explicitly: integration test suite asserts cross-org access returns 404 on every org-scoped route.
-- NIDA numbers and KYC docs: encrypted at rest (pgcrypto column encryption for `nida_number`; MinIO SSE for docs), masked in UI (last 4), access audited.
+- NIDA numbers and KYC docs: encrypted at rest (pgcrypto column encryption for `nida_number`; MinIO SSE for docs), **masked by default** in UI (last 4), access audited. The full number is returned only by an explicit, audited **reveal** call (`POST /renters/{user_id}/nida/reveal` for the org's `org_owner`/`org_manager`, `POST /admin/users/{id}/nida/reveal` for platform admin — reason required there): never a query flag, never in a URL, never cached, rate-limited per org (60/h). Every reveal writes `renter.nida_reveal` and is shown back to the renter in their own profile (`nida_reveals[]`, last 10), so the subject can see who looked. KYC **documents** gain no new access path — `kyc.view` is unchanged.
 - Rate limiting (Redis): auth endpoints, OTP, public QR resolution.
 - Input validation server-side on every endpoint; frontend validation is UX only.
 - HTTPS everywhere (ngrok in dev, TLS at proxy in prod).
