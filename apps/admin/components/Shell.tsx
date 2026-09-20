@@ -27,6 +27,7 @@ export interface NavItem {
 export const NAV: NavItem[] = [
   { href: '/', label: 'Dashboard', icon: 'solar:chart-square-linear' },
   { href: '/orgs', label: 'Organizations', icon: 'solar:buildings-2-linear' },
+  { href: '/users', label: 'Users', icon: 'solar:users-group-rounded-linear' },
   { href: '/templates', label: 'Templates', icon: 'solar:chat-square-code-linear' },
   { href: '/audit', label: 'Audit', icon: 'solar:history-linear' },
   { href: '/jobs', label: 'Jobs', icon: 'solar:refresh-circle-linear' },
