@@ -435,6 +435,19 @@ func (s *Server) routes() chi.Router {
 			r.Get("/admin/metrics", s.handleAdminMetrics)
 			r.Get("/admin/audit-log", s.handleAdminAuditLog)
 
+			// --- Phase 19 §19.2: the platform user directory ---
+			//
+			// Cross-org by design, behind the `tms_a` cookie. The list carries
+			// no NIDA field of any kind; the full number has its own POST, and
+			// opening a detail page is itself audited (`admin.user_view`),
+			// because the page aggregates one person's PII across every tenant.
+			r.Get("/admin/users", s.handleAdminListUsers)
+			r.Get("/admin/users/{id}", s.handleAdminGetUser)
+			r.Patch("/admin/users/{id}", s.handleAdminPatchUser)
+			r.Post("/admin/users/{id}/nida/reveal", s.handleAdminRevealNIDA)
+			r.Post("/admin/users/{id}/suspend", s.handleAdminSuspendUser)
+			r.Post("/admin/users/{id}/activate", s.handleAdminActivateUser)
+
 			// --- Phase 14: prepaid SMS credits per org ---
 			r.Get("/admin/orgs/{id}/sms", s.handleAdminOrgSMS)
 			r.Patch("/admin/orgs/{id}/sms", s.handleAdminOrgSMSWatermark)
@@ -462,6 +475,10 @@ func (s *Server) routes() chi.Router {
 		r.Group(func(r chi.Router) {
 			r.Use(s.sessions.RequireOrg(auth.RoleOwner))
 			r.Post("/org/members", s.handleCreateMember)
+			// Phase 19 §19.3: an owner fixes a colleague's name or role. It
+			// cannot empty the org of owners (409 `last_owner`) and cannot
+			// change the caller's own role.
+			r.Patch("/org/members/{id}", s.handlePatchMember)
 			r.Delete("/org/members/{id}", s.handleDeleteMember)
 		})
 	})

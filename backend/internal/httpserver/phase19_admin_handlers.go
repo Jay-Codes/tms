@@ -468,9 +468,19 @@ func (s *Server) handleAdminPatchUser(w http.ResponseWriter, r *http.Request) {
 		// a correction made about somebody by somebody else has to be visible to
 		// them, or it is a silent rewrite of whose tenancy this is.
 		if row.Kind == userKindRenter {
+			// A `notification_log` row belongs to an org — the platform has no
+			// SMS budget of its own — so the message goes out through the org
+			// whose rent book actually carries this name, which is also the org
+			// the renter would query if the correction were wrong. A renter with
+			// no tenancy anywhere is simply not texted; there is nobody to send
+			// as, and the name is not yet on any document.
+			orgID, orgName := s.renterHomeOrg(r, row.ID)
+			if orgID == "" {
+				return nil
+			}
 			notifyID, err = s.queueNameCorrected(r.Context(), q, nameCorrectedMessage{
-				UserID: db.UUIDString(row.ID), Phone: db.StrVal(row.Phone),
-				Name: name, OrgName: "TMS", Enabled: true,
+				OrgID: orgID, UserID: db.UUIDString(row.ID), Phone: db.StrVal(row.Phone),
+				Name: name, OrgName: orgName, Enabled: true,
 			})
 			return err
 		}
@@ -484,6 +494,22 @@ func (s *Server) handleAdminPatchUser(w http.ResponseWriter, r *http.Request) {
 		s.emailNameCorrected(r, row, name)
 	}
 	s.writeAdminUser(w, r, row.ID, "admin.users.patch")
+}
+
+// renterHomeOrg picks the org a platform-side message to a renter is sent as:
+// the first org they hold a live tenancy with, else any org that knows them.
+// It returns empty strings when no org does.
+func (s *Server) renterHomeOrg(r *http.Request, userID pgtype.UUID) (id, name string) {
+	rows, err := s.q.AdminUserOrgs(r.Context(), []pgtype.UUID{userID})
+	if err != nil || len(rows) == 0 {
+		return "", ""
+	}
+	for _, row := range rows {
+		if row.Relationship == "renting" {
+			return db.UUIDString(row.OrgID), row.OrgName
+		}
+	}
+	return db.UUIDString(rows[0].OrgID), rows[0].OrgName
 }
 
 // emailNameCorrected tells an org user or an admin that their display name was

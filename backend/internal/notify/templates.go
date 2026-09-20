@@ -248,8 +248,8 @@ var platformTemplates = map[string]Template{
 	// Phase 20 §20.3. `{{date}}` is platform-only, like `{{start_date}}`: it is
 	// the one fact this sentence exists to carry, and no other kind has it.
 	KindBackfillDone: {
-		EN: "Your rent book at {{org}} now shows history up to {{date}}. See it here: {{pay_link}}",
-		SW: "Daftari lako la kodi katika {{org}} sasa linaonyesha historia hadi {{date}}. Iangalie hapa: {{pay_link}}",
+		EN: "Your rent book for {{unit}} at {{org}} now shows history up to {{date}}. See it here: {{pay_link}}",
+		SW: "Daftari lako la kodi la {{unit}} katika {{org}} sasa linaonyesha historia hadi {{date}}. Iangalie hapa: {{pay_link}}",
 	},
 }
 

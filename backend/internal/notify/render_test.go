@@ -14,9 +14,23 @@ func fullVars() notify.Vars {
 		Name: "Asha Mrisho", Amount: "TZS 250,000", DueDate: "2026-09-12",
 		Property: "Block A", Unit: "Room 2", Org: "JJnE Rentals",
 		NextDueDate: "2026-10-12", Link: "https://tms.test/enduser/contract/abc",
-		Reason: "unit already promised", StartDate: "2026-09-05", NextAmount: "TZS 250,000",
+		// A different host from Link on purpose: TestRenderDoesNotReinterpretValues
+		// asserts that a renter named `{{link}}` cannot make the renderer paste
+		// the signing link in, and it would not catch that if every URL in the
+		// message shared an origin.
+		PayLink: "https://pay.example/enduser/payments",
+		Reason:  "unit already promised", StartDate: "2026-09-05", NextAmount: "TZS 250,000",
+		Date:    "2026-09-01",
 	}
 }
+
+// accountKinds are the messages that are about a person's account rather than
+// about one tenancy, so they name no unit. `name_corrected` (Phase 19 §19.3) is
+// the first: a renter may rent two units from the same landlord, and the name is
+// on both — naming one of them would be wrong, not merely redundant.
+//
+//nolint:gochecknoglobals // fixed list, read-only.
+var accountKinds = map[string]bool{notify.KindNameCorrected: true}
 
 // TestRenderPlatformTemplates pins every kind in both languages: each renders
 // something, names the unit and the org, and leaves no placeholder behind.
@@ -31,9 +45,13 @@ func TestRenderPlatformTemplates(t *testing.T) {
 				if strings.Contains(body, "{{") {
 					t.Errorf("body %q still holds an unsubstituted placeholder", body)
 				}
-				for _, want := range []string{"Room 2", "JJnE Rentals"} {
-					if !strings.Contains(body, want) {
-						t.Errorf("body %q does not name %q", body, want)
+				want := []string{"JJnE Rentals"}
+				if !accountKinds[kind] {
+					want = append(want, "Room 2")
+				}
+				for _, w := range want {
+					if !strings.Contains(body, w) {
+						t.Errorf("body %q does not name %q", body, w)
 					}
 				}
 			})

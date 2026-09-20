@@ -126,6 +126,8 @@ func DefaultNotificationSettings(base OrgSettings) NotificationSettings {
 			OverdueDaily:     kindToggle{Enabled: true},
 			ThankYou:         kindToggle{Enabled: true},
 			UnsignedReminder: kindWithAfter{Enabled: true, AfterDays: after},
+			NameCorrected:    &kindToggle{Enabled: true},
+			BackfillDone:     &kindToggle{Enabled: true},
 		},
 		Templates: map[string]*notify.Template{},
 	}
@@ -144,6 +146,16 @@ func notificationSettingsOf(base OrgSettings) NotificationSettings {
 		out.SendHour = stored.SendHour
 	}
 	out.Kinds = stored.Kinds
+	// A blob written before Phases 19/20 has no key for these two, and the
+	// screen needs a toggle to draw: resolving nil to the default here means the
+	// wire shape always names every kind, while the *stored* absence still means
+	// "never configured" (see notificationKinds).
+	if out.Kinds.NameCorrected == nil {
+		out.Kinds.NameCorrected = &kindToggle{Enabled: true}
+	}
+	if out.Kinds.BackfillDone == nil {
+		out.Kinds.BackfillDone = &kindToggle{Enabled: true}
+	}
 	if stored.Templates != nil {
 		out.Templates = stored.Templates
 	}

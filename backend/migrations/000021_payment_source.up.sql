@@ -49,8 +49,8 @@ INSERT INTO platform_templates (kind, sw, en, variables, locked) VALUES
            'property', 'unit']::text[],
      false),
     ('backfill_done',
-     'Daftari lako la kodi katika {{org}} sasa linaonyesha historia hadi {{date}}. Iangalie hapa: {{pay_link}}',
-     'Your rent book at {{org}} now shows history up to {{date}}. See it here: {{pay_link}}',
+     'Daftari lako la kodi la {{unit}} katika {{org}} sasa linaonyesha historia hadi {{date}}. Iangalie hapa: {{pay_link}}',
+     'Your rent book for {{unit}} at {{org}} now shows history up to {{date}}. See it here: {{pay_link}}',
      ARRAY['amount', 'date', 'due_date', 'link', 'name', 'next_due_date', 'org', 'pay_link',
            'property', 'unit']::text[],
      false)

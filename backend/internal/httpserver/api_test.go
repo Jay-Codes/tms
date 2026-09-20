@@ -68,6 +68,10 @@ type response struct {
 	Code int
 	Body map[string]any
 	Raw  string
+	// Header is the response's own headers. Phase 19 asserts on them: a
+	// response carrying a national ID number must say `Cache-Control:
+	// no-store`, and that is not visible in the body.
+	Header http.Header
 }
 
 // do issues a request carrying this client's cookies and records any set.
@@ -102,7 +106,7 @@ func (c *client) do(method, path string, body any) response {
 		c.cookies[ck.Name] = ck
 	}
 
-	out := response{Code: rec.Code, Raw: rec.Body.String()}
+	out := response{Code: rec.Code, Raw: rec.Body.String(), Header: rec.Header()}
 	if len(out.Raw) > 0 {
 		_ = json.Unmarshal([]byte(out.Raw), &out.Body)
 	}
