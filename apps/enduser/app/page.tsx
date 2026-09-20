@@ -465,7 +465,9 @@ function HomeContent() {
                     </>
                   )}
                 </h3>
-                <CountdownChip schedule={due.row} />
+                {/* No chip on a settled book: "Nothing to pay yet" beside
+                    "Nothing due on this unit yet" says the same thing twice. */}
+                {due.row && <CountdownChip schedule={due.row} />}
               </div>
 
               {due.row ? (
