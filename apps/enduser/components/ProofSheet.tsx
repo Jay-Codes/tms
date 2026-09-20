@@ -12,6 +12,15 @@
  * The org's payment instructions are repeated inside the sheet on purpose:
  * the moment a renter is filling this in is the moment they may realise they
  * paid the wrong account.
+ *
+ * Phase 20.1 fixes two things the field found. The file input used to carry
+ * `capture="environment"` always, which on Android and iOS opens the camera
+ * straight away — a renter with a bank PDF or a saved screenshot never saw a
+ * picker — so there are now two actions, "Take photo" and "Choose a file",
+ * over the same `pickFile` path. And the amount is read-only when the sheet was
+ * opened from an instalment: it is that period's balance, the server insists on
+ * exactly that number (422 `amount_mismatch`), and a typo here only ever made
+ * the landlord confirm money that matched nothing.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -27,7 +36,8 @@ import {
   type MobileMoney,
   type ProofMethod,
 } from '../lib/api';
-import { proofErrorMessage, todayIso } from '../lib/format';
+import { money, proofErrorMessage, todayIso } from '../lib/format';
+import { Money } from './Money';
 import { PayDetails } from './PayDetails';
 import { Notice } from './Screen';
 
@@ -52,6 +62,7 @@ export interface ProofSheetProps {
   onSubmitted?: () => void;
 }
 
+/** "Choose a file": everything the API accepts, and no `capture`. */
 const FILE_ACCEPT = PROOF_TYPES.join(',');
 
 export function ProofSheet({
@@ -80,7 +91,14 @@ export function ProofSheet({
   const [done, setDone] = useState(false);
 
   const dialog = useRef<HTMLDivElement | null>(null);
+  const cameraInput = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  /* §20.1: opened from an instalment, the amount is that row's outstanding
+     balance and nothing else — the server checks it to the shilling. Opened
+     from the generic "Send proof" button there is no row to lock it to, so the
+     box stays editable. */
+  const amountLocked = !!target?.scheduleId;
 
   /* Fresh sheet every time it opens — a stale amount from the last row would
      be the one mistake this screen must not make. */
@@ -97,6 +115,7 @@ export function ProofSheet({
     setDone(false);
     setStep(null);
     if (fileInput.current) fileInput.current.value = '';
+    if (cameraInput.current) cameraInput.current.value = '';
   }, [open, target]);
 
   useEffect(() => {
@@ -152,6 +171,22 @@ export function ProofSheet({
     return errs;
   }
 
+  /**
+   * What the instalment actually owes right now, straight from the API. Only
+   * used when the server rejected an amount without naming the one it wants.
+   */
+  async function rereadOutstanding(scheduleId?: string | null): Promise<number | null> {
+    if (!scheduleId) return null;
+    try {
+      const res = await renterApi.schedules();
+      const row = (res.items ?? []).find((s) => s.id === scheduleId);
+      if (!row) return null;
+      return Math.max(0, row.amount - (row.paid_amount ?? 0));
+    } catch {
+      return null;
+    }
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!target) return;
@@ -183,6 +218,19 @@ export function ProofSheet({
       setDone(true);
       onSubmitted?.();
     } catch (err) {
+      /* §20.1: the balance moved between opening the sheet and sending it —
+         the landlord recorded part of it, or another proof was accepted. The
+         row is re-read and the amount corrected in place, so the renter sends
+         the number the server is actually waiting for rather than guessing. */
+      if (err instanceof ApiError && err.status === 422 && err.is('amount_mismatch')) {
+        const expected = err.expected ?? (await rereadOutstanding(target.scheduleId));
+        if (expected !== null) {
+          setAmount(String(expected));
+          setFieldErrors({});
+          setError(t('proof.error.amountMismatch', { amount: money(expected) }));
+          return;
+        }
+      }
       if (err instanceof ApiError && Object.keys(err.errors).length > 0) {
         setFieldErrors(err.errors);
       }
@@ -257,18 +305,32 @@ export function ProofSheet({
 
             {error && <Notice tone="error">{error}</Notice>}
 
-            <div className={`field${fieldErrors.amount ? ' invalid' : ''}`}>
-              <label htmlFor="proof-amount">{t('proof.amount')}</label>
-              <input
-                id="proof-amount"
-                className="input"
-                inputMode="numeric"
-                autoComplete="off"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value.replace(/[^\d]/g, ''))}
-              />
-              {fieldErrors.amount && <span className="error">{fieldErrors.amount}</span>}
-            </div>
+            {amountLocked ? (
+              <div className={`field${fieldErrors.amount ? ' invalid' : ''}`}>
+                <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+                  {t('proof.amount')}
+                </span>
+                <Money
+                  amount={Number(amount) || 0}
+                  style={{ fontSize: 'var(--text-lg)', lineHeight: 1.2 }}
+                />
+                <span className="hint">{t('proof.amountLocked')}</span>
+                {fieldErrors.amount && <span className="error">{fieldErrors.amount}</span>}
+              </div>
+            ) : (
+              <div className={`field${fieldErrors.amount ? ' invalid' : ''}`}>
+                <label htmlFor="proof-amount">{t('proof.amount')}</label>
+                <input
+                  id="proof-amount"
+                  className="input"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value.replace(/[^\d]/g, ''))}
+                />
+                {fieldErrors.amount && <span className="error">{fieldErrors.amount}</span>}
+              </div>
+            )}
 
             <div className={`field${fieldErrors.paid_at ? ' invalid' : ''}`}>
               <label htmlFor="proof-date">{t('proof.paidAt')}</label>
@@ -329,16 +391,69 @@ export function ProofSheet({
             <div
               className={`field${fieldErrors.file || fieldErrors.object_key ? ' invalid' : ''}`}
             >
-              <label htmlFor="proof-file">{t('proof.file')}</label>
+              <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+                {t('proof.file')}
+              </span>
+              {/* Two doors to the same room (§20.1). The inputs are off-screen
+                  rather than `display: none` so they stay reachable to a
+                  keyboard and to assistive tech. */}
+              <input
+                id="proof-camera"
+                ref={cameraInput}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                aria-label={t('proof.takePhoto')}
+                style={{
+                  position: 'absolute',
+                  width: 1,
+                  height: 1,
+                  padding: 0,
+                  margin: -1,
+                  overflow: 'hidden',
+                  clipPath: 'inset(50%)',
+                  whiteSpace: 'nowrap',
+                  border: 0,
+                }}
+                onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
+              />
               <input
                 id="proof-file"
                 ref={fileInput}
-                className="input"
                 type="file"
                 accept={FILE_ACCEPT}
-                capture="environment"
+                aria-label={t('proof.chooseFile')}
+                style={{
+                  position: 'absolute',
+                  width: 1,
+                  height: 1,
+                  padding: 0,
+                  margin: -1,
+                  overflow: 'hidden',
+                  clipPath: 'inset(50%)',
+                  whiteSpace: 'nowrap',
+                  border: 0,
+                }}
                 onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
               />
+              <span style={{ display: 'grid', gap: 'var(--sp-2)', paddingTop: 'var(--sp-1)' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => cameraInput.current?.click()}
+                >
+                  <Icon icon="solar:camera-linear" width={20} aria-hidden />
+                  {t('proof.takePhoto')}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => fileInput.current?.click()}
+                >
+                  <Icon icon="solar:folder-with-files-linear" width={20} aria-hidden />
+                  {t('proof.chooseFile')}
+                </button>
+              </span>
               <span className="hint">{t('proof.fileHint')}</span>
               {file && (
                 <span
