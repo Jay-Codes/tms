@@ -1109,3 +1109,23 @@ top-level key, so both round-trip through `PATCH /org` untouched.
 **Phase 16 audit actions:** `proof.submit` · `proof.withdraw` · `proof.accept` ·
 `proof.reject` · `proof.view` (entity `payment_proof`) · `import.preview` ·
 `import.commit` · `import.undo` (entity `import_batch`).
+
+## Part 2 — Phase 18 (planned): landlord-assisted onboarding
+
+Audience org (`tms_o`), owner + manager, unless noted. FLOWS 2b, SPEC §5.15. Errors carry the code in the RFC-7807 `type` field as elsewhere.
+
+| Endpoint | Contract |
+|---|---|
+| `POST /assist` | `{phone, unit_id}` → `201 {session:{id, org_id, unit_id, unit_code, unit_name, phone, purpose:"register"\|"login", status:"open", code_issued_count, expires_at, created_at}, code, code_expires_at, link}`. `purpose` is `login` when the phone already belongs to a renter, `register` otherwise. `link = {APP_BASE_URL}/enduser/u/{unit_code}?assist={session.id}`. 409 `assist_open {session_id}` if the org already has an open session for that phone; 409 `not_a_renter_phone` if the phone belongs to an org user or admin; 404 unit; 429 per-org `assist:issue` 30/h. Writes the code to the SMS path's Redis slot (**no SMS**), a `notification_log` row `kind=otp, channel=in_person, status=shown`, audit `renter.assist_start` + `renter.assist_code`. |
+| `GET /assist` | `{items:[session…]}` open sessions of the org, newest first. |
+| `GET /assist/{id}` | `{session, status_detail:"waiting"\|"registered"\|"requested"\|"approved"\|"closed", renter:{id, full_name}?, link_request:{id, status}?}`. Polled by the landlord screen. Never returns the code. |
+| `POST /assist/{id}/code` | New code replacing the slot, TTL reset to 5 min, session `expires_at` extended to now + 30 min → `200 {code, code_expires_at, code_issued_count}`. 409 `assist_closed` when closed/expired; 429 after 10 codes per session or the org budget. Audit `renter.assist_code {n}`. |
+| `POST /assist/{id}/close` | → `200 {session}` status `closed`. Idempotent. Audit `renter.assist_close`. |
+| `POST /contracts/{id}/witness-otp` | Contract must be `pending_signature` with no renter signature (same 409s as `sign-otp`). Writes the sign slot (`otp:sign:{contract}:{phone}`) and a witness marker (TTL 5 min) → `200 {code, code_expires_at}`. Counts against the org `assist:issue` budget. Audit `contract.witness_otp`. The renter's `POST /contracts/{id}/sign` is unchanged; when the marker is live the signature row gets `witnessed_by_user_id`, and the document's signature block reads "witnessed by {name}". |
+| `GET /public/assist/{id}` | Unauthenticated → `200 {unit_code, purpose, status:"open"\|"closed"}`. 404 unknown. No phone, no org fields. |
+
+Hooks in existing endpoints (no contract change): `POST /auth/otp/verify` (`register`, `login`) and `POST /auth/register/renter` stamp `assist_sessions.renter_user_id` when an assist marker exists for the phone and add `assist_session_id` to their audit `after`; `POST /units/{unit_code}/link` stamps `link_request_id` on the open session for that org + renter + unit; `GET /contracts/{id}` and `/document` expose `signatures[].witnessed_by:{id, full_name}|null`.
+
+**Phase 18 audit actions:** `renter.assist_start` · `renter.assist_code` · `renter.assist_close` (entity `assist_session`) · `contract.witness_otp` (entity `contract`).
+
+**Phase 18 migration:** `000020_assist_sessions` — `assist_sessions` table, `contract_signatures.witnessed_by_user_id`, `notification_log.channel` CHECK widened to `('sms','in_person')`, `status` CHECK gains `shown`.

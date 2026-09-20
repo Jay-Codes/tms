@@ -218,6 +218,29 @@ Open questions for the client (defaults applied if unanswered):
 
 ---
 
+## Phase 18 — Landlord-assisted onboarding (OTP fallback, in person) (1 day) — 🔨 in progress, 20 Sep 2026, branch `phase-18-assisted-onboarding`
+
+Why: Beem accepted the OTP but left it `pending`; the renter never got a code and had no way forward. Landlord and renter are usually in the same room at onboarding (QR on the door), so the landlord's screen becomes the code channel. No SMS, no provider dependency. FLOWS 2b, SPEC §3 / §4 / §5.15.
+
+### 18.0 Docs first
+- [x] FLOWS 2b + Flow 3.5 note; SPEC §3 bullet, §4 `assist_sessions`, `contract_signatures.witnessed_by_user_id`, `notification_log.channel in_person` / status `shown`; §5.15 API; API.md "Phase 18" section; DECISIONS rows.
+
+### 18.1 Backend
+- [ ] Migration `000020_assist_sessions`: table per SPEC §4 (`UNIQUE (org_id, phone) WHERE status='open'`), `contract_signatures.witnessed_by_user_id UUID NULL REFERENCES users`, widen `notification_log.channel` CHECK to `('sms','in_person')` and `status` to include `shown`.
+- [ ] `auth.Store`: `PutOTPAssisted(purpose, phone, code)` — overwrites the slot, re-arms TTL, **ignores** cooldown; `SetAssistMarker(purpose, phone, sessionID)` / `TakeAssistMarker` (TTL = OTP TTL) and `SetWitnessMarker(contractID, userID)` / `TakeWitnessMarker`.
+- [ ] Handlers (org audience, owner + manager): `POST /assist`, `GET /assist`, `GET /assist/{id}`, `POST /assist/{id}/code`, `POST /assist/{id}/close`, `POST /contracts/{id}/witness-otp`; public `GET /public/assist/{id}`. Per-org limiter `assist:issue:{org}` 30/h; per session 10 codes. Purpose = `login` when `GetUserByPhone` finds a renter, `register` when none, 409 `not_a_renter_phone` for staff/admin, 409 `assist_open` when another open session exists (response carries its id). Session expiry 30 min from open (extended on each new code).
+- [ ] Hooks: `handleOTPVerify` (register/login) and `handleRegisterRenter` — if an assist marker exists for (purpose, phone) → stamp `renter_user_id`, audit `after.assist_session_id`. `handleCreateLinkRequest` — open session for (org, phone/user, unit) → stamp `link_request_id`. `handleSignContract` — witness marker → `witnessed_by_user_id` on the signature row. `GET /assist/{id}` derives `status_detail` from the stamps and the link request status.
+- [ ] `notification_log` row per issue: `kind=otp, channel=in_person, status=shown, body=""` (the code is never persisted), `dedupe_key=assist:{session}:{n}`; credits untouched. Admin metrics / failed-sends unaffected.
+- [ ] Audit: `renter.assist_start`, `renter.assist_code` (every issue and refresh, `after.n`), `renter.assist_close`, `contract.witness_otp` (entity contract). Org audit filter kinds updated.
+- [ ] Tests: assisted code verifies through the normal endpoint; assisted issue overwrites an in-flight SMS code; cooldown bypass is assisted-only (SMS path still 429s); per-org limiter 429; staff phone refused; second open session 409; org B cannot read/refresh org A's session (isolation census); public lookup returns no phone; register stamps `renter_user_id`; link request stamps `link_request_id`; witness code → signature row carries `witnessed_by_user_id`, and the SMS-issued code does not; expired session refresh → 409 `assist_closed`.
+
+### 18.2 Frontend
+- [ ] Tenant: `renters/assist` page (code display + QR + countdown + New code; live status via 5 s polling; "Review & approve" deep link); entry from unit detail ("Onboard in person"), Renters list ("Add renter → In person") and renter detail ("Help log in"); contract page "Witness signing" sheet with the code. SW/EN strings.
+- [ ] Enduser: `/u/{unit_code}?assist=` → register/login pages hide "Send code", show "Enter the code your landlord shows you", no resend; sign page reads the same hint. Session id kept in `sessionStorage` until the link request is created.
+- [ ] Docs: API.md confirmed contract, PROGRESS entry, DECISIONS, UAT checklist row.
+
+---
+
 ## Open questions (answer whenever; defaults applied if unanswered)
 
 1. **Credit unit**: 1 credit per 160-char GSM segment (default; 70 for UCS-2) vs 1 credit per message regardless of length. OTP/security messages exempt (default yes).

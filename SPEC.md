@@ -97,6 +97,7 @@ Notification scheduling and overdue detection run as a **scheduler goroutine ins
 ## 3. Identity & auth
 
 - **Renters:** phone-number-first. Register with phone → OTP via Beem SMS → set PIN/password. Login = phone + PIN (OTP fallback).
+- **Landlord-assisted (in person) fallback:** when the SMS does not arrive, an org user opens an *assist session* for a unit + phone; the code is generated into the **same Redis slot** the SMS path uses and shown on the landlord's screen instead of being sent. The renter verifies on their own device through the unchanged `POST /auth/otp/verify`. The same trick covers contract signing (`witness-otp`). Every reveal is audited; refresh limits are per org, not per phone. (FLOWS 2b, §5.15.)
 - **Landlord users & admins:** email + password; email verification link. Optional OTP step later.
 - Sessions: opaque token in **httpOnly, Secure, SameSite=Lax cookie** (SameSite=None + Secure when the apps are served from other origins than the API — `COOKIE_SAME_SITE`, `COOKIE_SECURE`, with the app origins in `CORS_ALLOWED_ORIGINS`), session data in Redis with Postgres fallback table (`sessions`) so Redis flush doesn't log everyone out.
 - Passwords/PINs: argon2id. OTPs: 6-digit, 5-min TTL in Redis, rate-limited (Redis counters: 3 sends / 10 min per phone, 5 verify attempts).
@@ -156,7 +157,8 @@ contracts            org_id, unit_id, renter_user_id, template_id, terms_snapsho
                      due_day NULLABLE, status (draft|pending_signature|active|expiring|ended|terminated),
                      snapshot_hash                            -- sha256 over terms_snapshot_html + key fields
 contract_signatures  org_id, contract_id, party (renter|landlord), user_id, method (otp_accept|drawn),
-                     otp_ref NULLABLE, signature_object_key NULLABLE, snapshot_hash, ip, user_agent, signed_at
+                     otp_ref NULLABLE, signature_object_key NULLABLE, snapshot_hash, ip, user_agent, signed_at,
+                     witnessed_by_user_id NULLABLE  -- org user who showed the signing code in person (FLOWS 2b.6)
                      -- append-only; one row per party; renter row required before activate
 unit_link_requests   org_id, unit_id, renter_user_id, status (pending|approved|rejected)
 payment_schedules    org_id, contract_id, period_start, period_end, due_date, amount,
@@ -185,8 +187,12 @@ expenses             org_id, property_id, unit_id NULLABLE, category_id, amount 
                      vendor, reference, note, receipt_object_key NULLABLE, recorded_by_user_id,
                      status (recorded|voided), voided_at, void_reason, deleted_at
 notification_log     org_id, user_id, kind (reminder_7d|reminder_due|overdue_daily|thank_you|otp|custom),
-                     channel (sms), dedupe_key UNIQUE, payload, provider_msg_id, status, sent_at
-                     -- status: queued|sending|sent|failed|held_no_credit
+                     channel (sms|in_person), dedupe_key UNIQUE, payload, provider_msg_id, status, sent_at
+                     -- status: queued|sending|sent|failed|held_no_credit|shown (in_person only)
+assist_sessions      org_id, unit_id, phone, purpose (register|login), started_by_user_id,
+                     renter_user_id NULLABLE, link_request_id NULLABLE,
+                     status (open|closed), code_issued_count, last_code_at, expires_at, closed_at, created_at
+                     -- one open session per (org, phone); the code itself lives only in Redis
 org_sms_credits      org_id PK, balance INT NOT NULL DEFAULT 0, low_watermark INT NOT NULL DEFAULT 50,
                      updated_at
 sms_credit_ledger    org_id, delta INT, balance_after INT, reason (topup|adjust|debit|refund),
@@ -466,6 +472,25 @@ GET  /imports                        batch history
 A row that would exceed the contract balance is an **error in the preview**, not a refusal at commit. `undo` reverses the batch's payments with reason `import undone` and soft-deletes the units and renters it created when nothing has touched them since. Formula-prefixed cells are stored verbatim and neutralised on export, as everywhere else (§8).
 
 ---
+
+
+### 5.15 Assisted onboarding (landlord, owner + manager) — FLOWS 2b
+
+```
+POST  /assist                         {phone, unit_id}  → 201 {session, code, expires_at, link}
+                                      purpose derived: existing renter → login, else register
+                                      409 assist_open (another open session for this phone in this org)
+                                      409 not_a_renter_phone (phone belongs to a staff/admin account)
+GET   /assist                         open sessions of the org
+GET   /assist/{id}                    {session, status_detail: waiting|registered|requested|approved,
+                                       renter?, link_request_id?}       (polled by the landlord screen)
+POST  /assist/{id}/code               new code, replaces the slot, resets the 5-min TTL → {code, expires_at}
+POST  /assist/{id}/close              status closed
+POST  /contracts/{id}/witness-otp     org audience; contract pending_signature, renter unsigned
+                                      → {code, expires_at}; renter verifies via the existing POST /contracts/{id}/sign
+GET   /public/assist/{id}             {unit_code, purpose, status}  — no phone, no org data beyond the unit
+```
+Rules: the code goes into `otp:{purpose}:{phone}` (or the contract's sign slot) exactly as the SMS path writes it, so `POST /auth/otp/verify`, `POST /auth/register/renter` and `POST /contracts/{id}/sign` are untouched. Assisted issues bypass the per-phone send limiter and resend cooldown; they are limited **per org** (30 codes / h) and per session (10 codes). The verify-attempt limiter (5 / phone) still applies. Each issue writes a `notification_log` row `kind=otp, channel=in_person, status=shown` (no credit debit) and an audit event. A successful `register` / `login` verify against a phone with an open session stamps `renter_user_id`; a link request from that renter for the session's unit stamps `link_request_id`. A signature completed while a witness marker is live gets `witnessed_by_user_id`.
 
 ## 6. Notifications (Beem SMS)
 
