@@ -60,7 +60,10 @@ type propertyResponse struct {
 	Lng          *float64   `json:"lng"`
 	Notes        *string    `json:"notes"`
 	UnitCounts   unitCounts `json:"unit_counts"`
-	CreatedAt    time.Time  `json:"created_at"`
+	// ContractTemplateID is the property's template (Phase 22), inherited by
+	// its units that name none; null means the org default.
+	ContractTemplateID *string   `json:"contract_template_id"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 // priceResponse is one price plan (`current_price` and the history rows).
@@ -96,9 +99,12 @@ type unitResponse struct {
 	// NextDueDate is the units board chip (Phase 16 §16.3): the next date rent
 	// is owed on an occupied unit, null on every other status and on an
 	// occupied unit with nothing outstanding.
-	NextDueDate *string   `json:"next_due_date"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	NextDueDate *string `json:"next_due_date"`
+	// ContractTemplateID is the unit's own template (Phase 22), null when it
+	// inherits its property's or the org default.
+	ContractTemplateID *string   `json:"contract_template_id"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 // periodResponse is one row of GET /org/payment-periods.
@@ -134,14 +140,15 @@ func toPeriods(rows []sqlc.PaymentPeriod) []periodResponse {
 
 func toProperty(p sqlc.Property, counts unitCounts) propertyResponse {
 	return propertyResponse{
-		ID:           db.UUIDString(p.ID),
-		Name:         p.Name,
-		LocationText: p.LocationText,
-		Lat:          p.Lat,
-		Lng:          p.Lng,
-		Notes:        p.Notes,
-		UnitCounts:   counts,
-		CreatedAt:    p.CreatedAt.Time,
+		ID:                 db.UUIDString(p.ID),
+		Name:               p.Name,
+		LocationText:       p.LocationText,
+		Lat:                p.Lat,
+		Lng:                p.Lng,
+		Notes:              p.Notes,
+		UnitCounts:         counts,
+		ContractTemplateID: optUUIDString(p.ContractTemplateID),
+		CreatedAt:          p.CreatedAt.Time,
 	}
 }
 
@@ -157,7 +164,8 @@ func toPropertyRow(r sqlc.ListPropertiesRow) propertyResponse {
 			Total: r.Total, Vacant: r.Vacant, Occupied: r.Occupied,
 			Maintenance: r.Maintenance, Unlisted: r.Unlisted,
 		},
-		CreatedAt: r.CreatedAt.Time,
+		ContractTemplateID: optUUIDString(r.ContractTemplateID),
+		CreatedAt:          r.CreatedAt.Time,
 	}
 }
 
@@ -178,6 +186,7 @@ type unitRow struct {
 	AllowedPeriodIds   []pgtype.UUID
 	CreatedAt          pgtype.Timestamptz
 	UpdatedAt          pgtype.Timestamptz
+	ContractTemplateID pgtype.UUID
 	PropertyName       string
 	PriceID            pgtype.UUID
 	PriceAmount        int64
@@ -195,18 +204,19 @@ func (s *Server) scanURL(code string) string {
 
 func (s *Server) toUnit(r unitRow) unitResponse {
 	u := unitResponse{
-		ID:             db.UUIDString(r.ID),
-		OrgID:          db.UUIDString(r.OrgID),
-		PropertyID:     db.UUIDString(r.PropertyID),
-		PropertyName:   r.PropertyName,
-		Name:           r.Name,
-		UnitCode:       r.UnitCode,
-		Status:         r.Status,
-		StatusOverride: r.StatusOverride,
-		AllowedPeriods: uuidStrings(r.AllowedPeriodIds),
-		ScanURL:        s.scanURL(r.UnitCode),
-		CreatedAt:      r.CreatedAt.Time,
-		UpdatedAt:      r.UpdatedAt.Time,
+		ID:                 db.UUIDString(r.ID),
+		OrgID:              db.UUIDString(r.OrgID),
+		PropertyID:         db.UUIDString(r.PropertyID),
+		PropertyName:       r.PropertyName,
+		Name:               r.Name,
+		UnitCode:           r.UnitCode,
+		Status:             r.Status,
+		StatusOverride:     r.StatusOverride,
+		AllowedPeriods:     uuidStrings(r.AllowedPeriodIds),
+		ScanURL:            s.scanURL(r.UnitCode),
+		ContractTemplateID: optUUIDString(r.ContractTemplateID),
+		CreatedAt:          r.CreatedAt.Time,
+		UpdatedAt:          r.UpdatedAt.Time,
 	}
 	// PriceID is NULL exactly when the unit has no price effective today; the
 	// amount/currency columns are COALESCEd and must not be read without it.

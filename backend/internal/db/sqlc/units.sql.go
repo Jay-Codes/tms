@@ -39,7 +39,7 @@ VALUES (
     $4,
     $5
 )
-RETURNING id, org_id, property_id, name, unit_code, status, allowed_period_ids, created_at, updated_at, deleted_at, status_override
+RETURNING id, org_id, property_id, name, unit_code, status, allowed_period_ids, created_at, updated_at, deleted_at, status_override, contract_template_id
 `
 
 type CreateUnitParams struct {
@@ -83,6 +83,7 @@ func (q *Queries) CreateUnit(ctx context.Context, arg CreateUnitParams) (Unit, e
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.StatusOverride,
+		&i.ContractTemplateID,
 	)
 	return i, err
 }
@@ -90,6 +91,7 @@ func (q *Queries) CreateUnit(ctx context.Context, arg CreateUnitParams) (Unit, e
 const getUnit = `-- name: GetUnit :one
 SELECT u.id, u.org_id, u.property_id, u.name, u.unit_code, u.status,
        u.status_override, u.allowed_period_ids, u.created_at, u.updated_at,
+       u.contract_template_id,
        p.name AS property_name,
        pp.id AS price_id,
        COALESCE(pp.amount, 0)::bigint      AS price_amount,
@@ -134,6 +136,7 @@ type GetUnitRow struct {
 	AllowedPeriodIds   []pgtype.UUID      `json:"allowed_period_ids"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ContractTemplateID pgtype.UUID        `json:"contract_template_id"`
 	PropertyName       string             `json:"property_name"`
 	PriceID            pgtype.UUID        `json:"price_id"`
 	PriceAmount        int64              `json:"price_amount"`
@@ -157,6 +160,7 @@ func (q *Queries) GetUnit(ctx context.Context, arg GetUnitParams) (GetUnitRow, e
 		&i.AllowedPeriodIds,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ContractTemplateID,
 		&i.PropertyName,
 		&i.PriceID,
 		&i.PriceAmount,
@@ -233,6 +237,7 @@ func (q *Queries) GetUnitByCode(ctx context.Context, unitCode string) (GetUnitBy
 const listUnits = `-- name: ListUnits :many
 SELECT u.id, u.org_id, u.property_id, u.name, u.unit_code, u.status,
        u.status_override, u.allowed_period_ids, u.created_at, u.updated_at,
+       u.contract_template_id,
        p.name AS property_name,
        pp.id AS price_id,
        COALESCE(pp.amount, 0)::bigint      AS price_amount,
@@ -291,6 +296,7 @@ type ListUnitsRow struct {
 	AllowedPeriodIds   []pgtype.UUID      `json:"allowed_period_ids"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ContractTemplateID pgtype.UUID        `json:"contract_template_id"`
 	PropertyName       string             `json:"property_name"`
 	PriceID            pgtype.UUID        `json:"price_id"`
 	PriceAmount        int64              `json:"price_amount"`
@@ -328,6 +334,7 @@ func (q *Queries) ListUnits(ctx context.Context, arg ListUnitsParams) ([]ListUni
 			&i.AllowedPeriodIds,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ContractTemplateID,
 			&i.PropertyName,
 			&i.PriceID,
 			&i.PriceAmount,
@@ -350,7 +357,7 @@ const setUnitStatusDerived = `-- name: SetUnitStatusDerived :one
 UPDATE units
 SET status = $1, status_override = false
 WHERE org_id = $2 AND id = $3 AND deleted_at IS NULL
-RETURNING id, org_id, property_id, name, unit_code, status, allowed_period_ids, created_at, updated_at, deleted_at, status_override
+RETURNING id, org_id, property_id, name, unit_code, status, allowed_period_ids, created_at, updated_at, deleted_at, status_override, contract_template_id
 `
 
 type SetUnitStatusDerivedParams struct {
@@ -379,6 +386,7 @@ func (q *Queries) SetUnitStatusDerived(ctx context.Context, arg SetUnitStatusDer
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.StatusOverride,
+		&i.ContractTemplateID,
 	)
 	return i, err
 }
@@ -386,7 +394,7 @@ func (q *Queries) SetUnitStatusDerived(ctx context.Context, arg SetUnitStatusDer
 const softDeleteUnit = `-- name: SoftDeleteUnit :one
 UPDATE units SET deleted_at = now()
 WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, org_id, property_id, name, unit_code, status, allowed_period_ids, created_at, updated_at, deleted_at, status_override
+RETURNING id, org_id, property_id, name, unit_code, status, allowed_period_ids, created_at, updated_at, deleted_at, status_override, contract_template_id
 `
 
 type SoftDeleteUnitParams struct {
@@ -409,6 +417,7 @@ func (q *Queries) SoftDeleteUnit(ctx context.Context, arg SoftDeleteUnitParams) 
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.StatusOverride,
+		&i.ContractTemplateID,
 	)
 	return i, err
 }
@@ -435,7 +444,7 @@ SET name               = COALESCE($1, name),
                               THEN $5::uuid[]
                               ELSE allowed_period_ids END
 WHERE org_id = $6 AND id = $7 AND deleted_at IS NULL
-RETURNING id, org_id, property_id, name, unit_code, status, allowed_period_ids, created_at, updated_at, deleted_at, status_override
+RETURNING id, org_id, property_id, name, unit_code, status, allowed_period_ids, created_at, updated_at, deleted_at, status_override, contract_template_id
 `
 
 type UpdateUnitParams struct {
@@ -471,6 +480,7 @@ func (q *Queries) UpdateUnit(ctx context.Context, arg UpdateUnitParams) (Unit, e
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.StatusOverride,
+		&i.ContractTemplateID,
 	)
 	return i, err
 }

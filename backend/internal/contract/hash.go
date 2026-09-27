@@ -21,6 +21,10 @@ type Snapshot struct {
 	StartDate         string // YYYY-MM-DD
 	EndDate           string // YYYY-MM-DD
 	DueDay            *int
+	// Policy is Policy.Canonical() of the contract's policy (Phase 22), empty
+	// for a contract without one. It is appended only when present, so every
+	// hash computed before Phase 22 still verifies.
+	Policy string
 }
 
 // Hash is the `snapshot_hash` stored on the contract and recomputed by
@@ -44,6 +48,9 @@ func (s Snapshot) Hash() string {
 		s.EndDate,
 		dueDay,
 	}, "|")
+	if s.Policy != "" {
+		payload += "|" + s.Policy
+	}
 	sum := sha256.Sum256([]byte(payload))
 	return hex.EncodeToString(sum[:])
 }

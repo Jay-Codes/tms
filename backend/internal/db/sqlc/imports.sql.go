@@ -254,7 +254,7 @@ func (q *Queries) CreateImportRow(ctx context.Context, arg CreateImportRowParams
 }
 
 const findContractForUnitAndRenter = `-- name: FindContractForUnitAndRenter :many
-SELECT id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language FROM contracts
+SELECT id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language, policy, supersedes_contract_id FROM contracts
 WHERE org_id = $1 AND unit_id = $2
   AND renter_user_id = $3 AND deleted_at IS NULL
   AND status IN ('active', 'expiring', 'ended', 'terminated')
@@ -307,6 +307,8 @@ func (q *Queries) FindContractForUnitAndRenter(ctx context.Context, arg FindCont
 			&i.TerminationEffectiveDate,
 			&i.LinkRequestID,
 			&i.Language,
+			&i.Policy,
+			&i.SupersedesContractID,
 		); err != nil {
 			return nil, err
 		}
@@ -320,7 +322,7 @@ func (q *Queries) FindContractForUnitAndRenter(ctx context.Context, arg FindCont
 
 const findPropertyByName = `-- name: FindPropertyByName :many
 
-SELECT id, org_id, name, location_text, lat, lng, notes, created_at, updated_at, deleted_at FROM properties
+SELECT id, org_id, name, location_text, lat, lng, notes, created_at, updated_at, deleted_at, contract_template_id FROM properties
 WHERE org_id = $1 AND deleted_at IS NULL
   AND lower(btrim(name)) = lower(btrim($2::text))
 ORDER BY created_at
@@ -356,6 +358,7 @@ func (q *Queries) FindPropertyByName(ctx context.Context, arg FindPropertyByName
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.ContractTemplateID,
 		); err != nil {
 			return nil, err
 		}
@@ -368,7 +371,7 @@ func (q *Queries) FindPropertyByName(ctx context.Context, arg FindPropertyByName
 }
 
 const findUnitByNameInOrg = `-- name: FindUnitByNameInOrg :many
-SELECT u.id, u.org_id, u.property_id, u.name, u.unit_code, u.status, u.allowed_period_ids, u.created_at, u.updated_at, u.deleted_at, u.status_override, p.name AS property_name
+SELECT u.id, u.org_id, u.property_id, u.name, u.unit_code, u.status, u.allowed_period_ids, u.created_at, u.updated_at, u.deleted_at, u.status_override, u.contract_template_id, p.name AS property_name
 FROM units u
 JOIN properties p ON p.id = u.property_id AND p.org_id = u.org_id
 WHERE u.org_id = $1 AND u.deleted_at IS NULL AND p.deleted_at IS NULL
@@ -383,18 +386,19 @@ type FindUnitByNameInOrgParams struct {
 }
 
 type FindUnitByNameInOrgRow struct {
-	ID               pgtype.UUID        `json:"id"`
-	OrgID            pgtype.UUID        `json:"org_id"`
-	PropertyID       pgtype.UUID        `json:"property_id"`
-	Name             string             `json:"name"`
-	UnitCode         string             `json:"unit_code"`
-	Status           string             `json:"status"`
-	AllowedPeriodIds []pgtype.UUID      `json:"allowed_period_ids"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
-	StatusOverride   bool               `json:"status_override"`
-	PropertyName     string             `json:"property_name"`
+	ID                 pgtype.UUID        `json:"id"`
+	OrgID              pgtype.UUID        `json:"org_id"`
+	PropertyID         pgtype.UUID        `json:"property_id"`
+	Name               string             `json:"name"`
+	UnitCode           string             `json:"unit_code"`
+	Status             string             `json:"status"`
+	AllowedPeriodIds   []pgtype.UUID      `json:"allowed_period_ids"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
+	StatusOverride     bool               `json:"status_override"`
+	ContractTemplateID pgtype.UUID        `json:"contract_template_id"`
+	PropertyName       string             `json:"property_name"`
 }
 
 // FindUnitByNameInOrg resolves the `unit` column of a payments sheet, which
@@ -421,6 +425,7 @@ func (q *Queries) FindUnitByNameInOrg(ctx context.Context, arg FindUnitByNameInO
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.StatusOverride,
+			&i.ContractTemplateID,
 			&i.PropertyName,
 		); err != nil {
 			return nil, err
@@ -434,7 +439,7 @@ func (q *Queries) FindUnitByNameInOrg(ctx context.Context, arg FindUnitByNameInO
 }
 
 const findUnitByNameInProperty = `-- name: FindUnitByNameInProperty :many
-SELECT id, org_id, property_id, name, unit_code, status, allowed_period_ids, created_at, updated_at, deleted_at, status_override FROM units
+SELECT id, org_id, property_id, name, unit_code, status, allowed_period_ids, created_at, updated_at, deleted_at, status_override, contract_template_id FROM units
 WHERE org_id = $1 AND property_id = $2
   AND deleted_at IS NULL
   AND lower(btrim(name)) = lower(btrim($3::text))
@@ -469,6 +474,7 @@ func (q *Queries) FindUnitByNameInProperty(ctx context.Context, arg FindUnitByNa
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.StatusOverride,
+			&i.ContractTemplateID,
 		); err != nil {
 			return nil, err
 		}
@@ -866,7 +872,7 @@ const withdrawImportedContract = `-- name: WithdrawImportedContract :one
 UPDATE contracts SET deleted_at = now()
 WHERE org_id = $1 AND id = $2
   AND status = 'pending_signature' AND deleted_at IS NULL
-RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language
+RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language, policy, supersedes_contract_id
 `
 
 type WithdrawImportedContractParams struct {
@@ -906,6 +912,8 @@ func (q *Queries) WithdrawImportedContract(ctx context.Context, arg WithdrawImpo
 		&i.TerminationEffectiveDate,
 		&i.LinkRequestID,
 		&i.Language,
+		&i.Policy,
+		&i.SupersedesContractID,
 	)
 	return i, err
 }

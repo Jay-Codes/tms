@@ -51,7 +51,7 @@ const createContractTemplate = `-- name: CreateContractTemplate :one
 INSERT INTO contract_templates (org_id, name, body_html, body_html_sw, is_default)
 VALUES ($1, $2, $3,
         COALESCE($4::text, ''), $5)
-RETURNING id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw
+RETURNING id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw, policy, content_updated_at
 `
 
 type CreateContractTemplateParams struct {
@@ -87,12 +87,14 @@ func (q *Queries) CreateContractTemplate(ctx context.Context, arg CreateContract
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.BodyHtmlSw,
+		&i.Policy,
+		&i.ContentUpdatedAt,
 	)
 	return i, err
 }
 
 const getContractTemplate = `-- name: GetContractTemplate :one
-SELECT id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw FROM contract_templates
+SELECT id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw, policy, content_updated_at FROM contract_templates
 WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
 `
 
@@ -114,12 +116,14 @@ func (q *Queries) GetContractTemplate(ctx context.Context, arg GetContractTempla
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.BodyHtmlSw,
+		&i.Policy,
+		&i.ContentUpdatedAt,
 	)
 	return i, err
 }
 
 const getDefaultContractTemplate = `-- name: GetDefaultContractTemplate :one
-SELECT id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw FROM contract_templates
+SELECT id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw, policy, content_updated_at FROM contract_templates
 WHERE org_id = $1 AND is_default AND deleted_at IS NULL
 LIMIT 1
 `
@@ -137,12 +141,14 @@ func (q *Queries) GetDefaultContractTemplate(ctx context.Context, orgID pgtype.U
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.BodyHtmlSw,
+		&i.Policy,
+		&i.ContentUpdatedAt,
 	)
 	return i, err
 }
 
 const listContractTemplates = `-- name: ListContractTemplates :many
-SELECT id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw FROM contract_templates
+SELECT id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw, policy, content_updated_at FROM contract_templates
 WHERE org_id = $1 AND deleted_at IS NULL
 ORDER BY is_default DESC, created_at DESC, id DESC
 `
@@ -166,6 +172,8 @@ func (q *Queries) ListContractTemplates(ctx context.Context, orgID pgtype.UUID) 
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.BodyHtmlSw,
+			&i.Policy,
+			&i.ContentUpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -180,7 +188,7 @@ func (q *Queries) ListContractTemplates(ctx context.Context, orgID pgtype.UUID) 
 const softDeleteContractTemplate = `-- name: SoftDeleteContractTemplate :one
 UPDATE contract_templates SET deleted_at = now()
 WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw
+RETURNING id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw, policy, content_updated_at
 `
 
 type SoftDeleteContractTemplateParams struct {
@@ -201,6 +209,8 @@ func (q *Queries) SoftDeleteContractTemplate(ctx context.Context, arg SoftDelete
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.BodyHtmlSw,
+		&i.Policy,
+		&i.ContentUpdatedAt,
 	)
 	return i, err
 }
@@ -212,7 +222,7 @@ SET name         = COALESCE($1, name),
     body_html_sw = COALESCE($3, body_html_sw),
     is_default   = COALESCE($4, is_default)
 WHERE org_id = $5 AND id = $6 AND deleted_at IS NULL
-RETURNING id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw
+RETURNING id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw, policy, content_updated_at
 `
 
 type UpdateContractTemplateParams struct {
@@ -244,6 +254,8 @@ func (q *Queries) UpdateContractTemplate(ctx context.Context, arg UpdateContract
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.BodyHtmlSw,
+		&i.Policy,
+		&i.ContentUpdatedAt,
 	)
 	return i, err
 }

@@ -9,12 +9,13 @@ import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { TableScroll, useT } from '@tms/ui';
+import { TableScroll, useT, type Translator } from '@tms/ui';
 import { Field, ProblemNote } from '../../../../components/FormBits';
 import { PageHead } from '../../../../components/PageHead';
 import { Sheet } from '../../../../components/Sheet';
 import {
   ApiError,
+  templateInUse,
   templatesApi,
   toApiError,
   unwrapTemplate,
@@ -47,6 +48,26 @@ const STARTER_BODY_SW =
   '<p>Upangaji unadumu kwa siku {{term_days}}, kuanzia {{start_date}} hadi {{end_date}}.</p>' +
   '<h2>Kodi</h2>' +
   '<p>Kodi ni {{rent}} kwa {{payment_period}}, inayolipwa siku ya {{due_day}} ya kila kipindi.</p>';
+
+/**
+ * Phase 22: a template still assigned to units or properties cannot go — the
+ * 409 names how many, so the landlord knows what to reassign first.
+ */
+function deleteError(t: Translator, e: unknown): ApiError {
+  const err = toApiError(e);
+  const usage = templateInUse(err);
+  if (err.status === 409 && usage) {
+    return new ApiError(409, {
+      type: err.code,
+      title: t('tpl.in_use.title'),
+      detail: t('tpl.in_use.detail', {
+        units: t.n('tpl.usage.units', usage.units),
+        properties: t.n('tpl.usage.properties', usage.properties),
+      }),
+    });
+  }
+  return err;
+}
 
 function NewTemplateForm({ onCreated }: { onCreated: (id: string) => void }) {
   const t = useT();
@@ -113,6 +134,8 @@ function TemplatesBody() {
   const router = useRouter();
   const [items, setItems] = useState<ContractTemplateSummary[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
+  const [actionError, setActionError] = useState<ApiError | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -132,6 +155,20 @@ function TemplatesBody() {
     void load(ac.signal);
     return () => ac.abort();
   }, [load]);
+
+  const remove = async (row: ContractTemplateSummary) => {
+    if (!window.confirm(t('tpl.delete_confirm', { name: row.name }))) return;
+    setDeleting(row.id);
+    setActionError(null);
+    try {
+      await templatesApi.remove(row.id);
+      await load();
+    } catch (e) {
+      setActionError(deleteError(t, e));
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   return (
     <>
@@ -158,26 +195,29 @@ function TemplatesBody() {
 
       <div style={{ paddingTop: 'var(--sp-4)', display: 'grid', gap: 'var(--sp-4)' }}>
         <ProblemNote error={error} />
+        <ProblemNote error={actionError} />
         <TableScroll label={t('tpl.list.table_label')}>
 <table className="ledger">
           <thead>
             <tr>
               <th>{t('common.name')}</th>
               <th>{t('tpl.default')}</th>
+              <th>{t('tpl.list.used_by')}</th>
               <th>{t('tpl.list.last_edited')}</th>
               <th>{t('tpl.list.created')}</th>
+              <th />
             </tr>
           </thead>
           <tbody>
             {items === null ? (
               <tr>
-                <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
+                <td colSpan={6} style={{ color: 'var(--ink-soft)' }}>
                   {t('common.loading')}
                 </td>
               </tr>
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
+                <td colSpan={6} style={{ color: 'var(--ink-soft)' }}>
                   {error ? t('common.no_results') : t('tpl.list.empty')}
                 </td>
               </tr>
@@ -188,10 +228,33 @@ function TemplatesBody() {
                     <Link href={`/contracts/templates/${row.id}`} style={{ color: 'inherit' }}>
                       {row.name}
                     </Link>
+                    {row.policy ? (
+                      <span className="stamp" style={{ marginLeft: 'var(--sp-2)' }} title={t('policy.title')}>
+                        {t('policy.chip')}
+                      </span>
+                    ) : null}
                   </td>
                   <td>{row.is_default ? <span className="stamp stamp-paid">{t('tpl.default')}</span> : null}</td>
+                  <td style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+                    {row.usage
+                      ? t('tpl.usage.line', {
+                          units: t.n('tpl.usage.units', row.usage.units),
+                          properties: t.n('tpl.usage.properties', row.usage.properties),
+                        })
+                      : '—'}
+                  </td>
                   <td style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{fmtDate(row.updated_at)}</td>
                   <td style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{fmtDate(row.created_at)}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn btn-quiet"
+                      onClick={() => void remove(row)}
+                      disabled={deleting !== null}
+                    >
+                      {deleting === row.id ? t('common.deleting') : t('common.delete')}
+                    </button>
+                  </td>
                 </tr>
               ))
             )}

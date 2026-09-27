@@ -1302,3 +1302,37 @@ See `PATCH /renters/{user_id}` in 19.3 (amended): `reason` required once signed 
 | `POST /contracts/{id}/write-off/undo` | **Owner only.** Rows back to `paid`/`overdue`/`partial`/`pending`, recomputed from their own money and dates. 409 `nothing_written_off`. → `{periods, amount, schedules}`. Audit `contract.write_off_undo`. |
 
 Schedule rows gain `write_off_reason` (only on `written_off`). Reports: `written_off` counts in `expected`, never in `outstanding`/`overdue`; a written-off row takes no payment.
+
+## Part 2 — Phase 22: contract templates per unit
+
+### 22.1 Template assignment
+Resolution, first hit wins: template named at approval/creation → unit's → property's → org default (soft-deleted assignments skipped). The contract-create audit row carries `template_source` (`explicit|unit|property|default`).
+
+| Route | Contract |
+|---|---|
+| `GET /units/{id}/template` | Org audience. → `{template: {id, name, source} \| null}` — what a tenancy of this unit would be written on. |
+| `POST /units/bulk-template` | Org audience. `{unit_ids: uuid[1..500], template_id: uuid \| null}` (key required; `null` clears). Ids outside the org match nothing. → `{updated, contract_template_id}`. Audit `unit.template_set` per unit. 400 on a template not in the org. |
+| `PUT /properties/{id}/template` | Org audience. `{template_id: uuid \| null}` → `{contract_template_id}`. Audit `property.template_set` (before/after). |
+| `POST /link-requests/{id}/approve` | Optional body `{template_id}` overrides the unit's resolved template for this one contract. 409 `template_not_found` when it is not a live template of the org. |
+| `GET /contract-templates` | Items gain `usage: {units, properties}`. |
+| `DELETE /contract-templates/{id}` | 409 `template_in_use` `{units, properties}` while assigned. |
+
+Unit and property responses gain `contract_template_id` (own assignment, null = inherit).
+
+### 22.2 Contract policies
+`contract_templates.policy` and `contracts.policy` (JSONB, migration 000024). Shape:
+`{move_out_proration: full_month|pro_rata, early_exit_prepaid: refund|forfeit|landlord_decides, deposit_mode: none|fixed|months, deposit_amount, deposit_months (1..24), deductions_may_exceed_deposit, tenant_notice_days (0..365), eviction_notice_days (0..365)}`.
+
+- `POST /contract-templates`, `PATCH /contract-templates/{id}`: optional `policy` — absent leaves it, `null` clears, an object is validated (400 with `policy.<field>` errors; unknown members refused) and stored normalised (fields the deposit mode does not use are zeroed). Template responses carry `policy` (null when none). Patch audit carries policy before/after.
+- Contract creation copies the template's policy onto the contract with the deposit **resolved to an amount** (`months` × the unit price scaled to 30 days). `contract.policy` on every contract response (null before Phase 22). The snapshot hash appends the policy's canonical JSON **only when present**, so every earlier hash still verifies.
+- New document variables `{{deposit}}` (amount, or "none"/"hakuna"), `{{tenant_notice_days}}`, `{{eviction_notice_days}}` — blank on a template without a policy.
+
+### 22.3 Unsigned contracts on reworded templates
+Migration 000025: `contract_templates.content_updated_at` (moves only when `body_html`, `body_html_sw` or `policy` changes — not on a rename or default flip) and `contracts.supersedes_contract_id`.
+
+| Route | Contract |
+|---|---|
+| `GET /contracts/{id}` and every contract reload | `template_changed: bool` — `pending_signature`, **nobody has signed yet**, and written before its template's content last changed. `supersedes_contract_id` on every contract. |
+| `PATCH /contract-templates/{id}` | Response gains `stale_pending`: unsigned, unsigned-by-anyone contracts still on the old content. |
+| `POST /contracts/{id}/reissue` | Org audience. Optional `{reason (≤200, default "contract wording updated"), template_id}`. Only `pending_signature` with **no signature** (409 `not_pending_signature`, 409 `already_signed`). In one transaction: the old contract is terminated with reason "Reissued: …", a new one is written from the same unit, renter, period, term, start date, due day, language and application — on `template_id`, else its own template (now reworded), else the unit's resolved template if that one was deleted — with `supersedes_contract_id` set. One SMS (`contract_ready` for the new one). Audit `contract.reissue` `{reason, new_contract_id}` then the new `contract.create`. → 201 `{contract}`. |
+| `POST /contract-templates/{id}/reissue-pending` | Org audience. Optional `{reason}`. Reissues every stale contract of the template, all or none. → `{reissued}`. |

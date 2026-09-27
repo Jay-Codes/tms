@@ -313,6 +313,27 @@ What exists: Phase 16 `payments` CSV import allocates rows against a contract's 
 - [x] **Arrears after move-out** (priority 1 of the unhappy-path catalogue): payments and proofs accepted on `ended`/`terminated` contracts; `GET /arrears` (Payments → Former tenants); owner-only, reversible `write-off` with new schedule status `written_off` (migration 000022). Tests: payment on a terminated contract, overpay refused, write-off/undo, write-off refused on a running contract, isolation.
 - [ ] Next (Phase 22, client answers 27 Sep: all landlord-configured, stipulated by contract): settle-up on termination (proration full|pro-rata, prepaid refund|forfeit, partial credit), deposits (amount, deductions, refund), single-period waive/discount, eviction stages with SW+EN letters, renter notice to leave, holdover alert. Depends on template policy fields — see Phase 22 templates.
 
+## Phase 22 — Contract templates per unit, contract policies, contract changes (27 Sep 2026) — 🔨 in progress, branch `phase-22-templates`
+
+Why: every approved application was written on the org's single default template; a landlord with shops and flats, or different blocks, needs different agreements, needs to choose one for a particular renter, and needs a way to change a contract after signing. The client's unhappy-path answers (27 Sep) put proration, prepaid refunds, deposits and notice periods in the contract, configured by the landlord.
+
+### 22.1 Template assignment
+- [x] Migration 000023: `units.contract_template_id`, `properties.contract_template_id`. Resolution picked → unit → property → default in `createContractTx`; `template_source` in the audit row.
+- [x] `GET /units/{id}/template`, `POST /units/bulk-template`, `PUT /properties/{id}/template`; approve takes optional `{template_id}`; template list `usage`; delete guard 409 `template_in_use`. Tests: resolution order, approval uses resolved/picked, delete guard, cross-org.
+- [x] Tenant UI: approve sheet shows/changes the template; property and unit settings; units bulk action; usage and delete (409 surfaced) on the templates list.
+
+### 22.2 Contract policies on the template (client answers)
+- [x] Backend (migration 000024, `contract/policy.go`, tests incl. hash stability and verify after template change). [x] Template editor UI, contract rules block, templates-list chip. — Structured `policy` on templates, snapshotted on each contract and covered by the hash: `move_out_proration` (full_month|pro_rata), `early_exit_prepaid` (refund|forfeit|landlord_decides), `deposit` (none|fixed amount|N months) + `deductions_may_exceed_deposit`, `tenant_notice_days`, `eviction_notice_days`. New variables `{{deposit}}`, `{{notice_days}}` for the text. Existing contracts keep an empty policy (hash unchanged).
+
+### 22.3 Stale unsigned contracts
+- [x] Backend: `content_updated_at` (migration 000025), `template_changed` on contracts, `stale_pending` on template save, `POST /contracts/{id}/reissue`, `POST /contract-templates/{id}/reissue-pending`; refused once anyone has signed. [x] UI: contract notice + Reissue sheet, "Replaces contract" link, template editor "Reissue them all". — Editing a template flags its `pending_signature` contracts "wording changed — reissue?"; reissue = withdraw + fresh contract from the same parameters (Phase 17 `reissue`).
+
+### 22.4 Contract changes (Phase 17 supersession)
+- [ ] Amend / renew / reissue as drafted in Phase 17, including switching template as an amendment.
+
+### 22.5 Settle-up on termination, deposits (reads 22.2 policy)
+- [ ] Termination settlement, deposit record and refund, single-period waive/discount, eviction stages with SW+EN letters, renter notice, holdover alert.
+
 ## Open questions (answer whenever; defaults applied if unanswered)
 
 1. **Credit unit**: 1 credit per 160-char GSM segment (default; 70 for UCS-2) vs 1 credit per message regardless of length. OTP/security messages exempt (default yes).

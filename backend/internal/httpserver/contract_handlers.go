@@ -175,11 +175,19 @@ func (s *Server) createContractTx(
 		return zero, "", errPeriodNotOffered
 	}
 
+	// Phase 22: a template named by the caller wins; otherwise the unit's,
+	// then its property's, then the org default (ResolveUnitTemplate).
 	var tpl sqlc.ContractTemplate
+	templateSource := templateSourceExplicit
 	if in.TemplateID.Valid {
 		tpl, err = q.GetContractTemplate(ctx, sqlc.GetContractTemplateParams{OrgID: in.OrgID, ID: in.TemplateID})
 	} else {
-		tpl, err = q.GetDefaultContractTemplate(ctx, in.OrgID)
+		var resolved sqlc.ResolveUnitTemplateRow
+		resolved, err = q.ResolveUnitTemplate(ctx, sqlc.ResolveUnitTemplateParams{OrgID: in.OrgID, UnitID: unit.ID})
+		if err == nil {
+			templateSource = resolved.Source
+			tpl, err = q.GetContractTemplate(ctx, sqlc.GetContractTemplateParams{OrgID: in.OrgID, ID: resolved.ID})
+		}
 	}
 	if isNoRows(err) {
 		return zero, "", errTemplateNotFound
@@ -224,7 +232,21 @@ func (s *Server) createContractTx(
 		wanted = renter.Locale
 	}
 	body, lang := contract.BodyFor(wanted, tpl.BodyHtml, tpl.BodyHtmlSw)
-	terms := contract.Render(contract.SanitizeHTML(body), map[string]string{
+	// Phase 22 §22.2: the template's policy, resolved onto this tenancy (a
+	// deposit in months becomes an amount), is copied onto the contract and
+	// covered by its hash.
+	tplPolicy, err := contract.ParsePolicy(tpl.Policy)
+	if err != nil {
+		return zero, "", err
+	}
+	var policy *contract.Policy
+	policyCanonical := ""
+	if tplPolicy != nil {
+		cp := tplPolicy.ForContract(unit.PriceAmount, int(unit.PricePeriodDays))
+		policy = &cp
+		policyCanonical = cp.Canonical()
+	}
+	vars := map[string]string{
 		"renter_name":    renter.FullName,
 		"unit":           unit.Name,
 		"property":       unit.PropertyName,
@@ -236,7 +258,15 @@ func (s *Server) createContractTx(
 		"org_name":       displayName,
 		"term_days":      strconv.Itoa(int(in.TermDays)),
 		"due_day":        contract.DueDayPhraseFor(lang, intPtr(dueDay)),
-	})
+	}
+	depositText := ""
+	if policy != nil {
+		depositText = formatTZS(policy.DepositAmount)
+	}
+	for k, v := range contract.PolicyVars(policy, lang, depositText) {
+		vars[k] = v
+	}
+	terms := contract.Render(contract.SanitizeHTML(body), vars)
 
 	hash := contract.Snapshot{
 		TermsHTML:         terms,
@@ -249,6 +279,7 @@ func (s *Server) createContractTx(
 		StartDate:         start.Format(dateLayout),
 		EndDate:           end.Format(dateLayout),
 		DueDay:            intPtr(dueDay),
+		Policy:            policyCanonical,
 	}.Hash()
 
 	created, err := q.CreateContract(ctx, sqlc.CreateContractParams{
@@ -272,6 +303,14 @@ func (s *Server) createContractTx(
 		return zero, "", err
 	}
 
+	if policy != nil {
+		if err := q.SetContractPolicy(ctx, sqlc.SetContractPolicyParams{
+			Policy: []byte(policyCanonical), OrgID: in.OrgID, ID: created.ID,
+		}); err != nil {
+			return zero, "", err
+		}
+	}
+
 	if err := audit.Record(ctx, q, audit.Entry{
 		OrgID:       db.UUIDString(in.OrgID),
 		ActorUserID: in.ActorUserID,
@@ -280,11 +319,12 @@ func (s *Server) createContractTx(
 		EntityID:    db.UUIDString(created.ID),
 		After: map[string]any{
 			"unit_id": db.UUIDString(unit.ID), "renter_user_id": db.UUIDString(renter.ID),
-			"template_id": db.UUIDString(tpl.ID), "rent_amount": unit.PriceAmount,
+			"template_id": db.UUIDString(tpl.ID), "template_source": templateSource,
+			"rent_amount":      unit.PriceAmount,
 			"rent_period_days": unit.PricePeriodDays, "payment_period_days": period.Days,
 			"term_days": in.TermDays, "start_date": start.Format(dateLayout),
 			"end_date": end.Format(dateLayout), "due_day": dueDayString(dueDay),
-			"status": contractPendingSignature, "snapshot_hash": hash,
+			"status": contractPendingSignature, "snapshot_hash": hash, "policy": policy,
 			"language": lang,
 		},
 	}); err != nil {
@@ -410,7 +450,30 @@ func (s *Server) reloadContract(
 		s.serverError(w, r, "contract.reload.signatures", err)
 		return contractResponse{}, false
 	}
-	return toContract(row, toSignatures(sigs)), true
+	out := toContract(row, toSignatures(sigs))
+	if !s.markTemplateChanged(w, r, row, &out) {
+		return contractResponse{}, false
+	}
+	return out, true
+}
+
+// markTemplateChanged sets `template_changed` on an unsigned contract whose
+// template was reworded after it was written (§22.3).
+func (s *Server) markTemplateChanged(
+	w http.ResponseWriter, r *http.Request, row sqlc.GetContractRow, out *contractResponse,
+) bool {
+	if row.Status != contractPendingSignature {
+		return true
+	}
+	changed, err := s.q.ContractTemplateChanged(r.Context(), sqlc.ContractTemplateChangedParams{
+		OrgID: row.OrgID, ID: row.ID,
+	})
+	if err != nil {
+		s.serverError(w, r, "contract.template_changed", err)
+		return false
+	}
+	out.TemplateChanged = changed
+	return true
 }
 
 // loadContract resolves the {id} route parameter for whichever audience is
@@ -571,7 +634,11 @@ func (s *Server) handleGetContract(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "contract.get.signatures", err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"contract": toContract(row, toSignatures(sigs))})
+	out := toContract(row, toSignatures(sigs))
+	if !s.markTemplateChanged(w, r, row, &out) {
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"contract": out})
 }
 
 // -------------------------------------------- GET /contracts/{id}/document --
@@ -1525,7 +1592,23 @@ func hashOf(row sqlc.GetContractRow) string {
 		StartDate:         row.StartDate.Time.Format(dateLayout),
 		EndDate:           row.EndDate.Time.Format(dateLayout),
 		DueDay:            intPtr(row.DueDay),
+		Policy:            storedPolicyCanonical(row.Policy),
 	}.Hash()
+}
+
+// storedPolicyCanonical re-canonicalises a stored policy for the hash. JSONB
+// may hand the keys back in any order; the struct round trip fixes it. A
+// column that does not parse contributes itself, so it fails verification
+// rather than being ignored.
+func storedPolicyCanonical(raw []byte) string {
+	p, err := contract.ParsePolicy(raw)
+	if err != nil {
+		return string(raw)
+	}
+	if p == nil {
+		return ""
+	}
+	return p.Canonical()
 }
 
 // signPurpose keys a signing OTP to one contract.

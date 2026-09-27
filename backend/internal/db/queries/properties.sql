@@ -16,7 +16,7 @@ RETURNING *;
 
 -- name: ListProperties :many
 SELECT p.id, p.org_id, p.name, p.location_text, p.lat, p.lng, p.notes,
-       p.created_at, p.updated_at,
+       p.created_at, p.updated_at, p.contract_template_id,
        c.total, c.vacant, c.occupied, c.maintenance, c.unlisted
 FROM properties p
 LEFT JOIN LATERAL (
@@ -36,7 +36,7 @@ LIMIT sqlc.arg(row_limit);
 
 -- name: GetProperty :one
 SELECT p.id, p.org_id, p.name, p.location_text, p.lat, p.lng, p.notes,
-       p.created_at, p.updated_at,
+       p.created_at, p.updated_at, p.contract_template_id,
        c.total, c.vacant, c.occupied, c.maintenance, c.unlisted
 FROM properties p
 LEFT JOIN LATERAL (

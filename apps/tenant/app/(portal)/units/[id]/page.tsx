@@ -15,15 +15,19 @@ import { useCallback, useEffect, useState } from 'react';
 import { Field, Note, ProblemNote } from '../../../../components/FormBits';
 import { PeriodPicker } from '../../../../components/PeriodPicker';
 import { PageHead } from '../../../../components/PageHead';
+import { templateSourceLabel, useTemplateList } from '../../../../components/TemplateBits';
 import { StatusMark } from '../../../../components/UnitStatus';
 import {
   ApiError,
   periodsApi,
+  propertiesApi,
   toApiError,
   unitsApi,
+  unwrapProperty,
   unwrapUnit,
   type PaymentPeriod,
   type Price,
+  type ResolvedTemplate,
   type Unit,
   type UnitQr,
   type UnitStatusOverride,
@@ -115,6 +119,96 @@ function QrBlock({ unit }: { unit: Unit }) {
           </Link>
         </div>
       )}
+    </div>
+  );
+}
+
+/* --------------------------- contract template ---------------------------- */
+
+/**
+ * Phase 22: the unit's own template, or none so it follows its property. The
+ * resolved line underneath is the backend's answer, re-read after each save.
+ */
+function UnitTemplate({ unit, onSaved }: { unit: Unit; onSaved: (templateId: string | null) => void }) {
+  const t = useT();
+  const templates = useTemplateList();
+  const [resolved, setResolved] = useState<ResolvedTemplate | null | undefined>(undefined);
+  const [propertyTemplateId, setPropertyTemplateId] = useState<string | null | undefined>(undefined);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const loadResolved = useCallback(
+    async (signal?: AbortSignal) => {
+      try {
+        setResolved((await unitsApi.template(unit.id, signal)).template ?? null);
+      } catch (e) {
+        if (e instanceof DOMException && e.name === 'AbortError') return;
+        setResolved(null);
+      }
+    },
+    [unit.id],
+  );
+
+  useEffect(() => {
+    const ac = new AbortController();
+    void loadResolved(ac.signal);
+    propertiesApi
+      .get(unit.property_id, ac.signal)
+      .then((p) => setPropertyTemplateId(unwrapProperty(p).contract_template_id ?? null))
+      .catch(() => setPropertyTemplateId(null));
+    return () => ac.abort();
+  }, [loadResolved, unit.property_id]);
+
+  // What "same as property" means today: the property's template, else the default.
+  const inherited =
+    templates?.find((x) => x.id === propertyTemplateId) ?? templates?.find((x) => x.is_default);
+
+  const save = async (value: string) => {
+    setBusy(true);
+    setError(null);
+    setNote(null);
+    try {
+      const res = await unitsApi.bulkTemplate([unit.id], value || null);
+      onSaved(res.contract_template_id);
+      setNote(t('common.saved'));
+      await loadResolved();
+    } catch (e) {
+      setError(toApiError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'grid', gap: 'var(--sp-3)', maxWidth: 480 }}>
+      <ProblemNote error={error} />
+      {note ? <Note>{note}</Note> : null}
+      <Field id="u_template" label={t('units.template.label')} error={error?.errors.template_id}>
+        <select
+          id="u_template"
+          className="input"
+          value={unit.contract_template_id ?? ''}
+          disabled={busy || templates === null}
+          onChange={(e) => void save(e.target.value)}
+        >
+          <option value="">
+            {inherited ? t('units.template.inherit_named', { name: inherited.name }) : t('units.template.inherit')}
+          </option>
+          {(templates ?? []).map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+        {resolved === undefined
+          ? t('common.loading')
+          : resolved
+            ? t('units.template.resolved', { name: resolved.name, source: templateSourceLabel(t, resolved.source) })
+            : t('units.template.none')}
+      </p>
     </div>
   );
 }
@@ -483,6 +577,10 @@ function UnitBody({ id }: { id: string }) {
             </button>
           </div>
         </div>
+      </Section>
+
+      <Section title={t('units.section.template')}>
+        <UnitTemplate unit={unit} onSaved={(id) => setUnit({ ...unit, contract_template_id: id })} />
       </Section>
 
       <Section title={t('qr.code')}>

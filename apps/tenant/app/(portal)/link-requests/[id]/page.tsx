@@ -15,16 +15,19 @@ import { NidaField } from '../../../../components/NidaField';
 import { Facts, KycStamp, LinkStatusStamp, ViewIdDocButton, localeLabel } from '../../../../components/RenterBits';
 import { PageHead } from '../../../../components/PageHead';
 import { Sheet } from '../../../../components/Sheet';
+import { templateSourceLabel, useTemplateList } from '../../../../components/TemplateBits';
 import {
   ApiError,
   hasKycDoc,
   linkRequestsApi,
   toApiError,
+  unitsApi,
   unwrapRequest,
   unwrapRequestDetail,
   type Contract,
   type LinkRequest,
   type RenterProfile,
+  type ResolvedTemplate,
 } from '../../../../lib/api';
 import { Amount, fmtDate, fmtTZS } from '../../../../lib/format';
 import { useT } from '@tms/ui';
@@ -93,6 +96,93 @@ function RejectForm({
   );
 }
 
+/* ---------------------------- contract template --------------------------- */
+
+/**
+ * Phase 22: the template this tenancy will be written on, and a way to pick
+ * another for this one approval. `value` is '' while the unit's resolved
+ * template stands — only a real change is sent with the approval.
+ */
+function TemplateChoice({
+  unitId,
+  value,
+  onChange,
+  disabled,
+}: {
+  unitId: string | undefined;
+  value: string;
+  onChange: (id: string) => void;
+  disabled: boolean;
+}) {
+  const t = useT();
+  const templates = useTemplateList();
+  const [resolved, setResolved] = useState<ResolvedTemplate | null | undefined>(undefined);
+  const [changing, setChanging] = useState(false);
+
+  useEffect(() => {
+    if (!unitId) {
+      setResolved(null);
+      return;
+    }
+    const ac = new AbortController();
+    unitsApi
+      .template(unitId, ac.signal)
+      .then((r) => setResolved(r.template ?? null))
+      .catch((e) => {
+        if (e instanceof DOMException && e.name === 'AbortError') return;
+        setResolved(null);
+      });
+    return () => ac.abort();
+  }, [unitId]);
+
+  const picked = value ? templates?.find((x) => x.id === value) : undefined;
+  const name = picked?.name ?? resolved?.name;
+  const hint = picked
+    ? t('linkreq.template.picked')
+    : resolved
+      ? templateSourceLabel(t, resolved.source)
+      : null;
+
+  return (
+    <div style={{ display: 'grid', gap: 'var(--sp-2)' }}>
+      <p style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
+        <span>
+          {resolved === undefined
+            ? t('common.loading')
+            : name
+              ? t('linkreq.template.label', { name })
+              : t('linkreq.template.none')}
+        </span>
+        {hint ? <span style={{ color: 'var(--ink-faint)', fontSize: 'var(--text-sm)' }}>{hint}</span> : null}
+        {!changing && templates && templates.length > 0 ? (
+          <button type="button" className="btn btn-quiet" onClick={() => setChanging(true)} disabled={disabled}>
+            {t('linkreq.template.change')}
+          </button>
+        ) : null}
+      </p>
+      {changing ? (
+        <Field id="approve_template" label={t('linkreq.template.pick')} hint={t('linkreq.template.pick_hint')}>
+          <select
+            id="approve_template"
+            className="input"
+            value={value || resolved?.id || ''}
+            disabled={disabled}
+            onChange={(e) => onChange(e.target.value === resolved?.id ? '' : e.target.value)}
+            style={{ maxWidth: 360 }}
+          >
+            {!resolved ? <option value="">{t('tpl.choose')}</option> : null}
+            {(templates ?? []).map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      ) : null}
+    </div>
+  );
+}
+
 /* --------------------------------- page ---------------------------------- */
 
 function RequestBody({ id }: { id: string }) {
@@ -108,6 +198,8 @@ function RequestBody({ id }: { id: string }) {
   // Phase 4: approving writes the contract in the same transaction and hands it
   // back, so the landlord can go straight to it instead of hunting the list.
   const [contract, setContract] = useState<Contract | null>(null);
+  // Phase 22: '' = the unit's resolved template; an id only when changed.
+  const [templateId, setTemplateId] = useState('');
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -321,6 +413,7 @@ function RequestBody({ id }: { id: string }) {
         {pending ? (
           <div style={{ display: 'grid', gap: 'var(--sp-3)', maxWidth: 640 }}>
             <p style={{ color: 'var(--ink-soft)' }}>{t('linkreq.decide.lead')}</p>
+            <TemplateChoice unitId={request.unit?.id} value={templateId} onChange={setTemplateId} disabled={busy} />
             <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
               <button type="button" className="btn btn-primary" onClick={() => setConfirmOpen(true)} disabled={busy}>
                 <Icon icon="solar:check-circle-linear" width={20} /> {t('linkreq.approve')}
@@ -360,7 +453,12 @@ function RequestBody({ id }: { id: string }) {
               type="button"
               className="btn btn-primary"
               disabled={busy}
-              onClick={() => void decide(() => linkRequestsApi.approve(request.id), t('linkreq.approve.done'))}
+              onClick={() =>
+                void decide(
+                  () => linkRequestsApi.approve(request.id, templateId || undefined),
+                  t('linkreq.approve.done'),
+                )
+              }
             >
               {busy ? t('linkreq.approve.busy') : t('linkreq.approve.yes')}
             </button>

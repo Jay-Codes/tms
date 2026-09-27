@@ -126,8 +126,16 @@ type contractResponse struct {
 	DueDay        *int32          `json:"due_day"`
 	// Language is the language the terms were rendered in, frozen with them
 	// (Phase 13). Contracts issued before Part 2 read 'en'.
-	Language          string           `json:"language"`
-	SnapshotHash      string           `json:"snapshot_hash"`
+	Language     string `json:"language"`
+	SnapshotHash string `json:"snapshot_hash"`
+	// Policy is the rules this tenancy was signed under (Phase 22), null for
+	// a contract written without one.
+	Policy *contract.Policy `json:"policy"`
+	// SupersedesContractID names the contract this one replaced (§22.3).
+	SupersedesContractID *string `json:"supersedes_contract_id"`
+	// TemplateChanged: unsigned, and its template's wording or policy changed
+	// after it was written — offer a reissue. Set on the single read only.
+	TemplateChanged   bool             `json:"template_changed"`
 	Signatures        []signatureBlock `json:"signatures"`
 	LinkRequestID     *string          `json:"link_request_id"`
 	CreatedAt         time.Time        `json:"created_at"`
@@ -163,11 +171,22 @@ type templateResponse struct {
 	// BodyHTMLSW is the Swahili body (Phase 13). It is sent alongside
 	// `body_html` on the single-template reads, empty when the org has not
 	// written one — the editor shows two tabs and only one of them is filled.
-	BodyHTMLSW string    `json:"body_html_sw,omitempty"`
-	IsDefault  bool      `json:"is_default"`
-	Variables  []string  `json:"variables,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	BodyHTMLSW string   `json:"body_html_sw,omitempty"`
+	IsDefault  bool     `json:"is_default"`
+	Variables  []string `json:"variables,omitempty"`
+	// Policy is what contracts written on this template will stipulate
+	// (Phase 22), null when the template sets none.
+	Policy *contract.Policy `json:"policy"`
+	// Usage is where the template is assigned (Phase 22), on the list only.
+	Usage     *templateUsage `json:"usage,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+}
+
+// templateUsage counts the units and properties a template is assigned to.
+type templateUsage struct {
+	Units      int64 `json:"units"`
+	Properties int64 `json:"properties"`
 }
 
 // brandingResponse is GET/PUT /org/branding.
@@ -198,16 +217,18 @@ func toContract(r contractRow, signatures []signatureBlock) contractResponse {
 		RentPeriodDays: r.RentPeriodDays,
 		RentPerPeriod: contract.RentPerPeriod(
 			r.RentAmount, int(r.RentPeriodDays), int(r.PaymentPeriodDays)),
-		TermDays:     r.TermDays,
-		StartDate:    r.StartDate.Time.Format(dateLayout),
-		EndDate:      r.EndDate.Time.Format(dateLayout),
-		DueDay:       r.DueDay,
-		Language:     r.Language,
-		SnapshotHash: db.StrVal(r.SnapshotHash),
-		Signatures:   signatures,
-		CreatedAt:    r.CreatedAt.Time,
-		ActivatedAt:  timePtr(r.ActivatedAt.Valid, r.ActivatedAt.Time),
-		TerminatedAt: timePtr(r.TerminatedAt.Valid, r.TerminatedAt.Time),
+		TermDays:             r.TermDays,
+		StartDate:            r.StartDate.Time.Format(dateLayout),
+		EndDate:              r.EndDate.Time.Format(dateLayout),
+		DueDay:               r.DueDay,
+		Language:             r.Language,
+		SnapshotHash:         db.StrVal(r.SnapshotHash),
+		Policy:               parsedPolicy(r.Policy),
+		SupersedesContractID: optUUIDString(r.SupersedesContractID),
+		Signatures:           signatures,
+		CreatedAt:            r.CreatedAt.Time,
+		ActivatedAt:          timePtr(r.ActivatedAt.Valid, r.ActivatedAt.Time),
+		TerminatedAt:         timePtr(r.TerminatedAt.Valid, r.TerminatedAt.Time),
 
 		TerminationReason: r.TerminationReason,
 		SchedulesSummary: schedulesSummary{
@@ -272,8 +293,19 @@ func toSchedule(s sqlc.PaymentSchedule) scheduleResponse {
 	}
 }
 
+// parsedPolicy is a stored policy for a response; one that does not parse is
+// shown as none rather than failing the read.
+func parsedPolicy(raw []byte) *contract.Policy {
+	p, err := contract.ParsePolicy(raw)
+	if err != nil {
+		return nil
+	}
+	return p
+}
+
 func toTemplateSummary(t sqlc.ContractTemplate) templateResponse {
 	return templateResponse{
+		Policy:    parsedPolicy(t.Policy),
 		ID:        db.UUIDString(t.ID),
 		Name:      t.Name,
 		IsDefault: t.IsDefault,

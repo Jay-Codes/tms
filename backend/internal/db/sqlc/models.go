@@ -66,6 +66,8 @@ type Contract struct {
 	TerminationEffectiveDate pgtype.Date        `json:"termination_effective_date"`
 	LinkRequestID            pgtype.UUID        `json:"link_request_id"`
 	Language                 string             `json:"language"`
+	Policy                   []byte             `json:"policy"`
+	SupersedesContractID     pgtype.UUID        `json:"supersedes_contract_id"`
 }
 
 type ContractSignature struct {
@@ -87,15 +89,17 @@ type ContractSignature struct {
 }
 
 type ContractTemplate struct {
-	ID         pgtype.UUID        `json:"id"`
-	OrgID      pgtype.UUID        `json:"org_id"`
-	Name       string             `json:"name"`
-	BodyHtml   string             `json:"body_html"`
-	IsDefault  bool               `json:"is_default"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt  pgtype.Timestamptz `json:"deleted_at"`
-	BodyHtmlSw string             `json:"body_html_sw"`
+	ID               pgtype.UUID        `json:"id"`
+	OrgID            pgtype.UUID        `json:"org_id"`
+	Name             string             `json:"name"`
+	BodyHtml         string             `json:"body_html"`
+	IsDefault        bool               `json:"is_default"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
+	BodyHtmlSw       string             `json:"body_html_sw"`
+	Policy           []byte             `json:"policy"`
+	ContentUpdatedAt pgtype.Timestamptz `json:"content_updated_at"`
 }
 
 type Expense struct {
@@ -359,16 +363,17 @@ type PricePlan struct {
 }
 
 type Property struct {
-	ID           pgtype.UUID        `json:"id"`
-	OrgID        pgtype.UUID        `json:"org_id"`
-	Name         string             `json:"name"`
-	LocationText string             `json:"location_text"`
-	Lat          *float64           `json:"lat"`
-	Lng          *float64           `json:"lng"`
-	Notes        *string            `json:"notes"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
+	ID                 pgtype.UUID        `json:"id"`
+	OrgID              pgtype.UUID        `json:"org_id"`
+	Name               string             `json:"name"`
+	LocationText       string             `json:"location_text"`
+	Lat                *float64           `json:"lat"`
+	Lng                *float64           `json:"lng"`
+	Notes              *string            `json:"notes"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
+	ContractTemplateID pgtype.UUID        `json:"contract_template_id"`
 }
 
 type RenterProfile struct {
@@ -413,17 +418,18 @@ type SmsCreditLedger struct {
 }
 
 type Unit struct {
-	ID               pgtype.UUID        `json:"id"`
-	OrgID            pgtype.UUID        `json:"org_id"`
-	PropertyID       pgtype.UUID        `json:"property_id"`
-	Name             string             `json:"name"`
-	UnitCode         string             `json:"unit_code"`
-	Status           string             `json:"status"`
-	AllowedPeriodIds []pgtype.UUID      `json:"allowed_period_ids"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
-	StatusOverride   bool               `json:"status_override"`
+	ID                 pgtype.UUID        `json:"id"`
+	OrgID              pgtype.UUID        `json:"org_id"`
+	PropertyID         pgtype.UUID        `json:"property_id"`
+	Name               string             `json:"name"`
+	UnitCode           string             `json:"unit_code"`
+	Status             string             `json:"status"`
+	AllowedPeriodIds   []pgtype.UUID      `json:"allowed_period_ids"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
+	StatusOverride     bool               `json:"status_override"`
+	ContractTemplateID pgtype.UUID        `json:"contract_template_id"`
 }
 
 type UnitLinkRequest struct {

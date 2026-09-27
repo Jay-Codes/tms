@@ -9,11 +9,12 @@ import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { ProblemNote } from '../../../../components/FormBits';
+import { Field, Note, ProblemNote } from '../../../../components/FormBits';
 import { PropertyExpenses } from '../../../../components/PropertyExpenses';
 import { PropertyForm } from '../../../../components/PropertyForm';
 import { PageHead } from '../../../../components/PageHead';
 import { Sheet } from '../../../../components/Sheet';
+import { useTemplateList } from '../../../../components/TemplateBits';
 import { StatusMark } from '../../../../components/UnitStatus';
 import { AddManyUnitsForm, AddUnitForm } from '../../../../components/UnitForms';
 import {
@@ -28,6 +29,64 @@ import {
 } from '../../../../lib/api';
 import { Amount } from '../../../../lib/format';
 import { TableScroll, useT } from '@tms/ui';
+
+/**
+ * Phase 22: the template this property's units are written on unless a unit
+ * names its own. Saves on change, like a unit's status.
+ */
+function PropertyTemplate({ property, onSaved }: { property: Property; onSaved: (p: Property) => void }) {
+  const t = useT();
+  const templates = useTemplateList();
+  const [error, setError] = useState<ApiError | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const fallback = templates?.find((x) => x.is_default);
+
+  const save = async (value: string) => {
+    setBusy(true);
+    setError(null);
+    setNote(null);
+    try {
+      const res = await propertiesApi.setTemplate(property.id, value || null);
+      onSaved({ ...property, contract_template_id: res.contract_template_id });
+      setNote(t('common.saved'));
+    } catch (e) {
+      setError(toApiError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'grid', gap: 'var(--sp-3)', maxWidth: 480 }}>
+      <ProblemNote error={error} />
+      {note ? <Note>{note}</Note> : null}
+      <Field
+        id="p_template"
+        label={t('properties.template.label')}
+        hint={t('properties.template.hint')}
+        error={error?.errors.template_id}
+      >
+        <select
+          id="p_template"
+          className="input"
+          value={property.contract_template_id ?? ''}
+          disabled={busy || templates === null}
+          onChange={(e) => void save(e.target.value)}
+        >
+          <option value="">
+            {fallback ? t('tpl.org_default_named', { name: fallback.name }) : t('tpl.org_default')}
+          </option>
+          {(templates ?? []).map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+    </div>
+  );
+}
 
 function PropertyBody({ id }: { id: string }) {
   const t = useT();
@@ -136,6 +195,8 @@ function PropertyBody({ id }: { id: string }) {
         {property?.notes ? (
           <p style={{ color: 'var(--ink-soft)', maxWidth: 'var(--measure)' }}>{property.notes}</p>
         ) : null}
+
+        {property ? <PropertyTemplate property={property} onSaved={setProperty} /> : null}
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-4)' }}>
           <h2 style={{ fontSize: 'var(--text-lg)' }}>

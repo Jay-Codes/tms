@@ -240,7 +240,7 @@ func (s *Server) handleCreateLinkRequest(w http.ResponseWriter, r *http.Request)
 		}
 		// Auto-approval is a decision, so it takes the same hook and the same
 		// notification as a landlord pressing Approve.
-		_, contractQueuedID, _, err = s.onLinkApproved(r.Context(), q, created, p.UserIDString())
+		_, contractQueuedID, _, err = s.onLinkApproved(r.Context(), q, created, p.UserIDString(), pgtype.UUID{})
 		if err != nil {
 			return err
 		}
@@ -524,8 +524,22 @@ func (s *Server) handleGetLinkRequest(w http.ResponseWriter, r *http.Request) {
 
 // ------------------------------------------ POST /link-requests/{id}/... --
 
+// handleApproveLinkRequest takes an optional body (Phase 22): `{template_id}`
+// writes the contract on that template instead of the unit's resolved one.
 func (s *Server) handleApproveLinkRequest(w http.ResponseWriter, r *http.Request) {
-	s.decideLinkRequest(w, r, linkApproved, "")
+	var body struct {
+		TemplateID string `json:"template_id"`
+	}
+	if !DecodeJSONOptional(w, r, &body) {
+		return
+	}
+	f := validate.Fields{}
+	templateID := uuidField(f, "template_id", body.TemplateID, false)
+	if !f.Empty() {
+		badRequest(w, f)
+		return
+	}
+	s.decideLinkRequest(w, r, linkApproved, "", templateID)
 }
 
 func (s *Server) handleRejectLinkRequest(w http.ResponseWriter, r *http.Request) {
@@ -541,12 +555,14 @@ func (s *Server) handleRejectLinkRequest(w http.ResponseWriter, r *http.Request)
 		badRequest(w, f)
 		return
 	}
-	s.decideLinkRequest(w, r, linkRejected, reason)
+	s.decideLinkRequest(w, r, linkRejected, reason, pgtype.UUID{})
 }
 
 // decideLinkRequest is the shared approve/reject path: flip a pending request,
 // audit it, queue the renter's SMS — all in one transaction.
-func (s *Server) decideLinkRequest(w http.ResponseWriter, r *http.Request, status, reason string) {
+func (s *Server) decideLinkRequest(
+	w http.ResponseWriter, r *http.Request, status, reason string, templateID pgtype.UUID,
+) {
 	if s.dbUnavailable(w) {
 		return
 	}
@@ -560,7 +576,7 @@ func (s *Server) decideLinkRequest(w http.ResponseWriter, r *http.Request, statu
 		// contract that approval should have created (API.md, Phase 4 notes);
 		// everything else about a decided request is still a 409.
 		if status == linkApproved && row.Status == linkApproved {
-			s.backfillApprovedRequest(w, r, p, row)
+			s.backfillApprovedRequest(w, r, p, row, templateID)
 			return
 		}
 		conflictCode(w, "not_pending", "request already decided",
@@ -614,7 +630,7 @@ func (s *Server) decideLinkRequest(w http.ResponseWriter, r *http.Request, statu
 		}
 		if status == linkApproved {
 			createdContract, contractQueuedID, madeContract, err = s.onLinkApproved(
-				r.Context(), q, decided, p.UserIDString())
+				r.Context(), q, decided, p.UserIDString(), templateID)
 			if err != nil {
 				return err
 			}
@@ -673,6 +689,7 @@ func (s *Server) decideLinkRequest(w http.ResponseWriter, r *http.Request, statu
 // makes the backfill path on an already-approved request safe.
 func (s *Server) onLinkApproved(
 	ctx context.Context, q *sqlc.Queries, req sqlc.UnitLinkRequest, actorUserID string,
+	templateID pgtype.UUID,
 ) (sqlc.Contract, string, bool, error) {
 	if existing, err := q.GetContractForLinkRequest(ctx, sqlc.GetContractForLinkRequestParams{
 		OrgID: req.OrgID, LinkRequestID: req.ID,
@@ -690,6 +707,7 @@ func (s *Server) onLinkApproved(
 		OrgID:           req.OrgID,
 		UnitID:          req.UnitID,
 		RenterUserID:    req.RenterUserID,
+		TemplateID:      templateID,
 		PaymentPeriodID: req.PaymentPeriodID,
 		TermDays:        termDays,
 		StartDate:       req.StartDate.Time,
@@ -707,7 +725,9 @@ func (s *Server) onLinkApproved(
 // failed) carries no contract, and re-approving it is how a landlord asks for
 // one. An already-approved request that DOES have a contract is still a 409 —
 // there is nothing left to do (API.md, Phase 4 notes).
-func (s *Server) backfillApprovedRequest(w http.ResponseWriter, r *http.Request, p auth.Principal, row sqlc.GetLinkRequestRow) {
+func (s *Server) backfillApprovedRequest(
+	w http.ResponseWriter, r *http.Request, p auth.Principal, row sqlc.GetLinkRequestRow, templateID pgtype.UUID,
+) {
 	existing, err := s.q.GetContractForLinkRequest(r.Context(), sqlc.GetContractForLinkRequestParams{
 		OrgID: p.OrgID, LinkRequestID: row.ID,
 	})
@@ -725,7 +745,7 @@ func (s *Server) backfillApprovedRequest(w http.ResponseWriter, r *http.Request,
 	var queuedID string
 	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
 		var err error
-		created, queuedID, _, err = s.onLinkApproved(r.Context(), q, linkRequestOf(row), p.UserIDString())
+		created, queuedID, _, err = s.onLinkApproved(r.Context(), q, linkRequestOf(row), p.UserIDString(), templateID)
 		return err
 	}); err != nil {
 		if writeCreateError(w, err) {

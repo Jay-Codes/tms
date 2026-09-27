@@ -25,6 +25,7 @@ RETURNING *;
 -- name: ListUnits :many
 SELECT u.id, u.org_id, u.property_id, u.name, u.unit_code, u.status,
        u.status_override, u.allowed_period_ids, u.created_at, u.updated_at,
+       u.contract_template_id,
        p.name AS property_name,
        pp.id AS price_id,
        COALESCE(pp.amount, 0)::bigint      AS price_amount,
@@ -64,6 +65,7 @@ LIMIT sqlc.arg(row_limit);
 -- name: GetUnit :one
 SELECT u.id, u.org_id, u.property_id, u.name, u.unit_code, u.status,
        u.status_override, u.allowed_period_ids, u.created_at, u.updated_at,
+       u.contract_template_id,
        p.name AS property_name,
        pp.id AS price_id,
        COALESCE(pp.amount, 0)::bigint      AS price_amount,

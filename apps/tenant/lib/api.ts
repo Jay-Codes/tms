@@ -348,6 +348,11 @@ export interface Property {
   notes: string | null;
   unit_counts: UnitCounts;
   created_at: string;
+  /**
+   * Phase 22 — the template this property's units are written on unless a
+   * unit names its own; null means the org default.
+   */
+  contract_template_id?: string | null;
 }
 
 export interface Price {
@@ -381,6 +386,18 @@ export interface Unit {
    * with nothing outstanding.
    */
   next_due_date?: string | null;
+  /** Phase 22 — the unit's own template; null inherits from its property. */
+  contract_template_id?: string | null;
+}
+
+/** Where a unit's template came from (Phase 22 resolution order). */
+export type TemplateSource = 'unit' | 'property' | 'default';
+
+/** `GET /units/{id}/template` — null when the org has no template at all. */
+export interface ResolvedTemplate {
+  id: string;
+  name: string;
+  source: TemplateSource;
 }
 
 export interface QrSheetItem {
@@ -474,6 +491,11 @@ export const propertiesApi = {
     api.post<{ items: Unit[] }>(`/properties/${id}/units/bulk`, body),
   qrSheet: (id: string, signal?: AbortSignal) =>
     api.get<{ items: QrSheetItem[] }>(`/properties/${id}/qr-sheet`, { signal }),
+  /** Phase 22. `null` puts the property back on the org default. */
+  setTemplate: (id: string, templateId: string | null) =>
+    api.put<{ contract_template_id: string | null }>(`/properties/${id}/template`, {
+      template_id: templateId,
+    }),
 };
 
 export const unitsApi = {
@@ -499,6 +521,18 @@ export const unitsApi = {
     period_days?: number;
     effective_from?: string;
   }) => api.post<{ items: Price[] }>('/units/bulk-price', body),
+  /** Phase 22: which template a tenancy of this unit would be written on, and why. */
+  template: (id: string, signal?: AbortSignal) =>
+    api.get<{ template: ResolvedTemplate | null }>(`/units/${id}/template`, { signal }),
+  /**
+   * Phase 22. `template_id` is always sent — `null` clears, so the units
+   * inherit from their property again. Ids outside the org match nothing.
+   */
+  bulkTemplate: (unitIds: string[], templateId: string | null) =>
+    api.post<{ updated: number; contract_template_id: string | null }>('/units/bulk-template', {
+      unit_ids: unitIds,
+      template_id: templateId,
+    }),
 };
 
 export const publicApi = {
@@ -657,10 +691,15 @@ export const linkRequestsApi = {
     ),
   get: (id: string, signal?: AbortSignal) =>
     api.get<LinkRequestDetail | LinkRequest>(`/link-requests/${id}`, { signal }),
-  /** Phase 4: approval also creates the contract, returned alongside the request. */
-  approve: (id: string) =>
+  /**
+   * Phase 4: approval also creates the contract, returned alongside the request.
+   * Phase 22: `templateId` writes it on that template; without it the unit's
+   * resolved template is used.
+   */
+  approve: (id: string, templateId?: string) =>
     api.post<{ request: LinkRequest; contract?: Contract } | LinkRequest>(
       `/link-requests/${id}/approve`,
+      templateId ? { template_id: templateId } : undefined,
     ),
   reject: (id: string, reason: string) =>
     api.post<{ request: LinkRequest } | LinkRequest>(`/link-requests/${id}/reject`, { reason }),
@@ -742,9 +781,34 @@ export const TEMPLATE_VARIABLES = [
   'org_name',
   'term_days',
   'due_day',
+  // Phase 22.2 — blank on a template without tenancy rules.
+  'deposit',
+  'tenant_notice_days',
+  'eviction_notice_days',
 ] as const;
 
 export type TemplateVariable = (typeof TEMPLATE_VARIABLES)[number];
+
+export type MoveOutProration = 'full_month' | 'pro_rata';
+export type EarlyExitPrepaid = 'refund' | 'forfeit' | 'landlord_decides';
+export type DepositMode = 'none' | 'fixed' | 'months';
+
+/**
+ * Phase 22.2 — the tenancy rules a template sets and each contract copies
+ * when it is written. On a template `deposit_amount` is the fixed amount and
+ * `deposit_months` the multiple; on a contract the deposit is always resolved
+ * to an amount. Fields the deposit mode does not use come back zeroed.
+ */
+export interface ContractPolicy {
+  move_out_proration: MoveOutProration;
+  early_exit_prepaid: EarlyExitPrepaid;
+  deposit_mode: DepositMode;
+  deposit_amount: number;
+  deposit_months: number;
+  deductions_may_exceed_deposit: boolean;
+  tenant_notice_days: number;
+  eviction_notice_days: number;
+}
 
 export interface ContractTemplateSummary {
   id: string;
@@ -752,6 +816,10 @@ export interface ContractTemplateSummary {
   is_default: boolean;
   updated_at: string;
   created_at: string;
+  /** Phase 22 — how many units and properties name this template. */
+  usage?: { units: number; properties: number };
+  /** Phase 22.2 — null (or absent, before 22.2) when it sets no rules. */
+  policy?: ContractPolicy | null;
 }
 
 export interface ContractTemplate extends ContractTemplateSummary {
@@ -826,6 +894,15 @@ export interface Contract {
   terminated_at: string | null;
   termination_reason: string | null;
   schedules_summary: SchedulesSummary | null;
+  /** Phase 22.2 — the rules copied from the template; null before Phase 22. */
+  policy?: ContractPolicy | null;
+  /**
+   * Phase 22.3 — unsigned by anyone and written before its template's wording
+   * or rules last changed. Only the single read computes it.
+   */
+  template_changed?: boolean;
+  /** Phase 22.3 — the contract this one was reissued from. */
+  supersedes_contract_id?: string | null;
 }
 
 export interface ContractDocument {
@@ -960,6 +1037,16 @@ export type BrandingAsset = 'logo' | 'letterhead';
 /* Phase 4 endpoint helpers (audience org)                              */
 /* ------------------------------------------------------------------ */
 
+/**
+ * `409 template_in_use` from `DELETE /contract-templates/{id}` (Phase 22)
+ * carries how many units and properties still name the template.
+ */
+export function templateInUse(err: unknown): { units: number; properties: number } | null {
+  if (!(err instanceof ApiError) || err.code !== 'template_in_use') return null;
+  const n = (v: unknown) => (typeof v === 'number' ? v : 0);
+  return { units: n(err.body.units), properties: n(err.body.properties) };
+}
+
 export const templatesApi = {
   list: (signal?: AbortSignal) =>
     api.get<{ items: ContractTemplateSummary[] }>('/contract-templates', { signal }),
@@ -972,6 +1059,7 @@ export const templatesApi = {
     body_html: string;
     body_html_sw?: string | null;
     is_default?: boolean;
+    policy?: ContractPolicy | null;
   }) => api.post<{ template: ContractTemplate } | ContractTemplate>('/contract-templates', body),
   update: (
     id: string,
@@ -980,12 +1068,22 @@ export const templatesApi = {
       body_html?: string;
       body_html_sw?: string | null;
       is_default?: boolean;
+      /** Absent leaves the rules, null clears them (Phase 22.2). */
+      policy?: ContractPolicy | null;
     },
-  ) => api.patch<{ template: ContractTemplate } | ContractTemplate>(`/contract-templates/${id}`, body),
+  ) =>
+    // Phase 22.3: `stale_pending` counts unsigned contracts still on the old content.
+    api.patch<({ template: ContractTemplate } | ContractTemplate) & { stale_pending?: number }>(
+      `/contract-templates/${id}`,
+      body,
+    ),
   remove: (id: string) => api.del<void>(`/contract-templates/${id}`),
   /** `language` picks which body is rendered; the backend defaults to English. */
   preview: (id: string, sample = true, language?: Locale) =>
     api.post<TemplatePreview>(`/contract-templates/${id}/preview`, { sample, language }),
+  /** Phase 22.3 — reissue every stale unsigned contract of this template, all or none. */
+  reissuePending: (id: string, reason?: string) =>
+    api.post<{ reissued: number }>(`/contract-templates/${id}/reissue-pending`, reason ? { reason } : {}),
 };
 
 export const contractsApi = {
@@ -1027,6 +1125,13 @@ export const contractsApi = {
   writeOff: (id: string, reason: string) =>
     api.post<WriteOffResult>(`/contracts/${id}/write-off`, { reason }),
   undoWriteOff: (id: string) => api.post<WriteOffResult>(`/contracts/${id}/write-off/undo`),
+  /**
+   * Phase 22.3 — withdraw an unsigned contract and write a new one on
+   * `template_id` (else its own, reworded, template). 201 with the NEW
+   * contract; 409 `not_pending_signature` / `already_signed`.
+   */
+  reissue: (id: string, body: { reason?: string; template_id?: string } = {}) =>
+    api.post<{ contract: Contract } | Contract>(`/contracts/${id}/reissue`, body),
 };
 
 /** `200 {periods, amount, schedules}` from write-off and its undo. */

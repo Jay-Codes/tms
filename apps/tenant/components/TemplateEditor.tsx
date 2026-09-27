@@ -27,6 +27,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { LOCALE_LABELS, useT, type Locale, type Translator } from '@tms/ui';
 import { Field, Note, ProblemNote } from './FormBits';
 import { DocumentPaper } from './DocumentPaper';
+import { PolicyEditor, toDraft, toPolicy, type PolicyDraft } from './PolicyBits';
 import {
   ApiError,
   TEMPLATE_VARIABLES,
@@ -53,6 +54,9 @@ const VARIABLE_KEYS: Record<string, string> = {
   org_name: 'tpl.var.org_name',
   term_days: 'tpl.var.term_days',
   due_day: 'tpl.var.due_day',
+  deposit: 'tpl.var.deposit',
+  tenant_notice_days: 'tpl.var.tenant_notice_days',
+  eviction_notice_days: 'tpl.var.eviction_notice_days',
 };
 
 const EDITOR_STYLE = `
@@ -244,6 +248,8 @@ export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
   const [template, setTemplate] = useState<ContractTemplate | null>(null);
   const [name, setName] = useState('');
   const [isDefault, setIsDefault] = useState(false);
+  // Phase 22.2: null = this template sets no tenancy rules.
+  const [policy, setPolicy] = useState<PolicyDraft | null>(null);
   const [loadError, setLoadError] = useState<ApiError | null>(null);
   const [saveError, setSaveError] = useState<ApiError | null>(null);
   const [previewError, setPreviewError] = useState<ApiError | null>(null);
@@ -251,6 +257,11 @@ export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
   const [busy, setBusy] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [saved, setSaved] = useState(false);
+  // Phase 22.3: unsigned contracts still on the wording before this save.
+  const [stalePending, setStalePending] = useState(0);
+  const [reissueError, setReissueError] = useState<ApiError | null>(null);
+  const [reissued, setReissued] = useState<number | null>(null);
+  const [reissuing, setReissuing] = useState(false);
 
   // Kept in a ref so the load effect can announce the template without making
   // an inline parent callback a dependency (and re-running the load).
@@ -300,6 +311,7 @@ export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
         setTemplate(tpl);
         setName(tpl.name ?? '');
         setIsDefault(Boolean(tpl.is_default));
+        setPolicy(tpl.policy ? toDraft(tpl.policy) : null);
         editorEn?.commands.setContent(tpl.body_html ?? '');
         editorSw?.commands.setContent(tpl.body_html_sw ?? '');
         setLoadError(null);
@@ -337,11 +349,16 @@ export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
         // the template back on the English fallback.
         body_html_sw: bodyOf(editorSw),
         is_default: isDefault,
+        policy: policy ? toPolicy(policy) : null,
       });
       const tpl = unwrapTemplate(res);
       setTemplate(tpl);
+      setStalePending(res.stale_pending ?? 0);
+      setReissued(null);
+      setReissueError(null);
       setName(tpl.name ?? name);
       setIsDefault(Boolean(tpl.is_default));
+      setPolicy(tpl.policy ? toDraft(tpl.policy) : null);
       setSaved(true);
       onSavedRef.current?.(tpl);
       await runPreview(lang);
@@ -349,6 +366,21 @@ export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
       setSaveError(toApiError(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const reissueAll = async () => {
+    if (!window.confirm(t.n('tpl.stale.confirm', stalePending))) return;
+    setReissuing(true);
+    setReissueError(null);
+    try {
+      const res = await templatesApi.reissuePending(templateId);
+      setReissued(res.reissued);
+      setStalePending(0);
+    } catch (e) {
+      setReissueError(toApiError(e));
+    } finally {
+      setReissuing(false);
     }
   };
 
@@ -379,6 +411,16 @@ export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
 
       <ProblemNote error={saveError} />
       {saved ? <Note>{t('tpl.saved')}</Note> : null}
+      <ProblemNote error={reissueError} />
+      {reissued !== null ? <Note>{t.n('tpl.stale.done', reissued)}</Note> : null}
+      {stalePending > 0 ? (
+        <p style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap', fontSize: 'var(--text-sm)' }}>
+          <span>{t.n('tpl.stale.count', stalePending)}</span>
+          <button type="button" className="btn btn-secondary" onClick={() => void reissueAll()} disabled={reissuing}>
+            {reissuing ? t('tpl.stale.reissuing') : t('tpl.stale.reissue_all')}
+          </button>
+        </p>
+      ) : null}
 
       <div
         // Editor and preview side by side only where both are usable: below
@@ -478,6 +520,15 @@ export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
           <p style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-faint)' }}>
             {t('tpl.variables_note', { example: '{{renter_name}}' })}
           </p>
+
+          <PolicyEditor
+            value={policy}
+            onChange={(d) => {
+              setPolicy(d);
+              setSaved(false);
+            }}
+            errors={saveError?.errors ?? {}}
+          />
 
           <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
             <button type="button" className="btn btn-primary" onClick={() => void save()} disabled={busy || !editor}>
