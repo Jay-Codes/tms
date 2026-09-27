@@ -323,10 +323,10 @@ Why: every approved application was written on the org's single default template
 - [x] Tenant UI: approve sheet shows/changes the template; property and unit settings; units bulk action; usage and delete (409 surfaced) on the templates list.
 
 ### 22.2 Contract policies on the template (client answers)
-- [x] Backend (migration 000024, `contract/policy.go`, tests incl. hash stability and verify after template change). [ ] Template editor UI. — Structured `policy` on templates, snapshotted on each contract and covered by the hash: `move_out_proration` (full_month|pro_rata), `early_exit_prepaid` (refund|forfeit|landlord_decides), `deposit` (none|fixed amount|N months) + `deductions_may_exceed_deposit`, `tenant_notice_days`, `eviction_notice_days`. New variables `{{deposit}}`, `{{notice_days}}` for the text. Existing contracts keep an empty policy (hash unchanged).
+- [x] Backend (migration 000024, `contract/policy.go`, tests incl. hash stability and verify after template change). [x] Template editor UI, contract rules block, templates-list chip. — Structured `policy` on templates, snapshotted on each contract and covered by the hash: `move_out_proration` (full_month|pro_rata), `early_exit_prepaid` (refund|forfeit|landlord_decides), `deposit` (none|fixed amount|N months) + `deductions_may_exceed_deposit`, `tenant_notice_days`, `eviction_notice_days`. New variables `{{deposit}}`, `{{notice_days}}` for the text. Existing contracts keep an empty policy (hash unchanged).
 
 ### 22.3 Stale unsigned contracts
-- [ ] Editing a template flags its `pending_signature` contracts "wording changed — reissue?"; reissue = withdraw + fresh contract from the same parameters (Phase 17 `reissue`).
+- [x] Backend: `content_updated_at` (migration 000025), `template_changed` on contracts, `stale_pending` on template save, `POST /contracts/{id}/reissue`, `POST /contract-templates/{id}/reissue-pending`; refused once anyone has signed. [ ] UI. — Editing a template flags its `pending_signature` contracts "wording changed — reissue?"; reissue = withdraw + fresh contract from the same parameters (Phase 17 `reissue`).
 
 ### 22.4 Contract changes (Phase 17 supersession)
 - [ ] Amend / renew / reissue as drafted in Phase 17, including switching template as an amendment.

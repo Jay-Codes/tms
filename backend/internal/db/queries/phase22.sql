@@ -57,3 +57,40 @@ RETURNING *;
 -- name: SetContractPolicy :exec
 UPDATE contracts SET policy = sqlc.arg(policy)
 WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND policy IS NULL;
+
+-- ------------------------------------------ §22.3 stale unsigned contracts --
+
+-- TouchTemplateContent records that a template's wording or policy changed.
+-- name: TouchTemplateContent :exec
+UPDATE contract_templates SET content_updated_at = now()
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND deleted_at IS NULL;
+
+-- ContractTemplateChanged: a contract nobody has signed yet, written before its
+-- template's wording or policy last changed.
+-- name: ContractTemplateChanged :one
+SELECT EXISTS (
+    SELECT 1 FROM contracts c
+    JOIN contract_templates t ON t.id = c.template_id AND t.org_id = c.org_id
+    WHERE c.org_id = sqlc.arg(org_id) AND c.id = sqlc.arg(id)
+      AND c.status = 'pending_signature' AND c.deleted_at IS NULL
+      AND c.created_at < t.content_updated_at
+      AND NOT EXISTS (SELECT 1 FROM contract_signatures cs
+                      WHERE cs.contract_id = c.id AND cs.org_id = c.org_id)
+) AS changed;
+
+-- ListStalePendingContracts is every unsigned contract on a template written
+-- before the template's wording or policy last changed.
+-- name: ListStalePendingContracts :many
+SELECT c.id FROM contracts c
+JOIN contract_templates t ON t.id = c.template_id AND t.org_id = c.org_id
+WHERE c.org_id = sqlc.arg(org_id) AND t.id = sqlc.arg(template_id)
+  AND c.status = 'pending_signature' AND c.deleted_at IS NULL
+  AND c.created_at < t.content_updated_at
+  AND NOT EXISTS (SELECT 1 FROM contract_signatures cs
+                  WHERE cs.contract_id = c.id AND cs.org_id = c.org_id)
+ORDER BY c.created_at;
+
+-- SetContractSupersedes links a reissued contract to the one it replaced.
+-- name: SetContractSupersedes :exec
+UPDATE contracts SET supersedes_contract_id = sqlc.arg(supersedes_contract_id)
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id);

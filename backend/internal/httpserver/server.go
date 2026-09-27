@@ -249,6 +249,9 @@ func (s *Server) routes() chi.Router {
 			r.Post("/units/bulk-template", s.handleBulkUnitTemplate)
 			r.Get("/units/{id}/template", s.handleGetUnitTemplate)
 			r.Put("/properties/{id}/template", s.handleSetPropertyTemplate)
+			// §22.3: unsigned contracts on reworded templates.
+			r.Post("/contracts/{id}/reissue", s.handleReissueContract)
+			r.Post("/contract-templates/{id}/reissue-pending", s.handleReissueStale)
 
 			// --- Phase 4: contracts ---
 			r.Get("/contracts", s.handleListContracts)

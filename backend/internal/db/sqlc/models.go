@@ -67,6 +67,7 @@ type Contract struct {
 	LinkRequestID            pgtype.UUID        `json:"link_request_id"`
 	Language                 string             `json:"language"`
 	Policy                   []byte             `json:"policy"`
+	SupersedesContractID     pgtype.UUID        `json:"supersedes_contract_id"`
 }
 
 type ContractSignature struct {
@@ -88,16 +89,17 @@ type ContractSignature struct {
 }
 
 type ContractTemplate struct {
-	ID         pgtype.UUID        `json:"id"`
-	OrgID      pgtype.UUID        `json:"org_id"`
-	Name       string             `json:"name"`
-	BodyHtml   string             `json:"body_html"`
-	IsDefault  bool               `json:"is_default"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt  pgtype.Timestamptz `json:"deleted_at"`
-	BodyHtmlSw string             `json:"body_html_sw"`
-	Policy     []byte             `json:"policy"`
+	ID               pgtype.UUID        `json:"id"`
+	OrgID            pgtype.UUID        `json:"org_id"`
+	Name             string             `json:"name"`
+	BodyHtml         string             `json:"body_html"`
+	IsDefault        bool               `json:"is_default"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
+	BodyHtmlSw       string             `json:"body_html_sw"`
+	Policy           []byte             `json:"policy"`
+	ContentUpdatedAt pgtype.Timestamptz `json:"content_updated_at"`
 }
 
 type Expense struct {

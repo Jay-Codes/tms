@@ -450,7 +450,30 @@ func (s *Server) reloadContract(
 		s.serverError(w, r, "contract.reload.signatures", err)
 		return contractResponse{}, false
 	}
-	return toContract(row, toSignatures(sigs)), true
+	out := toContract(row, toSignatures(sigs))
+	if !s.markTemplateChanged(w, r, row, &out) {
+		return contractResponse{}, false
+	}
+	return out, true
+}
+
+// markTemplateChanged sets `template_changed` on an unsigned contract whose
+// template was reworded after it was written (§22.3).
+func (s *Server) markTemplateChanged(
+	w http.ResponseWriter, r *http.Request, row sqlc.GetContractRow, out *contractResponse,
+) bool {
+	if row.Status != contractPendingSignature {
+		return true
+	}
+	changed, err := s.q.ContractTemplateChanged(r.Context(), sqlc.ContractTemplateChangedParams{
+		OrgID: row.OrgID, ID: row.ID,
+	})
+	if err != nil {
+		s.serverError(w, r, "contract.template_changed", err)
+		return false
+	}
+	out.TemplateChanged = changed
+	return true
 }
 
 // loadContract resolves the {id} route parameter for whichever audience is
@@ -611,7 +634,11 @@ func (s *Server) handleGetContract(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "contract.get.signatures", err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"contract": toContract(row, toSignatures(sigs))})
+	out := toContract(row, toSignatures(sigs))
+	if !s.markTemplateChanged(w, r, row, &out) {
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"contract": out})
 }
 
 // -------------------------------------------- GET /contracts/{id}/document --

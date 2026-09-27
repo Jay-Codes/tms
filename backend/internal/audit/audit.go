@@ -224,6 +224,10 @@ const (
 	// Phase 22 — which template a unit's or a property's tenancies use.
 	ActionUnitTemplateSet     = "unit.template_set"
 	ActionPropertyTemplateSet = "property.template_set"
+	// ActionContractReissue: an unsigned contract withdrawn and written again
+	// from the same terms (§22.3). The new contract's own `contract.create`
+	// row follows it.
+	ActionContractReissue = "contract.reissue"
 )
 
 // Entity types.

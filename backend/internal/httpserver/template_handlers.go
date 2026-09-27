@@ -245,6 +245,16 @@ func (s *Server) handlePatchTemplate(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
+		// §22.3: a change to what a contract would say (either body, or the
+		// policy) makes every unsigned contract on the old wording stale.
+		if updated.BodyHtml != existing.BodyHtml || updated.BodyHtmlSw != existing.BodyHtmlSw ||
+			string(updated.Policy) != string(existing.Policy) {
+			if err := q.TouchTemplateContent(r.Context(), sqlc.TouchTemplateContentParams{
+				OrgID: p.OrgID, ID: existing.ID,
+			}); err != nil {
+				return err
+			}
+		}
 		before := map[string]any{"name": existing.Name, "is_default": existing.IsDefault}
 		after := map[string]any{"name": updated.Name, "is_default": updated.IsDefault}
 		// The body itself is too large for the audit row, but its size makes a
@@ -281,7 +291,16 @@ func (s *Server) handlePatchTemplate(w http.ResponseWriter, r *http.Request) {
 	out.BodyHTML = updated.BodyHtml
 	out.BodyHTMLSW = updated.BodyHtmlSw
 	out.Variables = contract.Variables
-	WriteJSON(w, http.StatusOK, map[string]any{"template": out})
+	// How many unsigned contracts still carry the old wording, so the editor
+	// can offer to reissue them (§22.3).
+	stale, err := s.q.ListStalePendingContracts(r.Context(), sqlc.ListStalePendingContractsParams{
+		OrgID: p.OrgID, TemplateID: existing.ID,
+	})
+	if err != nil {
+		s.serverError(w, r, "template.update.stale", err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"template": out, "stale_pending": len(stale)})
 }
 
 // ------------------------------------------- DELETE /contract-templates/{id} --

@@ -130,7 +130,12 @@ type contractResponse struct {
 	SnapshotHash string `json:"snapshot_hash"`
 	// Policy is the rules this tenancy was signed under (Phase 22), null for
 	// a contract written without one.
-	Policy            *contract.Policy `json:"policy"`
+	Policy *contract.Policy `json:"policy"`
+	// SupersedesContractID names the contract this one replaced (§22.3).
+	SupersedesContractID *string `json:"supersedes_contract_id"`
+	// TemplateChanged: unsigned, and its template's wording or policy changed
+	// after it was written — offer a reissue. Set on the single read only.
+	TemplateChanged   bool             `json:"template_changed"`
 	Signatures        []signatureBlock `json:"signatures"`
 	LinkRequestID     *string          `json:"link_request_id"`
 	CreatedAt         time.Time        `json:"created_at"`
@@ -212,17 +217,18 @@ func toContract(r contractRow, signatures []signatureBlock) contractResponse {
 		RentPeriodDays: r.RentPeriodDays,
 		RentPerPeriod: contract.RentPerPeriod(
 			r.RentAmount, int(r.RentPeriodDays), int(r.PaymentPeriodDays)),
-		TermDays:     r.TermDays,
-		StartDate:    r.StartDate.Time.Format(dateLayout),
-		EndDate:      r.EndDate.Time.Format(dateLayout),
-		DueDay:       r.DueDay,
-		Language:     r.Language,
-		SnapshotHash: db.StrVal(r.SnapshotHash),
-		Policy:       parsedPolicy(r.Policy),
-		Signatures:   signatures,
-		CreatedAt:    r.CreatedAt.Time,
-		ActivatedAt:  timePtr(r.ActivatedAt.Valid, r.ActivatedAt.Time),
-		TerminatedAt: timePtr(r.TerminatedAt.Valid, r.TerminatedAt.Time),
+		TermDays:             r.TermDays,
+		StartDate:            r.StartDate.Time.Format(dateLayout),
+		EndDate:              r.EndDate.Time.Format(dateLayout),
+		DueDay:               r.DueDay,
+		Language:             r.Language,
+		SnapshotHash:         db.StrVal(r.SnapshotHash),
+		Policy:               parsedPolicy(r.Policy),
+		SupersedesContractID: optUUIDString(r.SupersedesContractID),
+		Signatures:           signatures,
+		CreatedAt:            r.CreatedAt.Time,
+		ActivatedAt:          timePtr(r.ActivatedAt.Valid, r.ActivatedAt.Time),
+		TerminatedAt:         timePtr(r.TerminatedAt.Valid, r.TerminatedAt.Time),
 
 		TerminationReason: r.TerminationReason,
 		SchedulesSummary: schedulesSummary{

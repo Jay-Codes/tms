@@ -11,6 +11,70 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const contractTemplateChanged = `-- name: ContractTemplateChanged :one
+SELECT EXISTS (
+    SELECT 1 FROM contracts c
+    JOIN contract_templates t ON t.id = c.template_id AND t.org_id = c.org_id
+    WHERE c.org_id = $1 AND c.id = $2
+      AND c.status = 'pending_signature' AND c.deleted_at IS NULL
+      AND c.created_at < t.content_updated_at
+      AND NOT EXISTS (SELECT 1 FROM contract_signatures cs
+                      WHERE cs.contract_id = c.id AND cs.org_id = c.org_id)
+) AS changed
+`
+
+type ContractTemplateChangedParams struct {
+	OrgID pgtype.UUID `json:"org_id"`
+	ID    pgtype.UUID `json:"id"`
+}
+
+// ContractTemplateChanged: a contract nobody has signed yet, written before its
+// template's wording or policy last changed.
+func (q *Queries) ContractTemplateChanged(ctx context.Context, arg ContractTemplateChangedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, contractTemplateChanged, arg.OrgID, arg.ID)
+	var changed bool
+	err := row.Scan(&changed)
+	return changed, err
+}
+
+const listStalePendingContracts = `-- name: ListStalePendingContracts :many
+SELECT c.id FROM contracts c
+JOIN contract_templates t ON t.id = c.template_id AND t.org_id = c.org_id
+WHERE c.org_id = $1 AND t.id = $2
+  AND c.status = 'pending_signature' AND c.deleted_at IS NULL
+  AND c.created_at < t.content_updated_at
+  AND NOT EXISTS (SELECT 1 FROM contract_signatures cs
+                  WHERE cs.contract_id = c.id AND cs.org_id = c.org_id)
+ORDER BY c.created_at
+`
+
+type ListStalePendingContractsParams struct {
+	OrgID      pgtype.UUID `json:"org_id"`
+	TemplateID pgtype.UUID `json:"template_id"`
+}
+
+// ListStalePendingContracts is every unsigned contract on a template written
+// before the template's wording or policy last changed.
+func (q *Queries) ListStalePendingContracts(ctx context.Context, arg ListStalePendingContractsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listStalePendingContracts, arg.OrgID, arg.TemplateID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const resolveUnitTemplate = `-- name: ResolveUnitTemplate :one
 
 SELECT t.id, t.name,
@@ -70,6 +134,23 @@ func (q *Queries) SetContractPolicy(ctx context.Context, arg SetContractPolicyPa
 	return err
 }
 
+const setContractSupersedes = `-- name: SetContractSupersedes :exec
+UPDATE contracts SET supersedes_contract_id = $1
+WHERE org_id = $2 AND id = $3
+`
+
+type SetContractSupersedesParams struct {
+	SupersedesContractID pgtype.UUID `json:"supersedes_contract_id"`
+	OrgID                pgtype.UUID `json:"org_id"`
+	ID                   pgtype.UUID `json:"id"`
+}
+
+// SetContractSupersedes links a reissued contract to the one it replaced.
+func (q *Queries) SetContractSupersedes(ctx context.Context, arg SetContractSupersedesParams) error {
+	_, err := q.db.Exec(ctx, setContractSupersedes, arg.SupersedesContractID, arg.OrgID, arg.ID)
+	return err
+}
+
 const setPropertyTemplate = `-- name: SetPropertyTemplate :one
 UPDATE properties SET contract_template_id = $1
 WHERE org_id = $2 AND id = $3 AND deleted_at IS NULL
@@ -99,7 +180,7 @@ const setTemplatePolicy = `-- name: SetTemplatePolicy :one
 
 UPDATE contract_templates SET policy = $1
 WHERE org_id = $2 AND id = $3 AND deleted_at IS NULL
-RETURNING id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw, policy
+RETURNING id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw, policy, content_updated_at
 `
 
 type SetTemplatePolicyParams struct {
@@ -124,6 +205,7 @@ func (q *Queries) SetTemplatePolicy(ctx context.Context, arg SetTemplatePolicyPa
 		&i.DeletedAt,
 		&i.BodyHtmlSw,
 		&i.Policy,
+		&i.ContentUpdatedAt,
 	)
 	return i, err
 }
@@ -198,4 +280,22 @@ func (q *Queries) TemplateUsage(ctx context.Context, orgID pgtype.UUID) ([]Templ
 		return nil, err
 	}
 	return items, nil
+}
+
+const touchTemplateContent = `-- name: TouchTemplateContent :exec
+
+UPDATE contract_templates SET content_updated_at = now()
+WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
+`
+
+type TouchTemplateContentParams struct {
+	OrgID pgtype.UUID `json:"org_id"`
+	ID    pgtype.UUID `json:"id"`
+}
+
+// ------------------------------------------ §22.3 stale unsigned contracts --
+// TouchTemplateContent records that a template's wording or policy changed.
+func (q *Queries) TouchTemplateContent(ctx context.Context, arg TouchTemplateContentParams) error {
+	_, err := q.db.Exec(ctx, touchTemplateContent, arg.OrgID, arg.ID)
+	return err
 }

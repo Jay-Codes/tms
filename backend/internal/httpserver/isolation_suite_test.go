@@ -282,6 +282,11 @@ var isoRoutes = []isoCase{
 	// ids from another org match nothing, so the bulk route answers 200 with
 	// updated: 0 — never touching org A.
 	{method: "GET", pattern: "/units/{id}/template", aud: isoOrg, path: "/units/{unitA}/template"},
+	{method: "POST", pattern: "/contracts/{id}/reissue", aud: isoOrg, path: "/contracts/{contractA}/reissue"},
+	{
+		method: "POST", pattern: "/contract-templates/{id}/reissue-pending", aud: isoOrg,
+		path: "/contract-templates/{templateA}/reissue-pending",
+	},
 	{
 		method: "PUT", pattern: "/properties/{id}/template", aud: isoOrg,
 		path: "/properties/{propertyA}/template", body: map[string]any{"template_id": nil},

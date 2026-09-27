@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -225,4 +226,188 @@ func (s *Server) handleGetUnitTemplate(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]any{"template": map[string]any{
 		"id": db.UUIDString(res.ID), "name": res.Name, "source": res.Source,
 	}})
+}
+
+// ----------------------------------------------- §22.3 reissue unsigned --
+
+const reissueReasonMax = 200
+
+// reissueTx withdraws one unsigned contract and writes it again from the same
+// terms — unit, renter, period, term, start, due day, language, application —
+// on the given template, or on its own template (now reworded), or on the
+// unit's resolved one if that template is gone. One SMS goes out: the new
+// contract's `contract_ready`; the withdrawal is not news to the renter.
+func (s *Server) reissueTx(
+	ctx context.Context, q *sqlc.Queries, row sqlc.GetContractRow, templateID pgtype.UUID, reason, actor string,
+) (sqlc.Contract, string, error) {
+	if !templateID.Valid && row.TemplateID.Valid {
+		if _, err := q.GetContractTemplate(ctx, sqlc.GetContractTemplateParams{
+			OrgID: row.OrgID, ID: row.TemplateID,
+		}); err == nil {
+			templateID = row.TemplateID
+		} else if !isNoRows(err) {
+			return sqlc.Contract{}, "", err
+		}
+	}
+	withdrawn := "Reissued: " + reason
+	if _, err := q.TerminateContract(ctx, sqlc.TerminateContractParams{
+		OrgID: row.OrgID, ID: row.ID, TerminationReason: &withdrawn,
+		TerminationEffectiveDate: pgtype.Date{Time: todayEAT(), Valid: true},
+	}); err != nil {
+		return sqlc.Contract{}, "", err
+	}
+	created, notifyID, err := s.createContractTx(ctx, q, contractInput{
+		OrgID: row.OrgID, UnitID: row.UnitID, RenterUserID: row.RenterUserID,
+		TemplateID: templateID, PaymentPeriodID: row.PaymentPeriodID, TermDays: row.TermDays,
+		StartDate: row.StartDate.Time, DueDay: row.DueDay, LinkRequestID: row.LinkRequestID,
+		ActorUserID: actor, Language: row.Language,
+	})
+	if err != nil {
+		return sqlc.Contract{}, "", err
+	}
+	if err := q.SetContractSupersedes(ctx, sqlc.SetContractSupersedesParams{
+		SupersedesContractID: row.ID, OrgID: row.OrgID, ID: created.ID,
+	}); err != nil {
+		return sqlc.Contract{}, "", err
+	}
+	if err := audit.Record(ctx, q, audit.Entry{
+		OrgID:       db.UUIDString(row.OrgID),
+		ActorUserID: actor,
+		Action:      audit.ActionContractReissue,
+		EntityType:  audit.EntityContract,
+		EntityID:    db.UUIDString(row.ID),
+		After:       map[string]any{"reason": reason, "new_contract_id": db.UUIDString(created.ID)},
+	}); err != nil {
+		return sqlc.Contract{}, "", err
+	}
+	return created, notifyID, nil
+}
+
+func reissueReason(f validate.Fields, raw string) string {
+	reason := f.MaxLen("reason", strings.TrimSpace(raw), reissueReasonMax)
+	if reason == "" {
+		reason = "contract wording updated"
+	}
+	return reason
+}
+
+// handleReissueContract is POST /contracts/{id}/reissue {reason?, template_id?}.
+func (s *Server) handleReissueContract(w http.ResponseWriter, r *http.Request) {
+	if s.dbUnavailable(w) {
+		return
+	}
+	p := auth.MustFromContext(r.Context())
+	row, ok := s.loadContract(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Reason     string `json:"reason"`
+		TemplateID string `json:"template_id"`
+	}
+	if !DecodeJSONOptional(w, r, &body) {
+		return
+	}
+	f := validate.Fields{}
+	reason := reissueReason(f, body.Reason)
+	templateID := uuidField(f, "template_id", body.TemplateID, false)
+	if !f.Empty() {
+		badRequest(w, f)
+		return
+	}
+	if row.Status != contractPendingSignature {
+		conflictCode(w, "not_pending_signature", "contract already signed or closed",
+			"only a contract still awaiting signature can be reissued")
+		return
+	}
+	// A signature — even the renter's alone, before activation — is on the
+	// old wording; replacing it silently would discard what they agreed to.
+	sigs, err := s.q.ListContractSignatures(r.Context(), sqlc.ListContractSignaturesParams{
+		OrgID: row.OrgID, ContractID: row.ID,
+	})
+	if err != nil {
+		s.serverError(w, r, "contract.reissue.signatures", err)
+		return
+	}
+	if len(sigs) > 0 {
+		conflictCode(w, "already_signed", "contract already signed",
+			"a signed contract is changed by an amendment, not a reissue")
+		return
+	}
+	var created sqlc.Contract
+	var notifyID string
+	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
+		var err error
+		created, notifyID, err = s.reissueTx(r.Context(), q, row, templateID, reason, p.UserIDString())
+		return err
+	}); err != nil {
+		if writeCreateError(w, err) {
+			return
+		}
+		s.serverError(w, r, "contract.reissue.tx", err)
+		return
+	}
+	s.enqueueNotifications(r.Context(), notifyID)
+	out, ok := s.reloadContract(w, r, created.ID, p.OrgID, pgtype.UUID{})
+	if !ok {
+		return
+	}
+	WriteJSON(w, http.StatusCreated, map[string]any{"contract": out})
+}
+
+// handleReissueStale is POST /contract-templates/{id}/reissue-pending
+// {reason?}: every unsigned contract still on the template's old wording is
+// reissued, all or none.
+func (s *Server) handleReissueStale(w http.ResponseWriter, r *http.Request) {
+	if s.dbUnavailable(w) {
+		return
+	}
+	p := auth.MustFromContext(r.Context())
+	tpl, ok := s.orgTemplate(w, r, p)
+	if !ok {
+		return
+	}
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if !DecodeJSONOptional(w, r, &body) {
+		return
+	}
+	f := validate.Fields{}
+	reason := reissueReason(f, body.Reason)
+	if !f.Empty() {
+		badRequest(w, f)
+		return
+	}
+	var notifyIDs []string
+	var reissued int
+	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
+		ids, err := q.ListStalePendingContracts(r.Context(), sqlc.ListStalePendingContractsParams{
+			OrgID: p.OrgID, TemplateID: tpl.ID,
+		})
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			row, err := q.GetContract(r.Context(), sqlc.GetContractParams{ID: id, OrgID: p.OrgID})
+			if err != nil {
+				return err
+			}
+			_, notifyID, err := s.reissueTx(r.Context(), q, row, pgtype.UUID{}, reason, p.UserIDString())
+			if err != nil {
+				return err
+			}
+			notifyIDs = append(notifyIDs, notifyID)
+			reissued++
+		}
+		return nil
+	}); err != nil {
+		if writeCreateError(w, err) {
+			return
+		}
+		s.serverError(w, r, "template.reissue_pending.tx", err)
+		return
+	}
+	s.enqueueNotifications(r.Context(), notifyIDs...)
+	WriteJSON(w, http.StatusOK, map[string]any{"reissued": reissued})
 }

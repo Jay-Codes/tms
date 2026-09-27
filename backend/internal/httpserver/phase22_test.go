@@ -198,3 +198,62 @@ func policyNum(t *testing.T, body map[string]any, key string) float64 {
 	p, _ := c["policy"].(map[string]any)
 	return mustFloat(t, p, key)
 }
+
+// ------------------------------------------ 22.3 stale unsigned contracts --
+
+func TestPhase22ReissueAfterTheTemplateChanges(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newContractFixture(t, "Reissue", "0722000400", "+255722000401")
+	c := fix.owner
+	old := c.do(http.MethodGet, "/contracts/"+fix.contractID, nil).mustStatus(t, http.StatusOK, "contract")
+	tplID := old.str(t, "contract", "template_id")
+
+	// A rename is not a change of wording.
+	c.do(http.MethodPatch, "/contract-templates/"+tplID, map[string]any{"name": "Renamed"}).
+		mustStatus(t, http.StatusOK, "rename template")
+	if b, _ := c.do(http.MethodGet, "/contracts/"+fix.contractID, nil).Body["contract"].(map[string]any)["template_changed"].(bool); b {
+		t.Error("template_changed after a rename only")
+	}
+
+	patched := c.do(http.MethodPatch, "/contract-templates/"+tplID, map[string]any{
+		"body_html":    "<h1>New wording</h1><p>Rent {{rent}} for {{unit}}.</p>",
+		"body_html_sw": "<h1>New wording</h1><p>Kodi {{rent}} kwa {{unit}}.</p>",
+	}).mustStatus(t, http.StatusOK, "reword template")
+	if got := mustFloat(t, patched.Body, "stale_pending"); got != 1 {
+		t.Errorf("stale_pending = %v, want 1", got)
+	}
+	if b, _ := c.do(http.MethodGet, "/contracts/"+fix.contractID, nil).Body["contract"].(map[string]any)["template_changed"].(bool); !b {
+		t.Error("template_changed not set after rewording")
+	}
+
+	re := c.do(http.MethodPost, "/contracts/"+fix.contractID+"/reissue", map[string]any{"reason": "clause 3 fixed"}).
+		mustStatus(t, http.StatusCreated, "reissue")
+	newID := re.str(t, "contract", "id")
+	if got := re.str(t, "contract", "supersedes_contract_id"); got != fix.contractID {
+		t.Errorf("supersedes = %s, want %s", got, fix.contractID)
+	}
+	if got := re.str(t, "contract", "status"); got != "pending_signature" {
+		t.Errorf("new status = %s", got)
+	}
+	if got := c.do(http.MethodGet, "/contracts/"+fix.contractID, nil).str(t, "contract", "status"); got != "terminated" {
+		t.Errorf("old status = %s, want terminated", got)
+	}
+	doc := c.do(http.MethodGet, "/contracts/"+newID+"/document", nil).mustStatus(t, http.StatusOK, "doc")
+	if !strings.Contains(doc.Raw, "New wording") {
+		t.Error("reissued contract is not on the new wording")
+	}
+
+	// Once signed, a contract is never reissued — that is an amendment.
+	h.signAsRenter(t, fix.renter, newID, fix.renterPhone)
+	signed := c.do(http.MethodPost, "/contracts/"+newID+"/reissue", nil)
+	if signed.Code != http.StatusConflict {
+		t.Errorf("reissue signed = %d, want 409", signed.Code)
+	}
+
+	// The template-wide call finds nothing left to do.
+	all := c.do(http.MethodPost, "/contract-templates/"+tplID+"/reissue-pending", nil).
+		mustStatus(t, http.StatusOK, "reissue pending")
+	if got := mustFloat(t, all.Body, "reissued"); got != 0 {
+		t.Errorf("reissued = %v, want 0", got)
+	}
+}
