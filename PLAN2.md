@@ -192,7 +192,7 @@ import_rows      id, batch_id, org_id, line INT, raw JSONB, errors JSONB NULLABL
 
 ---
 
-## Phase 17 — Contracts: revoke, amend, re-sign, renew (#17) — 📝 draft, to discuss with the client before scoping
+## Phase 17 — Contracts: revoke, amend, re-sign, renew (#17) — ✅ built as Phase 22.3/22.4 (27 Sep 2026) with the defaults below
 
 What exists today: `POST /contracts/{id}/terminate` (works from `pending_signature`, `active`, `expiring` — cancelling an unsigned contract is the same call), the `landlord_recorded` countersign path, `expiring` at ~30 days, and the rule that a signed document is **never edited** (snapshot hash, FLOWS 3 edge case: "landlord terminates and issues a new contract"). Anything below must keep that rule: a change is always a **new document** the renter signs again.
 
@@ -218,7 +218,7 @@ Open questions for the client (defaults applied if unanswered):
 
 ---
 
-## Phase 18 — Landlord-assisted onboarding (OTP fallback, in person) (1 day) — 🔨 in progress, 20 Sep 2026, branch `phase-18-assisted-onboarding`
+## Phase 18 — Landlord-assisted onboarding (OTP fallback, in person) (1 day) — 🟡 backend done; two screens left → Phase 25
 
 Why: Beem accepted the OTP but left it `pending`; the renter never got a code and had no way forward. Landlord and renter are usually in the same room at onboarding (QR on the door), so the landlord's screen becomes the code channel. No SMS, no provider dependency. FLOWS 2b, SPEC §3 / §4 / §5.15.
 
@@ -306,14 +306,14 @@ What exists: Phase 16 `payments` CSV import allocates rows against a contract's 
 - [x] Reports: collection rate and revenue by default **exclude** `source=backfill` payments from the *period they are recorded in* and count them in the period their `paid_at` falls in (that is what `paid_at` is for) — verify the report queries bucket by `paid_at`, not `created_at`; add a test with a backfilled year.
 - [x] Tests: past `start_date` accepted for manual/import, refused for application; backfill paid/waived; skips paid rows; 409/422 branches; renter sees chips; single SMS; audit rows; report bucketing by `paid_at`; import row before first schedule gets the hint.
 
-## Phase 21 — Field feedback round 2 + arrears after move-out (27 Sep 2026) — 🔨 in progress, branch `phase-21-rename-after-sign`
+## Phase 21 — Field feedback round 2 + arrears after move-out — ✅ done 27 Sep 2026
 
 - [x] Landlord renames a renter **after signing** (client decision): `PATCH /renters/{user_id}` takes `reason` (required once signed with this org), SMS always sent after a signature, 409 `renter_signed_elsewhere` when signed with another org. Tenant sheet gains the reason box. DECISIONS row supersedes Phase 19.3's.
 - [x] Pagination (Phase 23, branch `phase-23-pagination`): `GET /reports/payment-status` and `/reports/upcoming` page the finished list (offset cursor, totals/counts over the whole list); tenant payments, schedules tabs, due soon, contracts, contract payments, units, renters, link requests, notifications log, properties and the payment-status report gain Load more; new-contract pickers search as you type; the countersign badge follows the cursor (capped). `/me/schedules` stays whole (bounded per renter).
 - [x] **Arrears after move-out** (priority 1 of the unhappy-path catalogue): payments and proofs accepted on `ended`/`terminated` contracts; `GET /arrears` (Payments → Former tenants); owner-only, reversible `write-off` with new schedule status `written_off` (migration 000022). Tests: payment on a terminated contract, overpay refused, write-off/undo, write-off refused on a running contract, isolation.
-- [ ] Next (Phase 22, client answers 27 Sep: all landlord-configured, stipulated by contract): settle-up on termination (proration full|pro-rata, prepaid refund|forfeit, partial credit), deposits (amount, deductions, refund), single-period waive/discount, eviction stages with SW+EN letters, renter notice to leave, holdover alert. Depends on template policy fields — see Phase 22 templates.
+- [x] Next → built as Phase 22 (templates, policies, settle-up, deposits, unhappy paths).
 
-## Phase 22 — Contract templates per unit, contract policies, contract changes (27 Sep 2026) — 🔨 in progress, branch `phase-22-templates`
+## Phase 22 — Contract templates per unit, contract policies, contract changes, unhappy paths — ✅ done 27 Sep 2026
 
 Why: every approved application was written on the org's single default template; a landlord with shops and flats, or different blocks, needs different agreements, needs to choose one for a particular renter, and needs a way to change a contract after signing. The client's unhappy-path answers (27 Sep) put proration, prepaid refunds, deposits and notice periods in the contract, configured by the landlord.
 
@@ -335,10 +335,53 @@ Why: every approved application was written on the org's single default template
 - [x] Backend: termination settlement by policy (pro-rata straddle, prepaid refund/forfeit/landlord choice, refund ledger, reports net of refunds), preview endpoint, deposit ledger incl. applying deposit to rent; migration 000027; tests. [ ] UI.
 - [x] Backend (migration 000028, tests): single-period waive/discount with undo; renter/landlord notice to leave checked against the contract's notice days; holdover list, moved-out confirmation and renewal of an ended tenancy; eviction cases demand → notice → withdrawn/vacated with SMS and SW/EN letters. [x] UI: ledger relief + undo, notice banner/record/withdraw (both apps), eviction section with stepper and SW/EN letter printing, holdover and open-eviction cards on the contracts list.
 
-## Phase 24 — Payment corrections and landlord notices (27 Sep 2026) — 🔨 branch `phase-24-payment-corrections`
+## Phase 23 — Pagination — ✅ done 27 Sep 2026 (recorded under Phase 21 above)
+
+## Phase 24 — Payment corrections and landlord notices — ✅ done 27 Sep 2026
 
 - [x] Backend (migration 000029, tests): duplicate guard on record payment and proof accept (`possible_duplicate`, `confirm_duplicate`), `Idempotency-Key` replay, `POST /payments/{id}/correct` (reverse + record in one transaction), renter SMS on reversal/correction, landlord in-app inbox (`/inbox`) fed by reversals, corrections, confirmed duplicates, proofs submitted and renters' notices.
 - [x] Tenant UI: duplicate confirm step on record/accept (Idempotency-Key per sheet), Correct sheet on payments, bell with unread count, /inbox page.
+
+## Phase 25 — Finish landlord-assisted onboarding (Phase 18.2 screens) (½ day) — 📋 next
+
+Why: a renter whose OTP SMS never arrives cannot register or sign. The backend (assist sessions, code shown in person, witnessed signature) shipped in Phase 18; the two screens that use it did not.
+- [ ] Tenant `renters/assist`: start a session for a phone + unit, show the 6-digit code large with a QR and countdown, "New code", live status (5 s poll), "Review & approve" deep link when the renter has applied; entry points from the unit page and the link-requests page.
+- [ ] Enduser `/u/{unit_code}?assist=`: register/login hide "Send code" and ask for "the code your landlord shows you", no resend; the sign page reads the same.
+- [ ] Tests in the browser against the Phase 18 API; UAT row.
+
+## Phase 26 — Backfill: undo a whole backfill, bulk backfill by CSV (1 day) — 📋 planned
+
+Why: client ask #2 (27 Sep): "make it reversible and support bulk upload via CSV". Today each backfilled payment reverses one at a time and a *waived* backfill cannot be undone at all.
+- [ ] Migration: `backfill_batches` (org, contract, mode, until, created_by, undone_at); `payments.backfill_batch_id`; `payment_schedules.backfill_batch_id` for waived rows.
+- [ ] `POST /contracts/{id}/backfill` records its batch; `GET /contracts/{id}/backfills`; `POST /backfills/{id}/undo` — reverses the batch's payments through the normal reversal path and un-waives its rows (status recomputed); allowed while no later non-backfill payment touched those periods (409 `touched_since` otherwise), no fixed time window.
+- [ ] CSV import kind `backfill` (reuses the Phase 16 preview → commit → undo pipeline, 2 MiB): one row per tenancy — `renter_phone, unit_code, until, mode (paid|waived), paid_at?, method?, reference?, note?`; preview shows "N periods · TZS X" per row; one bad row blocks the commit; downloadable template.
+- [ ] Tenant UI: "Backfills" list on the contract page with Undo; import page gains the Backfill kind.
+- [ ] Tests: batch undo (paid and waived), refusal when touched, CSV preview/commit/undo, isolation.
+
+## Phase 27 — SMS credits: buy with mobile money (Snippe) + platform SMS stock (2 days) — ⏸ blocked on client inputs
+
+Why: client ask (27 Sep): landlords buy SMS credits themselves; the platform tracks its own SMS stock. Today only platform admin tops up.
+Needs from the client: **bundle sizes and prices**, **Snippe API key + webhook signing key** (and whether Snippe has a sandbox), VAT/receipt requirements, whether a landlord may pay from a phone other than their account phone.
+- [ ] TECHSTACK first: Snippe as the payment provider (REST, `POST /v1/payments` USSD push, HMAC-SHA256 webhooks, TZS only, min 500, 2.5% fee).
+- [ ] Migration: `sms_credit_packages` (admin-managed: credits, price), `sms_credit_orders` (org, package, amount, payer phone, short order code ≤30 chars as idempotency key, snippe reference, status pending|completed|failed|expired, credited_at), `snippe_webhook_events` (event id unique, for dedupe).
+- [ ] `POST /org/sms-credits/orders {package_id, phone}` → USSD push; `POST /webhooks/snippe` (public via proxy/nginx): verify signature + timestamp ≤5 min, dedupe by event id, check amount/reference, then in one transaction complete the order and credit the org through the existing top-up path (ledger reason `purchase`, which also releases held messages); reconciliation poller `GET /v1/payments/{ref}` for orders pending >5 min, expire at 4 h.
+- [ ] Platform SMS stock: `platform_sms_purchases` (Beem bundles bought: sms count, cost); admin dashboard — Beem balance vs credits sold and unused (liability), alert when stock < liability + buffer; margin report (sales − Beem cost − Snippe fee).
+- [ ] UI: landlord Settings → Notifications "Buy credits" (bundles, phone, waiting-for-approval state, history); admin packages editor, orders list, stock page.
+- [ ] Tests with a fake Snippe (httptest), signature and replay cases.
+
+## Phase 28 — Projections, break-even and ROI (2 days) — ⏸ needs client confirmation of inputs
+
+Why: client ask #6 (27 Sep): projections and simulations of profit and expenses, break-even, ROI.
+Needs from the client: confirm the inputs per property (purchase price, purchase date, current value) and whether renovations count as investment (a "capital" expense category).
+- [ ] Migration: `properties.purchase_price`, `purchase_date`, `current_value`; `expense_categories.is_capital`.
+- [ ] `POST /reports/projection {property_id?, horizon_months, rent_change_pct, occupancy_pct, collection_rate_pct, expense_change_pct}` (backend-computed, no business logic in the frontend): baseline = future schedules of running tenancies × trailing-12-month collection rate; vacant units at last rent × assumed occupancy; expenses = trailing-12-month average per category. Returns monthly projected net, cumulative cash vs investment, **break-even month**, ROI (annual net ÷ investment), yield (net ÷ current value), payback years — per property and for the portfolio.
+- [ ] Reports → "Projections" tab: scenario sliders re-querying the endpoint, chart of cumulative cash vs investment with the break-even point, saved named scenarios.
+- [ ] Tests: projection arithmetic against hand-computed fixtures.
+
+## Operations (not phases)
+- [ ] **Deploy** the merged work: `make docker-publish` then `make docker-deploy TAG=…` on the server (client-side step; frontends on Vercel already build from `main` and call the new routes).
+- [ ] **Local MinIO image**: `minio/minio` no longer pulls from Docker Hub; pin a mirror or alternative so `make up` works again (4 storage tests fail locally without it).
+- [ ] **Live Beem smoke test** once the sender ID is approved (PLAN.md).
 
 ## Open questions (answer whenever; defaults applied if unanswered)
 
