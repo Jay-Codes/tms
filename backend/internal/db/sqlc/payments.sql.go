@@ -23,7 +23,7 @@ VALUES (
     $8, $9, $10,
     COALESCE($11::text, 'manual')
 )
-RETURNING id, org_id, contract_id, schedule_id, amount, method, reference, paid_at, recorded_by_user_id, note, status, created_at, updated_at, deleted_at, reversed_at, reversal_reason, reversed_by_user_id, import_batch_id, source, idempotency_key, corrects_payment_id
+RETURNING id, org_id, contract_id, schedule_id, amount, method, reference, paid_at, recorded_by_user_id, note, status, created_at, updated_at, deleted_at, reversed_at, reversal_reason, reversed_by_user_id, import_batch_id, source, idempotency_key, corrects_payment_id, backfill_batch_id
 `
 
 type CreatePaymentParams struct {
@@ -89,6 +89,7 @@ func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (P
 		&i.Source,
 		&i.IdempotencyKey,
 		&i.CorrectsPaymentID,
+		&i.BackfillBatchID,
 	)
 	return i, err
 }
@@ -127,7 +128,7 @@ func (q *Queries) CreatePaymentAllocation(ctx context.Context, arg CreatePayment
 }
 
 const getPayment = `-- name: GetPayment :one
-SELECT p.id, p.org_id, p.contract_id, p.schedule_id, p.amount, p.method, p.reference, p.paid_at, p.recorded_by_user_id, p.note, p.status, p.created_at, p.updated_at, p.deleted_at, p.reversed_at, p.reversal_reason, p.reversed_by_user_id, p.import_batch_id, p.source, p.idempotency_key, p.corrects_payment_id,
+SELECT p.id, p.org_id, p.contract_id, p.schedule_id, p.amount, p.method, p.reference, p.paid_at, p.recorded_by_user_id, p.note, p.status, p.created_at, p.updated_at, p.deleted_at, p.reversed_at, p.reversal_reason, p.reversed_by_user_id, p.import_batch_id, p.source, p.idempotency_key, p.corrects_payment_id, p.backfill_batch_id,
        c.renter_user_id, c.unit_id,
        u.name AS unit_name, pr.name AS property_name,
        ru.full_name AS renter_name,
@@ -171,6 +172,7 @@ type GetPaymentRow struct {
 	Source            string             `json:"source"`
 	IdempotencyKey    *string            `json:"idempotency_key"`
 	CorrectsPaymentID pgtype.UUID        `json:"corrects_payment_id"`
+	BackfillBatchID   pgtype.UUID        `json:"backfill_batch_id"`
 	RenterUserID      pgtype.UUID        `json:"renter_user_id"`
 	UnitID            pgtype.UUID        `json:"unit_id"`
 	UnitName          string             `json:"unit_name"`
@@ -205,6 +207,7 @@ func (q *Queries) GetPayment(ctx context.Context, arg GetPaymentParams) (GetPaym
 		&i.Source,
 		&i.IdempotencyKey,
 		&i.CorrectsPaymentID,
+		&i.BackfillBatchID,
 		&i.RenterUserID,
 		&i.UnitID,
 		&i.UnitName,
@@ -309,7 +312,7 @@ func (q *Queries) ListAllocationsForPaymentsAnyOrg(ctx context.Context, paymentI
 }
 
 const listPayments = `-- name: ListPayments :many
-SELECT p.id, p.org_id, p.contract_id, p.schedule_id, p.amount, p.method, p.reference, p.paid_at, p.recorded_by_user_id, p.note, p.status, p.created_at, p.updated_at, p.deleted_at, p.reversed_at, p.reversal_reason, p.reversed_by_user_id, p.import_batch_id, p.source, p.idempotency_key, p.corrects_payment_id,
+SELECT p.id, p.org_id, p.contract_id, p.schedule_id, p.amount, p.method, p.reference, p.paid_at, p.recorded_by_user_id, p.note, p.status, p.created_at, p.updated_at, p.deleted_at, p.reversed_at, p.reversal_reason, p.reversed_by_user_id, p.import_batch_id, p.source, p.idempotency_key, p.corrects_payment_id, p.backfill_batch_id,
        c.renter_user_id, c.unit_id,
        u.name AS unit_name, pr.name AS property_name,
        ru.full_name AS renter_name,
@@ -369,6 +372,7 @@ type ListPaymentsRow struct {
 	Source            string             `json:"source"`
 	IdempotencyKey    *string            `json:"idempotency_key"`
 	CorrectsPaymentID pgtype.UUID        `json:"corrects_payment_id"`
+	BackfillBatchID   pgtype.UUID        `json:"backfill_batch_id"`
 	RenterUserID      pgtype.UUID        `json:"renter_user_id"`
 	UnitID            pgtype.UUID        `json:"unit_id"`
 	UnitName          string             `json:"unit_name"`
@@ -420,6 +424,7 @@ func (q *Queries) ListPayments(ctx context.Context, arg ListPaymentsParams) ([]L
 			&i.Source,
 			&i.IdempotencyKey,
 			&i.CorrectsPaymentID,
+			&i.BackfillBatchID,
 			&i.RenterUserID,
 			&i.UnitID,
 			&i.UnitName,
@@ -444,7 +449,7 @@ SET status = 'reversed', reversed_at = now(),
     reversed_by_user_id = $2
 WHERE org_id = $3 AND id = $4
   AND status = 'recorded' AND deleted_at IS NULL
-RETURNING id, org_id, contract_id, schedule_id, amount, method, reference, paid_at, recorded_by_user_id, note, status, created_at, updated_at, deleted_at, reversed_at, reversal_reason, reversed_by_user_id, import_batch_id, source, idempotency_key, corrects_payment_id
+RETURNING id, org_id, contract_id, schedule_id, amount, method, reference, paid_at, recorded_by_user_id, note, status, created_at, updated_at, deleted_at, reversed_at, reversal_reason, reversed_by_user_id, import_batch_id, source, idempotency_key, corrects_payment_id, backfill_batch_id
 `
 
 type ReversePaymentParams struct {
@@ -486,6 +491,7 @@ func (q *Queries) ReversePayment(ctx context.Context, arg ReversePaymentParams) 
 		&i.Source,
 		&i.IdempotencyKey,
 		&i.CorrectsPaymentID,
+		&i.BackfillBatchID,
 	)
 	return i, err
 }

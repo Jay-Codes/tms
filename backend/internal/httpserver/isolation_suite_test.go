@@ -1,6 +1,7 @@
 package httpserver_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sort"
@@ -463,6 +464,16 @@ var isoRoutes = []isoCase{
 		path: "/imports/{importBatchA}/undo",
 	},
 
+	// ------------------------------------------- backfill batches (Phase 26) --
+	//
+	// Listing another org's backfills is the same 404 as reading their
+	// contract; undoing one is the same 404 as reversing their payment.
+	{method: "GET", pattern: "/contracts/{id}/backfills", aud: isoOrg, path: "/contracts/{contractA}/backfills"},
+	{
+		method: "POST", pattern: "/backfills/{id}/undo", aud: isoOrg,
+		path: "/backfills/{backfillA}/undo", body: map[string]any{"reason": "hijack"},
+	},
+
 	// ----------------------------------- assisted onboarding (Phase 18) --
 	//
 	// A session is a renter's phone number and the code slot it owns, so org
@@ -900,6 +911,8 @@ var isoSecretIDs = []string{
 	// Phase 18: an assist session is a renter's phone number and the code slot
 	// it owns; its id is the handle to both.
 	"assistA",
+	// Phase 26: a backfill batch is one org's decision about its rent book.
+	"backfillA",
 }
 
 func (f *isoFixture) secrets() map[string]string {
@@ -989,6 +1002,18 @@ func newIsoFixture(t *testing.T, h *harness) *isoFixture {
 	f.ids["importBatchA"] = base.owner.importPreview(t, "units",
 		"iso-alpha.csv", "property,unit,rent_amount\nIso Alpha Block,Z9,150000\n").
 		mustStatus(t, http.StatusCreated, "org A import preview").str(t, "batch", "id")
+
+	// A backfill batch (Phase 26), written straight into the table: the
+	// fixture's contract has nothing past due for a real backfill to settle,
+	// and what the suite needs is only a batch of A's for B to try to reach.
+	var backfillA string
+	if err := h.pool.QueryRow(context.Background(),
+		`INSERT INTO backfill_batches (org_id, contract_id, mode, until, periods, amount)
+		 VALUES ($1, $2, 'waived', CURRENT_DATE, 1, 1000) RETURNING id::text`,
+		base.orgID, base.contractID).Scan(&backfillA); err != nil {
+		t.Fatalf("org A backfill batch: %v", err)
+	}
+	f.ids["backfillA"] = backfillA
 
 	// An open assist session (Phase 18): one org's in-person onboarding, with
 	// the renter's phone number on it, for the other org to try to read,

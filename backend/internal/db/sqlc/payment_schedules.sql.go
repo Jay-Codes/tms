@@ -20,7 +20,7 @@ SET paid_amount = $1,
         ELSE 'partial'
     END
 WHERE org_id = $2 AND id = $3 AND deleted_at IS NULL
-RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id
+RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id
 `
 
 type ApplyPaymentToScheduleParams struct {
@@ -56,6 +56,7 @@ func (q *Queries) ApplyPaymentToSchedule(ctx context.Context, arg ApplyPaymentTo
 		&i.AdjustmentReason,
 		&i.AdjustedAt,
 		&i.AdjustedByUserID,
+		&i.BackfillBatchID,
 	)
 	return i, err
 }
@@ -67,7 +68,7 @@ VALUES (
     $1, $2, $3,
     $4, $5, $6
 )
-RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id
+RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id
 `
 
 type CreatePaymentScheduleParams struct {
@@ -113,12 +114,13 @@ func (q *Queries) CreatePaymentSchedule(ctx context.Context, arg CreatePaymentSc
 		&i.AdjustmentReason,
 		&i.AdjustedAt,
 		&i.AdjustedByUserID,
+		&i.BackfillBatchID,
 	)
 	return i, err
 }
 
 const getSchedule = `-- name: GetSchedule :one
-SELECT id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id FROM payment_schedules
+SELECT id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id FROM payment_schedules
 WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
 `
 
@@ -153,12 +155,13 @@ func (q *Queries) GetSchedule(ctx context.Context, arg GetScheduleParams) (Payme
 		&i.AdjustmentReason,
 		&i.AdjustedAt,
 		&i.AdjustedByUserID,
+		&i.BackfillBatchID,
 	)
 	return i, err
 }
 
 const listSchedules = `-- name: ListSchedules :many
-SELECT s.id, s.org_id, s.contract_id, s.period_start, s.period_end, s.due_date, s.amount, s.status, s.created_at, s.updated_at, s.deleted_at, s.paid_amount, s.written_off_at, s.written_off_by_user_id, s.write_off_reason, s.original_amount, s.adjustment_kind, s.adjustment_reason, s.adjusted_at, s.adjusted_by_user_id,
+SELECT s.id, s.org_id, s.contract_id, s.period_start, s.period_end, s.due_date, s.amount, s.status, s.created_at, s.updated_at, s.deleted_at, s.paid_amount, s.written_off_at, s.written_off_by_user_id, s.write_off_reason, s.original_amount, s.adjustment_kind, s.adjustment_reason, s.adjusted_at, s.adjusted_by_user_id, s.backfill_batch_id,
        c.renter_user_id, c.status AS contract_status,
        u.name AS unit_name, p.name AS property_name,
        ru.full_name AS renter_name
@@ -212,6 +215,7 @@ type ListSchedulesRow struct {
 	AdjustmentReason   *string            `json:"adjustment_reason"`
 	AdjustedAt         pgtype.Timestamptz `json:"adjusted_at"`
 	AdjustedByUserID   pgtype.UUID        `json:"adjusted_by_user_id"`
+	BackfillBatchID    pgtype.UUID        `json:"backfill_batch_id"`
 	RenterUserID       pgtype.UUID        `json:"renter_user_id"`
 	ContractStatus     string             `json:"contract_status"`
 	UnitName           string             `json:"unit_name"`
@@ -262,6 +266,7 @@ func (q *Queries) ListSchedules(ctx context.Context, arg ListSchedulesParams) ([
 			&i.AdjustmentReason,
 			&i.AdjustedAt,
 			&i.AdjustedByUserID,
+			&i.BackfillBatchID,
 			&i.RenterUserID,
 			&i.ContractStatus,
 			&i.UnitName,
@@ -279,7 +284,7 @@ func (q *Queries) ListSchedules(ctx context.Context, arg ListSchedulesParams) ([
 }
 
 const listSchedulesForContract = `-- name: ListSchedulesForContract :many
-SELECT id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id FROM payment_schedules
+SELECT id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id FROM payment_schedules
 WHERE org_id = $1 AND contract_id = $2 AND deleted_at IS NULL
 ORDER BY period_start, id
 `
@@ -319,6 +324,7 @@ func (q *Queries) ListSchedulesForContract(ctx context.Context, arg ListSchedule
 			&i.AdjustmentReason,
 			&i.AdjustedAt,
 			&i.AdjustedByUserID,
+			&i.BackfillBatchID,
 		); err != nil {
 			return nil, err
 		}
@@ -402,7 +408,7 @@ func (q *Queries) ListSchedulesForRenter(ctx context.Context, renterUserID pgtyp
 
 const lockSchedulesForContract = `-- name: LockSchedulesForContract :many
 
-SELECT id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id FROM payment_schedules
+SELECT id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id FROM payment_schedules
 WHERE org_id = $1 AND contract_id = $2 AND deleted_at IS NULL
 ORDER BY due_date, period_start, id
 FOR UPDATE
@@ -447,6 +453,7 @@ func (q *Queries) LockSchedulesForContract(ctx context.Context, arg LockSchedule
 			&i.AdjustmentReason,
 			&i.AdjustedAt,
 			&i.AdjustedByUserID,
+			&i.BackfillBatchID,
 		); err != nil {
 			return nil, err
 		}
@@ -469,7 +476,7 @@ SET paid_amount = GREATEST(paid_amount - $1::bigint, 0),
         ELSE 'pending'
     END
 WHERE org_id = $3 AND id = $4 AND deleted_at IS NULL
-RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id
+RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id
 `
 
 type UnapplyPaymentFromScheduleParams struct {
@@ -511,6 +518,7 @@ func (q *Queries) UnapplyPaymentFromSchedule(ctx context.Context, arg UnapplyPay
 		&i.AdjustmentReason,
 		&i.AdjustedAt,
 		&i.AdjustedByUserID,
+		&i.BackfillBatchID,
 	)
 	return i, err
 }

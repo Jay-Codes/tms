@@ -156,6 +156,7 @@ type importCreated struct {
 	Renters    int `json:"renters"`
 	Contracts  int `json:"contracts"`
 	Payments   int `json:"payments"`
+	Backfills  int `json:"backfills"` // Phase 26
 }
 
 // importUndoCounts says what an undo took back.
@@ -165,6 +166,7 @@ type importUndoCounts struct {
 	Units      int `json:"units"`
 	Properties int `json:"properties"`
 	Renters    int `json:"renters"`
+	Backfills  int `json:"backfills"` // Phase 26
 }
 
 // importTemplateColumn is one row of the column reference the screen prints

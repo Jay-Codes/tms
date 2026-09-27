@@ -381,6 +381,10 @@ func (s *Server) routes() chi.Router {
 				// --- Phase 20 §20.3: settling history that predates TMS ---
 				r.Post("/contracts/{id}/backfill", s.handleContractBackfill)
 
+				// --- Phase 26: a backfill is listed and undone as a whole ---
+				r.Get("/contracts/{id}/backfills", s.handleListBackfills)
+				r.Post("/backfills/{id}/undo", s.handleUndoBackfill)
+
 				// --- Phase 21 §21.2: arrears after a tenancy has closed ---
 				r.Get("/arrears", s.handleListArrears)
 				// Writing a debt off is the decision to stop expecting money:

@@ -28,11 +28,12 @@ import (
 	"tms/backend/internal/validate"
 )
 
-// The three sheets a landlord may bring (PLAN2 §16.2).
+// The sheets a landlord may bring (PLAN2 §16.2; `backfill` is Phase 26).
 const (
 	KindUnits    = "units"
 	KindRenters  = "renters"
 	KindPayments = "payments"
+	KindBackfill = "backfill"
 )
 
 // File limits (PLAN2 §16.2).
@@ -111,12 +112,28 @@ var columns = map[string][]Column{
 		{Name: "reference", Required: false, Example: "RCT-001", Help: "receipt or transaction reference"},
 		{Name: "note", Required: false, Example: "January rent", Help: "free text"},
 	},
+	// Phase 26: one line per tenancy, each settled exactly as the contract
+	// page's Backfill button would settle it.
+	KindBackfill: {
+		{Name: "renter_phone", Required: true, Example: "0712000001", Help: "the renter of the running contract"},
+		{Name: "unit_code", Required: true, Example: "7K3M9QX2PA", Help: "the code on the unit's QR sticker"},
+		{Name: "until", Required: true, Example: "2026-08-31",
+			Help: "settle every period due on or before this date (YYYY-MM-DD)"},
+		{Name: "mode", Required: true, Example: "paid", Help: "paid or waived"},
+		{Name: "paid_at", Required: false, Example: "due_date",
+			Help: "due_date (default: each period's own due date) or one YYYY-MM-DD for all"},
+		{Name: "method", Required: false, Example: "cash",
+			Help: "cash, bank_transfer or mobile_money_manual (default cash)"},
+		{Name: "reference", Required: false, Example: "OLD-BOOK", Help: "receipt or book reference"},
+		{Name: "note", Required: false, Example: "from the paper rent book",
+			Help: "free text; required when mode is waived"},
+	},
 }
 
 // Kinds lists the sheets, in the order the picker shows them.
 //
 //nolint:gochecknoglobals // fixed list, read-only.
-var kindOrder = []string{KindUnits, KindRenters, KindPayments}
+var kindOrder = []string{KindUnits, KindRenters, KindPayments, KindBackfill}
 
 // Kinds returns the accepted `kind` values.
 func Kinds() []string { return append([]string(nil), kindOrder...) }
@@ -568,6 +585,83 @@ func ParsePaymentRow(raw map[string]string, now time.Time) (PaymentRow, RowError
 		errs.Add("paid_at", "cannot be more than a day in the future")
 	} else {
 		out.PaidAt = t
+	}
+	return out, errs
+}
+
+// Backfill modes (Phase 26), the two the manual call takes.
+const (
+	BackfillPaid   = "paid"
+	BackfillWaived = "waived"
+	// PaidAtDueDate is the `paid_at` value meaning "each period's own due date".
+	PaidAtDueDate = "due_date"
+)
+
+// BackfillRow is a validated line of a `backfill` sheet.
+type BackfillRow struct {
+	RenterPhone string
+	UnitCode    string
+	Until       time.Time
+	Mode        string
+	// PaidAt is zero when each period takes its own due date.
+	PaidAt    time.Time
+	Method    string
+	Reference string
+	Note      string
+}
+
+// ParseBackfillRow applies the `backfill` rules to one line's cells: the same
+// rules POST /contracts/{id}/backfill applies to its body. Whether `until`
+// is in the future or before the contract starts needs the contract and the
+// clock, and is resolution's to say.
+func ParseBackfillRow(raw map[string]string) (BackfillRow, RowErrors) {
+	errs := RowErrors{}
+	out := BackfillRow{
+		UnitCode:  text(errs, "unit_code", raw["unit_code"], NameMax, true),
+		Reference: text(errs, "reference", raw["reference"], ReferenceMax, false),
+		Note:      text(errs, "note", raw["note"], NoteMax, false),
+	}
+	if v := raw["renter_phone"]; v == "" {
+		errs.Add("renter_phone", "renter_phone is required")
+	} else if phone, err := validate.NormalizePhone(v); err != nil {
+		errs.Add("renter_phone", "must be a Tanzanian phone number")
+	} else {
+		out.RenterPhone = phone
+	}
+	if v := strings.TrimSpace(raw["until"]); v == "" {
+		errs.Add("until", "until is required")
+	} else if t, err := time.Parse("2006-01-02", v); err != nil {
+		errs.Add("until", "must be a date (YYYY-MM-DD)")
+	} else {
+		out.Until = t
+	}
+	switch v := strings.ToLower(strings.TrimSpace(raw["mode"])); v {
+	case "":
+		errs.Add("mode", "mode is required")
+	case BackfillPaid, BackfillWaived:
+		out.Mode = v
+	default:
+		errs.Add("mode", "must be paid or waived")
+	}
+	if out.Mode == BackfillWaived && out.Note == "" {
+		errs.Add("note", "a reason is required when periods are waived")
+	}
+	if out.Mode == BackfillPaid {
+		switch v := strings.ToLower(strings.TrimSpace(raw["method"])); v {
+		case "":
+			out.Method = MethodCash
+		case MethodCash, MethodBankTransfer, MethodMobileMoneyManual:
+			out.Method = v
+		default:
+			errs.Add("method", "must be cash, bank_transfer or mobile_money_manual")
+		}
+		if v := strings.TrimSpace(raw["paid_at"]); v != "" && strings.ToLower(v) != PaidAtDueDate {
+			if t, err := time.Parse("2006-01-02", v); err != nil {
+				errs.Add("paid_at", "must be due_date or a date (YYYY-MM-DD)")
+			} else {
+				out.PaidAt = t
+			}
+		}
 	}
 	return out, errs
 }

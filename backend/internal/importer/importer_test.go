@@ -235,3 +235,45 @@ func TestTemplateCSVCarriesTheMachineHeaders(t *testing.T) {
 		t.Error("an unknown kind must have no template")
 	}
 }
+
+// TestParseBackfillRow: the Phase 26 sheet mirrors POST /contracts/{id}/backfill.
+func TestParseBackfillRow(t *testing.T) {
+	row, errs := importer.ParseBackfillRow(map[string]string{
+		"renter_phone": "0712000001", "unit_code": "7K3M9QX2PA", "until": "2026-08-31", "mode": "Paid",
+	})
+	if len(errs) != 0 {
+		t.Fatalf("a minimal paid line is refused: %v", errs)
+	}
+	if row.Mode != importer.BackfillPaid || row.Method != importer.MethodCash || !row.PaidAt.IsZero() {
+		t.Errorf("defaults = %+v, want paid, cash, each period's own due date", row)
+	}
+	if row.RenterPhone != "+255712000001" {
+		t.Errorf("phone = %q, want it normalised", row.RenterPhone)
+	}
+
+	row, errs = importer.ParseBackfillRow(map[string]string{
+		"renter_phone": "0712000001", "unit_code": "X", "until": "2026-08-31", "mode": "paid",
+		"paid_at": "2026-09-01", "method": "bank_transfer",
+	})
+	if len(errs) != 0 || row.PaidAt.Format("2006-01-02") != "2026-09-01" || row.Method != "bank_transfer" {
+		t.Errorf("one date for every period = %+v %v", row, errs)
+	}
+
+	cases := []struct {
+		raw    map[string]string
+		column string
+	}{
+		{map[string]string{"renter_phone": "x", "unit_code": "X", "until": "2026-08-31", "mode": "paid"}, "renter_phone"},
+		{map[string]string{"renter_phone": "0712000001", "until": "2026-08-31", "mode": "paid"}, "unit_code"},
+		{map[string]string{"renter_phone": "0712000001", "unit_code": "X", "until": "31/08/2026", "mode": "paid"}, "until"},
+		{map[string]string{"renter_phone": "0712000001", "unit_code": "X", "until": "2026-08-31", "mode": "gift"}, "mode"},
+		{map[string]string{"renter_phone": "0712000001", "unit_code": "X", "until": "2026-08-31", "mode": "waived"}, "note"},
+		{map[string]string{"renter_phone": "0712000001", "unit_code": "X", "until": "2026-08-31", "mode": "paid", "method": "gateway"}, "method"},
+		{map[string]string{"renter_phone": "0712000001", "unit_code": "X", "until": "2026-08-31", "mode": "paid", "paid_at": "soon"}, "paid_at"},
+	}
+	for _, c := range cases {
+		if _, errs := importer.ParseBackfillRow(c.raw); errs[c.column] == "" {
+			t.Errorf("%v: no error on %s (%v)", c.raw, c.column, errs)
+		}
+	}
+}
