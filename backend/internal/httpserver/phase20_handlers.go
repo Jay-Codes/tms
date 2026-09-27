@@ -83,6 +83,12 @@ func (s *Server) handleContractBackfill(w http.ResponseWriter, r *http.Request) 
 		Method    string  `json:"method"`
 		Reference *string `json:"reference"`
 		Note      *string `json:"note"`
+		// Phase 29: reach back before the contract's start date.
+		From         string `json:"from"`
+		PeriodAmount *int64 `json:"period_amount"`
+		// DryRun answers what the call would do and writes nothing — the
+		// sheet's preview once `from` makes the rows the server's to invent.
+		DryRun bool `json:"dry_run"`
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
@@ -114,6 +120,20 @@ func (s *Server) handleContractBackfill(w http.ResponseWriter, r *http.Request) 
 		flatPaidAt = requiredDate(f, "paid_at", v)
 		perRowPaidAt = false
 	}
+	var from time.Time
+	if v := strings.TrimSpace(body.From); v != "" {
+		from = requiredDate(f, "from", v)
+	}
+	var periodAmount int64
+	if body.PeriodAmount != nil {
+		periodAmount = *body.PeriodAmount
+		switch {
+		case from.IsZero() && strings.TrimSpace(body.From) == "":
+			f.Add("period_amount", "only with from: it is the rent for the periods from creates")
+		case periodAmount <= 0 || periodAmount >= backfillHistoryPeriodAmountMax:
+			f.Add("period_amount", "must be a positive whole-shilling amount")
+		}
+	}
 	if !f.Empty() {
 		badRequest(w, f)
 		return
@@ -126,16 +146,18 @@ func (s *Server) handleContractBackfill(w http.ResponseWriter, r *http.Request) 
 	}
 	// 422, not 400: the request parsed and its fields are well formed — it is
 	// the combination with the contract that cannot be honoured (API.md).
-	today := todayEAT()
+	problems, err := backfillWindow(r.Context(), s.q, contract, until, from)
 	switch {
-	case until.After(today):
-		unprocessable(w, validate.Fields{"until": "must not be in the future"})
+	case errors.Is(err, errBackfillHistoryExists):
+		conflictCode(w, "history_exists", "periods before the start already exist",
+			"this contract already has periods before its start date; settle them with until alone, "+
+				"or undo the backfill that created them first")
 		return
-	case until.Before(contract.StartDate.Time):
-		unprocessable(w, validate.Fields{
-			"until": "must not be before the contract's start date (" +
-				contract.StartDate.Time.Format(dateLayout) + ")",
-		})
+	case err != nil:
+		s.serverError(w, r, "contract.backfill.window", err)
+		return
+	case !problems.Empty():
+		unprocessable(w, problems)
 		return
 	}
 
@@ -152,21 +174,34 @@ func (s *Server) handleContractBackfill(w http.ResponseWriter, r *http.Request) 
 		Until: until, Mode: mode, Method: method, Reference: reference, Note: note,
 		PerRowPaidAt: perRowPaidAt, PaidAt: flatPaidAt,
 		OrgName: brand.DisplayName, Settings: settings,
+		From: from, PeriodAmount: periodAmount,
 	}
 	var out backfillOutcome
-	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
+	err = s.inTx(r.Context(), func(q *sqlc.Queries) error {
 		var err error
 		out, err = s.runBackfill(r.Context(), q, req)
+		if err == nil && body.DryRun {
+			// The whole call ran; rolling it back is the preview.
+			return errBackfillDryRun
+		}
 		return err
-	}); err != nil {
+	})
+	if err != nil && !errors.Is(err, errBackfillDryRun) {
 		s.serverError(w, r, "contract.backfill.tx", err)
+		return
+	}
+	if body.DryRun {
+		WriteJSON(w, http.StatusOK, map[string]any{
+			"dry_run": true, "settled": out.Settled, "skipped": out.Skipped, "total": out.Total,
+			"created": out.Created, "schedules": out.Schedules, "backfill_id": nil,
+		})
 		return
 	}
 	s.enqueueNotifications(r.Context(), out.NotifyID)
 
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"settled": out.Settled, "skipped": out.Skipped, "total": out.Total,
-		"schedules": out.Schedules, "backfill_id": optUUIDString(out.BatchID),
+		"created": out.Created, "schedules": out.Schedules, "backfill_id": optUUIDString(out.BatchID),
 	})
 }
 
@@ -187,13 +222,20 @@ type backfillRequest struct {
 	// ImportBatchID names the CSV import a line of a `backfill` sheet arrived
 	// on (Phase 26); zero for the manual call.
 	ImportBatchID pgtype.UUID
+	// From, when set, is the real move-in: the periods from it up to the
+	// contract's start are created first (Phase 29). PeriodAmount is their
+	// rent per payment period, zero for the contract's own.
+	From         time.Time
+	PeriodAmount int64
 }
 
 // backfillOutcome is what the caller needs after the transaction commits.
 type backfillOutcome struct {
-	Settled   int    `json:"settled"`
-	Skipped   int    `json:"skipped"`
-	Total     int64  `json:"total"`
+	Settled int   `json:"settled"`
+	Skipped int   `json:"skipped"`
+	Total   int64 `json:"total"`
+	// Created counts the periods `from` wrote before the contract's start.
+	Created   int    `json:"created"`
 	NotifyID  string `json:"-"`
 	Schedules []scheduleResponse
 	// BatchID is the Phase 26 backfill batch the call wrote — zero when it
@@ -216,20 +258,33 @@ func (s *Server) runBackfill(
 ) (backfillOutcome, error) {
 	var out backfillOutcome
 
-	rows, err := q.LockBackfillSchedules(ctx, sqlc.LockBackfillSchedulesParams{
-		OrgID: req.OrgID, ContractID: req.Contract.ID,
-		Until: pgtype.Date{Time: req.Until, Valid: true},
+	// Phase 26: the decision is a row of its own, so it can be listed and
+	// undone as one. It is opened first so every payment, waived row and
+	// created period can name it, and dropped again at the end if the call
+	// did nothing.
+	var fromDate pgtype.Date
+	if !req.From.IsZero() {
+		fromDate = pgtype.Date{Time: req.From, Valid: true}
+	}
+	batch, err := q.CreateBackfillBatch(ctx, sqlc.CreateBackfillBatchParams{
+		OrgID: req.OrgID, ContractID: req.Contract.ID, Mode: req.Mode,
+		Until: pgtype.Date{Time: req.Until, Valid: true}, ImportBatchID: req.ImportBatchID,
+		CreatedByUserID: req.ActorUserID, FromDate: fromDate,
 	})
 	if err != nil {
 		return out, err
 	}
-	// Phase 26: the decision is a row of its own, so it can be listed and
-	// undone as one. It is opened first so every payment and waived row can
-	// name it, and dropped again at the end if the call settled nothing.
-	batch, err := q.CreateBackfillBatch(ctx, sqlc.CreateBackfillBatchParams{
-		OrgID: req.OrgID, ContractID: req.Contract.ID, Mode: req.Mode,
-		Until: pgtype.Date{Time: req.Until, Valid: true}, ImportBatchID: req.ImportBatchID,
-		CreatedByUserID: req.ActorUserID,
+	// Phase 29: the periods before the contract's start exist first, so the
+	// settlement below treats them like any other row.
+	if !req.From.IsZero() {
+		if out.Created, err = s.createBackfillHistory(ctx, q, req, batch.ID); err != nil {
+			return out, err
+		}
+	}
+
+	rows, err := q.LockBackfillSchedules(ctx, sqlc.LockBackfillSchedulesParams{
+		OrgID: req.OrgID, ContractID: req.Contract.ID,
+		Until: pgtype.Date{Time: req.Until, Valid: true},
 	})
 	if err != nil {
 		return out, err
@@ -322,7 +377,7 @@ func (s *Server) runBackfill(
 	if out.Schedules == nil {
 		out.Schedules = []scheduleResponse{}
 	}
-	if out.Settled == 0 {
+	if out.Settled == 0 && out.Created == 0 {
 		if err := q.DeleteEmptyBackfillBatch(ctx, sqlc.DeleteEmptyBackfillBatchParams{
 			OrgID: req.OrgID, ID: batch.ID,
 		}); err != nil {
@@ -330,7 +385,8 @@ func (s *Server) runBackfill(
 		}
 	} else {
 		if _, err := q.FinishBackfillBatch(ctx, sqlc.FinishBackfillBatchParams{
-			Periods: int32(out.Settled), Amount: batchAmount, OrgID: req.OrgID, ID: batch.ID,
+			Periods: int32(out.Settled), Amount: batchAmount, CreatedPeriods: int32(out.Created),
+			OrgID: req.OrgID, ID: batch.ID,
 		}); err != nil {
 			return out, err
 		}
@@ -350,6 +406,7 @@ func (s *Server) runBackfill(
 			"until": req.Until.Format(dateLayout), "mode": req.Mode,
 			"settled": out.Settled, "skipped": out.Skipped, "total": out.Total,
 			"backfill_id": optUUIDString(out.BatchID),
+			"from":        optDateString(fromDate), "created": out.Created,
 		},
 	}); err != nil {
 		return out, err

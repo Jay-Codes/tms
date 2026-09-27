@@ -789,7 +789,7 @@ SET amount = $1,
         ELSE 'pending'
     END
 WHERE org_id = $3 AND id = $4 AND deleted_at IS NULL
-RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id
+RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id, created_by_backfill_id
 `
 
 type SetScheduleAmountParams struct {
@@ -832,6 +832,7 @@ func (q *Queries) SetScheduleAmount(ctx context.Context, arg SetScheduleAmountPa
 		&i.AdjustedAt,
 		&i.AdjustedByUserID,
 		&i.BackfillBatchID,
+		&i.CreatedByBackfillID,
 	)
 	return i, err
 }

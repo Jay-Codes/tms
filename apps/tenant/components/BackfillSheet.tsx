@@ -14,6 +14,12 @@
  * a sum over the loaded schedule, nothing more. Which rows qualify, what each
  * one owes and what the total is are the server's answer, and the result panel
  * prints its numbers, not these.
+ *
+ * Phase 29: when the tenancy began before this contract (the landlord signed a
+ * fresh one on joining TMS and keeps the paper original), "Began earlier" takes
+ * the real move-in date and the rent back then. The server creates those
+ * periods; the preview then comes from a dry run, because the rows do not
+ * exist on this page yet.
  */
 
 import { Icon } from '@iconify/react';
@@ -33,18 +39,27 @@ import {
   type PaymentMethod,
   type ScheduleRow,
 } from '../lib/api';
-import { fmtTZS, todayISO } from '../lib/format';
+import { fmtDate, fmtTZS, todayISO } from '../lib/format';
 
 /** Everything the sheet needs about this opening of it. */
 export interface BackfillTarget {
   contractId: string;
   /** "Room 2 · Mbezi Court — Asha Juma", printed at the head of the sheet. */
   label?: string;
+  /** The contract's start date — the day before which `from` can reach. */
+  startDate?: string;
   /**
    * The rows the caller already has. When a caller has none (the Overdue list
    * only holds one row of the contract), the sheet reads them itself.
    */
   schedules?: ScheduleRow[];
+}
+
+/** The day before an ISO date, for the `from` picker's ceiling. */
+function dayBefore(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
 }
 
 /** Unsettled and already past its due date — the rows a backfill is for. */
@@ -87,6 +102,11 @@ export function BackfillSheet({
   const [paidAt, setPaidAt] = useState(todayISO());
   const [reference, setReference] = useState('');
   const [note, setNote] = useState('');
+  const [fromOn, setFromOn] = useState(false);
+  const [from, setFrom] = useState('');
+  const [periodAmount, setPeriodAmount] = useState('');
+  const [dry, setDry] = useState<BackfillResult | null>(null);
+  const [dryError, setDryError] = useState<ApiError | null>(null);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -96,6 +116,7 @@ export function BackfillSheet({
 
   const contractId = target?.contractId ?? '';
   const given = target?.schedules;
+  const startDate = target?.startDate ?? '';
 
   // Reset on every open, so a second backfill never inherits the first's boxes.
   useEffect(() => {
@@ -107,6 +128,11 @@ export function BackfillSheet({
     setPaidAt(todayISO());
     setReference('');
     setNote('');
+    setFromOn(false);
+    setFrom('');
+    setPeriodAmount('');
+    setDry(null);
+    setDryError(null);
     setError(null);
     setResult(null);
     setUntilTouched(false);
@@ -131,23 +157,58 @@ export function BackfillSheet({
   }, [rows, untilTouched]);
 
   const qualifying = (rows ?? []).filter((s) => isUnsettled(s) && s.due_date <= until);
-  const previewCount = qualifying.length;
-  const previewTotal = qualifying.reduce((sum, s) => sum + remainingOn(s), 0);
+  const localCount = qualifying.length;
+  const localTotal = qualifying.reduce((sum, s) => sum + remainingOn(s), 0);
+  const reaching = fromOn && from !== '';
+  const previewCount = reaching ? (dry?.settled ?? 0) : localCount;
+  const previewTotal = reaching ? (dry?.total ?? 0) : localTotal;
+
+  const buildBody = useCallback((): BackfillInput => {
+    const body: BackfillInput = { until, mode };
+    if (mode === 'paid') {
+      body.method = method;
+      body.paid_at = dateMode === 'due_date' ? 'due_date' : paidAt;
+      if (reference.trim()) body.reference = reference.trim();
+      if (note.trim()) body.note = note.trim();
+    } else {
+      body.note = note.trim();
+    }
+    if (fromOn && from) {
+      body.from = from;
+      const amount = Number(periodAmount.replace(/[^0-9]/g, ''));
+      if (amount > 0) body.period_amount = amount;
+    }
+    return body;
+  }, [dateMode, from, fromOn, mode, method, note, paidAt, periodAmount, reference, until]);
+
+  // Phase 29: the periods `from` creates do not exist yet, so the server
+  // answers the preview with a dry run. Waived needs its reason first.
+  useEffect(() => {
+    if (!open || !contractId || !reaching || !until || (mode === 'waived' && !note.trim())) {
+      setDry(null);
+      setDryError(null);
+      return;
+    }
+    const handle = window.setTimeout(() => {
+      contractsApi
+        .backfill(contractId, { ...buildBody(), dry_run: true })
+        .then((r) => {
+          setDry(r);
+          setDryError(null);
+        })
+        .catch((e) => {
+          setDry(null);
+          setDryError(toApiError(e));
+        });
+    }, 400);
+    return () => window.clearTimeout(handle);
+  }, [open, contractId, reaching, until, mode, note, buildBody]);
 
   const send = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
-      const body: BackfillInput = { until, mode };
-      if (mode === 'paid') {
-        body.method = method;
-        body.paid_at = dateMode === 'due_date' ? 'due_date' : paidAt;
-        if (reference.trim()) body.reference = reference.trim();
-        if (note.trim()) body.note = note.trim();
-      } else {
-        body.note = note.trim();
-      }
-      const res = await contractsApi.backfill(contractId, body);
+      const res = await contractsApi.backfill(contractId, buildBody());
       setResult(res);
       onDone(res);
     } catch (e) {
@@ -155,10 +216,14 @@ export function BackfillSheet({
     } finally {
       setBusy(false);
     }
-  }, [contractId, dateMode, mode, method, note, onDone, paidAt, reference, until]);
+  }, [buildBody, contractId, onDone]);
 
   const ready =
-    contractId !== '' && until !== '' && (mode === 'paid' ? true : note.trim().length > 0);
+    contractId !== '' &&
+    until !== '' &&
+    (mode === 'paid' ? true : note.trim().length > 0) &&
+    (!fromOn || from !== '');
+  const fieldErrors = { ...(dryError?.errors ?? {}), ...(error?.errors ?? {}) };
 
   return (
     <Sheet open={open} title={t('backfill.title')} onClose={onClose} width={560}>
@@ -187,6 +252,7 @@ export function BackfillSheet({
                 amount: fmtTZS(result.total),
                 skipped: result.skipped,
               })}
+              {result.created ? ` ${t('backfill.done.created', { n: result.created })}` : ''}
             </span>
           </p>
           <p style={{ color: 'var(--ink-faint)', fontSize: 'var(--text-sm)' }}>{t('backfill.sms_note')}</p>
@@ -208,11 +274,51 @@ export function BackfillSheet({
           <ProblemNote error={error} />
           <p style={{ color: 'var(--ink-soft)' }}>{t('backfill.lead')}</p>
 
+          {startDate ? (
+            <div className="field">
+              <label style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center' }}>
+                <input type="checkbox" checked={fromOn} onChange={(e) => setFromOn(e.target.checked)} />
+                {t('backfill.from.toggle', { date: fmtDate(startDate) })}
+              </label>
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>{t('backfill.from.lead')}</span>
+            </div>
+          ) : null}
+
+          {fromOn && startDate ? (
+            <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-4)' }}>
+              <Field id="bf_from" label={t('backfill.from')} hint={t('backfill.from.hint')} error={fieldErrors.from}>
+                <input
+                  id="bf_from"
+                  className="input"
+                  type="date"
+                  value={from}
+                  max={dayBefore(startDate)}
+                  onChange={(e) => setFrom(e.target.value)}
+                />
+              </Field>
+              <Field
+                id="bf_period_amount"
+                label={t('backfill.period_amount')}
+                hint={t('backfill.period_amount.hint')}
+                error={fieldErrors.period_amount}
+              >
+                <input
+                  id="bf_period_amount"
+                  className="input"
+                  inputMode="numeric"
+                  placeholder={t('backfill.period_amount.placeholder')}
+                  value={periodAmount}
+                  onChange={(e) => setPeriodAmount(e.target.value)}
+                />
+              </Field>
+            </div>
+          ) : null}
+
           <Field
             id="bf_until"
             label={t('backfill.until')}
             hint={t('backfill.until.hint')}
-            error={error?.errors.until}
+            error={fieldErrors.until}
           >
             <input
               id="bf_until"
@@ -336,13 +442,16 @@ export function BackfillSheet({
               borderRadius: 'var(--radius-sm)',
             }}
           >
+            {reaching && dry?.created ? (
+              <span>{t('backfill.preview.created', { n: dry.created })}</span>
+            ) : null}
             <strong>
               {previewCount === 0
                 ? t('backfill.preview.none')
                 : t('backfill.preview', { count: previewCount, amount: fmtTZS(previewTotal) })}
             </strong>
             <span style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
-              {t('backfill.preview.note')}
+              {reaching ? t('backfill.preview.note_server') : t('backfill.preview.note')}
             </span>
           </div>
 

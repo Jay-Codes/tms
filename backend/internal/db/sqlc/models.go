@@ -54,6 +54,8 @@ type BackfillBatch struct {
 	UndoneAt        pgtype.Timestamptz `json:"undone_at"`
 	UndoneByUserID  pgtype.UUID        `json:"undone_by_user_id"`
 	UndoReason      *string            `json:"undo_reason"`
+	FromDate        pgtype.Date        `json:"from_date"`
+	CreatedPeriods  int32              `json:"created_periods"`
 }
 
 type Contract struct {
@@ -391,27 +393,28 @@ type PaymentProof struct {
 }
 
 type PaymentSchedule struct {
-	ID                 pgtype.UUID        `json:"id"`
-	OrgID              pgtype.UUID        `json:"org_id"`
-	ContractID         pgtype.UUID        `json:"contract_id"`
-	PeriodStart        pgtype.Date        `json:"period_start"`
-	PeriodEnd          pgtype.Date        `json:"period_end"`
-	DueDate            pgtype.Date        `json:"due_date"`
-	Amount             int64              `json:"amount"`
-	Status             string             `json:"status"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
-	PaidAmount         int64              `json:"paid_amount"`
-	WrittenOffAt       pgtype.Timestamptz `json:"written_off_at"`
-	WrittenOffByUserID pgtype.UUID        `json:"written_off_by_user_id"`
-	WriteOffReason     *string            `json:"write_off_reason"`
-	OriginalAmount     *int64             `json:"original_amount"`
-	AdjustmentKind     *string            `json:"adjustment_kind"`
-	AdjustmentReason   *string            `json:"adjustment_reason"`
-	AdjustedAt         pgtype.Timestamptz `json:"adjusted_at"`
-	AdjustedByUserID   pgtype.UUID        `json:"adjusted_by_user_id"`
-	BackfillBatchID    pgtype.UUID        `json:"backfill_batch_id"`
+	ID                  pgtype.UUID        `json:"id"`
+	OrgID               pgtype.UUID        `json:"org_id"`
+	ContractID          pgtype.UUID        `json:"contract_id"`
+	PeriodStart         pgtype.Date        `json:"period_start"`
+	PeriodEnd           pgtype.Date        `json:"period_end"`
+	DueDate             pgtype.Date        `json:"due_date"`
+	Amount              int64              `json:"amount"`
+	Status              string             `json:"status"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt           pgtype.Timestamptz `json:"deleted_at"`
+	PaidAmount          int64              `json:"paid_amount"`
+	WrittenOffAt        pgtype.Timestamptz `json:"written_off_at"`
+	WrittenOffByUserID  pgtype.UUID        `json:"written_off_by_user_id"`
+	WriteOffReason      *string            `json:"write_off_reason"`
+	OriginalAmount      *int64             `json:"original_amount"`
+	AdjustmentKind      *string            `json:"adjustment_kind"`
+	AdjustmentReason    *string            `json:"adjustment_reason"`
+	AdjustedAt          pgtype.Timestamptz `json:"adjusted_at"`
+	AdjustedByUserID    pgtype.UUID        `json:"adjusted_by_user_id"`
+	BackfillBatchID     pgtype.UUID        `json:"backfill_batch_id"`
+	CreatedByBackfillID pgtype.UUID        `json:"created_by_backfill_id"`
 }
 
 type PlatformSmsPurchase struct {

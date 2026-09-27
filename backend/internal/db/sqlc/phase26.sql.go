@@ -27,6 +27,9 @@ SELECT EXISTS (
           UNION
           SELECT s.id FROM payment_schedules s
           WHERE s.backfill_batch_id = $2::uuid AND s.org_id = $1
+          UNION
+          SELECT s.id FROM payment_schedules s
+          WHERE s.created_by_backfill_id = $2::uuid AND s.org_id = $1
       )
 )::boolean AS touched
 `
@@ -50,12 +53,12 @@ func (q *Queries) BackfillBatchTouched(ctx context.Context, arg BackfillBatchTou
 
 const createBackfillBatch = `-- name: CreateBackfillBatch :one
 
-INSERT INTO backfill_batches (org_id, contract_id, mode, until, import_batch_id, created_by_user_id)
+INSERT INTO backfill_batches (org_id, contract_id, mode, until, import_batch_id, created_by_user_id, from_date)
 VALUES (
     $1, $2, $3, $4,
-    $5, $6
+    $5, $6, $7
 )
-RETURNING id, org_id, contract_id, mode, until, periods, amount, import_batch_id, created_by_user_id, created_at, undone_at, undone_by_user_id, undo_reason
+RETURNING id, org_id, contract_id, mode, until, periods, amount, import_batch_id, created_by_user_id, created_at, undone_at, undone_by_user_id, undo_reason, from_date, created_periods
 `
 
 type CreateBackfillBatchParams struct {
@@ -65,6 +68,7 @@ type CreateBackfillBatchParams struct {
 	Until           pgtype.Date `json:"until"`
 	ImportBatchID   pgtype.UUID `json:"import_batch_id"`
 	CreatedByUserID pgtype.UUID `json:"created_by_user_id"`
+	FromDate        pgtype.Date `json:"from_date"`
 }
 
 // Phase 26 — a backfill is one decision, recorded as one row and undone as one.
@@ -80,6 +84,7 @@ func (q *Queries) CreateBackfillBatch(ctx context.Context, arg CreateBackfillBat
 		arg.Until,
 		arg.ImportBatchID,
 		arg.CreatedByUserID,
+		arg.FromDate,
 	)
 	var i BackfillBatch
 	err := row.Scan(
@@ -96,13 +101,15 @@ func (q *Queries) CreateBackfillBatch(ctx context.Context, arg CreateBackfillBat
 		&i.UndoneAt,
 		&i.UndoneByUserID,
 		&i.UndoReason,
+		&i.FromDate,
+		&i.CreatedPeriods,
 	)
 	return i, err
 }
 
 const deleteEmptyBackfillBatch = `-- name: DeleteEmptyBackfillBatch :exec
 DELETE FROM backfill_batches
-WHERE org_id = $1 AND id = $2 AND periods = 0
+WHERE org_id = $1 AND id = $2 AND periods = 0 AND created_periods = 0
 `
 
 type DeleteEmptyBackfillBatchParams struct {
@@ -192,16 +199,18 @@ func (q *Queries) FindUnitByCodeInOrg(ctx context.Context, arg FindUnitByCodeInO
 
 const finishBackfillBatch = `-- name: FinishBackfillBatch :one
 UPDATE backfill_batches
-SET periods = $1, amount = $2
-WHERE org_id = $3 AND id = $4
-RETURNING id, org_id, contract_id, mode, until, periods, amount, import_batch_id, created_by_user_id, created_at, undone_at, undone_by_user_id, undo_reason
+SET periods = $1, amount = $2,
+    created_periods = $3
+WHERE org_id = $4 AND id = $5
+RETURNING id, org_id, contract_id, mode, until, periods, amount, import_batch_id, created_by_user_id, created_at, undone_at, undone_by_user_id, undo_reason, from_date, created_periods
 `
 
 type FinishBackfillBatchParams struct {
-	Periods int32       `json:"periods"`
-	Amount  int64       `json:"amount"`
-	OrgID   pgtype.UUID `json:"org_id"`
-	ID      pgtype.UUID `json:"id"`
+	Periods        int32       `json:"periods"`
+	Amount         int64       `json:"amount"`
+	CreatedPeriods int32       `json:"created_periods"`
+	OrgID          pgtype.UUID `json:"org_id"`
+	ID             pgtype.UUID `json:"id"`
 }
 
 // FinishBackfillBatch writes the counts once the rows are settled, so the list
@@ -210,6 +219,7 @@ func (q *Queries) FinishBackfillBatch(ctx context.Context, arg FinishBackfillBat
 	row := q.db.QueryRow(ctx, finishBackfillBatch,
 		arg.Periods,
 		arg.Amount,
+		arg.CreatedPeriods,
 		arg.OrgID,
 		arg.ID,
 	)
@@ -228,12 +238,14 @@ func (q *Queries) FinishBackfillBatch(ctx context.Context, arg FinishBackfillBat
 		&i.UndoneAt,
 		&i.UndoneByUserID,
 		&i.UndoReason,
+		&i.FromDate,
+		&i.CreatedPeriods,
 	)
 	return i, err
 }
 
 const getBackfillBatch = `-- name: GetBackfillBatch :one
-SELECT b.id, b.org_id, b.contract_id, b.mode, b.until, b.periods, b.amount, b.import_batch_id, b.created_by_user_id, b.created_at, b.undone_at, b.undone_by_user_id, b.undo_reason,
+SELECT b.id, b.org_id, b.contract_id, b.mode, b.until, b.periods, b.amount, b.import_batch_id, b.created_by_user_id, b.created_at, b.undone_at, b.undone_by_user_id, b.undo_reason, b.from_date, b.created_periods,
        cu.full_name AS created_by_name,
        uu.full_name AS undone_by_name
 FROM backfill_batches b
@@ -261,6 +273,8 @@ type GetBackfillBatchRow struct {
 	UndoneAt        pgtype.Timestamptz `json:"undone_at"`
 	UndoneByUserID  pgtype.UUID        `json:"undone_by_user_id"`
 	UndoReason      *string            `json:"undo_reason"`
+	FromDate        pgtype.Date        `json:"from_date"`
+	CreatedPeriods  int32              `json:"created_periods"`
 	CreatedByName   *string            `json:"created_by_name"`
 	UndoneByName    *string            `json:"undone_by_name"`
 }
@@ -282,6 +296,8 @@ func (q *Queries) GetBackfillBatch(ctx context.Context, arg GetBackfillBatchPara
 		&i.UndoneAt,
 		&i.UndoneByUserID,
 		&i.UndoReason,
+		&i.FromDate,
+		&i.CreatedPeriods,
 		&i.CreatedByName,
 		&i.UndoneByName,
 	)
@@ -323,7 +339,7 @@ func (q *Queries) ListBackfillBatchPayments(ctx context.Context, arg ListBackfil
 }
 
 const listBackfillBatchesForContract = `-- name: ListBackfillBatchesForContract :many
-SELECT b.id, b.org_id, b.contract_id, b.mode, b.until, b.periods, b.amount, b.import_batch_id, b.created_by_user_id, b.created_at, b.undone_at, b.undone_by_user_id, b.undo_reason,
+SELECT b.id, b.org_id, b.contract_id, b.mode, b.until, b.periods, b.amount, b.import_batch_id, b.created_by_user_id, b.created_at, b.undone_at, b.undone_by_user_id, b.undo_reason, b.from_date, b.created_periods,
        cu.full_name AS created_by_name,
        uu.full_name AS undone_by_name,
        EXISTS (
@@ -341,6 +357,9 @@ SELECT b.id, b.org_id, b.contract_id, b.mode, b.until, b.periods, b.amount, b.im
                  UNION
                  SELECT s.id FROM payment_schedules s
                  WHERE s.backfill_batch_id = b.id AND s.org_id = b.org_id
+                 UNION
+                 SELECT s.id FROM payment_schedules s
+                 WHERE s.created_by_backfill_id = b.id AND s.org_id = b.org_id
              )
        )::boolean AS touched
 FROM backfill_batches b
@@ -369,6 +388,8 @@ type ListBackfillBatchesForContractRow struct {
 	UndoneAt        pgtype.Timestamptz `json:"undone_at"`
 	UndoneByUserID  pgtype.UUID        `json:"undone_by_user_id"`
 	UndoReason      *string            `json:"undo_reason"`
+	FromDate        pgtype.Date        `json:"from_date"`
+	CreatedPeriods  int32              `json:"created_periods"`
 	CreatedByName   *string            `json:"created_by_name"`
 	UndoneByName    *string            `json:"undone_by_name"`
 	Touched         bool               `json:"touched"`
@@ -400,6 +421,8 @@ func (q *Queries) ListBackfillBatchesForContract(ctx context.Context, arg ListBa
 			&i.UndoneAt,
 			&i.UndoneByUserID,
 			&i.UndoReason,
+			&i.FromDate,
+			&i.CreatedPeriods,
 			&i.CreatedByName,
 			&i.UndoneByName,
 			&i.Touched,
@@ -415,7 +438,7 @@ func (q *Queries) ListBackfillBatchesForContract(ctx context.Context, arg ListBa
 }
 
 const listBackfillBatchesForImport = `-- name: ListBackfillBatchesForImport :many
-SELECT id, org_id, contract_id, mode, until, periods, amount, import_batch_id, created_by_user_id, created_at, undone_at, undone_by_user_id, undo_reason FROM backfill_batches
+SELECT id, org_id, contract_id, mode, until, periods, amount, import_batch_id, created_by_user_id, created_at, undone_at, undone_by_user_id, undo_reason, from_date, created_periods FROM backfill_batches
 WHERE org_id = $1 AND import_batch_id = $2
   AND undone_at IS NULL
 ORDER BY created_at, id
@@ -451,6 +474,8 @@ func (q *Queries) ListBackfillBatchesForImport(ctx context.Context, arg ListBack
 			&i.UndoneAt,
 			&i.UndoneByUserID,
 			&i.UndoReason,
+			&i.FromDate,
+			&i.CreatedPeriods,
 		); err != nil {
 			return nil, err
 		}
@@ -463,7 +488,7 @@ func (q *Queries) ListBackfillBatchesForImport(ctx context.Context, arg ListBack
 }
 
 const lockBackfillBatch = `-- name: LockBackfillBatch :one
-SELECT id, org_id, contract_id, mode, until, periods, amount, import_batch_id, created_by_user_id, created_at, undone_at, undone_by_user_id, undo_reason FROM backfill_batches
+SELECT id, org_id, contract_id, mode, until, periods, amount, import_batch_id, created_by_user_id, created_at, undone_at, undone_by_user_id, undo_reason, from_date, created_periods FROM backfill_batches
 WHERE org_id = $1 AND id = $2
 FOR UPDATE
 `
@@ -492,6 +517,8 @@ func (q *Queries) LockBackfillBatch(ctx context.Context, arg LockBackfillBatchPa
 		&i.UndoneAt,
 		&i.UndoneByUserID,
 		&i.UndoReason,
+		&i.FromDate,
+		&i.CreatedPeriods,
 	)
 	return i, err
 }
@@ -501,7 +528,7 @@ UPDATE backfill_batches
 SET undone_at = now(), undone_by_user_id = $1,
     undo_reason = $2
 WHERE org_id = $3 AND id = $4 AND undone_at IS NULL
-RETURNING id, org_id, contract_id, mode, until, periods, amount, import_batch_id, created_by_user_id, created_at, undone_at, undone_by_user_id, undo_reason
+RETURNING id, org_id, contract_id, mode, until, periods, amount, import_batch_id, created_by_user_id, created_at, undone_at, undone_by_user_id, undo_reason, from_date, created_periods
 `
 
 type MarkBackfillBatchUndoneParams struct {
@@ -533,6 +560,8 @@ func (q *Queries) MarkBackfillBatchUndone(ctx context.Context, arg MarkBackfillB
 		&i.UndoneAt,
 		&i.UndoneByUserID,
 		&i.UndoReason,
+		&i.FromDate,
+		&i.CreatedPeriods,
 	)
 	return i, err
 }
@@ -563,7 +592,7 @@ SET status = CASE
     END
 WHERE org_id = $2 AND backfill_batch_id = $3
   AND status = 'waived' AND deleted_at IS NULL
-RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id
+RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id, created_by_backfill_id
 `
 
 type UnwaiveBackfillSchedulesParams struct {
@@ -605,6 +634,7 @@ func (q *Queries) UnwaiveBackfillSchedules(ctx context.Context, arg UnwaiveBackf
 			&i.AdjustedAt,
 			&i.AdjustedByUserID,
 			&i.BackfillBatchID,
+			&i.CreatedByBackfillID,
 		); err != nil {
 			return nil, err
 		}
@@ -621,7 +651,7 @@ UPDATE payment_schedules
 SET status = 'waived', backfill_batch_id = $1
 WHERE org_id = $2 AND id = $3
   AND status IN ('pending', 'partial', 'overdue') AND deleted_at IS NULL
-RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id
+RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id, created_by_backfill_id
 `
 
 type WaiveBackfillScheduleParams struct {
@@ -657,6 +687,7 @@ func (q *Queries) WaiveBackfillSchedule(ctx context.Context, arg WaiveBackfillSc
 		&i.AdjustedAt,
 		&i.AdjustedByUserID,
 		&i.BackfillBatchID,
+		&i.CreatedByBackfillID,
 	)
 	return i, err
 }

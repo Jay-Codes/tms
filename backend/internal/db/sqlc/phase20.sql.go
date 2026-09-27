@@ -89,7 +89,7 @@ func (q *Queries) ListLastPaymentSourceForSchedules(ctx context.Context, schedul
 }
 
 const lockBackfillSchedules = `-- name: LockBackfillSchedules :many
-SELECT id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id FROM payment_schedules
+SELECT id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id, created_by_backfill_id FROM payment_schedules
 WHERE org_id = $1 AND contract_id = $2
   AND due_date <= $3 AND deleted_at IS NULL
 ORDER BY due_date, period_start, id
@@ -140,6 +140,7 @@ func (q *Queries) LockBackfillSchedules(ctx context.Context, arg LockBackfillSch
 			&i.AdjustedAt,
 			&i.AdjustedByUserID,
 			&i.BackfillBatchID,
+			&i.CreatedByBackfillID,
 		); err != nil {
 			return nil, err
 		}
@@ -155,7 +156,7 @@ const waiveSchedule = `-- name: WaiveSchedule :one
 UPDATE payment_schedules SET status = 'waived'
 WHERE org_id = $1 AND id = $2
   AND status IN ('pending', 'partial', 'overdue') AND deleted_at IS NULL
-RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id
+RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id, created_by_backfill_id
 `
 
 type WaiveScheduleParams struct {
@@ -191,6 +192,7 @@ func (q *Queries) WaiveSchedule(ctx context.Context, arg WaiveScheduleParams) (P
 		&i.AdjustedAt,
 		&i.AdjustedByUserID,
 		&i.BackfillBatchID,
+		&i.CreatedByBackfillID,
 	)
 	return i, err
 }

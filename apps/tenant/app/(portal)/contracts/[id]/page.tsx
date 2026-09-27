@@ -29,7 +29,7 @@ import {
 import { DocumentPaper, PrintStyles } from '../../../../components/DocumentPaper';
 import { Field, Note, ProblemNote } from '../../../../components/FormBits';
 import { AmendForm, type AmendMode } from '../../../../components/AmendForm';
-import { BackfillSheet, needsBackfill } from '../../../../components/BackfillSheet';
+import { BackfillSheet } from '../../../../components/BackfillSheet';
 import { BackfillsList } from '../../../../components/BackfillsList';
 import { DaysOverdue, PaymentsTable, ReverseSheet, SourceChip } from '../../../../components/PaymentBits';
 import { ProofsFor } from '../../../../components/ProofBits';
@@ -1169,9 +1169,10 @@ function ContractBody({ id }: { id: string }) {
               </p>
             </div>
             <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-              {/* Phase 20.3 — only while something past its due date is still
-                  open, which is exactly the state a pre-TMS tenancy lands in. */}
-              {running && needsBackfill(rows) ? (
+              {/* Phase 20.3 — offered on any running contract: history past
+                  its due date may be open, and since Phase 29
+                  the tenancy may also have begun before this contract. */}
+              {running ? (
                 <button type="button" className="btn btn-quiet" onClick={() => setBackfillOpen(true)}>
                   <Icon icon="solar:history-linear" width={20} /> {t('backfill.open')}
                 </button>
@@ -1527,7 +1528,12 @@ function ContractBody({ id }: { id: string }) {
 
       <BackfillSheet
         open={backfillOpen}
-        target={{ contractId: id, label: contractLabel, schedules: schedules ?? undefined }}
+        target={{
+          contractId: id,
+          label: contractLabel,
+          startDate: contract.start_date,
+          schedules: schedules ?? undefined,
+        }}
         onClose={() => setBackfillOpen(false)}
         onDone={() => void load()}
       />

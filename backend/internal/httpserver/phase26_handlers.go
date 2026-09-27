@@ -52,20 +52,24 @@ func notFoundBackfill(w http.ResponseWriter) {
 
 // backfillResponse is one line of the contract page's "Backfills" list.
 type backfillResponse struct {
-	ID            string         `json:"id"`
-	ContractID    string         `json:"contract_id"`
-	Mode          string         `json:"mode"`
-	Until         string         `json:"until"`
-	Periods       int32          `json:"periods"`
-	Amount        int64          `json:"amount"`
-	ImportBatchID *string        `json:"import_batch_id"`
-	CreatedBy     *backfillActor `json:"created_by"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UndoneAt      *time.Time     `json:"undone_at"`
-	UndoneBy      *backfillActor `json:"undone_by"`
-	UndoReason    *string        `json:"undo_reason"`
-	Touched       bool           `json:"touched"`
-	CanUndo       bool           `json:"can_undo"`
+	ID         string `json:"id"`
+	ContractID string `json:"contract_id"`
+	Mode       string `json:"mode"`
+	Until      string `json:"until"`
+	Periods    int32  `json:"periods"`
+	Amount     int64  `json:"amount"`
+	// Phase 29: the real move-in the batch reached back to, and how many
+	// periods before the contract's start it created.
+	From           *string        `json:"from"`
+	CreatedPeriods int32          `json:"created_periods"`
+	ImportBatchID  *string        `json:"import_batch_id"`
+	CreatedBy      *backfillActor `json:"created_by"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UndoneAt       *time.Time     `json:"undone_at"`
+	UndoneBy       *backfillActor `json:"undone_by"`
+	UndoReason     *string        `json:"undo_reason"`
+	Touched        bool           `json:"touched"`
+	CanUndo        bool           `json:"can_undo"`
 }
 
 // backfillActor names who did something, the way import batches do.
@@ -86,6 +90,7 @@ func toBackfill(b sqlc.GetBackfillBatchRow, touched bool) backfillResponse {
 		ID: db.UUIDString(b.ID), ContractID: db.UUIDString(b.ContractID),
 		Mode: b.Mode, Until: b.Until.Time.Format(dateLayout),
 		Periods: b.Periods, Amount: b.Amount,
+		From: optDateString(b.FromDate), CreatedPeriods: b.CreatedPeriods,
 		ImportBatchID: optUUIDString(b.ImportBatchID),
 		CreatedBy:     backfillActorOf(b.CreatedByUserID, b.CreatedByName),
 		CreatedAt:     b.CreatedAt.Time,
@@ -126,6 +131,7 @@ func (s *Server) handleListBackfills(w http.ResponseWriter, r *http.Request) {
 			ImportBatchID: row.ImportBatchID, CreatedByUserID: row.CreatedByUserID,
 			CreatedAt: row.CreatedAt, UndoneAt: row.UndoneAt, UndoneByUserID: row.UndoneByUserID,
 			UndoReason: row.UndoReason, CreatedByName: row.CreatedByName, UndoneByName: row.UndoneByName,
+			FromDate: row.FromDate, CreatedPeriods: row.CreatedPeriods,
 		}, row.Touched))
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"items": items})
@@ -137,6 +143,9 @@ func (s *Server) handleListBackfills(w http.ResponseWriter, r *http.Request) {
 type backfillUndoOutcome struct {
 	PaymentsReversed int `json:"payments_reversed"`
 	PeriodsReopened  int `json:"periods_reopened"`
+	// PeriodsRemoved counts the periods before the contract's start that the
+	// batch had created (Phase 29), gone with it.
+	PeriodsRemoved int `json:"periods_removed"`
 }
 
 func (s *Server) handleUndoBackfill(w http.ResponseWriter, r *http.Request) {
@@ -210,6 +219,7 @@ func (s *Server) handleUndoBackfill(w http.ResponseWriter, r *http.Request) {
 		"backfill":          toBackfill(after, false),
 		"payments_reversed": out.PaymentsReversed,
 		"periods_reopened":  out.PeriodsReopened,
+		"periods_removed":   out.PeriodsRemoved,
 	})
 }
 
@@ -291,6 +301,16 @@ func (s *Server) undoBackfillTx(ctx context.Context, q *sqlc.Queries, p auth.Pri
 		return out, err
 	}
 	out.PeriodsReopened = len(reopened)
+	// Phase 29: the periods the batch invented go with it, now that their
+	// money is reversed. The touched check above already refused the undo if
+	// anyone else's money sits on them.
+	removed, err := q.DeleteBackfillCreatedSchedules(ctx, sqlc.DeleteBackfillCreatedSchedulesParams{
+		OrgID: p.OrgID, CreatedByBackfillID: batch.ID,
+	})
+	if err != nil {
+		return out, err
+	}
+	out.PeriodsRemoved = int(removed)
 
 	if _, err := q.MarkBackfillBatchUndone(ctx, sqlc.MarkBackfillBatchUndoneParams{
 		UndoneByUserID: p.UserID, UndoReason: &reason, OrgID: p.OrgID, ID: batch.ID,
@@ -309,7 +329,7 @@ func (s *Server) undoBackfillTx(ctx context.Context, q *sqlc.Queries, p auth.Pri
 		},
 		After: map[string]any{
 			"reason": reason, "payments_reversed": out.PaymentsReversed,
-			"periods_reopened": out.PeriodsReopened,
+			"periods_reopened": out.PeriodsReopened, "periods_removed": out.PeriodsRemoved,
 		},
 	})
 }
@@ -339,6 +359,9 @@ func (s *Server) resolveBackfillRows(
 		}
 		row.resolved["mode"] = parsed.Mode
 		row.resolved["until"] = parsed.Until.Format(dateLayout)
+		if !parsed.From.IsZero() {
+			row.resolved["from"] = parsed.From.Format(dateLayout)
+		}
 		if parsed.Until.After(today) {
 			row.errs.Add("until", "must not be in the future")
 			continue
@@ -392,9 +415,18 @@ func (s *Server) resolveBackfillRows(
 		row.contractID = contract.ID
 		row.resolved["contract_id"] = key
 
-		if parsed.Until.Before(contract.StartDate.Time) {
-			row.errs.Add("until", "must not be before the contract's start date ("+
-				contract.StartDate.Time.Format(dateLayout)+")")
+		problems, err := backfillWindow(ctx, q, contract, parsed.Until, parsed.From)
+		if errors.Is(err, errBackfillHistoryExists) {
+			row.errs.Add("from", "this contract already has periods before its start date; leave from empty")
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if !problems.Empty() {
+			for col, msg := range problems {
+				row.errs.Add(col, msg)
+			}
 			continue
 		}
 
@@ -403,6 +435,18 @@ func (s *Server) resolveBackfillRows(
 		})
 		if err != nil {
 			return err
+		}
+		// Phase 29: the periods `from` would create count in the preview as
+		// the unsettled rows they will be.
+		if !parsed.From.IsZero() {
+			created := backfillHistoryRows(contract, parsed.From, parsed.PeriodAmount)
+			for _, r := range created {
+				book = append(book, sqlc.PaymentSchedule{
+					DueDate: pgtype.Date{Time: r.DueDate, Valid: true}, Amount: r.Amount,
+					Status: payment.StatusPending,
+				})
+			}
+			row.resolved["created"] = len(created)
 		}
 		periods, amount := backfillPreview(book, parsed.Until)
 		if periods == 0 {
@@ -495,6 +539,7 @@ func (s *Server) applyBackfillRows(
 			Reference: db.Str(b.Reference), Note: db.Str(b.Note),
 			PerRowPaidAt: b.PaidAt.IsZero(), PaidAt: b.PaidAt,
 			OrgName: brand.DisplayName, Settings: settings, ImportBatchID: batch.ID,
+			From: b.From, PeriodAmount: b.PeriodAmount,
 		})
 		if err != nil {
 			return made, nil, err

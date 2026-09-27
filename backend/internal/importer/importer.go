@@ -127,6 +127,12 @@ var columns = map[string][]Column{
 		{Name: "reference", Required: false, Example: "OLD-BOOK", Help: "receipt or book reference"},
 		{Name: "note", Required: false, Example: "from the paper rent book",
 			Help: "free text; required when mode is waived"},
+		// Phase 29: reach back before the contract's start date.
+		{Name: "from", Required: false, Example: "",
+			Help: "real move-in date (YYYY-MM-DD) when the tenancy began before the contract's start; " +
+				"the missing periods are created from it"},
+		{Name: "period_amount", Required: false, Example: "",
+			Help: "rent per payment period back then, whole shillings (default: the contract's); only with from"},
 	},
 }
 
@@ -608,6 +614,10 @@ type BackfillRow struct {
 	Method    string
 	Reference string
 	Note      string
+	// From is zero unless the line reaches back before the contract's start
+	// (Phase 29); PeriodAmount is zero for "the contract's own rent".
+	From         time.Time
+	PeriodAmount int64
 }
 
 // ParseBackfillRow applies the `backfill` rules to one line's cells: the same
@@ -662,6 +672,17 @@ func ParseBackfillRow(raw map[string]string) (BackfillRow, RowErrors) {
 				out.PaidAt = t
 			}
 		}
+	}
+	if v := strings.TrimSpace(raw["from"]); v != "" {
+		if t, err := time.Parse("2006-01-02", v); err != nil {
+			errs.Add("from", "must be a date (YYYY-MM-DD)")
+		} else {
+			out.From = t
+		}
+	}
+	out.PeriodAmount = money(errs, "period_amount", raw["period_amount"], false)
+	if out.PeriodAmount > 0 && strings.TrimSpace(raw["from"]) == "" {
+		errs.Add("period_amount", "only with from: it is the rent for the periods from creates")
 	}
 	return out, errs
 }

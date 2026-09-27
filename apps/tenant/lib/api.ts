@@ -1438,13 +1438,25 @@ export interface BackfillInput {
   method?: PaymentMethod;
   reference?: string;
   note?: string;
+  /**
+   * Phase 29 — the real move-in, before the contract's start date. The server
+   * creates the periods from it up to the start, then settles as usual.
+   */
+  from?: string;
+  /** Rent per payment period back then (whole TZS); only with `from`. */
+  period_amount?: number;
+  /** Answer what the call would do, write nothing — the sheet's preview. */
+  dry_run?: boolean;
 }
 
-/** `200 {settled, skipped, total, schedules}`. */
+/** `200 {settled, skipped, total, created, schedules}`. */
 export interface BackfillResult {
   settled: number;
   skipped: number;
   total: number;
+  /** Phase 29 — periods created before the contract's start. */
+  created?: number;
+  dry_run?: boolean;
   schedules?: ScheduleRow[];
 }
 
@@ -3151,6 +3163,9 @@ export interface BackfillBatch {
   periods: number;
   /** Money moved (`paid`) or forgiven (`waived`). */
   amount: number;
+  /** Phase 29 — the real move-in it reached back to, and the periods it created. */
+  from?: string | null;
+  created_periods?: number;
   /** The CSV import the line arrived on; null for the contract page's button. */
   import_batch_id: string | null;
   created_by: { user_id: string; name: string } | null;
@@ -3167,6 +3182,8 @@ export interface BackfillUndoResult {
   backfill: BackfillBatch;
   payments_reversed: number;
   periods_reopened: number;
+  /** Phase 29 — periods before the contract's start that went with it. */
+  periods_removed?: number;
 }
 
 export const backfillsApi = {

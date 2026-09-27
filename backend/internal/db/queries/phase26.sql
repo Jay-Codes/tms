@@ -5,10 +5,10 @@
 -- rows a `waived` batch closed. The undo walks both.
 
 -- name: CreateBackfillBatch :one
-INSERT INTO backfill_batches (org_id, contract_id, mode, until, import_batch_id, created_by_user_id)
+INSERT INTO backfill_batches (org_id, contract_id, mode, until, import_batch_id, created_by_user_id, from_date)
 VALUES (
     sqlc.arg(org_id), sqlc.arg(contract_id), sqlc.arg(mode), sqlc.arg(until),
-    sqlc.narg(import_batch_id), sqlc.narg(created_by_user_id)
+    sqlc.narg(import_batch_id), sqlc.narg(created_by_user_id), sqlc.narg(from_date)
 )
 RETURNING *;
 
@@ -16,7 +16,8 @@ RETURNING *;
 -- shows what the call did even after an undo has taken the money back.
 -- name: FinishBackfillBatch :one
 UPDATE backfill_batches
-SET periods = sqlc.arg(periods), amount = sqlc.arg(amount)
+SET periods = sqlc.arg(periods), amount = sqlc.arg(amount),
+    created_periods = sqlc.arg(created_periods)
 WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id)
 RETURNING *;
 
@@ -25,7 +26,7 @@ RETURNING *;
 -- button would be noise.
 -- name: DeleteEmptyBackfillBatch :exec
 DELETE FROM backfill_batches
-WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND periods = 0;
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND periods = 0 AND created_periods = 0;
 
 -- name: StampPaymentBackfillBatch :exec
 UPDATE payments SET backfill_batch_id = sqlc.arg(backfill_batch_id)
@@ -62,6 +63,9 @@ SELECT b.*,
                  UNION
                  SELECT s.id FROM payment_schedules s
                  WHERE s.backfill_batch_id = b.id AND s.org_id = b.org_id
+                 UNION
+                 SELECT s.id FROM payment_schedules s
+                 WHERE s.created_by_backfill_id = b.id AND s.org_id = b.org_id
              )
        )::boolean AS touched
 FROM backfill_batches b
@@ -106,6 +110,9 @@ SELECT EXISTS (
           UNION
           SELECT s.id FROM payment_schedules s
           WHERE s.backfill_batch_id = sqlc.arg(id)::uuid AND s.org_id = sqlc.arg(org_id)
+          UNION
+          SELECT s.id FROM payment_schedules s
+          WHERE s.created_by_backfill_id = sqlc.arg(id)::uuid AND s.org_id = sqlc.arg(org_id)
       )
 )::boolean AS touched;
 

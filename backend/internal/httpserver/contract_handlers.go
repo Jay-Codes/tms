@@ -744,6 +744,11 @@ func (s *Server) documentSchedule(r *http.Request, row sqlc.GetContractRow) []ma
 	if err == nil && len(stored) > 0 {
 		out := make([]map[string]any, 0, len(stored))
 		for _, sc := range stored {
+			// Phase 29: periods a backfill created before the start date are
+			// rent book history, not terms anyone signed.
+			if sc.CreatedByBackfillID.Valid {
+				continue
+			}
 			out = append(out, map[string]any{
 				"period_start": sc.PeriodStart.Time.Format(dateLayout),
 				"period_end":   sc.PeriodEnd.Time.Format(dateLayout),

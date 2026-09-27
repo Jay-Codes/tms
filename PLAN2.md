@@ -379,6 +379,16 @@ Needs from the client: confirm the inputs per property (purchase price, purchase
 - [x] Reports → "Projections" tab: scenario sliders re-querying the endpoint, chart of cumulative cash vs investment with the break-even point, saved named scenarios.
 - [x] Tests: projection arithmetic against hand-computed fixtures.
 
+## Phase 29 — Backfill before the contract's start date (½ day) — ✅ done 27 Sep 2026
+
+Why: field feedback (27 Sep): landlords onboard long-standing renters on a fresh contract dated the day they joined TMS; the real start is on the paper contract in their drawer. Phase 20's answer (put the real move-in on the contract) means terminating and re-signing — nobody does it. "Allow backfills before the contract date since they are loading previous data, and landlords have their physical contract copies."
+- [x] Migration 000033: `payment_schedules.created_by_backfill_id`; `backfill_batches.from_date`, `created_periods`.
+- [x] `POST /contracts/{id}/backfill` gains `from` (real move-in, before `start_date`, at most 10 years before it) and `period_amount` (rent per payment period back then, default the contract's; only with `from`) and `dry_run`. With `from`, the periods from it up to the day before `start_date` are generated (same generator, last one prorated), owned by the batch, then settled up to `until` as before; later ones stay `overdue`. `until` may now be before `start_date` (≥ `from`, or ≥ the first existing period). A second `from` while history exists → 409 `history_exists`. Response gains `created`.
+- [x] Undo removes the created periods (soft delete) after reversing their money; `touched_since` also covers money recorded later on a created period. Contract document schedule leaves the created periods out (history, not signed terms).
+- [x] CSV kind `backfill` gains optional `from` and `period_amount` columns; preview counts the created periods.
+- [x] Tenant UI: "This tenancy began before {start}" in the Backfill sheet (move-in date + rent back then; preview from a dry run); "Backfill history" button offered on every running contract; Backfills list shows "from {date} · N periods created"; undo warning and result mention removed periods. SW/EN.
+- [x] Tests (`phase29_test.go`): create + settle + remaining overdue + dry run writes nothing + document unchanged + 409 on second `from` + undo removes; `until` alone settles created history; validation (422/400 per field); undo refused when a created period took real money; CSV `from`/`period_amount`.
+
 ## Browser walk-through and fixes (27 Sep 2026) — ✅
 
 - [x] Phases 25–28 walked through on the local stack (dev DB migrated to 32): assisted onboarding end to end; backfill → Backfills list → Undo restores the months; Backfill CSV template served; Projections with and without a purchase price (ROI/yield/payback checked by hand, break-even month marked on the chart); Buy credits shows the switched-off state; admin SMS sales page renders.

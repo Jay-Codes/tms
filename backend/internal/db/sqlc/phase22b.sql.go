@@ -28,7 +28,7 @@ SET original_amount = amount,
     adjusted_at = now(), adjusted_by_user_id = $5
 WHERE org_id = $6 AND id = $7 AND deleted_at IS NULL
   AND original_amount IS NULL AND status IN ('pending', 'partial', 'overdue')
-RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id
+RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id, created_by_backfill_id
 `
 
 type AdjustScheduleParams struct {
@@ -80,6 +80,7 @@ func (q *Queries) AdjustSchedule(ctx context.Context, arg AdjustScheduleParams) 
 		&i.AdjustedAt,
 		&i.AdjustedByUserID,
 		&i.BackfillBatchID,
+		&i.CreatedByBackfillID,
 	)
 	return i, err
 }
@@ -560,7 +561,7 @@ SET amount = original_amount,
     adjusted_at = NULL, adjusted_by_user_id = NULL
 WHERE org_id = $2 AND id = $3 AND deleted_at IS NULL
   AND original_amount IS NOT NULL AND status IN ('pending', 'partial', 'overdue', 'paid', 'waived')
-RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id
+RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id, backfill_batch_id, created_by_backfill_id
 `
 
 type UndoScheduleAdjustmentParams struct {
@@ -594,6 +595,7 @@ func (q *Queries) UndoScheduleAdjustment(ctx context.Context, arg UndoScheduleAd
 		&i.AdjustedAt,
 		&i.AdjustedByUserID,
 		&i.BackfillBatchID,
+		&i.CreatedByBackfillID,
 	)
 	return i, err
 }
