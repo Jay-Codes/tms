@@ -35,8 +35,10 @@ export function PropertyForm({
         location_text: location.trim(),
         notes: notes.trim(),
       };
+      // An edit that blanks the notes clears them (null), rather than
+      // storing an empty string beside properties that never had any.
       const res = initial
-        ? await propertiesApi.update(initial.id, body)
+        ? await propertiesApi.update(initial.id, { ...body, notes: body.notes || null })
         : await propertiesApi.create(body);
       onSaved(unwrapProperty(res));
     } catch (err) {

@@ -245,12 +245,13 @@ func (s *Server) handleGetOrg(w http.ResponseWriter, r *http.Request) {
 // orgSettingsPatch mirrors OrgSettings with pointers so an absent key is
 // distinguishable from an explicit null/zero value.
 type orgSettingsPatch struct {
-	AutoApproveLinks     *bool            `json:"auto_approve_links"`
-	DueDay               *json.RawMessage `json:"due_day"`
-	GraceDays            *int             `json:"grace_days"`
-	ReminderOffsetsDays  *[]int           `json:"reminder_offsets_days"`
-	UnsignedReminderDays *int             `json:"unsigned_reminder_days"`
-	SMSLanguage          *string          `json:"sms_language"`
+	AutoApproveLinks *bool `json:"auto_approve_links"`
+	// A plain RawMessage, not a pointer: `null` (no due day) must be seen.
+	DueDay               json.RawMessage `json:"due_day"`
+	GraceDays            *int            `json:"grace_days"`
+	ReminderOffsetsDays  *[]int          `json:"reminder_offsets_days"`
+	UnsignedReminderDays *int            `json:"unsigned_reminder_days"`
+	SMSLanguage          *string         `json:"sms_language"`
 }
 
 // apply merges the patch onto current settings, recording validation errors.
@@ -258,9 +259,9 @@ func (p orgSettingsPatch) apply(cur OrgSettings, f validate.Fields) OrgSettings 
 	if p.AutoApproveLinks != nil {
 		cur.AutoApproveLinks = *p.AutoApproveLinks
 	}
-	if p.DueDay != nil {
+	if len(p.DueDay) > 0 {
 		var v *int
-		if err := json.Unmarshal(*p.DueDay, &v); err != nil {
+		if err := json.Unmarshal(p.DueDay, &v); err != nil {
 			f.Add("settings.due_day", "must be a whole number between 1 and 28, or null")
 		} else if v != nil && (*v < 1 || *v > 28) {
 			f.Add("settings.due_day", "must be between 1 and 28, or null")

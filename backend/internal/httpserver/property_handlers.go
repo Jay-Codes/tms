@@ -194,11 +194,11 @@ func (s *Server) handlePatchProperty(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Name         *string          `json:"name"`
-		LocationText *string          `json:"location_text"`
-		Lat          *json.RawMessage `json:"lat"`
-		Lng          *json.RawMessage `json:"lng"`
-		Notes        *json.RawMessage `json:"notes"`
+		Name         *string         `json:"name"`
+		LocationText *string         `json:"location_text"`
+		Lat          json.RawMessage `json:"lat"`
+		Lng          json.RawMessage `json:"lng"`
+		Notes        json.RawMessage `json:"notes"`
 		// Phase 28: the investment fields; null clears one. Not pointers: a
 		// pointer decodes an explicit null as "absent".
 		PurchasePrice json.RawMessage `json:"purchase_price"`

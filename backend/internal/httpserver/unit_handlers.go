@@ -188,9 +188,9 @@ func (s *Server) handlePatchUnit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Name             *string          `json:"name"`
-		Status           *string          `json:"status"`
-		AllowedPeriodIDs *json.RawMessage `json:"allowed_period_ids"`
+		Name             *string         `json:"name"`
+		Status           *string         `json:"status"`
+		AllowedPeriodIDs json.RawMessage `json:"allowed_period_ids"`
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
@@ -216,9 +216,10 @@ func (s *Server) handlePatchUnit(w http.ResponseWriter, r *http.Request) {
 			params.StatusOverride = &override
 		}
 	}
-	if body.AllowedPeriodIDs != nil {
+	// A plain RawMessage so an explicit `null` ("every period") is seen.
+	if len(body.AllowedPeriodIDs) > 0 {
 		var ids *[]string
-		if err := json.Unmarshal(*body.AllowedPeriodIDs, &ids); err != nil {
+		if err := json.Unmarshal(body.AllowedPeriodIDs, &ids); err != nil {
 			f.Add("allowed_period_ids", "must be a list of ids or null")
 		} else {
 			params.SetAllowed = true

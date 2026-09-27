@@ -330,13 +330,17 @@ func parseUUIDList(f validate.Fields, field string, in []string) []pgtype.UUID {
 }
 
 // jsonNumberPtr decodes an optional-and-nullable numeric patch field. The three
-// states are: absent (raw == nil), explicit null (set, value nil) and a value.
-func jsonNumberPtr(f validate.Fields, field string, raw *json.RawMessage, min, max float64) (set bool, val *float64) {
-	if raw == nil {
+// states are: absent (empty raw), explicit null (set, value nil) and a value.
+//
+// The field must be a plain json.RawMessage, never a pointer: encoding/json
+// sets a *json.RawMessage to nil for a literal `null`, which made "clear it"
+// indistinguishable from "not sent".
+func jsonNumberPtr(f validate.Fields, field string, raw json.RawMessage, min, max float64) (set bool, val *float64) {
+	if len(raw) == 0 {
 		return false, nil
 	}
 	var v *float64
-	if err := json.Unmarshal(*raw, &v); err != nil {
+	if err := json.Unmarshal(raw, &v); err != nil {
 		f.Add(field, "must be a number or null")
 		return false, nil
 	}
@@ -348,12 +352,13 @@ func jsonNumberPtr(f validate.Fields, field string, raw *json.RawMessage, min, m
 }
 
 // jsonStringPtr decodes an optional-and-nullable string patch field.
-func jsonStringPtr(f validate.Fields, field string, raw *json.RawMessage, maxLen int) (set bool, val *string) {
-	if raw == nil {
+// Like jsonNumberPtr, it takes a plain json.RawMessage so `null` is seen.
+func jsonStringPtr(f validate.Fields, field string, raw json.RawMessage, maxLen int) (set bool, val *string) {
+	if len(raw) == 0 {
 		return false, nil
 	}
 	var v *string
-	if err := json.Unmarshal(*raw, &v); err != nil {
+	if err := json.Unmarshal(raw, &v); err != nil {
 		f.Add(field, "must be a string or null")
 		return false, nil
 	}
