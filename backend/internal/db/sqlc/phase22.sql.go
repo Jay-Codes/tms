@@ -37,6 +37,72 @@ func (q *Queries) ContractTemplateChanged(ctx context.Context, arg ContractTempl
 	return changed, err
 }
 
+const deletePaymentAllocation = `-- name: DeletePaymentAllocation :exec
+DELETE FROM payment_allocations WHERE org_id = $1 AND id = $2
+`
+
+type DeletePaymentAllocationParams struct {
+	OrgID pgtype.UUID `json:"org_id"`
+	ID    pgtype.UUID `json:"id"`
+}
+
+// DeletePaymentAllocation removes an allocation whose money has been moved.
+func (q *Queries) DeletePaymentAllocation(ctx context.Context, arg DeletePaymentAllocationParams) error {
+	_, err := q.db.Exec(ctx, deletePaymentAllocation, arg.OrgID, arg.ID)
+	return err
+}
+
+const listAllocationsFrom = `-- name: ListAllocationsFrom :many
+SELECT a.id, a.payment_id, a.schedule_id, a.amount
+FROM payment_allocations a
+JOIN payment_schedules s ON s.id = a.schedule_id AND s.org_id = a.org_id
+JOIN payments p ON p.id = a.payment_id AND p.org_id = a.org_id
+WHERE a.org_id = $1 AND s.contract_id = $2
+  AND s.period_start >= $3 AND s.deleted_at IS NULL
+  AND p.status <> 'reversed' AND p.deleted_at IS NULL
+ORDER BY s.period_start, a.created_at
+`
+
+type ListAllocationsFromParams struct {
+	OrgID      pgtype.UUID `json:"org_id"`
+	ContractID pgtype.UUID `json:"contract_id"`
+	FromDate   pgtype.Date `json:"from_date"`
+}
+
+type ListAllocationsFromRow struct {
+	ID         pgtype.UUID `json:"id"`
+	PaymentID  pgtype.UUID `json:"payment_id"`
+	ScheduleID pgtype.UUID `json:"schedule_id"`
+	Amount     int64       `json:"amount"`
+}
+
+// ListAllocationsFrom is every live allocation on a contract's periods starting
+// on or after a date — the money an amendment carries across.
+func (q *Queries) ListAllocationsFrom(ctx context.Context, arg ListAllocationsFromParams) ([]ListAllocationsFromRow, error) {
+	rows, err := q.db.Query(ctx, listAllocationsFrom, arg.OrgID, arg.ContractID, arg.FromDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllocationsFromRow{}
+	for rows.Next() {
+		var i ListAllocationsFromRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PaymentID,
+			&i.ScheduleID,
+			&i.Amount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStalePendingContracts = `-- name: ListStalePendingContracts :many
 SELECT c.id FROM contracts c
 JOIN contract_templates t ON t.id = c.template_id AND t.org_id = c.org_id
@@ -73,6 +139,52 @@ func (q *Queries) ListStalePendingContracts(ctx context.Context, arg ListStalePe
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockContract = `-- name: LockContract :one
+SELECT id, status FROM contracts
+WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
+FOR UPDATE
+`
+
+type LockContractParams struct {
+	OrgID pgtype.UUID `json:"org_id"`
+	ID    pgtype.UUID `json:"id"`
+}
+
+type LockContractRow struct {
+	ID     pgtype.UUID `json:"id"`
+	Status string      `json:"status"`
+}
+
+// LockContract serialises an amendment's activation against the old contract.
+func (q *Queries) LockContract(ctx context.Context, arg LockContractParams) (LockContractRow, error) {
+	row := q.db.QueryRow(ctx, lockContract, arg.OrgID, arg.ID)
+	var i LockContractRow
+	err := row.Scan(&i.ID, &i.Status)
+	return i, err
+}
+
+const openAmendmentFor = `-- name: OpenAmendmentFor :one
+
+SELECT id FROM contracts
+WHERE org_id = $1 AND supersedes_contract_id = $2
+  AND status = 'pending_signature' AND amendment_effective_date IS NOT NULL
+  AND deleted_at IS NULL
+`
+
+type OpenAmendmentForParams struct {
+	OrgID      pgtype.UUID `json:"org_id"`
+	ContractID pgtype.UUID `json:"contract_id"`
+}
+
+// ---------------------------------------------------- §22.4 amendments --
+// OpenAmendmentFor is the unsigned amendment of a contract, if any.
+func (q *Queries) OpenAmendmentFor(ctx context.Context, arg OpenAmendmentForParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, openAmendmentFor, arg.OrgID, arg.ContractID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const resolveUnitTemplate = `-- name: ResolveUnitTemplate :one
@@ -244,6 +356,62 @@ func (q *Queries) SetUnitsTemplate(ctx context.Context, arg SetUnitsTemplatePara
 	return items, nil
 }
 
+const shrinkPaymentAllocation = `-- name: ShrinkPaymentAllocation :exec
+UPDATE payment_allocations SET amount = $1
+WHERE org_id = $2 AND id = $3
+`
+
+type ShrinkPaymentAllocationParams struct {
+	Amount int64       `json:"amount"`
+	OrgID  pgtype.UUID `json:"org_id"`
+	ID     pgtype.UUID `json:"id"`
+}
+
+// ShrinkPaymentAllocation keeps the part of an allocation that could not move.
+func (q *Queries) ShrinkPaymentAllocation(ctx context.Context, arg ShrinkPaymentAllocationParams) error {
+	_, err := q.db.Exec(ctx, shrinkPaymentAllocation, arg.Amount, arg.OrgID, arg.ID)
+	return err
+}
+
+const supersedeContract = `-- name: SupersedeContract :one
+UPDATE contracts
+SET superseded_by_contract_id = $1,
+    termination_effective_date = $2,
+    termination_reason = $3,
+    status = CASE WHEN $2::date < CURRENT_DATE THEN 'ended' ELSE status END
+WHERE org_id = $4 AND id = $5 AND status IN ('active', 'expiring')
+RETURNING id, status
+`
+
+type SupersedeContractParams struct {
+	NewID   pgtype.UUID `json:"new_id"`
+	LastDay pgtype.Date `json:"last_day"`
+	Reason  *string     `json:"reason"`
+	OrgID   pgtype.UUID `json:"org_id"`
+	ID      pgtype.UUID `json:"id"`
+}
+
+type SupersedeContractRow struct {
+	ID     pgtype.UUID `json:"id"`
+	Status string      `json:"status"`
+}
+
+// SupersedeContract closes the old side of an activated amendment: it points
+// at its successor and stops the day before the amendment governs. When that
+// day has already passed it ends now; otherwise the lifecycle job ends it.
+func (q *Queries) SupersedeContract(ctx context.Context, arg SupersedeContractParams) (SupersedeContractRow, error) {
+	row := q.db.QueryRow(ctx, supersedeContract,
+		arg.NewID,
+		arg.LastDay,
+		arg.Reason,
+		arg.OrgID,
+		arg.ID,
+	)
+	var i SupersedeContractRow
+	err := row.Scan(&i.ID, &i.Status)
+	return i, err
+}
+
 const templateUsage = `-- name: TemplateUsage :many
 SELECT t.id,
        (SELECT count(*) FROM units u
@@ -297,5 +465,23 @@ type TouchTemplateContentParams struct {
 // TouchTemplateContent records that a template's wording or policy changed.
 func (q *Queries) TouchTemplateContent(ctx context.Context, arg TouchTemplateContentParams) error {
 	_, err := q.db.Exec(ctx, touchTemplateContent, arg.OrgID, arg.ID)
+	return err
+}
+
+const waiveScheduleFrom = `-- name: WaiveScheduleFrom :exec
+UPDATE payment_schedules SET status = 'waived', paid_amount = $1
+WHERE org_id = $2 AND id = $3 AND deleted_at IS NULL
+`
+
+type WaiveScheduleFromParams struct {
+	PaidAmount int64       `json:"paid_amount"`
+	OrgID      pgtype.UUID `json:"org_id"`
+	ID         pgtype.UUID `json:"id"`
+}
+
+// WaiveScheduleFrom closes one of the old contract's periods the amendment
+// takes over, keeping only money that could not be moved.
+func (q *Queries) WaiveScheduleFrom(ctx context.Context, arg WaiveScheduleFromParams) error {
+	_, err := q.db.Exec(ctx, waiveScheduleFrom, arg.PaidAmount, arg.OrgID, arg.ID)
 	return err
 }

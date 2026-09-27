@@ -329,7 +329,7 @@ Why: every approved application was written on the org's single default template
 - [x] Backend: `content_updated_at` (migration 000025), `template_changed` on contracts, `stale_pending` on template save, `POST /contracts/{id}/reissue`, `POST /contract-templates/{id}/reissue-pending`; refused once anyone has signed. [x] UI: contract notice + Reissue sheet, "Replaces contract" link, template editor "Reissue them all". — Editing a template flags its `pending_signature` contracts "wording changed — reissue?"; reissue = withdraw + fresh contract from the same parameters (Phase 17 `reissue`).
 
 ### 22.4 Contract changes (Phase 17 supersession)
-- [ ] Amend / renew / reissue as drafted in Phase 17, including switching template as an amendment.
+- [x] Backend: `POST /contracts/{id}/amend` (amend + renew), period-boundary effective dates, one open amendment, activation waives/moves money/supersedes, lifecycle ends superseded contracts (migration 000026). Tests: rent rise with prepaid carry and reversal unwind, renewal, refusals. [ ] UI. — Amend / renew / reissue as drafted in Phase 17, including switching template as an amendment.
 
 ### 22.5 Settle-up on termination, deposits (reads 22.2 policy)
 - [ ] Termination settlement, deposit record and refund, single-period waive/discount, eviction stages with SW+EN letters, renter notice, holdover alert.

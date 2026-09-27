@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Phase 22 §22.1 — template assignment. The rule under test is the resolution
@@ -255,5 +256,134 @@ func TestPhase22ReissueAfterTheTemplateChanges(t *testing.T) {
 		mustStatus(t, http.StatusOK, "reissue pending")
 	if got := mustFloat(t, all.Body, "reissued"); got != 0 {
 		t.Errorf("reissued = %v, want 0", got)
+	}
+}
+
+// ---------------------------------------------------- 22.4 amendments --
+
+func scheduleRows(t *testing.T, c *client, contractID string) []map[string]any {
+	t.Helper()
+	return listOf(t, c.do(http.MethodGet, "/contracts/"+contractID+"/schedules", nil).
+		mustStatus(t, http.StatusOK, "schedules"))
+}
+
+// TestPhase22AmendRentMidTermCarriesPrepaidMoney: a rent rise from the second
+// period, with the second period already paid. The old contract keeps the
+// first period, waives the rest, and the money paid for the second moves to
+// the amendment's first period.
+func TestPhase22AmendRentMidTermCarriesPrepaidMoney(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newPaymentFixture(t, "Amend", "0722000500", "+255722000501")
+	c := fix.owner
+	c.recordPayment(map[string]any{
+		"contract_id": fix.contractID, "amount": fix.amounts[0] + fix.amounts[1], "method": "cash",
+		"allow_overpay_rollover": true,
+	}).mustStatus(t, http.StatusCreated, "pay two periods")
+	rows := scheduleRows(t, c, fix.contractID)
+	second, _ := rows[1]["period_start"].(string)
+	day, _ := time.Parse("2006-01-02", second)
+
+	path := "/contracts/" + fix.contractID + "/amend"
+	mid := c.do(http.MethodPost, path, map[string]any{
+		"effective_date": day.AddDate(0, 0, 1).Format("2006-01-02"), "reason": "rent review", "rent_amount": 300_000,
+	})
+	if mid.Code != http.StatusUnprocessableEntity || mid.str(t, "type") != "effective_not_period_start" {
+		t.Fatalf("mid-period amendment = %d %s, want 422", mid.Code, mid.Raw)
+	}
+
+	am := c.do(http.MethodPost, path, map[string]any{
+		"effective_date": second, "reason": "rent review", "rent_amount": 300_000,
+	}).mustStatus(t, http.StatusCreated, "amend")
+	amID := am.str(t, "contract", "id")
+	if got := am.str(t, "contract", "status"); got != "pending_signature" {
+		t.Errorf("amendment status = %s", got)
+	}
+	if got := am.str(t, "contract", "amendment_effective_date"); got != second {
+		t.Errorf("effective = %s, want %s", got, second)
+	}
+	again := c.do(http.MethodPost, path, map[string]any{"effective_date": second, "reason": "twice"})
+	if again.Code != http.StatusConflict || again.str(t, "type") != "amendment_pending" {
+		t.Errorf("second amendment = %d %s, want 409 amendment_pending", again.Code, again.Raw)
+	}
+	// The old contract still collects while the renter reads the new one.
+	if got := c.do(http.MethodGet, "/contracts/"+fix.contractID, nil).str(t, "contract", "status"); got != "active" {
+		t.Errorf("old status while amendment pending = %s", got)
+	}
+
+	h.signAsRenter(t, fix.renter, amID, fix.renterPhone)
+	c.do(http.MethodPost, "/contracts/"+amID+"/activate", nil).mustStatus(t, http.StatusOK, "activate amendment")
+
+	old := c.do(http.MethodGet, "/contracts/"+fix.contractID, nil).mustStatus(t, http.StatusOK, "old")
+	if got := old.str(t, "contract", "superseded_by_contract_id"); got != amID {
+		t.Errorf("superseded_by = %s, want %s", got, amID)
+	}
+	oldRows := scheduleRows(t, c, fix.contractID)
+	if got := oldRows[0]["status"]; got != "paid" {
+		t.Errorf("old first period = %v, want paid (it stands)", got)
+	}
+	for i, r := range oldRows[1:] {
+		if r["status"] != "waived" {
+			t.Errorf("old period %d = %v, want waived", i+1, r["status"])
+		}
+	}
+	newRows := scheduleRows(t, c, amID)
+	if got := int64(mustFloat(t, newRows[0], "paid_amount")); got != fix.amounts[1] {
+		t.Errorf("carried onto the amendment = %d, want %d", got, fix.amounts[1])
+	}
+	if got := int64(mustFloat(t, newRows[0], "amount")); got != 300_000 {
+		t.Errorf("amended rent = %d, want 300000", got)
+	}
+	if got := newRows[0]["status"]; got != "partial" {
+		t.Errorf("amendment first period = %v, want partial", got)
+	}
+	if rows := h.auditPayloads(t, "contract.supersede"); len(rows) != 1 {
+		t.Errorf("contract.supersede rows = %d, want 1", len(rows))
+	}
+
+	// Reversing the original payment unwinds both halves: nothing left paid.
+	var paymentID string
+	for _, p := range listOf(t, c.do(http.MethodGet, "/payments?contract_id="+fix.contractID, nil).
+		mustStatus(t, http.StatusOK, "payments")) {
+		paymentID, _ = p["id"].(string)
+	}
+	c.do(http.MethodPost, "/payments/"+paymentID+"/reverse", map[string]any{"reason": "bounced"}).
+		mustStatus(t, http.StatusOK, "reverse")
+	if got := mustFloat(t, scheduleRows(t, c, amID)[0], "paid_amount"); got != 0 {
+		t.Errorf("amendment paid after reversal = %v, want 0", got)
+	}
+}
+
+func TestPhase22RenewOnTheEndDate(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newPaymentFixture(t, "Renew", "0722000600", "+255722000601")
+	c := fix.owner
+	end := c.do(http.MethodGet, "/contracts/"+fix.contractID, nil).str(t, "contract", "end_date")
+	re := c.do(http.MethodPost, "/contracts/"+fix.contractID+"/amend", map[string]any{
+		"effective_date": end, "reason": "renewal",
+	}).mustStatus(t, http.StatusCreated, "renew")
+	renewal := re.str(t, "contract", "id")
+	if got := re.str(t, "contract", "start_date"); got != end {
+		t.Errorf("renewal starts %s, want %s", got, end)
+	}
+	h.signAsRenter(t, fix.renter, renewal, fix.renterPhone)
+	c.do(http.MethodPost, "/contracts/"+renewal+"/activate", nil).mustStatus(t, http.StatusOK, "activate renewal")
+	for i, r := range scheduleRows(t, c, fix.contractID) {
+		if r["status"] == "waived" {
+			t.Errorf("old period %d waived by a renewal", i)
+		}
+	}
+	if got := c.do(http.MethodGet, "/contracts/"+fix.contractID, nil).str(t, "contract", "status"); got != "active" {
+		t.Errorf("old contract status = %s, want still active until its end", got)
+	}
+}
+
+func TestPhase22AmendRefusedOnAnUnsignedContract(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newContractFixture(t, "AmendPending", "0722000700", "+255722000701")
+	r := fix.owner.do(http.MethodPost, "/contracts/"+fix.contractID+"/amend", map[string]any{
+		"effective_date": time.Now().UTC().Format("2006-01-02"), "reason": "x",
+	})
+	if r.Code != http.StatusConflict {
+		t.Errorf("amend unsigned = %d, want 409", r.Code)
 	}
 }

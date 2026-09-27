@@ -94,3 +94,57 @@ ORDER BY c.created_at;
 -- name: SetContractSupersedes :exec
 UPDATE contracts SET supersedes_contract_id = sqlc.arg(supersedes_contract_id)
 WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id);
+
+-- ---------------------------------------------------- §22.4 amendments --
+
+-- OpenAmendmentFor is the unsigned amendment of a contract, if any.
+-- name: OpenAmendmentFor :one
+SELECT id FROM contracts
+WHERE org_id = sqlc.arg(org_id) AND supersedes_contract_id = sqlc.arg(contract_id)
+  AND status = 'pending_signature' AND amendment_effective_date IS NOT NULL
+  AND deleted_at IS NULL;
+
+-- LockContract serialises an amendment's activation against the old contract.
+-- name: LockContract :one
+SELECT id, status FROM contracts
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND deleted_at IS NULL
+FOR UPDATE;
+
+-- ListAllocationsFrom is every live allocation on a contract's periods starting
+-- on or after a date — the money an amendment carries across.
+-- name: ListAllocationsFrom :many
+SELECT a.id, a.payment_id, a.schedule_id, a.amount
+FROM payment_allocations a
+JOIN payment_schedules s ON s.id = a.schedule_id AND s.org_id = a.org_id
+JOIN payments p ON p.id = a.payment_id AND p.org_id = a.org_id
+WHERE a.org_id = sqlc.arg(org_id) AND s.contract_id = sqlc.arg(contract_id)
+  AND s.period_start >= sqlc.arg(from_date) AND s.deleted_at IS NULL
+  AND p.status <> 'reversed' AND p.deleted_at IS NULL
+ORDER BY s.period_start, a.created_at;
+
+-- DeletePaymentAllocation removes an allocation whose money has been moved.
+-- name: DeletePaymentAllocation :exec
+DELETE FROM payment_allocations WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id);
+
+-- WaiveScheduleFrom closes one of the old contract's periods the amendment
+-- takes over, keeping only money that could not be moved.
+-- name: WaiveScheduleFrom :exec
+UPDATE payment_schedules SET status = 'waived', paid_amount = sqlc.arg(paid_amount)
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND deleted_at IS NULL;
+
+-- SupersedeContract closes the old side of an activated amendment: it points
+-- at its successor and stops the day before the amendment governs. When that
+-- day has already passed it ends now; otherwise the lifecycle job ends it.
+-- name: SupersedeContract :one
+UPDATE contracts
+SET superseded_by_contract_id = sqlc.arg(new_id),
+    termination_effective_date = sqlc.arg(last_day),
+    termination_reason = sqlc.arg(reason),
+    status = CASE WHEN sqlc.arg(last_day)::date < CURRENT_DATE THEN 'ended' ELSE status END
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND status IN ('active', 'expiring')
+RETURNING id, status;
+
+-- ShrinkPaymentAllocation keeps the part of an allocation that could not move.
+-- name: ShrinkPaymentAllocation :exec
+UPDATE payment_allocations SET amount = sqlc.arg(amount)
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id);
