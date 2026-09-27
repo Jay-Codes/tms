@@ -342,12 +342,12 @@ Why: every approved application was written on the org's single default template
 - [x] Backend (migration 000029, tests): duplicate guard on record payment and proof accept (`possible_duplicate`, `confirm_duplicate`), `Idempotency-Key` replay, `POST /payments/{id}/correct` (reverse + record in one transaction), renter SMS on reversal/correction, landlord in-app inbox (`/inbox`) fed by reversals, corrections, confirmed duplicates, proofs submitted and renters' notices.
 - [x] Tenant UI: duplicate confirm step on record/accept (Idempotency-Key per sheet), Correct sheet on payments, bell with unread count, /inbox page.
 
-## Phase 25 — Finish landlord-assisted onboarding (Phase 18.2 screens) (½ day) — 🟡 built 27 Sep 2026; browser run left
+## Phase 25 — Finish landlord-assisted onboarding (Phase 18.2 screens) (½ day) — ✅ done 27 Sep 2026
 
 Why: a renter whose OTP SMS never arrives cannot register or sign. The backend (assist sessions, code shown in person, witnessed signature) shipped in Phase 18; the two screens that use it did not.
 - [x] Tenant `renters/assist`: start a session for a phone + unit, show the 6-digit code large with a QR and countdown, "New code", live status (5 s poll), "Review & approve" deep link when the renter has applied; entry points from the unit page and the link-requests page.
 - [x] Enduser `/u/{unit_code}?assist=`: register/login hide "Send code" and ask for "the code your landlord shows you", no resend; the sign page reads the same.
-- [ ] Tests in the browser against the Phase 18 API; UAT row. — UAT row P22 written; backend test for the QR added; browser run still to do (needs the stack up).
+- [x] Tests in the browser against the Phase 18 API; UAT row. — UAT row P22; backend test for the QR; browser walk-through 27 Sep 2026: session started, code + QR + countdown shown, renter registered with the landlord's code (no SMS, no resend), landlord progress moved to Registered on its own.
 
 ## Phase 26 — Backfill: undo a whole backfill, bulk backfill by CSV (1 day) — ✅ done 27 Sep 2026
 
@@ -379,8 +379,22 @@ Needs from the client: confirm the inputs per property (purchase price, purchase
 - [x] Reports → "Projections" tab: scenario sliders re-querying the endpoint, chart of cumulative cash vs investment with the break-even point, saved named scenarios.
 - [x] Tests: projection arithmetic against hand-computed fixtures.
 
+## Browser walk-through and fixes (27 Sep 2026) — ✅
+
+- [x] Phases 25–28 walked through on the local stack (dev DB migrated to 32): assisted onboarding end to end; backfill → Backfills list → Undo restores the months; Backfill CSV template served; Projections with and without a purchase price (ROI/yield/payback checked by hand, break-even month marked on the chart); Buy credits shows the switched-off state; admin SMS sales page renders.
+- [x] Projection chart: long horizons label every tick with its year (month names alone read as time running backwards).
+- [x] Backfilled and imported payments show the date only (they carry no real time; midnight UTC read as 03:00).
+- [x] `null` now clears nullable PATCH fields — property `lat`/`lng`/`notes`, org `settings.due_day`, unit `allowed_period_ids` (pinned by `TestPatchNullClearsNullableFields`).
+
+## Waiting on the client (nothing to build until these arrive)
+
+- **Snippe (Phase 27 is switched off until then):** bundle sizes and prices (entered by admin), `SNIPPE_API_KEY` + `SNIPPE_WEBHOOK_SECRET`, the webhook URL `https://api.tms.kuzo.co.tz/api/v1/webhooks/snippe` registered in the Snippe dashboard, VAT/receipt rules, whether Snippe has a sandbox (four details marked `UNCERTAIN:` in `backend/internal/snippe/snippe.go` to confirm there), and the Beem bundles already bought (opening stock).
+- **Projections (Phase 28 defaults to confirm):** rent-change slider affects vacant units and re-lettings only; occupancy and collection default to 100% without history; months before joining TMS count as zero; renovations count as investment when their category is marked Capital.
+- **Beem:** approved sender ID, then the live SMS smoke test below.
+- **Notifications to landlords:** in-app bell is the default (Phase 24); say if owners should also get SMS or e-mail.
+
 ## Operations (not phases)
-- [ ] **Deploy** the merged work: `make docker-publish` then `make docker-deploy TAG=…` on the server (client-side step; frontends on Vercel already build from `main` and call the new routes).
+- [ ] **Deploy** the merged work: `make docker-publish` then `make docker-deploy TAG=c851066` on the server (client-side step; frontends on Vercel already build from `main` and call routes the server does not have yet — do this first).
 - [x] **MinIO image**: `minio/minio` and `minio/mc` no longer pull (Docker Hub or quay.io); both compose files now use `bitnamilegacy/minio:2025.4.22` (same release, ships `mc` and `curl`), run as root so existing volumes stay writable. Local `make up` works again and the 4 storage-dependent tests pass.
 - [ ] **Live Beem smoke test** once the sender ID is approved (PLAN.md).
 
