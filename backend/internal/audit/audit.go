@@ -228,6 +228,10 @@ const (
 	// from the same terms (§22.3). The new contract's own `contract.create`
 	// row follows it.
 	ActionContractReissue = "contract.reissue"
+	// §22.4: an amendment written (on the old contract) and, when it
+	// activates, the old contract handing over to it.
+	ActionContractAmend     = "contract.amend"
+	ActionContractSupersede = "contract.supersede"
 )
 
 // Entity types.

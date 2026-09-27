@@ -144,6 +144,12 @@ export function ContractsTable({
               {showRenter ? <td>{c.renter?.full_name ?? '—'}</td> : null}
               <td>
                 <ContractStatusStamp status={c.status} />
+                {/* Phase 22.4 — an amendment awaiting signature, or a contract one replaced. */}
+                {c.superseded_by_contract_id ? (
+                  <span className="stamp" style={{ marginLeft: 'var(--sp-2)' }}>{t('contracts.amend.chip_replaced')}</span>
+                ) : c.amendment_effective_date ? (
+                  <span className="stamp" style={{ marginLeft: 'var(--sp-2)' }}>{t('contracts.amend.chip')}</span>
+                ) : null}
                 {isReadyToCountersign(c) ? (
                   <div style={{ fontSize: 'var(--text-xs)', color: 'var(--primary)' }}>ready to countersign</div>
                 ) : null}

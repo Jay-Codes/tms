@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"tms/backend/internal/auth"
 	"tms/backend/internal/db"
 	"tms/backend/internal/db/sqlc"
+	"tms/backend/internal/httpx"
 	"tms/backend/internal/validate"
 )
 
@@ -31,6 +33,14 @@ func optUUIDString(id pgtype.UUID) *string {
 		return nil
 	}
 	s := db.UUIDString(id)
+	return &s
+}
+
+func optDateString(d pgtype.Date) *string {
+	if !d.Valid {
+		return nil
+	}
+	s := d.Time.Format(dateLayout)
 	return &s
 }
 
@@ -410,4 +420,293 @@ func (s *Server) handleReissueStale(w http.ResponseWriter, r *http.Request) {
 	}
 	s.enqueueNotifications(r.Context(), notifyIDs...)
 	WriteJSON(w, http.StatusOK, map[string]any{"reissued": reissued})
+}
+
+// --------------------------------------------------- §22.4 amendments --
+
+const amendReasonMax = 200
+
+var errAmendmentStale = errors.New("contract: the amended contract is no longer running")
+
+// handleAmendContract is POST /contracts/{id}/amend: a new contract, pre-filled
+// from this running one with the changes applied, for the renter to sign
+// again. This one keeps collecting until the amendment activates. A renewal is
+// an amendment whose effective date is this contract's end date.
+func (s *Server) handleAmendContract(w http.ResponseWriter, r *http.Request) {
+	if s.dbUnavailable(w) {
+		return
+	}
+	p := auth.MustFromContext(r.Context())
+	old, ok := s.loadContract(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		EffectiveDate   string `json:"effective_date"`
+		Reason          string `json:"reason"`
+		RentAmount      *int64 `json:"rent_amount"`
+		RentPeriodDays  *int32 `json:"rent_period_days"`
+		PaymentPeriodID string `json:"payment_period_id"`
+		DueDay          *int32 `json:"due_day"`
+		TermDays        *int32 `json:"term_days"`
+		TemplateID      string `json:"template_id"`
+		Language        string `json:"language"`
+	}
+	if !DecodeJSON(w, r, &body) {
+		return
+	}
+	f := validate.Fields{}
+	effective := requiredDate(f, "effective_date", body.EffectiveDate)
+	reason := f.MaxLen("reason", f.Required("reason", strings.TrimSpace(body.Reason)), amendReasonMax)
+	in := contractInput{
+		OrgID: old.OrgID, UnitID: old.UnitID, RenterUserID: old.RenterUserID,
+		PaymentPeriodID: old.PaymentPeriodID, DueDay: old.DueDay, Language: old.Language,
+		ActorUserID: p.UserIDString(), Amends: old.ID, AmendReason: reason,
+		RentAmount: old.RentAmount, RentPeriodDays: old.RentPeriodDays,
+	}
+	if body.RentAmount != nil {
+		if *body.RentAmount < 1 {
+			f.Add("rent_amount", "must be above zero")
+		}
+		in.RentAmount = *body.RentAmount
+	}
+	if body.RentPeriodDays != nil {
+		if *body.RentPeriodDays < 1 || *body.RentPeriodDays > 366 {
+			f.Add("rent_period_days", "between 1 and 366 days")
+		}
+		in.RentPeriodDays = *body.RentPeriodDays
+	}
+	if v := uuidField(f, "payment_period_id", body.PaymentPeriodID, false); v.Valid {
+		in.PaymentPeriodID = v
+	}
+	if body.DueDay != nil {
+		if *body.DueDay < 1 || *body.DueDay > 31 {
+			f.Add("due_day", "between 1 and 31")
+		}
+		in.DueDay = body.DueDay
+	}
+	in.TemplateID = uuidField(f, "template_id", body.TemplateID, false)
+	if l := strings.TrimSpace(body.Language); l != "" {
+		in.Language = f.OneOf("language", l, "sw", "en")
+	}
+	if !f.Empty() {
+		badRequest(w, f)
+		return
+	}
+	if old.Status != contractActive && old.Status != contractExpiring {
+		conflictCode(w, "contract_not_active", "contract not running",
+			"only a running contract can be amended or renewed")
+		return
+	}
+
+	// The effective date must open one of this contract's own periods (or be
+	// its end, for a renewal): a date inside a period would charge that period
+	// twice, once on each contract.
+	schedules, err := s.q.ListSchedulesForContract(r.Context(), sqlc.ListSchedulesForContractParams{
+		OrgID: old.OrgID, ContractID: old.ID,
+	})
+	if err != nil {
+		s.serverError(w, r, "contract.amend.schedules", err)
+		return
+	}
+	today := todayEAT()
+	allowed := []string{}
+	valid := false
+	for _, sc := range schedules {
+		if sc.PeriodStart.Time.Before(today) {
+			continue
+		}
+		d := sc.PeriodStart.Time.Format(dateLayout)
+		allowed = append(allowed, d)
+		valid = valid || d == effective.Format(dateLayout)
+	}
+	end := old.EndDate.Time.Format(dateLayout)
+	allowed = append(allowed, end)
+	valid = valid || end == effective.Format(dateLayout)
+	if !valid {
+		if len(allowed) > 6 {
+			allowed = allowed[:6]
+		}
+		httpx.WriteProblemExtra(w, http.StatusUnprocessableEntity, "effective_not_period_start",
+			"effective date must start a period",
+			"an amendment takes effect on the first day of one of this contract's periods, or on its end date to renew",
+			map[string]any{"allowed": allowed})
+		return
+	}
+	in.AmendsEffective = effective
+	in.StartDate = effective
+
+	// Term: to the old end date, unless the landlord sets one; a renewal
+	// (effective on the end date) defaults to the old term again.
+	switch {
+	case body.TermDays != nil:
+		if *body.TermDays < 1 || *body.TermDays > termDaysMax {
+			f.Add("term_days", "must be a whole number of days between 1 and 3650")
+			badRequest(w, f)
+			return
+		}
+		in.TermDays = *body.TermDays
+	case effective.Before(old.EndDate.Time):
+		in.TermDays = int32(old.EndDate.Time.Sub(effective).Hours() / 24)
+	default:
+		in.TermDays = old.TermDays
+	}
+
+	// The template: the one named, else this contract's own if still live,
+	// else whatever the unit resolves to now.
+	if !in.TemplateID.Valid && old.TemplateID.Valid {
+		if _, err := s.q.GetContractTemplate(r.Context(), sqlc.GetContractTemplateParams{
+			OrgID: old.OrgID, ID: old.TemplateID,
+		}); err == nil {
+			in.TemplateID = old.TemplateID
+		}
+	}
+
+	var created sqlc.Contract
+	var notifyID string
+	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
+		var err error
+		created, notifyID, err = s.createContractTx(r.Context(), q, in)
+		if err != nil {
+			return err
+		}
+		return audit.Record(r.Context(), q, audit.Entry{
+			OrgID:       db.UUIDString(old.OrgID),
+			ActorUserID: p.UserIDString(),
+			Action:      audit.ActionContractAmend,
+			EntityType:  audit.EntityContract,
+			EntityID:    db.UUIDString(old.ID),
+			Before: map[string]any{
+				"rent_amount": old.RentAmount, "rent_period_days": old.RentPeriodDays,
+				"end_date": end, "due_day": old.DueDay,
+			},
+			After: map[string]any{
+				"amendment_id": db.UUIDString(created.ID), "effective_date": effective.Format(dateLayout),
+				"reason": reason, "rent_amount": in.RentAmount, "rent_period_days": in.RentPeriodDays,
+				"term_days": in.TermDays, "due_day": in.DueDay,
+			},
+		})
+	}); err != nil {
+		if writeCreateError(w, err) {
+			return
+		}
+		s.serverError(w, r, "contract.amend.tx", err)
+		return
+	}
+	s.enqueueNotifications(r.Context(), notifyID)
+	out, ok := s.reloadContract(w, r, created.ID, p.OrgID, pgtype.UUID{})
+	if !ok {
+		return
+	}
+	WriteJSON(w, http.StatusCreated, map[string]any{"contract": out})
+}
+
+// supersedeTx is the second half of activating an amendment, inside the
+// activation's transaction: the old contract's periods from the effective date
+// are waived, money already paid on them moves to the new contract's periods
+// in order (the same payments, re-allocated), and the old contract stops the
+// day before — at once if that day has passed, else by the lifecycle job.
+func (s *Server) supersedeTx(
+	ctx context.Context, q *sqlc.Queries, amendment sqlc.GetContractRow,
+	fresh []sqlc.PaymentSchedule, actor string,
+) (int64, error) {
+	org, oldID := amendment.OrgID, amendment.SupersedesContractID
+	effective := amendment.AmendmentEffectiveDate.Time
+	locked, err := q.LockContract(ctx, sqlc.LockContractParams{OrgID: org, ID: oldID})
+	if err != nil {
+		return 0, err
+	}
+	if locked.Status != contractActive && locked.Status != contractExpiring {
+		return 0, errAmendmentStale
+	}
+	oldRows, err := q.LockSchedulesForContract(ctx, sqlc.LockSchedulesForContractParams{
+		OrgID: org, ContractID: oldID,
+	})
+	if err != nil {
+		return 0, err
+	}
+	allocs, err := q.ListAllocationsFrom(ctx, sqlc.ListAllocationsFromParams{
+		OrgID: org, ContractID: oldID, FromDate: pgtype.Date{Time: effective, Valid: true},
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	// Carry: walk the new periods in order, filling each before the next.
+	paid := make([]int64, len(fresh))
+	moved := map[string]int64{}
+	var carried int64
+	next := 0
+	for _, a := range allocs {
+		left := a.Amount
+		for left > 0 && next < len(fresh) {
+			room := fresh[next].Amount - paid[next]
+			if room <= 0 {
+				next++
+				continue
+			}
+			take := min(left, room)
+			if _, err := q.CreatePaymentAllocation(ctx, sqlc.CreatePaymentAllocationParams{
+				OrgID: org, PaymentID: a.PaymentID, ScheduleID: fresh[next].ID, Amount: take,
+			}); err != nil {
+				return 0, err
+			}
+			paid[next] += take
+			if _, err := q.ApplyPaymentToSchedule(ctx, sqlc.ApplyPaymentToScheduleParams{
+				PaidAmount: paid[next], OrgID: org, ID: fresh[next].ID,
+			}); err != nil {
+				return 0, err
+			}
+			left -= take
+		}
+		took := a.Amount - left
+		if took == 0 {
+			continue
+		}
+		carried += took
+		moved[db.UUIDString(a.ScheduleID)] += took
+		if left == 0 {
+			err = q.DeletePaymentAllocation(ctx, sqlc.DeletePaymentAllocationParams{OrgID: org, ID: a.ID})
+		} else {
+			err = q.ShrinkPaymentAllocation(ctx, sqlc.ShrinkPaymentAllocationParams{Amount: left, OrgID: org, ID: a.ID})
+		}
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	waived := 0
+	for _, row := range oldRows {
+		if row.PeriodStart.Time.Before(effective) || row.Status == "waived" || row.Status == "written_off" {
+			continue
+		}
+		if err := q.WaiveScheduleFrom(ctx, sqlc.WaiveScheduleFromParams{
+			PaidAmount: row.PaidAmount - moved[db.UUIDString(row.ID)], OrgID: org, ID: row.ID,
+		}); err != nil {
+			return 0, err
+		}
+		waived++
+	}
+
+	reason := "Superseded by amendment from " + effective.Format(dateLayout)
+	if amendment.AmendmentReason != nil {
+		reason += ": " + *amendment.AmendmentReason
+	}
+	if _, err := q.SupersedeContract(ctx, sqlc.SupersedeContractParams{
+		NewID: amendment.ID, LastDay: pgtype.Date{Time: effective.AddDate(0, 0, -1), Valid: true},
+		Reason: &reason, OrgID: org, ID: oldID,
+	}); err != nil {
+		return 0, err
+	}
+	return carried, audit.Record(ctx, q, audit.Entry{
+		OrgID:       db.UUIDString(org),
+		ActorUserID: actor,
+		Action:      audit.ActionContractSupersede,
+		EntityType:  audit.EntityContract,
+		EntityID:    db.UUIDString(oldID),
+		After: map[string]any{
+			"superseded_by": db.UUIDString(amendment.ID), "effective_date": effective.Format(dateLayout),
+			"waived": waived, "carried": carried,
+		},
+	})
 }

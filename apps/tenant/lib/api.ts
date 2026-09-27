@@ -901,8 +901,38 @@ export interface Contract {
    * or rules last changed. Only the single read computes it.
    */
   template_changed?: boolean;
-  /** Phase 22.3 — the contract this one was reissued from. */
+  /** Phase 22.3 — the contract this one was reissued from (or, 22.4, amends). */
   supersedes_contract_id?: string | null;
+  /**
+   * Phase 22.4 — set on an amendment: the day it governs from (YYYY-MM-DD)
+   * and why. A renewal is an amendment effective on the old end date.
+   */
+  amendment_effective_date?: string | null;
+  amendment_reason?: string | null;
+  /** Phase 22.4 — set on the old contract once an amendment activates. */
+  superseded_by_contract_id?: string | null;
+  /** Phase 22.4 — the last day the old contract governs. */
+  termination_effective_date?: string | null;
+}
+
+/** `POST /contracts/{id}/amend` body (API.md 22.4). Omitted fields carry over. */
+export interface AmendInput {
+  effective_date: string;
+  reason: string;
+  rent_amount?: number;
+  rent_period_days?: number;
+  payment_period_id?: string;
+  due_day?: number;
+  term_days?: number;
+  template_id?: string;
+  language?: Locale;
+}
+
+/** `422 effective_not_period_start` names the dates an amendment may start on. */
+export function allowedEffectiveDates(err: unknown): string[] {
+  if (!(err instanceof ApiError) || err.code !== 'effective_not_period_start') return [];
+  const raw = err.body.allowed;
+  return Array.isArray(raw) ? raw.filter((d): d is string => typeof d === 'string') : [];
 }
 
 export interface ContractDocument {
@@ -1132,6 +1162,13 @@ export const contractsApi = {
    */
   reissue: (id: string, body: { reason?: string; template_id?: string } = {}) =>
     api.post<{ contract: Contract } | Contract>(`/contracts/${id}/reissue`, body),
+  /**
+   * Phase 22.4 — amend (or, effective on `end_date`, renew) a running
+   * contract. 201 with the new `pending_signature` amendment; 409
+   * `amendment_pending` / `contract_not_active`; 422 `effective_not_period_start`.
+   */
+  amend: (id: string, body: AmendInput) =>
+    api.post<{ contract: Contract } | Contract>(`/contracts/${id}/amend`, body),
 };
 
 /** `200 {periods, amount, schedules}` from write-off and its undo. */

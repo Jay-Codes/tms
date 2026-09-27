@@ -133,6 +133,12 @@ type contractResponse struct {
 	Policy *contract.Policy `json:"policy"`
 	// SupersedesContractID names the contract this one replaced (§22.3).
 	SupersedesContractID *string `json:"supersedes_contract_id"`
+	// §22.4: set on an amendment (the day it governs from, and why), and on
+	// the contract it replaced once it activates.
+	AmendmentEffectiveDate   *string `json:"amendment_effective_date"`
+	AmendmentReason          *string `json:"amendment_reason"`
+	SupersededByContractID   *string `json:"superseded_by_contract_id"`
+	TerminationEffectiveDate *string `json:"termination_effective_date"`
 	// TemplateChanged: unsigned, and its template's wording or policy changed
 	// after it was written — offer a reissue. Set on the single read only.
 	TemplateChanged   bool             `json:"template_changed"`
@@ -217,18 +223,22 @@ func toContract(r contractRow, signatures []signatureBlock) contractResponse {
 		RentPeriodDays: r.RentPeriodDays,
 		RentPerPeriod: contract.RentPerPeriod(
 			r.RentAmount, int(r.RentPeriodDays), int(r.PaymentPeriodDays)),
-		TermDays:             r.TermDays,
-		StartDate:            r.StartDate.Time.Format(dateLayout),
-		EndDate:              r.EndDate.Time.Format(dateLayout),
-		DueDay:               r.DueDay,
-		Language:             r.Language,
-		SnapshotHash:         db.StrVal(r.SnapshotHash),
-		Policy:               parsedPolicy(r.Policy),
-		SupersedesContractID: optUUIDString(r.SupersedesContractID),
-		Signatures:           signatures,
-		CreatedAt:            r.CreatedAt.Time,
-		ActivatedAt:          timePtr(r.ActivatedAt.Valid, r.ActivatedAt.Time),
-		TerminatedAt:         timePtr(r.TerminatedAt.Valid, r.TerminatedAt.Time),
+		TermDays:                 r.TermDays,
+		StartDate:                r.StartDate.Time.Format(dateLayout),
+		EndDate:                  r.EndDate.Time.Format(dateLayout),
+		DueDay:                   r.DueDay,
+		Language:                 r.Language,
+		SnapshotHash:             db.StrVal(r.SnapshotHash),
+		Policy:                   parsedPolicy(r.Policy),
+		SupersedesContractID:     optUUIDString(r.SupersedesContractID),
+		AmendmentEffectiveDate:   optDateString(r.AmendmentEffectiveDate),
+		AmendmentReason:          r.AmendmentReason,
+		SupersededByContractID:   optUUIDString(r.SupersededByContractID),
+		TerminationEffectiveDate: optDateString(r.TerminationEffectiveDate),
+		Signatures:               signatures,
+		CreatedAt:                r.CreatedAt.Time,
+		ActivatedAt:              timePtr(r.ActivatedAt.Valid, r.ActivatedAt.Time),
+		TerminatedAt:             timePtr(r.TerminatedAt.Valid, r.TerminatedAt.Time),
 
 		TerminationReason: r.TerminationReason,
 		SchedulesSummary: schedulesSummary{

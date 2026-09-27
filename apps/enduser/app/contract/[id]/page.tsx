@@ -226,8 +226,26 @@ function DocumentContent() {
         </div>
       </header>
 
+      {/* Phase 22.4: an amendment names what it changes and from when, so the
+          renter knows what the sign button at the bottom agrees to. */}
+      {needsSignature && contract?.amendment_effective_date && (
+        <Notice>
+          {contract.amendment_reason
+            ? t('doc.amendment', {
+                date: formatDate(locale, contract.amendment_effective_date),
+                reason: contract.amendment_reason,
+              })
+            : t('doc.amendmentNoReason', { date: formatDate(locale, contract.amendment_effective_date) })}
+        </Notice>
+      )}
       {needsSignature && (
         <Notice>{t('doc.readThenSign')}</Notice>
+      )}
+      {contract?.superseded_by_contract_id && (
+        <Notice>
+          {t('doc.replaced')}{' '}
+          <Link href={`/contract/${encodeURIComponent(contract.superseded_by_contract_id)}`}>{t('doc.openNewer')}</Link>
+        </Notice>
       )}
       {doc.status === 'pending_signature' && renterSigned && !landlordSigned && (
         <Notice>{t('doc.signedWaiting', { org: doc.org.display_name })}</Notice>

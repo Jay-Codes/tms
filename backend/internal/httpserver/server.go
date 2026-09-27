@@ -251,6 +251,8 @@ func (s *Server) routes() chi.Router {
 			r.Put("/properties/{id}/template", s.handleSetPropertyTemplate)
 			// §22.3: unsigned contracts on reworded templates.
 			r.Post("/contracts/{id}/reissue", s.handleReissueContract)
+			// §22.4: amend or renew a running contract (renter signs again).
+			r.Post("/contracts/{id}/amend", s.handleAmendContract)
 			r.Post("/contract-templates/{id}/reissue-pending", s.handleReissueStale)
 
 			// --- Phase 4: contracts ---

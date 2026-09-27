@@ -284,6 +284,10 @@ var isoRoutes = []isoCase{
 	{method: "GET", pattern: "/units/{id}/template", aud: isoOrg, path: "/units/{unitA}/template"},
 	{method: "POST", pattern: "/contracts/{id}/reissue", aud: isoOrg, path: "/contracts/{contractA}/reissue"},
 	{
+		method: "POST", pattern: "/contracts/{id}/amend", aud: isoOrg, path: "/contracts/{contractA}/amend",
+		body: map[string]any{"effective_date": "{today}", "reason": "hijack"},
+	},
+	{
 		method: "POST", pattern: "/contract-templates/{id}/reissue-pending", aud: isoOrg,
 		path: "/contract-templates/{templateA}/reissue-pending",
 	},

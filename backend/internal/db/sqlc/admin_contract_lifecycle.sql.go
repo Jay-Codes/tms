@@ -15,7 +15,9 @@ const endLapsedContracts = `-- name: EndLapsedContracts :many
 UPDATE contracts
 SET status = 'ended'
 WHERE status IN ('active', 'expiring') AND deleted_at IS NULL
-  AND end_date <= CURRENT_DATE
+  AND (end_date <= CURRENT_DATE
+       -- §22.4: a superseded contract stops the day before its amendment.
+       OR (superseded_by_contract_id IS NOT NULL AND termination_effective_date < CURRENT_DATE))
 RETURNING id, org_id, unit_id
 `
 

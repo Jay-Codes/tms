@@ -44,6 +44,7 @@ var (
 	errUnitUnavailable  = errors.New("contract: unit not available")
 	errUnitNotPriced    = errors.New("contract: unit has no current price")
 	errContractExists   = errors.New("contract: unit already has a live contract")
+	errAmendmentPending = errors.New("contract: an amendment is already awaiting signature")
 	errRenterUnknown    = errors.New("contract: renter unknown to this org")
 	errPeriodNotOffered = errors.New("contract: payment period not offered")
 	errTemplateNotFound = errors.New("contract: no template")
@@ -68,6 +69,9 @@ func writeCreateError(w http.ResponseWriter, err error) bool {
 	case errors.Is(err, errUnitNotPriced):
 		conflictCode(w, "unit_not_priced", "unit has no price",
 			"set a price on the unit before writing a contract for it")
+	case errors.Is(err, errAmendmentPending):
+		conflictCode(w, "amendment_pending", "an amendment is already open",
+			"withdraw or finish the amendment awaiting signature first")
 	case errors.Is(err, errContractExists):
 		conflictCode(w, "contract_exists", "contract already exists",
 			"this unit already has a contract awaiting signature or running")
@@ -104,6 +108,14 @@ type contractInput struct {
 	// override it per contract, but the default is the language the person
 	// signing actually reads.
 	Language string
+	// Amendment (§22.4): set when this contract amends a running one on the
+	// same unit. The unit is occupied by that contract and stays so; the rent
+	// is the amendment's, not the unit's current price list.
+	Amends          pgtype.UUID
+	AmendsEffective time.Time
+	AmendReason     string
+	RentAmount      int64
+	RentPeriodDays  int32
 }
 
 // createContractTx writes one contract and its audit row through the supplied
@@ -125,11 +137,17 @@ func (s *Server) createContractTx(
 	if err != nil {
 		return zero, "", err
 	}
-	switch unit.Status {
-	case statusOccupied:
+	amendment := in.Amends.Valid
+	switch {
+	case amendment:
+	case unit.Status == statusOccupied:
 		return zero, "", errUnitOccupied
-	case statusUnlisted, statusMaintenance:
+	case unit.Status == statusUnlisted, unit.Status == statusMaintenance:
 		return zero, "", errUnitUnavailable
+	}
+	if in.RentAmount > 0 {
+		unit.PriceAmount, unit.PricePeriodDays = in.RentAmount, in.RentPeriodDays
+		unit.PriceID = pgtype.UUID{Valid: true}
 	}
 	if !unit.PriceID.Valid || unit.PricePeriodDays <= 0 {
 		return zero, "", errUnitNotPriced
@@ -141,7 +159,7 @@ func (s *Server) createContractTx(
 	if err != nil {
 		return zero, "", err
 	}
-	if live > 0 {
+	if live > 0 && !amendment {
 		return zero, "", errContractExists
 	}
 
@@ -282,7 +300,7 @@ func (s *Server) createContractTx(
 		Policy:            policyCanonical,
 	}.Hash()
 
-	created, err := q.CreateContract(ctx, sqlc.CreateContractParams{
+	createParams := sqlc.CreateContractParams{
 		OrgID: in.OrgID, UnitID: unit.ID, RenterUserID: renter.ID,
 		TemplateID: tpl.ID, TermsSnapshotHtml: terms,
 		RentAmount: unit.PriceAmount, RentPeriodDays: unit.PricePeriodDays,
@@ -293,11 +311,20 @@ func (s *Server) createContractTx(
 		DueDay:    dueDay, Status: contractPendingSignature,
 		SnapshotHash: &hash, LinkRequestID: in.LinkRequestID,
 		Language: &lang,
-	})
+	}
+	if amendment {
+		createParams.SupersedesContractID = in.Amends
+		createParams.AmendmentEffectiveDate = pgtype.Date{Time: in.AmendsEffective, Valid: true}
+		createParams.AmendmentReason = &in.AmendReason
+	}
+	created, err := q.CreateContract(ctx, createParams)
 	if err != nil {
 		// The partial unique index on (unit_id) over the live statuses is the
 		// real guard; a race that gets past the count lands here.
 		if isUnique(err) {
+			if amendment {
+				return zero, "", errAmendmentPending
+			}
 			return zero, "", errContractExists
 		}
 		return zero, "", err
@@ -1150,14 +1177,23 @@ func (s *Server) handleActivateContract(w http.ResponseWriter, r *http.Request) 
 		}); err != nil {
 			return err
 		}
+		fresh := make([]sqlc.PaymentSchedule, 0, len(rows))
 		for _, gen := range rows {
-			if _, err := q.CreatePaymentSchedule(r.Context(), sqlc.CreatePaymentScheduleParams{
+			made, err := q.CreatePaymentSchedule(r.Context(), sqlc.CreatePaymentScheduleParams{
 				OrgID: row.OrgID, ContractID: row.ID,
 				PeriodStart: pgtype.Date{Time: gen.PeriodStart, Valid: true},
 				PeriodEnd:   pgtype.Date{Time: gen.PeriodEnd, Valid: true},
 				DueDate:     pgtype.Date{Time: gen.DueDate, Valid: true},
 				Amount:      gen.Amount,
-			}); err != nil {
+			})
+			if err != nil {
+				return err
+			}
+			fresh = append(fresh, made)
+		}
+		// §22.4: an amendment takes over from the contract it amends.
+		if row.AmendmentEffectiveDate.Valid && row.SupersedesContractID.Valid {
+			if _, err := s.supersedeTx(r.Context(), q, row, fresh, p.UserIDString()); err != nil {
 				return err
 			}
 		}
@@ -1206,6 +1242,11 @@ func (s *Server) handleActivateContract(w http.ResponseWriter, r *http.Request) 
 		if isNoRows(err) {
 			conflictCode(w, "not_pending_signature", "contract not awaiting signature",
 				"only a contract awaiting signature can be activated")
+			return
+		}
+		if errors.Is(err, errAmendmentStale) {
+			conflictCode(w, "amendment_stale", "amended contract no longer running",
+				"the contract this amendment changes has ended or been terminated; withdraw the amendment")
 			return
 		}
 		s.serverError(w, r, "contract.activate.tx", err)

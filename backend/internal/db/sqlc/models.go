@@ -68,6 +68,9 @@ type Contract struct {
 	Language                 string             `json:"language"`
 	Policy                   []byte             `json:"policy"`
 	SupersedesContractID     pgtype.UUID        `json:"supersedes_contract_id"`
+	AmendmentEffectiveDate   pgtype.Date        `json:"amendment_effective_date"`
+	AmendmentReason          *string            `json:"amendment_reason"`
+	SupersededByContractID   pgtype.UUID        `json:"superseded_by_contract_id"`
 }
 
 type ContractSignature struct {

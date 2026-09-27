@@ -268,6 +268,17 @@ function SignContent() {
       {/* ---- step 1: what you are agreeing to ---- */}
       {step === 'summary' && (
         <>
+          {/* Phase 22.4: an amendment says what it changes before it is signed. */}
+          {contract?.amendment_effective_date && (
+            <Notice>
+              {contract.amendment_reason
+                ? t('doc.amendment', {
+                    date: formatDate(locale, contract.amendment_effective_date),
+                    reason: contract.amendment_reason,
+                  })
+                : t('doc.amendmentNoReason', { date: formatDate(locale, contract.amendment_effective_date) })}
+            </Notice>
+          )}
           <p style={{ color: 'var(--ink-soft)' }}>
             {t('sign.intro', {
               phone: user ? displayPhone(user.phone) : t('sign.yourPhone'),
