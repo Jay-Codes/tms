@@ -4,10 +4,13 @@
  * Phase 28 — projections, break-even and ROI.
  *
  *  - `ProjectionsTab` is the Reports → Projections tab: scenario controls that
- *    re-query `POST /reports/projection` (debounced), the headline figures, a
- *    chart of cumulative cash against the investment with the break-even
- *    point, the per-property table, the monthly table and the assumptions the
- *    backend used. Saved scenarios load, save and delete by name.
+ *    re-query `POST /reports/projection` (debounced) — the basis (signed
+ *    contracts, contracts + units picked, best case) with a unit picker in
+ *    place of an occupancy guess — the headline figures (returns measured
+ *    against what has been spent), a chart of cumulative income against
+ *    cumulative spend with the break-even point, the per-property table, the
+ *    monthly table and the assumptions the backend used. Saved scenarios
+ *    load, save and delete by name.
  *  - `PropertyInvestment` is the three investment fields on a property page.
  *
  * Every figure is computed by the backend (CLAUDE.md: no business logic in the
@@ -38,9 +41,11 @@ import {
   toApiError,
   unwrapProperty,
   type BreakEvenStatus,
+  type ProjectionBasis,
   type ProjectionParams,
   type ProjectionReport,
   type ProjectionScenario,
+  type ProjectionUnitRow,
   type Property,
   type RateSource,
 } from '../lib/api';
@@ -69,6 +74,11 @@ const monthHeading = (m: string) => bucketHeading(`${m}-01`, 'month');
 function breakEvenValue(t: Translator, status: BreakEvenStatus, month: string | null): string {
   if (month && (status === 'reached' || status === 'projected')) return monthHeading(month);
   return t(`proj.breakeven.${status}`);
+}
+
+function paybackValue(t: Translator, years: number | null | undefined): string {
+  if (years === null || years === undefined) return '—';
+  return years === 0 ? t('proj.payback.covered') : t('proj.years', { n: years });
 }
 
 function sourceLabel(t: Translator, s: RateSource): string {
@@ -136,28 +146,34 @@ function Slider({
 
 interface ScenarioState {
   horizon: number;
+  basis: ProjectionBasis;
+  /** The picked units; sent only with the `selected` basis. */
+  unitIds: string[];
   rent: number;
   expense: number;
   /** null = the trailing twelve months. */
-  occupancy: number | null;
   collection: number | null;
 }
 
-const BASE_SCENARIO: ScenarioState = { horizon: 24, rent: 0, expense: 0, occupancy: null, collection: null };
+const BASE_SCENARIO: ScenarioState = { horizon: 24, basis: 'contracts', unitIds: [], rent: 0, expense: 0, collection: null };
+
+const BASES: ProjectionBasis[] = ['contracts', 'selected', 'best_case'];
 
 const toParams = (s: ScenarioState): ProjectionParams => ({
   horizon_months: s.horizon,
+  basis: s.basis,
+  unit_ids: s.basis === 'selected' ? s.unitIds : [],
   rent_change_pct: s.rent,
   expense_change_pct: s.expense,
-  occupancy_pct: s.occupancy,
   collection_rate_pct: s.collection,
 });
 
 const fromSaved = (s: ProjectionScenario): ScenarioState => ({
   horizon: s.horizon_months,
+  basis: s.basis,
+  unitIds: s.unit_ids ?? [],
   rent: s.rent_change_pct,
   expense: s.expense_change_pct,
-  occupancy: s.occupancy_pct,
   collection: s.collection_rate_pct,
 });
 
@@ -278,6 +294,84 @@ function SavedScenarios({ current, onLoad }: { current: ScenarioState; onLoad: (
   );
 }
 
+/* ------------------------------------------------------------ units -- */
+
+/**
+ * Every unit with its own price and contract, and a tick for whether the
+ * forecast assumes it let once no contract covers it. Ticking a box moves the
+ * scenario to "contracts + units I pick", starting from what is ticked now.
+ */
+function UnitPicker({
+  units,
+  checked,
+  portfolio,
+  onChange,
+}: {
+  units: ProjectionUnitRow[];
+  checked: (u: ProjectionUnitRow) => boolean;
+  portfolio: boolean;
+  onChange: (ids: string[]) => void;
+}) {
+  const t = useT();
+  const picked = units.filter(checked).map((u) => u.id);
+  const toggle = (id: string) => onChange(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]);
+  const vacant = units.filter((u) => u.lettable && !u.let_until).map((u) => u.id);
+
+  if (units.length === 0) return <Note>{t('proj.units.none')}</Note>;
+  return (
+    <div style={{ display: 'grid', gap: 'var(--sp-2)' }}>
+      <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)', marginRight: 'auto' }}>
+          {t('proj.units.count', { picked: picked.length, total: units.length })}
+        </span>
+        <button type="button" className="btn btn-quiet" onClick={() => onChange(vacant)} disabled={vacant.length === 0} style={{ minHeight: 32 }}>
+          {t('proj.units.pick_vacant')}
+        </button>
+        <button type="button" className="btn btn-quiet" onClick={() => onChange([])} disabled={picked.length === 0} style={{ minHeight: 32 }}>
+          {t('proj.units.clear')}
+        </button>
+      </div>
+      <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+        <TableScroll label={t('proj.units.title')}>
+          <table className="ledger">
+            <thead>
+              <tr>
+                <th style={{ width: 40 }} aria-label={t('proj.units.assumed')} />
+                <th>{t('proj.units.unit')}</th>
+                {portfolio ? <th>{t('common.property')}</th> : null}
+                <th>{t('proj.units.status')}</th>
+                <th className="num">{t('proj.units.rent')}</th>
+                <th>{t('proj.units.contract')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {units.map((u) => {
+                const id = `proj_unit_${u.id}`;
+                return (
+                  <tr key={u.id}>
+                    <td>
+                      <input id={id} type="checkbox" checked={checked(u)} onChange={() => toggle(u.id)} />
+                    </td>
+                    <td>
+                      <label htmlFor={id} style={{ fontWeight: 500, cursor: 'pointer' }}>
+                        {u.name}
+                      </label>
+                    </td>
+                    {portfolio ? <td>{u.property_name}</td> : null}
+                    <td>{t(`units.status.${u.status}`)}</td>
+                    <td className="num">{u.monthly_rent > 0 ? fmtTZS(u.monthly_rent) : t('proj.units.no_price')}</td>
+                    <td>{u.let_until ? t('proj.units.let_until', { date: fmtDate(u.let_until) }) : '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </TableScroll>
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------ the tab -- */
 
 export function ProjectionsTab({ propertyId }: { propertyId: string }) {
@@ -316,13 +410,17 @@ export function ProjectionsTab({ propertyId }: { propertyId: string }) {
   const base = data?.baseline;
   const inv = data?.investment;
   const months = data?.months ?? [];
+  const units = data?.units ?? [];
   const labels = months.map((m) => (months.length > 12 ? longTick(m.month) : monthTick(m.month)));
   const headings = months.map((m) => monthHeading(m.month));
   const beIndex =
     inv?.break_even_status === 'projected' && inv.break_even_month
       ? months.findIndex((m) => m.month === inv.break_even_month)
       : -1;
-  const priced = inv ? inv.total !== null : false;
+  // What the ticks show follows the scenario at once; the server's `assumed`
+  // flags catch up after the debounce.
+  const checked = (u: ProjectionUnitRow) =>
+    sc.basis === 'selected' ? sc.unitIds.includes(u.id) : sc.basis === 'best_case' ? u.lettable : false;
 
   return (
     <div style={{ opacity: loading ? 0.7 : 1, transition: 'opacity 120ms linear', display: 'grid', gap: 'var(--sp-6)' }} aria-busy={loading}>
@@ -333,7 +431,7 @@ export function ProjectionsTab({ propertyId }: { propertyId: string }) {
 
       <section style={{ display: 'grid', gap: 'var(--sp-4)' }}>
         <SectionHead icon="solar:tuning-2-linear" title={t('proj.scenario.title')} />
-        <div style={{ display: 'grid', gap: 'var(--sp-5)', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+        <div style={{ display: 'grid', gap: 'var(--sp-5)', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', alignItems: 'start' }}>
           <Field id="proj_horizon" label={t('proj.scenario.horizon')}>
             <select
               id="proj_horizon"
@@ -344,6 +442,24 @@ export function ProjectionsTab({ propertyId }: { propertyId: string }) {
               {HORIZONS.map((h) => (
                 <option key={h} value={h}>
                   {t('proj.scenario.horizon_months', { count: h })}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field id="proj_basis" label={t('proj.scenario.basis')} hint={t(`proj.basis_hint.${sc.basis}`)}>
+            <select
+              id="proj_basis"
+              className="input"
+              value={sc.basis}
+              onChange={(e) => {
+                const basis = e.target.value as ProjectionBasis;
+                // Moving to "units I pick" starts from what is ticked now.
+                set(basis === 'selected' && sc.basis !== 'selected' ? { basis, unitIds: units.filter(checked).map((u) => u.id) } : { basis });
+              }}
+            >
+              {BASES.map((b) => (
+                <option key={b} value={b}>
+                  {t(`proj.basis.${b}`)}
                 </option>
               ))}
             </select>
@@ -359,17 +475,6 @@ export function ProjectionsTab({ propertyId }: { propertyId: string }) {
             onChange={(v) => set({ rent: v })}
             onReset={sc.rent !== 0 ? () => set({ rent: 0 }) : undefined}
             resetLabel={t('proj.scenario.reset')}
-          />
-          <Slider
-            id="proj_occ"
-            label={t('proj.scenario.occupancy')}
-            hint={applied ? sourceLabel(t, sc.occupancy === null ? applied.occupancy_source : 'scenario') : undefined}
-            value={sc.occupancy ?? applied?.occupancy_pct ?? 100}
-            min={0}
-            max={100}
-            onChange={(v) => set({ occupancy: v })}
-            onReset={sc.occupancy !== null ? () => set({ occupancy: null }) : undefined}
-            resetLabel={t('proj.scenario.use_trailing')}
           />
           <Slider
             id="proj_coll"
@@ -395,19 +500,33 @@ export function ProjectionsTab({ propertyId }: { propertyId: string }) {
             resetLabel={t('proj.scenario.reset')}
           />
         </div>
+        <details open={sc.basis === 'selected' || undefined} style={{ display: 'grid', gap: 'var(--sp-3)' }}>
+          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+            {t('proj.units.title')}
+            {base ? (
+              <span style={{ fontWeight: 400, color: 'var(--ink-soft)' }}>
+                {' '}
+                · {t('proj.units.summary', { n: base.units_assumed, rent: fmtTZS(base.assumed_rent_monthly) })}
+              </span>
+            ) : null}
+          </summary>
+          <div style={{ marginTop: 'var(--sp-3)' }}>
+            <UnitPicker
+              units={units}
+              checked={checked}
+              portfolio={data?.scope === 'portfolio'}
+              onChange={(ids) => set({ basis: 'selected', unitIds: ids })}
+            />
+          </div>
+        </details>
         <SavedScenarios current={sc} onLoad={setSc} />
       </section>
 
-      {inv && !priced ? (
+      {inv && inv.purchase_price === null ? (
         <Note>
           {t('proj.no_price')}{' '}
-          {propertyId ? (
-            <Link href={`/properties/${propertyId}`}>{t('proj.no_price.link')}</Link>
-          ) : null}
+          {propertyId ? <Link href={`/properties/${propertyId}`}>{t('proj.no_price.link')}</Link> : null}
         </Note>
-      ) : null}
-      {inv && priced && inv.incomplete ? (
-        <Note>{t('proj.incomplete', { priced: inv.priced_properties, total: data?.properties.length ?? 0 })}</Note>
       ) : null}
 
       <section style={{ display: 'grid', gap: 'var(--sp-4)' }}>
@@ -422,23 +541,35 @@ export function ProjectionsTab({ propertyId }: { propertyId: string }) {
           <StatTile
             label={t('proj.tile.roi')}
             value={pct(inv?.roi_projected_pct)}
-            sub={inv && priced ? t('proj.tile.roi_sub', { trailing: pct(inv.roi_trailing_pct), investment: fmtTZS(inv.total) }) : t('proj.tile.needs_price')}
+            tone={inv?.roi_projected_pct !== null && inv?.roi_projected_pct !== undefined && inv.roi_projected_pct < 0 ? 'overdue' : undefined}
+            sub={
+              inv
+                ? inv.roi_projected_pct === null
+                  ? t('proj.tile.roi_none')
+                  : t('proj.tile.roi_sub', { expenses: fmtTZS(inv.projected_annual_expenses), trailing: pct(inv.roi_trailing_pct) })
+                : undefined
+            }
           />
           <StatTile
-            label={t('proj.tile.yield')}
-            value={pct(inv?.yield_pct)}
-            sub={inv?.current_value ? t('proj.tile.yield_sub', { value: fmtTZS(inv.current_value) }) : t('proj.tile.needs_value')}
-          />
-          <StatTile
-            label={t('proj.tile.payback')}
-            value={inv?.payback_years === null || inv?.payback_years === undefined ? '—' : t('proj.years', { n: inv.payback_years })}
-            sub={priced ? undefined : t('proj.tile.needs_price')}
+            label={t('proj.tile.spent')}
+            value={fmtTZS(inv?.spent_to_date ?? null)}
+            sub={inv ? t('proj.tile.spent_sub', { income: fmtTZS(inv.income_to_date) }) : undefined}
           />
           <StatTile
             label={t('proj.tile.break_even')}
             value={inv ? breakEvenValue(t, inv.break_even_status, inv.break_even_month) : '—'}
             tone={inv?.break_even_status === 'reached' ? 'paid' : inv?.break_even_status === 'not_profitable' ? 'overdue' : undefined}
-            sub={inv && priced ? t(`proj.breakeven_sub.${inv.break_even_status}`) : undefined}
+            sub={inv ? t(`proj.breakeven_sub.${inv.break_even_status}`) : undefined}
+          />
+          <StatTile
+            label={t('proj.tile.payback')}
+            value={paybackValue(t, inv?.payback_years)}
+            sub={t('proj.tile.payback_sub')}
+          />
+          <StatTile
+            label={t('proj.tile.yield')}
+            value={pct(inv?.yield_pct)}
+            sub={inv?.current_value ? t('proj.tile.yield_sub', { value: fmtTZS(inv.current_value) }) : t('proj.tile.needs_value')}
           />
         </TileRow>
       </section>
@@ -453,23 +584,19 @@ export function ProjectionsTab({ propertyId }: { propertyId: string }) {
         empty={t('proj.chart.empty')}
         series={[
           {
-            id: 'cumulative',
-            label: t('proj.series.cumulative'),
-            color: CHART_ROLES.net,
-            values: months.map((m) => m.cumulative),
+            id: 'income',
+            label: t('proj.series.income'),
+            color: CHART_ROLES.collected,
+            values: months.map((m) => m.cumulative_income),
             area: true,
           },
-          ...(inv && inv.total !== null
-            ? [
-                {
-                  id: 'investment',
-                  label: t('proj.series.investment'),
-                  color: CHART_ROLES.expected,
-                  values: months.map(() => inv.total),
-                  dashed: true,
-                },
-              ]
-            : []),
+          {
+            id: 'spent',
+            label: t('proj.series.spent'),
+            color: CHART_ROLES.expenses,
+            values: months.map((m) => m.cumulative_spent),
+            dashed: true,
+          },
           // The break-even month as a one-point series: the chart draws a
           // ringed end marker on a series' last value, so a series that is
           // empty except at that month is a dot exactly there, with its own
@@ -479,8 +606,8 @@ export function ProjectionsTab({ propertyId }: { propertyId: string }) {
                 {
                   id: 'break_even',
                   label: t('proj.chart.break_even'),
-                  color: CHART_ROLES.collected,
-                  values: months.map((m, i) => (i === beIndex ? m.cumulative : null)),
+                  color: CHART_ROLES.net,
+                  values: months.map((m, i) => (i === beIndex ? m.cumulative_income : null)),
                 },
               ]
             : []),
@@ -497,7 +624,7 @@ export function ProjectionsTab({ propertyId }: { propertyId: string }) {
                   <th>{t('common.property')}</th>
                   <th className="num">{t('proj.tile.annual_net')}</th>
                   <th className="num">{t('proj.tile.roi')}</th>
-                  <th className="num">{t('proj.tile.yield')}</th>
+                  <th className="num">{t('proj.tile.spent')}</th>
                   <th className="num">{t('proj.tile.payback')}</th>
                   <th>{t('proj.tile.break_even')}</th>
                 </tr>
@@ -512,8 +639,8 @@ export function ProjectionsTab({ propertyId }: { propertyId: string }) {
                     </td>
                     <td className="num">{fmtTZS(p.projected_annual_net)}</td>
                     <td className="num">{pct(p.roi_projected_pct)}</td>
-                    <td className="num">{pct(p.yield_pct)}</td>
-                    <td className="num">{p.payback_years === null ? '—' : t('proj.years', { n: p.payback_years })}</td>
+                    <td className="num">{fmtTZS(p.spent_to_date)}</td>
+                    <td className="num">{paybackValue(t, p.payback_years)}</td>
                     <td>{breakEvenValue(t, p.break_even_status, p.break_even_month)}</td>
                   </tr>
                 ))}
@@ -545,7 +672,9 @@ export function ProjectionsTab({ propertyId }: { propertyId: string }) {
                   <td className="num" style={m.net < 0 ? { color: 'var(--stamp-overdue)' } : undefined}>
                     {fmtTZS(m.net)}
                   </td>
-                  <td className="num">{fmtTZS(m.cumulative)}</td>
+                  <td className="num" style={m.cumulative < 0 ? { color: 'var(--stamp-overdue)' } : undefined}>
+                    {fmtTZS(m.cumulative)}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -568,6 +697,14 @@ export function ProjectionsTab({ propertyId }: { propertyId: string }) {
         <section style={{ display: 'grid', gap: 'var(--sp-4)' }}>
           <SectionHead icon="solar:notebook-linear" title={t('proj.baseline.title')} />
           <dl style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 'var(--sp-2) var(--sp-4)', maxWidth: 640, margin: 0 }}>
+            <dt>{t('proj.scenario.basis')}</dt>
+            <dd style={{ margin: 0 }}>{t(`proj.basis.${applied.basis}`)}</dd>
+            <dt>{t('proj.baseline.units')}</dt>
+            <dd className="num" style={{ margin: 0 }}>
+              {t('proj.baseline.units_value', { total: base.units_total, let: base.units_let, assumed: base.units_assumed })}
+            </dd>
+            <dt>{t('proj.baseline.assumed_rent')}</dt>
+            <dd className="num" style={{ margin: 0 }}>{fmtTZS(base.assumed_rent_monthly)}</dd>
             <dt>{t('proj.baseline.window')}</dt>
             <dd className="num" style={{ margin: 0 }}>
               {t('proj.baseline.window_value', { from: fmtDate(base.history_from), to: fmtDate(base.history_to), n: base.history_months })}
@@ -576,8 +713,6 @@ export function ProjectionsTab({ propertyId }: { propertyId: string }) {
             <dd className="num" style={{ margin: 0 }}>
               {pct(base.collection_rate_pct)} ({fmtTZS(base.collected)} / {fmtTZS(base.expected)})
             </dd>
-            <dt>{t('proj.baseline.occupancy')}</dt>
-            <dd className="num" style={{ margin: 0 }}>{pct(base.occupancy_pct)}</dd>
             <dt>{t('proj.baseline.running')}</dt>
             <dd className="num" style={{ margin: 0 }}>{fmtTZS(base.running_expenses_monthly)}</dd>
             {base.categories.map((c) => (
@@ -585,14 +720,16 @@ export function ProjectionsTab({ propertyId }: { propertyId: string }) {
             ))}
             <dt>{t('proj.baseline.capital')}</dt>
             <dd className="num" style={{ margin: 0 }}>{fmtTZS(base.capital_expenses)}</dd>
-            <dt>{t('proj.baseline.units')}</dt>
-            <dd className="num" style={{ margin: 0 }}>
-              {t('proj.baseline.units_value', { total: base.units_total, let: base.units_let, open: base.units_open })}
-            </dd>
-            <dt>{t('proj.baseline.market_rent')}</dt>
-            <dd className="num" style={{ margin: 0 }}>{fmtTZS(base.market_rent_monthly)}</dd>
             {inv ? (
               <>
+                <dt>{t('proj.baseline.spent_to_date')}</dt>
+                <dd className="num" style={{ margin: 0 }}>
+                  {t('proj.baseline.spent_value', {
+                    running: fmtTZS(inv.running_spend),
+                    capital: fmtTZS(inv.capital_spend),
+                    price: fmtTZS(inv.purchase_price ?? 0),
+                  })}
+                </dd>
                 <dt>{t('proj.baseline.cash_to_date')}</dt>
                 <dd className="num" style={{ margin: 0 }}>{fmtTZS(inv.cash_to_date)}</dd>
               </>

@@ -41,6 +41,7 @@ const (
 	projectionChangeMax    = 500.0
 	projectionScenarioMax  = 50
 	projectionScenarioName = 60
+	projectionUnitIDsMax   = 1000
 	earliestPurchaseYear   = 1900
 )
 
@@ -96,8 +97,9 @@ func jsonPastDatePtr(f validate.Fields, field string, raw json.RawMessage) (set 
 // and by a saved scenario.
 type projectionParams struct {
 	HorizonMonths     *int     `json:"horizon_months"`
+	Basis             *string  `json:"basis"`
+	UnitIDs           []string `json:"unit_ids"`
 	RentChangePct     *float64 `json:"rent_change_pct"`
-	OccupancyPct      *float64 `json:"occupancy_pct"`
 	CollectionRatePct *float64 `json:"collection_rate_pct"`
 	ExpenseChangePct  *float64 `json:"expense_change_pct"`
 }
@@ -128,8 +130,41 @@ func (in projectionParams) scenario(f validate.Fields) report.ProjectionScenario
 	}
 	out.RentChangePct = change("rent_change_pct", in.RentChangePct)
 	out.ExpenseChangePct = change("expense_change_pct", in.ExpenseChangePct)
-	out.OccupancyPct = rate("occupancy_pct", in.OccupancyPct)
 	out.CollectionRatePct = rate("collection_rate_pct", in.CollectionRatePct)
+	out.Basis = report.BasisContracts
+	if in.Basis != nil {
+		if !report.ValidBasis(*in.Basis) {
+			f.Add("basis", "must be contracts, selected or best_case")
+		}
+		out.Basis = *in.Basis
+	}
+	if len(in.UnitIDs) > projectionUnitIDsMax {
+		f.Add("unit_ids", "must list at most 1000 units")
+	}
+	seen := make(map[string]struct{}, len(in.UnitIDs))
+	for _, raw := range in.UnitIDs {
+		id, err := db.ParseUUID(strings.TrimSpace(raw))
+		if err != nil {
+			f.Add("unit_ids", "must be unit ids")
+			break
+		}
+		key := db.UUIDString(id)
+		if _, dup := seen[key]; !dup {
+			seen[key] = struct{}{}
+			out.UnitIDs = append(out.UnitIDs, key)
+		}
+	}
+	return out
+}
+
+// unitUUIDs is a scenario's picked units as stored.
+func unitUUIDs(ids []string) []pgtype.UUID {
+	out := make([]pgtype.UUID, 0, len(ids))
+	for _, id := range ids {
+		if u, err := db.ParseUUID(id); err == nil {
+			out = append(out, u)
+		}
+	}
 	return out
 }
 
@@ -137,15 +172,17 @@ func (in projectionParams) scenario(f validate.Fields) report.ProjectionScenario
 
 // projectionPropertyRow is one property's headline in the response.
 type projectionPropertyRow struct {
-	ID                 string   `json:"id"`
-	Name               string   `json:"name"`
-	HasPurchasePrice   bool     `json:"has_purchase_price"`
-	ProjectedAnnualNet int64    `json:"projected_annual_net"`
-	ROIProjectedPct    *float64 `json:"roi_projected_pct"`
-	YieldPct           *float64 `json:"yield_pct"`
-	PaybackYears       *float64 `json:"payback_years"`
-	BreakEvenMonth     *string  `json:"break_even_month"`
-	BreakEvenStatus    string   `json:"break_even_status"`
+	ID                      string   `json:"id"`
+	Name                    string   `json:"name"`
+	HasPurchasePrice        bool     `json:"has_purchase_price"`
+	ProjectedAnnualNet      int64    `json:"projected_annual_net"`
+	ProjectedAnnualExpenses int64    `json:"projected_annual_expenses"`
+	SpentToDate             int64    `json:"spent_to_date"`
+	ROIProjectedPct         *float64 `json:"roi_projected_pct"`
+	YieldPct                *float64 `json:"yield_pct"`
+	PaybackYears            *float64 `json:"payback_years"`
+	BreakEvenMonth          *string  `json:"break_even_month"`
+	BreakEvenStatus         string   `json:"break_even_status"`
 }
 
 type projectionResponse struct {
@@ -210,7 +247,8 @@ func (s *Server) handleReportProjection(w http.ResponseWriter, r *http.Request) 
 		inv := part.Investment
 		resp.Properties = append(resp.Properties, projectionPropertyRow{
 			ID: part.ID, Name: part.Name, HasPurchasePrice: inv.PurchasePrice != nil,
-			ProjectedAnnualNet: inv.ProjectedAnnualNet, ROIProjectedPct: inv.ROIProjectedPct,
+			ProjectedAnnualNet: inv.ProjectedAnnualNet, ProjectedAnnualExpenses: inv.ProjectedAnnualExpenses,
+			SpentToDate: inv.SpentToDate, ROIProjectedPct: inv.ROIProjectedPct,
 			YieldPct: inv.YieldPct, PaybackYears: inv.PaybackYears,
 			BreakEvenMonth: inv.BreakEvenMonth, BreakEvenStatus: inv.BreakEvenStatus,
 		})
@@ -240,9 +278,9 @@ type projectionFacts struct {
 	created    time.Time
 	collected  map[time.Time]int64 // net of refunds, whole history
 	running    map[time.Time]int64 // whole history
+	capital    map[time.Time]int64 // whole history
 	activity   time.Time           // earliest month anything happened
 	categories map[string]*report.CategoryAmount
-	unitIDs    map[string]time.Time // unit → created on
 }
 
 // projectionInputs reads every fact the engine needs, per property.
@@ -269,8 +307,8 @@ func (s *Server) projectionInputs(
 				Scheduled: make([]int64, horizon),
 			},
 			created: created, activity: created,
-			collected: map[time.Time]int64{}, running: map[time.Time]int64{},
-			categories: map[string]*report.CategoryAmount{}, unitIDs: map[string]time.Time{},
+			collected: map[time.Time]int64{}, running: map[time.Time]int64{}, capital: map[time.Time]int64{},
+			categories: map[string]*report.CategoryAmount{},
 		}
 		if pr.PurchaseDate.Valid {
 			d := pr.PurchaseDate.Time
@@ -336,7 +374,7 @@ func (s *Server) projectionInputs(
 		touch(pf, m)
 		inWindow := !m.Before(historyFrom)
 		if row.IsCapital {
-			pf.in.CapitalToDate += row.Amount
+			pf.capital[m] += row.Amount
 			if inWindow {
 				pf.in.TrailingCapital += row.Amount
 			}
@@ -377,15 +415,7 @@ func (s *Server) projectionInputs(
 		if pf == nil {
 			continue
 		}
-		uid := db.UUIDString(u.ID)
-		pf.unitIDs[uid] = u.CreatedOn.Time
 		pf.in.Units = append(pf.in.Units, projectionUnit(start, u))
-	}
-	spans, err := s.q.OccupancyContractSpans(ctx, sqlc.OccupancyContractSpansParams{
-		OrgID: orgID, ToDate: dateParam(start), PropertyID: propertyID,
-	})
-	if err != nil {
-		return nil, err
 	}
 
 	out := make([]report.ProjectionProperty, 0, len(order))
@@ -400,20 +430,21 @@ func (s *Server) projectionInputs(
 			pf.in.HistoryMonths = 1
 		}
 		// Past net, month by month, over the whole history.
-		months := make(map[time.Time]struct{}, len(pf.collected)+len(pf.running))
-		for m := range pf.collected {
-			months[m] = struct{}{}
-		}
-		for m := range pf.running {
-			months[m] = struct{}{}
+		months := make(map[time.Time]struct{}, len(pf.collected)+len(pf.running)+len(pf.capital))
+		for _, src := range []map[time.Time]int64{pf.collected, pf.running, pf.capital} {
+			for m := range src {
+				months[m] = struct{}{}
+			}
 		}
 		for m := range months {
-			pf.in.PastNet = append(pf.in.PastNet, report.MonthAmount{Month: m, Amount: pf.collected[m] - pf.running[m]})
+			pf.in.Past = append(pf.in.Past, report.PastMonth{
+				Month: m, Income: pf.collected[m], Running: pf.running[m], Capital: pf.capital[m],
+			})
 			if !m.Before(historyFrom) {
 				pf.in.TrailingCollected += pf.collected[m]
 			}
 		}
-		sort.Slice(pf.in.PastNet, func(i, j int) bool { return pf.in.PastNet[i].Month.Before(pf.in.PastNet[j].Month) })
+		sort.Slice(pf.in.Past, func(i, j int) bool { return pf.in.Past[i].Month.Before(pf.in.Past[j].Month) })
 		for _, c := range pf.categories {
 			pf.in.TrailingRunning = append(pf.in.TrailingRunning, *c)
 		}
@@ -424,18 +455,19 @@ func (s *Server) projectionInputs(
 			}
 			return a.ID < b.ID
 		})
-		pf.in.TrailingOccupiedUnitMonths, pf.in.TrailingUnitMonths =
-			trailingOccupancy(start, pf.in.HistoryMonths, pf.unitIDs, spans)
 		out = append(out, pf.in)
 	}
 	return out, nil
 }
 
-// projectionUnit is one unit as the engine sees it: its market rent per month
+// projectionUnit is one unit as the engine sees it: its own rent per month
 // (the current price, else the last tenancy's rent, normalised to 30 days)
-// and the first projection month it is on the open market.
+// and the first projection month no contract covers it.
 func projectionUnit(start time.Time, u sqlc.ProjectionUnitsRow) report.ProjectionUnit {
-	out := report.ProjectionUnit{Lettable: u.Status == "vacant" || u.Status == "occupied"}
+	out := report.ProjectionUnit{
+		ID: db.UUIDString(u.ID), Name: u.Name, Status: u.Status,
+		Lettable: u.Status == "vacant" || u.Status == "occupied",
+	}
 	switch {
 	case u.PriceAmount > 0 && u.PricePeriodDays > 0:
 		out.MonthlyRent = int64(math.Round(float64(u.PriceAmount) * 30 / float64(u.PricePeriodDays)))
@@ -444,6 +476,8 @@ func projectionUnit(start time.Time, u sqlc.ProjectionUnitsRow) report.Projectio
 	}
 	if u.RunningEnd.Valid {
 		e := u.RunningEnd.Time
+		until := e.Format(dateLayout)
+		out.LetUntil = &until
 		i := monthIndex(start, e)
 		if e.Day() > 1 {
 			i++ // the month the tenancy ends in is still its own
@@ -455,54 +489,28 @@ func projectionUnit(start time.Time, u sqlc.ProjectionUnitsRow) report.Projectio
 	return out
 }
 
-// trailingOccupancy measures the property's units at the last day of each of
-// its history months, the way GET /reports/occupancy measures a month: units
-// that existed that day, and how many of them a tenancy covered.
-func trailingOccupancy(
-	start time.Time, months int, units map[string]time.Time, spans []sqlc.OccupancyContractSpansRow,
-) (occupied, total int64) {
-	for k := months; k >= 1; k-- {
-		day := start.AddDate(0, -k+1, -1) // last day of the month k months back
-		covered := map[string]struct{}{}
-		for _, sp := range spans {
-			uid := db.UUIDString(sp.UnitID)
-			if _, ours := units[uid]; !ours {
-				continue
-			}
-			if !sp.StartDate.Time.After(day) && day.Before(sp.EndDate.Time) {
-				covered[uid] = struct{}{}
-			}
-		}
-		for uid, created := range units {
-			if created.After(day) {
-				continue
-			}
-			total++
-			if _, ok := covered[uid]; ok {
-				occupied++
-			}
-		}
-	}
-	return occupied, total
-}
-
 // ------------------------------------------------ saved scenarios --
 
 type projectionScenarioResponse struct {
 	ID                string    `json:"id"`
 	Name              string    `json:"name"`
 	HorizonMonths     int       `json:"horizon_months"`
+	Basis             string    `json:"basis"`
+	UnitIDs           []string  `json:"unit_ids"`
 	RentChangePct     float64   `json:"rent_change_pct"`
-	OccupancyPct      *float64  `json:"occupancy_pct"`
 	CollectionRatePct *float64  `json:"collection_rate_pct"`
 	ExpenseChangePct  float64   `json:"expense_change_pct"`
 	CreatedAt         time.Time `json:"created_at"`
 }
 
 func toProjectionScenario(r sqlc.ProjectionScenario) projectionScenarioResponse {
+	ids := make([]string, 0, len(r.UnitIds))
+	for _, id := range r.UnitIds {
+		ids = append(ids, db.UUIDString(id))
+	}
 	return projectionScenarioResponse{
 		ID: db.UUIDString(r.ID), Name: r.Name, HorizonMonths: int(r.HorizonMonths),
-		RentChangePct: r.RentChangePct, OccupancyPct: r.OccupancyPct,
+		Basis: r.Basis, UnitIDs: ids, RentChangePct: r.RentChangePct,
 		CollectionRatePct: r.CollectionRatePct, ExpenseChangePct: r.ExpenseChangePct,
 		CreatedAt: r.CreatedAt.Time,
 	}
@@ -560,7 +568,7 @@ func (s *Server) handleCreateProjectionScenario(w http.ResponseWriter, r *http.R
 		var err error
 		created, err = q.CreateProjectionScenario(r.Context(), sqlc.CreateProjectionScenarioParams{
 			OrgID: p.OrgID, Name: name, HorizonMonths: int32(sc.HorizonMonths), //nolint:gosec // bounded 1–120
-			RentChangePct: sc.RentChangePct, OccupancyPct: sc.OccupancyPct,
+			Basis: sc.Basis, UnitIds: unitUUIDs(sc.UnitIDs), RentChangePct: sc.RentChangePct,
 			CollectionRatePct: sc.CollectionRatePct, ExpenseChangePct: sc.ExpenseChangePct,
 			CreatedByUserID: p.UserID,
 		})

@@ -469,11 +469,12 @@ type ProjectionScenario struct {
 	Name              string             `json:"name"`
 	HorizonMonths     int32              `json:"horizon_months"`
 	RentChangePct     float64            `json:"rent_change_pct"`
-	OccupancyPct      *float64           `json:"occupancy_pct"`
 	CollectionRatePct *float64           `json:"collection_rate_pct"`
 	ExpenseChangePct  float64            `json:"expense_change_pct"`
 	CreatedByUserID   pgtype.UUID        `json:"created_by_user_id"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	Basis             string             `json:"basis"`
+	UnitIds           []pgtype.UUID      `json:"unit_ids"`
 }
 
 type Property struct {

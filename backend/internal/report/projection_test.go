@@ -7,23 +7,30 @@ import (
 	"tms/backend/internal/report"
 )
 
-// Phase 28 — the projection engine against hand-computed fixtures.
+// Phase 28 — the projection engine against hand-computed fixtures (reworked
+// 27 Sep 2026: units instead of an occupancy guess, returns against spend).
 //
 // The base property, worked by hand (start = October 2026, horizon 6):
 //
 //	trailing: collected 1,080,000 of 1,200,000 expected   → collection 90%
-//	          18 of 24 unit-months occupied                → occupancy 75%
 //	          running costs 240,000 + 120,000 over 12 mo.  → 30,000 a month
-//	units:    one let until month 3 at 100,000 (scheduled 100,000 × 3)
-//	          one vacant at 120,000
+//	          capital 400,000
+//	units:    a — let until month 3 at 100,000 (scheduled 100,000 × 3)
+//	          b — vacant at 120,000
+//	          c — under maintenance at 50,000
 //
-//	months 0–2: (100,000 + 120,000 × 0.75) × 0.90 = 171,000; net 141,000
-//	months 3–5: (100,000 + 120,000) × 0.75 × 0.90 = 148,500; net 118,500
-//	horizon:    income 958,500, running 180,000, net 778,500
-//	annual:     778,500 × 12 / 6 = 1,557,000 projected; 720,000 trailing
+//	signed contracts only:
+//	  months 0–2: 100,000 × 0.90 = 90,000; net 60,000
+//	  months 3–5: nothing let;           net −30,000
+//	  horizon:    income 270,000, running 180,000, net 90,000
+//	  annual:     net 180,000 on expenses 360,000 → ROI 50%
+//	best case (a after its contract, b from now; c is not lettable):
+//	  every month: (100,000 + 120,000) × 0.90 = 198,000; net 168,000
 //
-// Past net since the purchase (15 Jan 2025): 300,000 in June 2025 and 100,000
-// in Sept 2026 — the 1,000,000 of December 2024 predates it and is ignored.
+// Recorded months since the purchase (15 Jan 2025): June 2025 income 300,000;
+// November 2025 income 500,000 and capital 400,000; September 2026 income
+// 130,000 and running 30,000 — 930,000 in, 430,000 out, 500,000 ahead. The
+// 1,000,000 of December 2024 predates the purchase and is ignored.
 
 func month(y int, m time.Month) time.Time { return time.Date(y, m, 1, 0, 0, 0, 0, time.UTC) }
 
@@ -33,29 +40,29 @@ var projStart = month(2026, time.October)
 
 func baseProperty() report.ProjectionProperty {
 	bought := time.Date(2025, time.January, 15, 0, 0, 0, 0, time.UTC)
+	until := "2026-12-31"
 	return report.ProjectionProperty{
 		ID: "p", Name: "Mbezi Block A",
-		PurchaseDate:               &bought,
-		HistoryMonths:              12,
-		TrailingCollected:          1_080_000,
-		TrailingExpected:           1_200_000,
-		TrailingOccupiedUnitMonths: 18,
-		TrailingUnitMonths:         24,
+		PurchaseDate:      &bought,
+		HistoryMonths:     12,
+		TrailingCollected: 1_080_000,
+		TrailingExpected:  1_200_000,
 		TrailingRunning: []report.CategoryAmount{
 			{ID: "c1", Name: "Repairs", Amount: 240_000},
 			{ID: "c2", Name: "Utilities", Amount: 120_000},
 		},
 		TrailingCapital: 400_000,
-		CapitalToDate:   400_000,
-		PastNet: []report.MonthAmount{
-			{Month: month(2024, time.December), Amount: 1_000_000},
-			{Month: month(2025, time.June), Amount: 300_000},
-			{Month: month(2026, time.September), Amount: 100_000},
+		Past: []report.PastMonth{
+			{Month: month(2024, time.December), Income: 1_000_000},
+			{Month: month(2025, time.June), Income: 300_000},
+			{Month: month(2025, time.November), Income: 500_000, Capital: 400_000},
+			{Month: month(2026, time.September), Income: 130_000, Running: 30_000},
 		},
 		Scheduled: []int64{100_000, 100_000, 100_000},
 		Units: []report.ProjectionUnit{
-			{MonthlyRent: 100_000, FreeFrom: 3, Lettable: true},
-			{MonthlyRent: 120_000, FreeFrom: 0, Lettable: true},
+			{ID: "a", Name: "A1", Status: "occupied", MonthlyRent: 100_000, FreeFrom: 3, LetUntil: &until, Lettable: true},
+			{ID: "b", Name: "A2", Status: "vacant", MonthlyRent: 120_000, Lettable: true},
+			{ID: "c", Name: "A3", Status: "maintenance", MonthlyRent: 50_000},
 		},
 	}
 }
@@ -79,101 +86,159 @@ func wantNilF(t *testing.T, what string, got *float64) {
 	}
 }
 
-func TestProjectionMonthlyArithmetic(t *testing.T) {
-	p := baseProperty()
-	p.PurchasePrice = i64(5_000_000)
-	got := report.ProjectProperty(projStart, sixMonths(), p)
+func withBasis(basis string, units ...string) report.ProjectionScenario {
+	return report.ProjectionScenario{HorizonMonths: 6, Basis: basis, UnitIDs: units}
+}
 
-	if len(got.Months) != 6 {
-		t.Fatalf("months = %d, want 6", len(got.Months))
+func TestProjectionSignedContractsOnly(t *testing.T) {
+	got := report.ProjectProperty(projStart, sixMonths(), baseProperty())
+
+	if len(got.Months) != 6 || got.Months[0].Month != "2026-10" || got.Months[5].Month != "2027-03" {
+		t.Fatalf("months = %+v", got.Months)
 	}
 	for i, m := range got.Months {
-		wantIncome, wantNet := int64(171_000), int64(141_000)
+		wantIncome, wantNet := int64(90_000), int64(60_000)
 		if i >= 3 {
-			wantIncome, wantNet = 148_500, 118_500
+			wantIncome, wantNet = 0, -30_000
 		}
 		if m.Income != wantIncome || m.RunningExpenses != 30_000 || m.Net != wantNet {
-			t.Errorf("month %d (%s) = income %d, running %d, net %d; want %d, 30000, %d",
-				i, m.Month, m.Income, m.RunningExpenses, m.Net, wantIncome, wantNet)
+			t.Errorf("month %d = income %d, running %d, net %d; want %d, 30000, %d",
+				i, m.Income, m.RunningExpenses, m.Net, wantIncome, wantNet)
 		}
 	}
-	if got.Months[0].Month != "2026-10" || got.Months[5].Month != "2027-03" {
-		t.Errorf("month labels %s…%s, want 2026-10…2027-03", got.Months[0].Month, got.Months[5].Month)
-	}
-	if got.Totals != (report.ProjectionTotals{Income: 958_500, RunningExpenses: 180_000, Net: 778_500}) {
+	if got.Totals != (report.ProjectionTotals{Income: 270_000, RunningExpenses: 180_000, Net: 90_000}) {
 		t.Errorf("totals = %+v", got.Totals)
 	}
-	// The cumulative line starts from the cash made since purchase (400,000).
-	if c := got.Months[0].Cumulative; c != 541_000 {
-		t.Errorf("month 0 cumulative = %d, want 541000", c)
-	}
-	if c := got.Months[5].Cumulative; c != 1_178_500 {
-		t.Errorf("month 5 cumulative = %d, want 1178500", c)
+	// The cumulative lines start from what was made and spent since purchase.
+	if m := got.Months[0]; m.CumulativeIncome != 1_020_000 || m.CumulativeSpent != 460_000 || m.Cumulative != 560_000 {
+		t.Errorf("month 0 cumulative = %+v", m)
 	}
 
-	b := got.Baseline
-	wantF(t, "baseline collection", b.CollectionRatePct, 90)
-	wantF(t, "baseline occupancy", b.OccupancyPct, 75)
-	if b.RunningMonthly != 30_000 || b.RunningExpenses != 360_000 || b.CapitalExpenses != 400_000 {
-		t.Errorf("baseline expenses = %+v", b)
-	}
-	if b.Net != 720_000 || b.UnitsTotal != 2 || b.UnitsLet != 1 || b.UnitsOpen != 1 || b.MarketRentMonthly != 120_000 {
-		t.Errorf("baseline = %+v", b)
-	}
-	if b.HistoryFrom != "2025-10-01" || b.HistoryTo != "2026-10-01" {
-		t.Errorf("history window %s → %s", b.HistoryFrom, b.HistoryTo)
-	}
-	if len(b.Categories) != 2 || b.Categories[0].Monthly != 20_000 || b.Categories[1].Monthly != 10_000 {
-		t.Errorf("categories = %+v", b.Categories)
-	}
 	a := got.Applied
-	if a.CollectionRatePct != 90 || a.CollectionRateSource != report.SourceTrailing ||
-		a.OccupancyPct != 75 || a.OccupancySource != report.SourceTrailing || a.HorizonMonths != 6 {
+	if a.Basis != report.BasisContracts || a.CollectionRatePct != 90 || a.CollectionRateSource != report.SourceTrailing {
 		t.Errorf("applied = %+v", a)
 	}
+	b := got.Baseline
+	wantF(t, "baseline collection", b.CollectionRatePct, 90)
+	if b.RunningMonthly != 30_000 || b.CapitalExpenses != 400_000 || b.Net != 720_000 {
+		t.Errorf("baseline = %+v", b)
+	}
+	if b.UnitsTotal != 3 || b.UnitsLet != 1 || b.UnitsOpen != 1 || b.UnitsAssumed != 0 || b.AssumedRentMonthly != 0 {
+		t.Errorf("baseline units = %+v", b)
+	}
+	if len(got.Units) != 3 || got.Units[0].Assumed || got.Units[0].LetUntil == nil || got.Units[0].PropertyName != "Mbezi Block A" {
+		t.Errorf("unit rows = %+v", got.Units)
+	}
 
-	// Investment: 5,000,000 + 400,000 capital. Capital spend is investment, not
-	// a running cost: the monthly 30,000 above does not include it.
+	// Returns are measured against spend, with no purchase price needed.
 	inv := got.Investment
-	if inv.Total == nil || *inv.Total != 5_400_000 || inv.CashToDate != 400_000 {
-		t.Fatalf("investment = %+v", inv)
+	if inv.IncomeToDate != 930_000 || inv.RunningSpend != 30_000 || inv.CapitalSpend != 400_000 ||
+		inv.SpentToDate != 430_000 || inv.CashToDate != 500_000 {
+		t.Errorf("to date = %+v", inv)
 	}
-	if inv.TrailingAnnualNet != 720_000 || inv.ProjectedAnnualNet != 1_557_000 {
-		t.Errorf("annual nets = %d trailing, %d projected", inv.TrailingAnnualNet, inv.ProjectedAnnualNet)
+	if inv.ProjectedAnnualNet != 180_000 || inv.ProjectedAnnualExpenses != 360_000 || inv.TrailingAnnualNet != 720_000 {
+		t.Errorf("annual = %+v", inv)
 	}
-	wantF(t, "roi trailing", inv.ROITrailingPct, 13.3)   // 720,000 / 5,400,000
-	wantF(t, "roi projected", inv.ROIProjectedPct, 28.8) // 1,557,000 / 5,400,000
-	wantF(t, "payback", inv.PaybackYears, 3.5)           // 5,400,000 / 1,557,000 = 3.47
+	wantF(t, "roi projected", inv.ROIProjectedPct, 50)  // 180,000 / 360,000
+	wantF(t, "roi trailing", inv.ROITrailingPct, 42.1)  // (1,080,000 − 760,000) / 760,000
+	wantF(t, "payback once ahead", inv.PaybackYears, 0) // already 500,000 ahead
 	wantNilF(t, "yield without a current value", inv.YieldPct)
-	if inv.BreakEvenStatus != report.BreakEvenBeyondHorizon || inv.BreakEvenMonth != nil {
-		t.Errorf("break-even = %v %s, want beyond_horizon", inv.BreakEvenMonth, inv.BreakEvenStatus)
+	if inv.BreakEvenStatus != report.BreakEvenReached || inv.BreakEvenMonth == nil || *inv.BreakEvenMonth != "2025-06" {
+		t.Errorf("break-even = %v %s, want reached 2025-06", inv.BreakEvenMonth, inv.BreakEvenStatus)
+	}
+}
+
+func TestProjectionBases(t *testing.T) {
+	hundred := 100.0
+	for _, c := range []struct {
+		name         string
+		sc           report.ProjectionScenario
+		month0       int64 // income
+		month3       int64
+		assumed      int
+		assumedRent  int64
+		wantAssumeds []bool
+	}{
+		{
+			name: "best case lets every lettable unit", sc: withBasis(report.BasisBestCase),
+			month0: 198_000, month3: 198_000, assumed: 2, assumedRent: 220_000, wantAssumeds: []bool{true, true, false},
+		},
+		{
+			// b from now; a's contract ends and nothing replaces it.
+			name: "picked vacant unit", sc: withBasis(report.BasisSelected, "b"),
+			month0: 198_000, month3: 108_000, assumed: 1, assumedRent: 120_000, wantAssumeds: []bool{false, true, false},
+		},
+		{
+			// A landlord may pick a unit best case leaves out.
+			name: "picked unit under maintenance", sc: withBasis(report.BasisSelected, "c", "not-ours"),
+			month0: 135_000, month3: 45_000, assumed: 1, assumedRent: 50_000, wantAssumeds: []bool{false, false, true},
+		},
+		{
+			// Picks are ignored outside "selected".
+			name: "picks without the selected basis", sc: withBasis(report.BasisContracts, "b"),
+			month0: 90_000, month3: 0, wantAssumeds: []bool{false, false, false},
+		},
+		{
+			// Signed rent is kept; assumed lettings take the change.
+			name: "rent change, full collection",
+			sc: report.ProjectionScenario{HorizonMonths: 6, Basis: report.BasisBestCase,
+				RentChangePct: 10, CollectionRatePct: &hundred},
+			month0: 232_000, month3: 242_000, assumed: 2, assumedRent: 220_000, wantAssumeds: []bool{true, true, false},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := report.ProjectProperty(projStart, c.sc, baseProperty())
+			if got.Months[0].Income != c.month0 || got.Months[3].Income != c.month3 {
+				t.Errorf("income = %d / %d, want %d / %d", got.Months[0].Income, got.Months[3].Income, c.month0, c.month3)
+			}
+			if got.Baseline.UnitsAssumed != c.assumed || got.Baseline.AssumedRentMonthly != c.assumedRent {
+				t.Errorf("assumed = %d at %d, want %d at %d",
+					got.Baseline.UnitsAssumed, got.Baseline.AssumedRentMonthly, c.assumed, c.assumedRent)
+			}
+			for i, u := range got.Units {
+				if u.Assumed != c.wantAssumeds[i] {
+					t.Errorf("unit %s assumed = %v, want %v", u.ID, u.Assumed, c.wantAssumeds[i])
+				}
+			}
+		})
+	}
+	// An unknown basis is signed contracts.
+	if got := report.ProjectProperty(projStart, withBasis("wishful"), baseProperty()); got.Applied.Basis != report.BasisContracts {
+		t.Errorf("unknown basis applied as %s", got.Applied.Basis)
+	}
+	// Expenses −20%: 24,000 a month.
+	sc := sixMonths()
+	sc.ExpenseChangePct = -20
+	if got := report.ProjectProperty(projStart, sc, baseProperty()); got.Months[0].RunningExpenses != 24_000 {
+		t.Errorf("running = %d, want 24000", got.Months[0].RunningExpenses)
 	}
 }
 
 func TestProjectionBreakEven(t *testing.T) {
 	for _, c := range []struct {
-		name       string
-		price      int64
-		expenseChg float64
-		wantMonth  string
-		wantStatus string
+		name        string
+		price       int64
+		sc          report.ProjectionScenario
+		wantMonth   string
+		wantStatus  string
+		wantPayback *float64
 	}{
-		// 400,000 to date; +141,000 ×3, +118,500 → 1,060,000 at month 4.
-		{name: "inside the horizon", price: 1_000_000, wantMonth: "2027-02", wantStatus: report.BreakEvenProjected},
-		// June 2025 alone pays back 300,000. December 2024 (before purchase)
-		// would have paid it back earlier and must not count.
-		{name: "already in the past", price: 300_000, wantMonth: "2025-06", wantStatus: report.BreakEvenReached},
-		{name: "beyond the horizon", price: 5_000_000, wantStatus: report.BreakEvenBeyondHorizon},
+		// −1,000,000; +300,000, +100,000, +100,000 → −500,000; then +168,000 a
+		// month: −332,000, −164,000, +4,000 in December 2026.
+		{name: "inside the horizon", price: 1_000_000, sc: withBasis(report.BasisBestCase),
+			wantMonth: "2026-12", wantStatus: report.BreakEvenProjected, wantPayback: f64(0.2)}, // 500,000 / 2,016,000
+		// June 2025 alone covers 300,000. December 2024 (before purchase) must not count.
+		{name: "already in the past", price: 300_000, sc: sixMonths(), wantMonth: "2025-06", wantStatus: report.BreakEvenReached, wantPayback: f64(0)},
+		// −1,500,000 behind at +180,000 a year.
+		{name: "beyond the horizon", price: 2_000_000, sc: sixMonths(), wantStatus: report.BreakEvenBeyondHorizon, wantPayback: f64(8.3)},
 		// Running costs × 11 (330,000 a month) exceed every month's income.
-		{name: "never, at a loss", price: 5_000_000, expenseChg: 1000, wantStatus: report.BreakEvenNotProfitable},
+		{name: "never, at a loss", price: 5_000_000, sc: report.ProjectionScenario{HorizonMonths: 6, ExpenseChangePct: 1000},
+			wantStatus: report.BreakEvenNotProfitable},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			p := baseProperty()
 			p.PurchasePrice = i64(c.price)
-			p.CapitalToDate = 0
-			sc := sixMonths()
-			sc.ExpenseChangePct = c.expenseChg
-			inv := report.ProjectProperty(projStart, sc, p).Investment
+			inv := report.ProjectProperty(projStart, c.sc, p).Investment
 			if inv.BreakEvenStatus != c.wantStatus {
 				t.Fatalf("status = %s, want %s", inv.BreakEvenStatus, c.wantStatus)
 			}
@@ -183,96 +248,65 @@ func TestProjectionBreakEven(t *testing.T) {
 			case c.wantMonth != "" && (inv.BreakEvenMonth == nil || *inv.BreakEvenMonth != c.wantMonth):
 				t.Errorf("month = %v, want %s", inv.BreakEvenMonth, c.wantMonth)
 			}
-			if c.wantStatus == report.BreakEvenNotProfitable {
-				wantNilF(t, "payback at a loss", inv.PaybackYears)
+			if c.wantPayback == nil {
+				wantNilF(t, "payback", inv.PaybackYears)
+			} else {
+				wantF(t, "payback", inv.PaybackYears, *c.wantPayback)
+			}
+			if inv.SpentToDate != 430_000+c.price {
+				t.Errorf("spent to date = %d, want the purchase price added", inv.SpentToDate)
 			}
 		})
 	}
 }
 
-func TestProjectionWithoutPurchasePrice(t *testing.T) {
-	p := baseProperty()
-	got := report.ProjectProperty(projStart, sixMonths(), p)
-	inv := got.Investment
-	if inv.Total != nil || inv.BreakEvenMonth != nil || inv.BreakEvenStatus != report.BreakEvenNoPrice {
-		t.Errorf("investment without a price = %+v", inv)
+func f64(v float64) *float64 { return &v }
+
+func TestProjectionNothingSpent(t *testing.T) {
+	// Income and no costs at all: nothing to break even on, no ROI.
+	p := report.ProjectionProperty{
+		ID: "free", HistoryMonths: 12, TrailingCollected: 600_000,
+		Past:      []report.PastMonth{{Month: month(2026, time.May), Income: 600_000}},
+		Scheduled: []int64{50_000, 50_000},
 	}
-	wantNilF(t, "roi trailing", inv.ROITrailingPct)
+	inv := report.ProjectProperty(projStart, sixMonths(), p).Investment
+	if inv.BreakEvenStatus != report.BreakEvenNoCosts || inv.BreakEvenMonth != nil {
+		t.Errorf("break-even = %v %s, want no_costs", inv.BreakEvenMonth, inv.BreakEvenStatus)
+	}
 	wantNilF(t, "roi projected", inv.ROIProjectedPct)
+	wantNilF(t, "roi trailing", inv.ROITrailingPct)
 	wantNilF(t, "payback", inv.PaybackYears)
-	// Income, expenses and net still work, exactly as with a price.
-	if got.Totals.Net != 778_500 || inv.ProjectedAnnualNet != 1_557_000 {
-		t.Errorf("totals without a price = %+v, annual %d", got.Totals, inv.ProjectedAnnualNet)
-	}
-	// Yield needs only the current value.
-	p.CurrentValue = i64(7_200_000)
-	wantF(t, "yield", report.ProjectProperty(projStart, sixMonths(), p).Investment.YieldPct, 21.6)
-}
 
-func TestProjectionScenarioOverrides(t *testing.T) {
-	p := baseProperty()
-	hundred, half := 100.0, 50.0
-	for _, c := range []struct {
-		name       string
-		sc         report.ProjectionScenario
-		wantMonth0 int64 // income
-		wantMonth3 int64
-		wantExp    int64
-	}{
-		// Full occupancy, full collection, rents +10% on the open market only:
-		// month 0 = 100,000 scheduled + 120,000 × 1.1; month 3 = both × 1.1.
-		{
-			name:       "occupancy, collection and rent",
-			sc:         report.ProjectionScenario{HorizonMonths: 6, OccupancyPct: &hundred, CollectionRatePct: &hundred, RentChangePct: 10},
-			wantMonth0: 232_000, wantMonth3: 242_000, wantExp: 30_000,
-		},
-		// Half collected: (100,000 + 90,000) × 0.5; (220,000 × 0.75) × 0.5.
-		{
-			name:       "collection only",
-			sc:         report.ProjectionScenario{HorizonMonths: 6, CollectionRatePct: &half},
-			wantMonth0: 95_000, wantMonth3: 82_500, wantExp: 30_000,
-		},
-		// Expenses −20%: 24,000 a month; income unchanged.
-		{
-			name:       "expenses",
-			sc:         report.ProjectionScenario{HorizonMonths: 6, ExpenseChangePct: -20},
-			wantMonth0: 171_000, wantMonth3: 148_500, wantExp: 24_000,
-		},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			got := report.ProjectProperty(projStart, c.sc, p)
-			if got.Months[0].Income != c.wantMonth0 || got.Months[3].Income != c.wantMonth3 {
-				t.Errorf("income = %d / %d, want %d / %d",
-					got.Months[0].Income, got.Months[3].Income, c.wantMonth0, c.wantMonth3)
-			}
-			if got.Months[0].RunningExpenses != c.wantExp {
-				t.Errorf("running = %d, want %d", got.Months[0].RunningExpenses, c.wantExp)
-			}
-		})
+	// Nothing spent yet, but the forecast dips (60,000 a month of costs) and
+	// comes back: month 0 −60,000, month 1 +140,000.
+	q := report.ProjectionProperty{
+		ID: "new", HistoryMonths: 1,
+		TrailingRunning: []report.CategoryAmount{{ID: "c", Name: "Cleaning", Amount: 60_000}},
+		Scheduled:       []int64{0, 200_000},
 	}
-	got := report.ProjectProperty(projStart, report.ProjectionScenario{HorizonMonths: 6, OccupancyPct: &half}, p)
-	if got.Applied.OccupancySource != report.SourceScenario || got.Applied.OccupancyPct != 50 ||
-		got.Applied.CollectionRateSource != report.SourceTrailing {
-		t.Errorf("applied = %+v", got.Applied)
+	inv = report.ProjectProperty(projStart, report.ProjectionScenario{HorizonMonths: 3}, q).Investment
+	if inv.BreakEvenStatus != report.BreakEvenProjected || inv.BreakEvenMonth == nil || *inv.BreakEvenMonth != "2026-11" {
+		t.Errorf("break-even = %v %s, want projected 2026-11", inv.BreakEvenMonth, inv.BreakEvenStatus)
 	}
 }
 
 func TestProjectionDefaultsAndHistory(t *testing.T) {
-	// A young property: four months in the book, nothing ever due, no units
-	// measured. Averages divide by four; both rates default to 100%.
+	// A young property: four months in the book, nothing ever due. Averages
+	// divide by four; the collection rate defaults to 100%.
 	p := report.ProjectionProperty{
 		ID: "young", HistoryMonths: 4,
 		TrailingCollected: 200_000,
 		TrailingRunning:   []report.CategoryAmount{{ID: "c", Name: "Cleaning", Amount: 120_000}},
-		Units:             []report.ProjectionUnit{{MonthlyRent: 80_000, Lettable: true}, {MonthlyRent: 50_000, Lettable: false}},
+		Units: []report.ProjectionUnit{
+			{ID: "u1", MonthlyRent: 80_000, Lettable: true},
+			{ID: "u2", MonthlyRent: 50_000, Lettable: false},
+		},
 	}
-	got := report.ProjectProperty(projStart, report.ProjectionScenario{}, p)
+	got := report.ProjectProperty(projStart, report.ProjectionScenario{Basis: report.BasisBestCase}, p)
 	if len(got.Months) != report.ProjectionHorizonDefault {
 		t.Errorf("default horizon = %d months, want %d", len(got.Months), report.ProjectionHorizonDefault)
 	}
-	a := got.Applied
-	if a.CollectionRatePct != 100 || a.CollectionRateSource != report.SourceDefault ||
-		a.OccupancyPct != 100 || a.OccupancySource != report.SourceDefault {
+	if a := got.Applied; a.CollectionRatePct != 100 || a.CollectionRateSource != report.SourceDefault {
 		t.Errorf("applied defaults = %+v", a)
 	}
 	wantNilF(t, "baseline collection", got.Baseline.CollectionRatePct)
@@ -285,7 +319,7 @@ func TestProjectionDefaultsAndHistory(t *testing.T) {
 		t.Errorf("trailing annual net = %d, want 240000", got.Investment.TrailingAnnualNet)
 	}
 	// Without a purchase date every recorded month counts.
-	p.PastNet = []report.MonthAmount{{Month: month(2020, time.March), Amount: 7}, {Month: month(2026, time.May), Amount: 3}}
+	p.Past = []report.PastMonth{{Month: month(2020, time.March), Income: 7}, {Month: month(2026, time.May), Income: 5, Running: 2}}
 	if c := report.ProjectProperty(projStart, report.ProjectionScenario{}, p).Investment.CashToDate; c != 10 {
 		t.Errorf("cash to date without a purchase date = %d, want 10", c)
 	}
@@ -296,60 +330,58 @@ func TestProjectionDefaultsAndHistory(t *testing.T) {
 	if n := len(report.ProjectProperty(projStart, report.ProjectionScenario{HorizonMonths: 500}, p).Months); n != 120 {
 		t.Errorf("horizon 500 → %d months, want 120", n)
 	}
+	// Yield needs only the current value: 180,000 a year on 7,200,000.
+	base := baseProperty()
+	base.CurrentValue = i64(7_200_000)
+	wantF(t, "yield", report.ProjectProperty(projStart, sixMonths(), base).Investment.YieldPct, 2.5)
 }
 
 func TestProjectionPortfolio(t *testing.T) {
 	priced := baseProperty()
 	priced.PurchasePrice = i64(1_000_000)
-	priced.CapitalToDate = 0
 	priced.CurrentValue = i64(7_200_000)
 	unpriced := report.ProjectionProperty{
 		ID: "q", Name: "Kariakoo shops", HistoryMonths: 12,
-		Units: []report.ProjectionUnit{{MonthlyRent: 50_000, Lettable: true}},
+		Units: []report.ProjectionUnit{{ID: "q1", MonthlyRent: 50_000, Lettable: true}},
 	}
-	got, parts := report.ProjectPortfolio(projStart, sixMonths(), []report.ProjectionProperty{priced, unpriced})
+	sc := withBasis(report.BasisBestCase)
+	got, parts := report.ProjectPortfolio(projStart, sc, []report.ProjectionProperty{priced, unpriced})
 	if len(parts) != 2 {
 		t.Fatalf("parts = %d", len(parts))
 	}
 
 	// The monthly lines are the sum of the parts.
 	for i, m := range got.Months {
-		sum := parts[0].Months[i].Net + parts[1].Months[i].Net
-		if m.Net != sum || m.Cumulative != parts[0].Months[i].Cumulative+parts[1].Months[i].Cumulative {
-			t.Errorf("month %d net %d cumulative %d do not add up", i, m.Net, m.Cumulative)
+		a, b := parts[0].Months[i], parts[1].Months[i]
+		if m.Net != a.Net+b.Net || m.Cumulative != a.Cumulative+b.Cumulative ||
+			m.CumulativeIncome != a.CumulativeIncome+b.CumulativeIncome || m.CumulativeSpent != a.CumulativeSpent+b.CumulativeSpent {
+			t.Errorf("month %d does not add up: %+v", i, m)
 		}
 	}
-	if got.Months[0].Net != 191_000 || got.Totals.Net != 778_500+300_000 {
+	// 168,000 + 50,000 (the unpriced shop has no history: 100% collection).
+	if got.Months[0].Net != 218_000 || got.Totals.Net != 6*218_000 {
 		t.Errorf("portfolio month 0 net %d, total %d", got.Months[0].Net, got.Totals.Net)
 	}
+	if len(got.Units) != 4 || got.Units[3].PropertyName != "Kariakoo shops" || !got.Units[3].Assumed {
+		t.Errorf("portfolio units = %+v", got.Units)
+	}
 
-	// Investment covers the priced property only, and says so.
+	// Every property counts toward the returns; the purchase price adds to spend.
 	inv := got.Investment
-	if !inv.Incomplete || inv.PricedCount != 1 || len(inv.MissingPriceIDs) != 1 || inv.MissingPriceIDs[0] != "q" {
-		t.Errorf("incomplete flag = %+v", inv)
+	if inv.PurchasePrice == nil || *inv.PurchasePrice != 1_000_000 || inv.SpentToDate != 1_430_000 || inv.CashToDate != -500_000 {
+		t.Fatalf("investment = %+v", inv)
 	}
-	if inv.Total == nil || *inv.Total != 1_000_000 {
-		t.Fatalf("total = %v, want 1,000,000", inv.Total)
+	// −500,000 + 218,000 a month: −282,000, −64,000, +154,000 in December.
+	if inv.BreakEvenStatus != report.BreakEvenProjected || inv.BreakEvenMonth == nil || *inv.BreakEvenMonth != "2026-12" {
+		t.Errorf("portfolio break-even = %v %s", inv.BreakEvenMonth, inv.BreakEvenStatus)
 	}
-	if inv.BreakEvenMonth == nil || *inv.BreakEvenMonth != "2027-02" {
-		t.Errorf("portfolio break-even = %v, want 2027-02 (the priced property alone)", inv.BreakEvenMonth)
+	if inv.ProjectedAnnualNet != 2_616_000 || inv.ProjectedAnnualExpenses != 360_000 {
+		t.Errorf("portfolio annual = %+v", inv)
 	}
-	wantF(t, "portfolio roi projected", inv.ROIProjectedPct, 155.7) // 1,557,000 / 1,000,000
-	wantF(t, "portfolio yield", inv.YieldPct, 21.6)                 // only the valued property
-	if inv.ProjectedAnnualNet != 1_557_000+600_000 {
-		t.Errorf("portfolio projected annual net = %d", inv.ProjectedAnnualNet)
-	}
-
-	// Aggregated baseline: 1,080,000 of 1,200,000; 18 of 24 unit-months.
+	wantF(t, "portfolio roi projected", inv.ROIProjectedPct, 726.7) // 2,616,000 / 360,000
+	wantF(t, "portfolio yield", inv.YieldPct, 28)                   // only the valued property: 2,016,000 / 7,200,000
 	wantF(t, "portfolio collection", got.Baseline.CollectionRatePct, 90)
-	wantF(t, "portfolio occupancy", got.Baseline.OccupancyPct, 75)
-	if got.Baseline.UnitsTotal != 3 || got.Baseline.MarketRentMonthly != 170_000 {
+	if got.Baseline.UnitsTotal != 4 || got.Baseline.UnitsAssumed != 3 || got.Baseline.AssumedRentMonthly != 270_000 {
 		t.Errorf("portfolio baseline = %+v", got.Baseline)
-	}
-
-	// No property priced: no investment figures at all.
-	none, _ := report.ProjectPortfolio(projStart, sixMonths(), []report.ProjectionProperty{unpriced})
-	if none.Investment.Total != nil || none.Investment.BreakEvenStatus != report.BreakEvenNoPrice {
-		t.Errorf("unpriced portfolio investment = %+v", none.Investment)
 	}
 }

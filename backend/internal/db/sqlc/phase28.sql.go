@@ -24,25 +24,27 @@ func (q *Queries) CountProjectionScenarios(ctx context.Context, orgID pgtype.UUI
 
 const createProjectionScenario = `-- name: CreateProjectionScenario :one
 INSERT INTO projection_scenarios (
-    org_id, name, horizon_months, rent_change_pct, occupancy_pct,
+    org_id, name, horizon_months, basis, unit_ids, rent_change_pct,
     collection_rate_pct, expense_change_pct, created_by_user_id
 ) VALUES (
     $1, $2, $3, $4,
-    $5, $6, $7,
-    $8
+    $5::uuid[], $6,
+    $7, $8,
+    $9
 )
-RETURNING id, org_id, name, horizon_months, rent_change_pct, occupancy_pct, collection_rate_pct, expense_change_pct, created_by_user_id, created_at
+RETURNING id, org_id, name, horizon_months, rent_change_pct, collection_rate_pct, expense_change_pct, created_by_user_id, created_at, basis, unit_ids
 `
 
 type CreateProjectionScenarioParams struct {
-	OrgID             pgtype.UUID `json:"org_id"`
-	Name              string      `json:"name"`
-	HorizonMonths     int32       `json:"horizon_months"`
-	RentChangePct     float64     `json:"rent_change_pct"`
-	OccupancyPct      *float64    `json:"occupancy_pct"`
-	CollectionRatePct *float64    `json:"collection_rate_pct"`
-	ExpenseChangePct  float64     `json:"expense_change_pct"`
-	CreatedByUserID   pgtype.UUID `json:"created_by_user_id"`
+	OrgID             pgtype.UUID   `json:"org_id"`
+	Name              string        `json:"name"`
+	HorizonMonths     int32         `json:"horizon_months"`
+	Basis             string        `json:"basis"`
+	UnitIds           []pgtype.UUID `json:"unit_ids"`
+	RentChangePct     float64       `json:"rent_change_pct"`
+	CollectionRatePct *float64      `json:"collection_rate_pct"`
+	ExpenseChangePct  float64       `json:"expense_change_pct"`
+	CreatedByUserID   pgtype.UUID   `json:"created_by_user_id"`
 }
 
 func (q *Queries) CreateProjectionScenario(ctx context.Context, arg CreateProjectionScenarioParams) (ProjectionScenario, error) {
@@ -50,8 +52,9 @@ func (q *Queries) CreateProjectionScenario(ctx context.Context, arg CreateProjec
 		arg.OrgID,
 		arg.Name,
 		arg.HorizonMonths,
+		arg.Basis,
+		arg.UnitIds,
 		arg.RentChangePct,
-		arg.OccupancyPct,
 		arg.CollectionRatePct,
 		arg.ExpenseChangePct,
 		arg.CreatedByUserID,
@@ -63,11 +66,12 @@ func (q *Queries) CreateProjectionScenario(ctx context.Context, arg CreateProjec
 		&i.Name,
 		&i.HorizonMonths,
 		&i.RentChangePct,
-		&i.OccupancyPct,
 		&i.CollectionRatePct,
 		&i.ExpenseChangePct,
 		&i.CreatedByUserID,
 		&i.CreatedAt,
+		&i.Basis,
+		&i.UnitIds,
 	)
 	return i, err
 }
@@ -75,7 +79,7 @@ func (q *Queries) CreateProjectionScenario(ctx context.Context, arg CreateProjec
 const deleteProjectionScenario = `-- name: DeleteProjectionScenario :one
 DELETE FROM projection_scenarios
 WHERE org_id = $1 AND id = $2
-RETURNING id, org_id, name, horizon_months, rent_change_pct, occupancy_pct, collection_rate_pct, expense_change_pct, created_by_user_id, created_at
+RETURNING id, org_id, name, horizon_months, rent_change_pct, collection_rate_pct, expense_change_pct, created_by_user_id, created_at, basis, unit_ids
 `
 
 type DeleteProjectionScenarioParams struct {
@@ -92,18 +96,19 @@ func (q *Queries) DeleteProjectionScenario(ctx context.Context, arg DeleteProjec
 		&i.Name,
 		&i.HorizonMonths,
 		&i.RentChangePct,
-		&i.OccupancyPct,
 		&i.CollectionRatePct,
 		&i.ExpenseChangePct,
 		&i.CreatedByUserID,
 		&i.CreatedAt,
+		&i.Basis,
+		&i.UnitIds,
 	)
 	return i, err
 }
 
 const listProjectionScenarios = `-- name: ListProjectionScenarios :many
 
-SELECT id, org_id, name, horizon_months, rent_change_pct, occupancy_pct, collection_rate_pct, expense_change_pct, created_by_user_id, created_at FROM projection_scenarios
+SELECT id, org_id, name, horizon_months, rent_change_pct, collection_rate_pct, expense_change_pct, created_by_user_id, created_at, basis, unit_ids FROM projection_scenarios
 WHERE org_id = $1
 ORDER BY lower(name), id
 `
@@ -124,11 +129,12 @@ func (q *Queries) ListProjectionScenarios(ctx context.Context, orgID pgtype.UUID
 			&i.Name,
 			&i.HorizonMonths,
 			&i.RentChangePct,
-			&i.OccupancyPct,
 			&i.CollectionRatePct,
 			&i.ExpenseChangePct,
 			&i.CreatedByUserID,
 			&i.CreatedAt,
+			&i.Basis,
+			&i.UnitIds,
 		); err != nil {
 			return nil, err
 		}
@@ -463,8 +469,7 @@ func (q *Queries) ProjectionScheduledDaily(ctx context.Context, arg ProjectionSc
 }
 
 const projectionUnits = `-- name: ProjectionUnits :many
-SELECT u.id, u.property_id, u.status,
-       (u.created_at AT TIME ZONE 'Africa/Dar_es_Salaam')::date AS created_on,
+SELECT u.id, u.property_id, u.name, u.status,
        COALESCE(pp.amount, 0)::bigint        AS price_amount,
        COALESCE(pp.period_days, 0)::int      AS price_period_days,
        COALESCE(lc.rent_amount, 0)::bigint   AS last_rent_amount,
@@ -495,7 +500,7 @@ LEFT JOIN LATERAL (
 ) rc ON true
 WHERE u.org_id = $1 AND u.deleted_at IS NULL
   AND ($2::uuid IS NULL OR u.property_id = $2::uuid)
-ORDER BY u.property_id, u.id
+ORDER BY u.property_id, u.name, u.id
 `
 
 type ProjectionUnitsParams struct {
@@ -506,8 +511,8 @@ type ProjectionUnitsParams struct {
 type ProjectionUnitsRow struct {
 	ID                 pgtype.UUID `json:"id"`
 	PropertyID         pgtype.UUID `json:"property_id"`
+	Name               string      `json:"name"`
 	Status             string      `json:"status"`
-	CreatedOn          pgtype.Date `json:"created_on"`
 	PriceAmount        int64       `json:"price_amount"`
 	PricePeriodDays    int32       `json:"price_period_days"`
 	LastRentAmount     int64       `json:"last_rent_amount"`
@@ -515,9 +520,8 @@ type ProjectionUnitsRow struct {
 	RunningEnd         pgtype.Date `json:"running_end"`
 }
 
-// ProjectionUnits is every live unit with what the market would pay for it:
-// its current price (or, without one, the rent of its latest tenancy) and the
-// day its running tenancy, if any, ends.
+// ProjectionUnits is every live unit with its own price (or, without one, the
+// rent of its latest tenancy) and the day its running tenancy, if any, ends.
 func (q *Queries) ProjectionUnits(ctx context.Context, arg ProjectionUnitsParams) ([]ProjectionUnitsRow, error) {
 	rows, err := q.db.Query(ctx, projectionUnits, arg.OrgID, arg.PropertyID)
 	if err != nil {
@@ -530,8 +534,8 @@ func (q *Queries) ProjectionUnits(ctx context.Context, arg ProjectionUnitsParams
 		if err := rows.Scan(
 			&i.ID,
 			&i.PropertyID,
+			&i.Name,
 			&i.Status,
-			&i.CreatedOn,
 			&i.PriceAmount,
 			&i.PricePeriodDays,
 			&i.LastRentAmount,

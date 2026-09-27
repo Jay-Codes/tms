@@ -1,24 +1,28 @@
 package report
 
-// Phase 28 — projections, break-even and ROI (PLAN2 Phase 28).
+// Phase 28 — projections, break-even and ROI (PLAN2 Phase 28, reworked
+// 27 Sep 2026 after the client walk-through).
 //
 // This file is the whole of the arithmetic. It reads no database and knows no
 // HTTP: the handler gathers the facts (the trailing twelve months of cash and
-// expenses, the tenancies' future schedules, the units' market rents, the
-// investment a landlord entered) and this turns them into a monthly forecast
-// and the four investment figures. Keeping it pure is what lets every figure be
-// checked against a hand-computed fixture, and CLAUDE.md keeps it out of the
-// frontend: the screen sends scenario parameters and draws what comes back.
+// expenses, the tenancies' future schedules, each unit's price, the costs a
+// landlord has logged) and this turns them into a monthly forecast and the
+// return figures. Keeping it pure is what lets every figure be checked against
+// a hand-computed fixture, and CLAUDE.md keeps it out of the frontend: the
+// screen sends scenario parameters and draws what comes back.
 //
 // The model, in one paragraph. A month's projected income is the rent already
-// scheduled on running tenancies plus, for every lettable unit not covered by
-// one, its market rent × (1 + rent change) × occupancy; the sum is then
-// multiplied by the collection rate. A month's running expenses are the
-// trailing monthly average of each non-capital category × (1 + expense
-// change). Capital spend is not a running cost: it is added to the purchase
-// price to make the investment. Net is income less running expenses; the
-// cumulative line starts from the cash the property has actually made since it
-// was bought, and break-even is the first month it reaches the investment.
+// scheduled on signed, running contracts plus, for every unit the scenario
+// assumes let, its own price × (1 + rent change) from the month it is free of
+// its contract; the sum is then multiplied by the collection rate. Which units
+// are assumed let is the basis: none (signed contracts only), the ones the
+// landlord picked, or every lettable unit (best case) — there is no occupancy
+// percentage to guess. A month's running expenses are the trailing monthly
+// average of each non-capital category × (1 + expense change). The return is
+// measured against what has been spent, because that is what the rent book
+// records: every running and capital expense, plus the purchase price when a
+// landlord entered one. Break-even is the month cumulative income first covers
+// cumulative spend; ROI is net ÷ expenses.
 
 import (
 	"math"
@@ -35,13 +39,25 @@ const (
 	ProjectionHistoryMonths = 12
 )
 
+// Bases: which units the forecast assumes let beyond the signed contracts.
+const (
+	BasisContracts = "contracts" // signed contracts only; nothing else is let
+	BasisSelected  = "selected"  // signed contracts plus the units picked
+	BasisBestCase  = "best_case" // every lettable unit let whenever no contract covers it
+)
+
+// ValidBasis reports whether b is one of the three bases.
+func ValidBasis(b string) bool {
+	return b == BasisContracts || b == BasisSelected || b == BasisBestCase
+}
+
 // Break-even outcomes. Exactly one applies to a scope.
 const (
-	BreakEvenReached       = "reached"           // already happened, in the past
-	BreakEvenProjected     = "projected"         // happens inside the horizon
-	BreakEvenBeyondHorizon = "beyond_horizon"    // profitable, but not within the horizon
-	BreakEvenNotProfitable = "not_profitable"    // the projected net never pays it back
-	BreakEvenNoPrice       = "no_purchase_price" // no investment to break even on
+	BreakEvenReached       = "reached"        // income has already covered the spend
+	BreakEvenProjected     = "projected"      // happens inside the horizon
+	BreakEvenBeyondHorizon = "beyond_horizon" // profitable, but not within the horizon
+	BreakEvenNotProfitable = "not_profitable" // the projected net never pays it back
+	BreakEvenNoCosts       = "no_costs"       // nothing spent yet, nothing to break even on
 )
 
 // Where an applied rate came from.
@@ -54,9 +70,12 @@ const (
 // ProjectionScenario is what the landlord can move. A nil rate means "what the
 // last twelve months say".
 type ProjectionScenario struct {
-	HorizonMonths     int
+	HorizonMonths int
+	// Basis is one of the Basis* constants; empty means BasisContracts.
+	Basis string
+	// UnitIDs are the units assumed let under BasisSelected.
+	UnitIDs           []string
 	RentChangePct     float64
-	OccupancyPct      *float64
 	CollectionRatePct *float64
 	ExpenseChangePct  float64
 }
@@ -68,23 +87,34 @@ type CategoryAmount struct {
 	Amount int64
 }
 
-// MonthAmount is one calendar month's figure; Month is the 1st of the month.
-type MonthAmount struct {
-	Month  time.Time
-	Amount int64
+// PastMonth is one recorded calendar month: the cash collected (net of
+// refunds) and what was spent, running and capital. Month is the 1st.
+type PastMonth struct {
+	Month   time.Time
+	Income  int64
+	Running int64
+	Capital int64
 }
+
+// Spent is everything paid out that month.
+func (m PastMonth) Spent() int64 { return m.Running + m.Capital }
 
 // ProjectionUnit is one unit as the forecast sees it.
 type ProjectionUnit struct {
-	// MonthlyRent is what the market pays for it per month: the current price
-	// (or the last tenancy's rent) normalised to 30 days.
+	ID     string
+	Name   string
+	Status string
+	// MonthlyRent is the unit's own price per month (its current price plan,
+	// else the last tenancy's rent), normalised to 30 days.
 	MonthlyRent int64
-	// FreeFrom is the first projection month the unit is on the open market:
-	// 0 for a vacant unit, the month after its running tenancy ends otherwise.
-	// Before it, the unit's income is its scheduled rent, counted elsewhere.
+	// FreeFrom is the first projection month the unit is not under a running
+	// contract: 0 for a vacant unit, the month after its tenancy ends
+	// otherwise. Before it, the unit's income is its scheduled rent.
 	FreeFrom int
-	// Lettable is false for a unit under maintenance or unlisted: it earns
-	// its schedule, if it has one, and nothing on the open market.
+	// LetUntil is the running contract's end date (YYYY-MM-DD), if any.
+	LetUntil *string
+	// Lettable is false for a unit under maintenance or unlisted: best case
+	// leaves it out, though a landlord may still pick it by hand.
 	Lettable bool
 }
 
@@ -100,20 +130,14 @@ type ProjectionProperty struct {
 	// has been in the book (1–12); averages divide by it, so a block added in
 	// June is not averaged as if it had earned nothing since last October.
 	HistoryMonths     int
-	TrailingCollected int64 // cash collected, net of refunds
-	TrailingExpected  int64 // what fell due
-	// Occupancy over the window, as unit-months: each unit measured at the end
-	// of each month.
-	TrailingOccupiedUnitMonths int64
-	TrailingUnitMonths         int64
-	TrailingRunning            []CategoryAmount // non-capital expenses per category
-	TrailingCapital            int64            // capital spend inside the window
-	CapitalToDate              int64            // all capital spend ever recorded
+	TrailingCollected int64            // cash collected, net of refunds
+	TrailingExpected  int64            // what fell due
+	TrailingRunning   []CategoryAmount // non-capital expenses per category
+	TrailingCapital   int64            // capital spend inside the window
 
-	// PastNet is the actual monthly net (collected less running expenses)
-	// over the property's whole recorded history before the projection
-	// starts, ascending. Months before the purchase month are ignored.
-	PastNet []MonthAmount
+	// Past is every recorded month before the projection starts, ascending.
+	// Months before the purchase month are ignored.
+	Past []PastMonth
 	// Scheduled is the rent already scheduled on running tenancies, per
 	// projection month.
 	Scheduled []int64
@@ -128,9 +152,12 @@ type ProjectionMonth struct {
 	Income          int64  `json:"income"`
 	RunningExpenses int64  `json:"running_expenses"`
 	Net             int64  `json:"net"`
-	// Cumulative is the cash made since purchase (or since the book began,
-	// without a purchase date), at the end of this month.
-	Cumulative int64 `json:"cumulative"`
+	// CumulativeIncome and CumulativeSpent run from the purchase (or the
+	// start of the book) to the end of this month; Cumulative is their
+	// difference, and break-even is where it turns positive.
+	CumulativeIncome int64 `json:"cumulative_income"`
+	CumulativeSpent  int64 `json:"cumulative_spent"`
+	Cumulative       int64 `json:"cumulative"`
 }
 
 // ProjectionTotals adds the forecast up over the horizon.
@@ -155,53 +182,75 @@ type ProjectionBaseline struct {
 	Collected         int64    `json:"collected"`
 	Expected          int64    `json:"expected"`
 	CollectionRatePct *float64 `json:"collection_rate_pct"`
-	OccupancyPct      *float64 `json:"occupancy_pct"`
 	RunningExpenses   int64    `json:"running_expenses"`
 	CapitalExpenses   int64    `json:"capital_expenses"`
 	// RunningMonthly is the trailing monthly average of running costs.
-	RunningMonthly    int64             `json:"running_expenses_monthly"`
-	Categories        []CategoryMonthly `json:"categories"`
-	Net               int64             `json:"net"`
-	UnitsTotal        int               `json:"units_total"`
-	UnitsLet          int               `json:"units_let"`
-	UnitsOpen         int               `json:"units_open"`
-	MarketRentMonthly int64             `json:"market_rent_monthly"`
+	RunningMonthly int64             `json:"running_expenses_monthly"`
+	Categories     []CategoryMonthly `json:"categories"`
+	Net            int64             `json:"net"`
+	UnitsTotal     int               `json:"units_total"`
+	UnitsLet       int               `json:"units_let"`
+	UnitsOpen      int               `json:"units_open"`
+	// UnitsAssumed are the units the basis assumes let beyond their contracts,
+	// and AssumedRentMonthly their prices a month before the rent change.
+	UnitsAssumed       int   `json:"units_assumed"`
+	AssumedRentMonthly int64 `json:"assumed_rent_monthly"`
 }
 
 // ProjectionApplied is the scenario as it was actually applied.
 type ProjectionApplied struct {
-	HorizonMonths        int     `json:"horizon_months"`
-	RentChangePct        float64 `json:"rent_change_pct"`
-	OccupancyPct         float64 `json:"occupancy_pct"`
-	OccupancySource      string  `json:"occupancy_source"`
-	CollectionRatePct    float64 `json:"collection_rate_pct"`
-	CollectionRateSource string  `json:"collection_rate_source"`
-	ExpenseChangePct     float64 `json:"expense_change_pct"`
+	HorizonMonths        int      `json:"horizon_months"`
+	Basis                string   `json:"basis"`
+	UnitIDs              []string `json:"unit_ids"`
+	RentChangePct        float64  `json:"rent_change_pct"`
+	CollectionRatePct    float64  `json:"collection_rate_pct"`
+	CollectionRateSource string   `json:"collection_rate_source"`
+	ExpenseChangePct     float64  `json:"expense_change_pct"`
 }
 
-// ProjectionInvestment is the break-even and return block.
+// ProjectionUnitRow is one unit in the picker: what it rents for, whether a
+// contract holds it and until when, and whether this forecast assumes it let.
+type ProjectionUnitRow struct {
+	ID           string  `json:"id"`
+	Name         string  `json:"name"`
+	PropertyID   string  `json:"property_id"`
+	PropertyName string  `json:"property_name"`
+	Status       string  `json:"status"`
+	MonthlyRent  int64   `json:"monthly_rent"`
+	LetUntil     *string `json:"let_until"`
+	Lettable     bool    `json:"lettable"`
+	Assumed      bool    `json:"assumed"`
+}
+
+// ProjectionInvestment is the break-even and return block, measured against
+// what has been spent.
 type ProjectionInvestment struct {
+	// PurchasePrice counts as spend when entered; it is optional.
 	PurchasePrice *int64 `json:"purchase_price"`
 	CapitalSpend  int64  `json:"capital_spend"`
-	// Total is purchase price + capital spend; null without a purchase price.
-	Total        *int64 `json:"total"`
+	RunningSpend  int64  `json:"running_spend"`
+	// SpentToDate is running + capital + purchase price, since purchase (or
+	// the start of the book), up to the start of the projection.
+	SpentToDate  int64  `json:"spent_to_date"`
+	IncomeToDate int64  `json:"income_to_date"`
+	CashToDate   int64  `json:"cash_to_date"` // income − spent
 	CurrentValue *int64 `json:"current_value"`
-	// CashToDate is the actual net cash made since purchase, up to the start
-	// of the projection — where the cumulative line starts.
-	CashToDate         int64    `json:"cash_to_date"`
-	BreakEvenMonth     *string  `json:"break_even_month"`
-	BreakEvenStatus    string   `json:"break_even_status"`
-	TrailingAnnualNet  int64    `json:"trailing_annual_net"`
-	ProjectedAnnualNet int64    `json:"projected_annual_net"`
-	ROITrailingPct     *float64 `json:"roi_trailing_pct"`
-	ROIProjectedPct    *float64 `json:"roi_projected_pct"`
-	YieldPct           *float64 `json:"yield_pct"`
-	PaybackYears       *float64 `json:"payback_years"`
-	// Incomplete is the portfolio's warning: some properties have no purchase
-	// price, so the investment figures cover only the ones that do.
-	Incomplete      bool     `json:"incomplete"`
-	PricedCount     int      `json:"priced_properties"`
-	MissingPriceIDs []string `json:"missing_price_property_ids"`
+
+	BreakEvenMonth  *string `json:"break_even_month"`
+	BreakEvenStatus string  `json:"break_even_status"`
+
+	TrailingAnnualNet int64 `json:"trailing_annual_net"`
+	// TrailingAnnualSpend is running + capital over the window, annualised.
+	TrailingAnnualSpend     int64 `json:"trailing_annual_spend"`
+	ProjectedAnnualNet      int64 `json:"projected_annual_net"`
+	ProjectedAnnualExpenses int64 `json:"projected_annual_expenses"`
+	// ROI is net ÷ expenses: what every shilling spent brought back on top.
+	ROITrailingPct  *float64 `json:"roi_trailing_pct"`
+	ROIProjectedPct *float64 `json:"roi_projected_pct"`
+	YieldPct        *float64 `json:"yield_pct"`
+	// PaybackYears is how long, at the projected annual net, until income
+	// covers the spend to date: 0 once it has, null if it never will.
+	PaybackYears *float64 `json:"payback_years"`
 }
 
 // ProjectionResult is one scope's forecast: a property, or the portfolio.
@@ -213,6 +262,7 @@ type ProjectionResult struct {
 	Months     []ProjectionMonth    `json:"months"`
 	Totals     ProjectionTotals     `json:"totals"`
 	Investment ProjectionInvestment `json:"investment"`
+	Units      []ProjectionUnitRow  `json:"units"`
 }
 
 // ------------------------------------------------------------- engine --
@@ -222,7 +272,6 @@ type ProjectionResult struct {
 func ProjectProperty(start time.Time, sc ProjectionScenario, p ProjectionProperty) ProjectionResult {
 	sc = sc.normalised()
 	coll, collSrc := appliedRate(sc.CollectionRatePct, trailingCollectionPct(p.TrailingCollected, p.TrailingExpected))
-	occ, occSrc := appliedRate(sc.OccupancyPct, pctOf(p.TrailingOccupiedUnitMonths, p.TrailingUnitMonths))
 
 	months := historyMonths(p.HistoryMonths)
 	var runningTotal int64
@@ -232,66 +281,73 @@ func ProjectProperty(start time.Time, sc ProjectionScenario, p ProjectionPropert
 	runningAvg := float64(runningTotal) / float64(months)
 	monthlyExpenses := roundInt(runningAvg * (1 + sc.ExpenseChangePct/100))
 
+	assumed := assumedUnits(sc, p.Units)
 	rentFactor := 1 + sc.RentChangePct/100
 	out := ProjectionResult{
 		ID:       p.ID,
 		Name:     p.Name,
-		Baseline: propertyBaseline(start, p, months, runningTotal),
-		Applied: ProjectionApplied{
-			HorizonMonths: sc.HorizonMonths, RentChangePct: sc.RentChangePct,
-			OccupancyPct: occ, OccupancySource: occSrc,
-			CollectionRatePct: coll, CollectionRateSource: collSrc,
-			ExpenseChangePct: sc.ExpenseChangePct,
-		},
-		Months: make([]ProjectionMonth, sc.HorizonMonths),
+		Baseline: propertyBaseline(start, p, months, runningTotal, assumed),
+		Applied:  applied(sc, coll, collSrc),
+		Months:   make([]ProjectionMonth, sc.HorizonMonths),
+		Units:    make([]ProjectionUnitRow, 0, len(p.Units)),
+	}
+	for i, u := range p.Units {
+		out.Units = append(out.Units, ProjectionUnitRow{
+			ID: u.ID, Name: u.Name, PropertyID: p.ID, PropertyName: p.Name, Status: u.Status,
+			MonthlyRent: u.MonthlyRent, LetUntil: u.LetUntil, Lettable: u.Lettable, Assumed: assumed[i],
+		})
 	}
 
-	cash := cashSince(p.PastNet, p.PurchaseDate)
-	cum := cash
+	past := sincePurchase(p.Past, p.PurchaseDate)
+	inv := ProjectionInvestment{PurchasePrice: p.PurchasePrice, CurrentValue: p.CurrentValue}
+	for _, m := range past {
+		inv.IncomeToDate += m.Income
+		inv.RunningSpend += m.Running
+		inv.CapitalSpend += m.Capital
+	}
+	inv.SpentToDate = inv.RunningSpend + inv.CapitalSpend
+	if p.PurchasePrice != nil {
+		inv.SpentToDate += *p.PurchasePrice
+	}
+	inv.CashToDate = inv.IncomeToDate - inv.SpentToDate
+
+	cumIn, cumOut := inv.IncomeToDate, inv.SpentToDate
 	nets := make([]int64, sc.HorizonMonths)
+	expenses := make([]int64, sc.HorizonMonths)
 	for m := 0; m < sc.HorizonMonths; m++ {
 		gross := 0.0
 		if m < len(p.Scheduled) {
 			gross += float64(p.Scheduled[m])
 		}
-		for _, u := range p.Units {
-			if u.Lettable && m >= u.FreeFrom {
-				gross += float64(u.MonthlyRent) * rentFactor * occ / 100
+		for i, u := range p.Units {
+			if assumed[i] && m >= u.FreeFrom {
+				gross += float64(u.MonthlyRent) * rentFactor
 			}
 		}
 		income := roundInt(gross * coll / 100)
 		net := income - monthlyExpenses
-		cum += net
-		nets[m] = net
+		cumIn += income
+		cumOut += monthlyExpenses
+		nets[m], expenses[m] = net, monthlyExpenses
 		out.Months[m] = ProjectionMonth{
 			Month: start.AddDate(0, m, 0).Format(monthLayout), Income: income,
-			RunningExpenses: monthlyExpenses, Net: net, Cumulative: cum,
+			RunningExpenses: monthlyExpenses, Net: net,
+			CumulativeIncome: cumIn, CumulativeSpent: cumOut, Cumulative: cumIn - cumOut,
 		}
 		out.Totals.Income += income
 		out.Totals.RunningExpenses += monthlyExpenses
 		out.Totals.Net += net
 	}
 
-	inv := ProjectionInvestment{
-		PurchasePrice: p.PurchasePrice, CapitalSpend: p.CapitalToDate, CurrentValue: p.CurrentValue,
-		CashToDate:         cash,
-		TrailingAnnualNet:  annualise(out.Baseline.Net, months),
-		ProjectedAnnualNet: projectedAnnual(nets),
-		MissingPriceIDs:    []string{},
-	}
-	if p.PurchasePrice != nil {
-		total := *p.PurchasePrice + p.CapitalToDate
-		inv.Total = &total
-		inv.PricedCount = 1
-		past := sincePurchase(p.PastNet, p.PurchaseDate)
-		inv.BreakEvenMonth, inv.BreakEvenStatus = breakEven(start, total, past, nets, inv.ProjectedAnnualNet)
-		inv.ROITrailingPct = pctRatio(inv.TrailingAnnualNet, total)
-		inv.ROIProjectedPct = pctRatio(inv.ProjectedAnnualNet, total)
-		inv.PaybackYears = payback(total, inv.ProjectedAnnualNet)
-	} else {
-		inv.BreakEvenStatus = BreakEvenNoPrice
-		inv.MissingPriceIDs = []string{p.ID}
-	}
+	trailingSpend := runningTotal + p.TrailingCapital
+	inv.TrailingAnnualNet = annualise(out.Baseline.Net, months)
+	inv.TrailingAnnualSpend = annualise(trailingSpend, months)
+	inv.ProjectedAnnualNet = projectedAnnual(nets)
+	inv.ProjectedAnnualExpenses = projectedAnnual(expenses)
+	inv.ROITrailingPct = pctRatio(p.TrailingCollected-trailingSpend, trailingSpend)
+	inv.ROIProjectedPct = pctRatio(inv.ProjectedAnnualNet, inv.ProjectedAnnualExpenses)
+	inv.BreakEvenMonth, inv.BreakEvenStatus = breakEven(start, purchaseOf(p), past, nets, inv.ProjectedAnnualNet)
+	inv.PaybackYears = payback(inv.CashToDate, inv.SpentToDate, inv.ProjectedAnnualNet)
 	if p.CurrentValue != nil {
 		inv.YieldPct = pctRatio(inv.ProjectedAnnualNet, *p.CurrentValue)
 	}
@@ -301,9 +357,7 @@ func ProjectProperty(start time.Time, sc ProjectionScenario, p ProjectionPropert
 
 // ProjectPortfolio forecasts every property and adds them up. The monthly
 // lines are the sum of the properties' own lines, so the portfolio always
-// reconciles with its parts. The investment figures cover only the properties
-// that have a purchase price — adding the income of an unpriced block to the
-// return on a priced one would overstate it — and say so with `incomplete`.
+// reconciles with its parts; the return figures are computed on the sums.
 func ProjectPortfolio(
 	start time.Time, sc ProjectionScenario, props []ProjectionProperty,
 ) (ProjectionResult, []ProjectionResult) {
@@ -313,11 +367,11 @@ func ProjectPortfolio(
 		parts[i] = ProjectProperty(start, sc, p)
 	}
 
-	out := ProjectionResult{Months: make([]ProjectionMonth, sc.HorizonMonths)}
+	out := ProjectionResult{Months: make([]ProjectionMonth, sc.HorizonMonths), Units: []ProjectionUnitRow{}}
 	for m := range out.Months {
 		out.Months[m].Month = start.AddDate(0, m, 0).Format(monthLayout)
 	}
-	var collected, expected, occUnits, unitMonths int64
+	var collected, expected, trailingSpend, purchase int64
 	cats := map[string]*CategoryMonthly{}
 	var catOrder []string
 	b := &out.Baseline
@@ -325,28 +379,34 @@ func ProjectPortfolio(
 	b.HistoryTo = start.Format(dateLayout)
 	b.Categories = []CategoryMonthly{}
 
-	inv := ProjectionInvestment{MissingPriceIDs: []string{}}
-	var pricedTotal, pricedTrailing, pricedProjected, valueTotal, valuedProjected int64
-	pricedNets := make([]int64, sc.HorizonMonths)
-	pastByMonth := map[time.Time]int64{}
+	inv := ProjectionInvestment{}
+	var valueTotal, valuedProjected int64
+	var priced bool
+	nets := make([]int64, sc.HorizonMonths)
+	expenses := make([]int64, sc.HorizonMonths)
+	pastByMonth := map[time.Time]*PastMonth{}
 	for i, part := range parts {
 		p := props[i]
 		for m := range out.Months {
 			pm := part.Months[m]
-			out.Months[m].Income += pm.Income
-			out.Months[m].RunningExpenses += pm.RunningExpenses
-			out.Months[m].Net += pm.Net
-			out.Months[m].Cumulative += pm.Cumulative
+			o := &out.Months[m]
+			o.Income += pm.Income
+			o.RunningExpenses += pm.RunningExpenses
+			o.Net += pm.Net
+			o.CumulativeIncome += pm.CumulativeIncome
+			o.CumulativeSpent += pm.CumulativeSpent
+			o.Cumulative += pm.Cumulative
+			nets[m] += pm.Net
+			expenses[m] += pm.RunningExpenses
 		}
 		out.Totals.Income += part.Totals.Income
 		out.Totals.RunningExpenses += part.Totals.RunningExpenses
 		out.Totals.Net += part.Totals.Net
+		out.Units = append(out.Units, part.Units...)
 
 		pb := part.Baseline
 		collected += p.TrailingCollected
 		expected += p.TrailingExpected
-		occUnits += p.TrailingOccupiedUnitMonths
-		unitMonths += p.TrailingUnitMonths
 		if pb.HistoryMonths > b.HistoryMonths {
 			b.HistoryMonths = pb.HistoryMonths
 		}
@@ -357,7 +417,8 @@ func ProjectPortfolio(
 		b.UnitsTotal += pb.UnitsTotal
 		b.UnitsLet += pb.UnitsLet
 		b.UnitsOpen += pb.UnitsOpen
-		b.MarketRentMonthly += pb.MarketRentMonthly
+		b.UnitsAssumed += pb.UnitsAssumed
+		b.AssumedRentMonthly += pb.AssumedRentMonthly
 		for _, c := range pb.Categories {
 			if cur, ok := cats[c.ID]; ok {
 				cur.Monthly += c.Monthly
@@ -370,22 +431,26 @@ func ProjectPortfolio(
 
 		pi := part.Investment
 		inv.CapitalSpend += pi.CapitalSpend
+		inv.RunningSpend += pi.RunningSpend
+		inv.SpentToDate += pi.SpentToDate
+		inv.IncomeToDate += pi.IncomeToDate
 		inv.CashToDate += pi.CashToDate
 		inv.TrailingAnnualNet += pi.TrailingAnnualNet
-		inv.ProjectedAnnualNet += pi.ProjectedAnnualNet
-		if pi.Total != nil {
-			inv.PricedCount++
-			pricedTotal += *pi.Total
-			pricedTrailing += pi.TrailingAnnualNet
-			pricedProjected += pi.ProjectedAnnualNet
-			for m := range pricedNets {
-				pricedNets[m] += part.Months[m].Net
+		inv.TrailingAnnualSpend += pi.TrailingAnnualSpend
+		trailingSpend += pb.RunningExpenses + pb.CapitalExpenses
+		if p.PurchasePrice != nil {
+			priced = true
+			purchase += *p.PurchasePrice
+		}
+		for _, pm := range sincePurchase(p.Past, p.PurchaseDate) {
+			cur := pastByMonth[pm.Month]
+			if cur == nil {
+				cur = &PastMonth{Month: pm.Month}
+				pastByMonth[pm.Month] = cur
 			}
-			for _, pm := range sincePurchase(p.PastNet, p.PurchaseDate) {
-				pastByMonth[pm.Month] += pm.Amount
-			}
-		} else {
-			inv.MissingPriceIDs = append(inv.MissingPriceIDs, p.ID)
+			cur.Income += pm.Income
+			cur.Running += pm.Running
+			cur.Capital += pm.Capital
 		}
 		if pi.CurrentValue != nil {
 			valueTotal += *pi.CurrentValue
@@ -395,46 +460,30 @@ func ProjectPortfolio(
 
 	b.Collected, b.Expected = collected, expected
 	b.CollectionRatePct = trailingCollectionPct(collected, expected)
-	b.OccupancyPct = pctOf(occUnits, unitMonths)
 	for _, id := range catOrder {
 		b.Categories = append(b.Categories, *cats[id])
 	}
 	if b.HistoryMonths == 0 {
 		b.HistoryMonths = 1
 	}
-
 	coll, collSrc := appliedRate(sc.CollectionRatePct, b.CollectionRatePct)
-	occ, occSrc := appliedRate(sc.OccupancyPct, b.OccupancyPct)
-	out.Applied = ProjectionApplied{
-		HorizonMonths: sc.HorizonMonths, RentChangePct: sc.RentChangePct,
-		OccupancyPct: occ, OccupancySource: occSrc,
-		CollectionRatePct: coll, CollectionRateSource: collSrc,
-		ExpenseChangePct: sc.ExpenseChangePct,
-	}
+	out.Applied = applied(sc, coll, collSrc)
 
-	inv.Incomplete = inv.PricedCount < len(props)
-	if inv.PricedCount > 0 {
-		purchase := pricedTotal
-		inv.Total = &purchase
-		past := make([]MonthAmount, 0, len(pastByMonth))
-		for month, amount := range pastByMonth {
-			past = append(past, MonthAmount{Month: month, Amount: amount})
-		}
-		sort.Slice(past, func(i, j int) bool { return past[i].Month.Before(past[j].Month) })
-		inv.BreakEvenMonth, inv.BreakEvenStatus = breakEven(start, pricedTotal, past, pricedNets, pricedProjected)
-		inv.ROITrailingPct = pctRatio(pricedTrailing, pricedTotal)
-		inv.ROIProjectedPct = pctRatio(pricedProjected, pricedTotal)
-		inv.PaybackYears = payback(pricedTotal, pricedProjected)
-		var pp int64
-		for _, part := range parts {
-			if part.Investment.PurchasePrice != nil {
-				pp += *part.Investment.PurchasePrice
-			}
-		}
+	if priced {
+		pp := purchase
 		inv.PurchasePrice = &pp
-	} else {
-		inv.BreakEvenStatus = BreakEvenNoPrice
 	}
+	past := make([]PastMonth, 0, len(pastByMonth))
+	for _, pm := range pastByMonth {
+		past = append(past, *pm)
+	}
+	sort.Slice(past, func(i, j int) bool { return past[i].Month.Before(past[j].Month) })
+	inv.ProjectedAnnualNet = projectedAnnual(nets)
+	inv.ProjectedAnnualExpenses = projectedAnnual(expenses)
+	inv.ROITrailingPct = pctRatio(collected-trailingSpend, trailingSpend)
+	inv.ROIProjectedPct = pctRatio(inv.ProjectedAnnualNet, inv.ProjectedAnnualExpenses)
+	inv.BreakEvenMonth, inv.BreakEvenStatus = breakEven(start, purchase, past, nets, inv.ProjectedAnnualNet)
+	inv.PaybackYears = payback(inv.CashToDate, inv.SpentToDate, inv.ProjectedAnnualNet)
 	if valueTotal > 0 {
 		v := valueTotal
 		inv.CurrentValue = &v
@@ -458,11 +507,46 @@ func (sc ProjectionScenario) normalised() ProjectionScenario {
 	if sc.HorizonMonths > ProjectionHorizonMax {
 		sc.HorizonMonths = ProjectionHorizonMax
 	}
+	if !ValidBasis(sc.Basis) {
+		sc.Basis = BasisContracts
+	}
+	if sc.Basis != BasisSelected || sc.UnitIDs == nil {
+		sc.UnitIDs = []string{}
+	}
 	return sc
 }
 
+func applied(sc ProjectionScenario, coll float64, collSrc string) ProjectionApplied {
+	return ProjectionApplied{
+		HorizonMonths: sc.HorizonMonths, Basis: sc.Basis, UnitIDs: sc.UnitIDs,
+		RentChangePct:     sc.RentChangePct,
+		CollectionRatePct: coll, CollectionRateSource: collSrc,
+		ExpenseChangePct: sc.ExpenseChangePct,
+	}
+}
+
+// assumedUnits says, per unit, whether the basis assumes it let once it is
+// free of its contract. Signed contracts are always counted through their
+// schedules; this is only about the time no contract covers a unit.
+func assumedUnits(sc ProjectionScenario, units []ProjectionUnit) []bool {
+	out := make([]bool, len(units))
+	picked := make(map[string]struct{}, len(sc.UnitIDs))
+	for _, id := range sc.UnitIDs {
+		picked[id] = struct{}{}
+	}
+	for i, u := range units {
+		switch sc.Basis {
+		case BasisBestCase:
+			out[i] = u.Lettable
+		case BasisSelected:
+			_, out[i] = picked[u.ID]
+		}
+	}
+	return out
+}
+
 // propertyBaseline describes one property's trailing window.
-func propertyBaseline(start time.Time, p ProjectionProperty, months int, runningTotal int64) ProjectionBaseline {
+func propertyBaseline(start time.Time, p ProjectionProperty, months int, runningTotal int64, assumed []bool) ProjectionBaseline {
 	b := ProjectionBaseline{
 		HistoryFrom:       start.AddDate(0, -ProjectionHistoryMonths, 0).Format(dateLayout),
 		HistoryTo:         start.Format(dateLayout),
@@ -470,7 +554,6 @@ func propertyBaseline(start time.Time, p ProjectionProperty, months int, running
 		Collected:         p.TrailingCollected,
 		Expected:          p.TrailingExpected,
 		CollectionRatePct: trailingCollectionPct(p.TrailingCollected, p.TrailingExpected),
-		OccupancyPct:      pctOf(p.TrailingOccupiedUnitMonths, p.TrailingUnitMonths),
 		RunningExpenses:   runningTotal,
 		CapitalExpenses:   p.TrailingCapital,
 		RunningMonthly:    roundInt(float64(runningTotal) / float64(months)),
@@ -483,13 +566,16 @@ func propertyBaseline(start time.Time, p ProjectionProperty, months int, running
 			ID: c.ID, Name: c.Name, Monthly: roundInt(float64(c.Amount) / float64(months)),
 		})
 	}
-	for _, u := range p.Units {
+	for i, u := range p.Units {
 		switch {
 		case u.FreeFrom > 0:
 			b.UnitsLet++
 		case u.Lettable:
 			b.UnitsOpen++
-			b.MarketRentMonthly += u.MonthlyRent
+		}
+		if assumed[i] {
+			b.UnitsAssumed++
+			b.AssumedRentMonthly += u.MonthlyRent
 		}
 	}
 	return b
@@ -514,15 +600,6 @@ func trailingCollectionPct(collected, expected int64) *float64 {
 		return nil
 	}
 	v := round1(clampPct(float64(collected) / float64(expected) * 100))
-	return &v
-}
-
-// pctOf is part ÷ whole as a percentage to one decimal; nil for no whole.
-func pctOf(part, whole int64) *float64 {
-	if whole <= 0 {
-		return nil
-	}
-	v := round1(clampPct(float64(part) / float64(whole) * 100))
 	return &v
 }
 
@@ -555,12 +632,12 @@ func monthStart(d time.Time) time.Time {
 
 // sincePurchase keeps the months from the purchase month on; every month
 // without a purchase date.
-func sincePurchase(past []MonthAmount, purchase *time.Time) []MonthAmount {
+func sincePurchase(past []PastMonth, purchase *time.Time) []PastMonth {
 	if purchase == nil {
 		return past
 	}
 	from := monthStart(*purchase)
-	out := make([]MonthAmount, 0, len(past))
+	out := make([]PastMonth, 0, len(past))
 	for _, m := range past {
 		if !monthStart(m.Month).Before(from) {
 			out = append(out, m)
@@ -569,31 +646,61 @@ func sincePurchase(past []MonthAmount, purchase *time.Time) []MonthAmount {
 	return out
 }
 
-func cashSince(past []MonthAmount, purchase *time.Time) int64 {
-	var out int64
-	for _, m := range sincePurchase(past, purchase) {
-		out += m.Amount
+func purchaseOf(p ProjectionProperty) int64 {
+	if p.PurchasePrice == nil {
+		return 0
 	}
-	return out
+	return *p.PurchasePrice
 }
 
-// breakEven walks the actual months and then the projected ones, and names
-// the first month the cumulative net reaches the investment.
-func breakEven(start time.Time, investment int64, past []MonthAmount, nets []int64, annual int64) (*string, string) {
-	var cum int64
+// breakEven walks the actual months and then the projected ones, with the
+// purchase price (if any) spent up front, and names the month cumulative
+// income covers cumulative spend. A book that dipped below and came back is
+// "reached" at the month it last came back; one still below is projected
+// forward. A book whose income covers every cost, past and projected, from
+// the first month has nothing to break even on: `no_costs`.
+func breakEven(start time.Time, purchase int64, past []PastMonth, nets []int64, annual int64) (*string, string) {
+	cum := -purchase
+	spent := purchase
+	var back *time.Time
+	if cum >= 0 && len(past) > 0 {
+		m := monthStart(past[0].Month)
+		back = &m
+	}
 	for _, m := range past {
-		cum += m.Amount
-		if cum >= investment {
-			s := monthStart(m.Month).Format(monthLayout)
-			return &s, BreakEvenReached
+		cum += m.Income - m.Spent()
+		spent += m.Spent()
+		switch {
+		case cum < 0:
+			back = nil
+		case back == nil:
+			ms := monthStart(m.Month)
+			back = &ms
 		}
 	}
+	if cum >= 0 && spent > 0 {
+		if back != nil {
+			s := back.Format(monthLayout)
+			return &s, BreakEvenReached
+		}
+		return nil, BreakEvenReached
+	}
+	// Still below, or nothing spent yet: walk the forecast. A book that has
+	// spent nothing only has something to break even on once a projected
+	// month takes it below zero.
+	dipped := cum < 0
 	for i, n := range nets {
 		cum += n
-		if cum >= investment {
+		switch {
+		case cum < 0:
+			dipped = true
+		case dipped:
 			s := start.AddDate(0, i, 0).Format(monthLayout)
 			return &s, BreakEvenProjected
 		}
+	}
+	if !dipped {
+		return nil, BreakEvenNoCosts
 	}
 	if annual <= 0 {
 		return nil, BreakEvenNotProfitable
@@ -606,10 +713,10 @@ func annualise(v int64, months int) int64 {
 	return roundInt(float64(v) * ProjectionHistoryMonths / float64(months))
 }
 
-// projectedAnnual is the first twelve projected months' net, scaled to a year
-// when the horizon is shorter.
-func projectedAnnual(nets []int64) int64 {
-	n := len(nets)
+// projectedAnnual is the first twelve projected months' figure, scaled to a
+// year when the horizon is shorter.
+func projectedAnnual(vals []int64) int64 {
+	n := len(vals)
 	if n > ProjectionHistoryMonths {
 		n = ProjectionHistoryMonths
 	}
@@ -617,7 +724,7 @@ func projectedAnnual(nets []int64) int64 {
 		return 0
 	}
 	var sum int64
-	for _, v := range nets[:n] {
+	for _, v := range vals[:n] {
 		sum += v
 	}
 	return annualise(sum, n)
@@ -632,13 +739,21 @@ func pctRatio(num, den int64) *float64 {
 	return &v
 }
 
-// payback is the simple payback period in years: investment ÷ annual net.
-// Nil when the property does not make money — it never pays back.
-func payback(investment, annual int64) *float64 {
+// payback is how many years, at the projected annual net, until income
+// covers the spend to date: 0 when it already has, nil when nothing was spent
+// or the property does not make money.
+func payback(cashToDate, spent, annual int64) *float64 {
+	if spent <= 0 {
+		return nil
+	}
+	if cashToDate >= 0 {
+		v := 0.0
+		return &v
+	}
 	if annual <= 0 {
 		return nil
 	}
-	v := round1(float64(investment) / float64(annual))
+	v := round1(float64(-cashToDate) / float64(annual))
 	return &v
 }
 
