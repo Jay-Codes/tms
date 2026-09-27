@@ -1379,3 +1379,7 @@ Migration 000028: schedule `original_amount`, `adjustment_kind|reason|at|by`; co
 | `GET /evictions/{id}/letter?kind=demand\|notice&lang=sw\|en` | `{html, kind, lang, total}` — printable letter with today's arrears statement (periods past due, rent, paid, owing, total). Platform wording, not org-editable. 409 `no_notice_yet` for a notice letter before the notice. |
 
 Audit actions `schedule.adjust`, `schedule.adjust_undo`, `contract.notice`, `contract.notice_withdraw`, `contract.moved_out`, `contract.eviction`.
+
+## Part 2 — Phase 23: pagination
+
+`GET /reports/payment-status` and `GET /reports/upcoming` now page the finished list: `?limit=` (1–500, default 100) and `?cursor=` (opaque; the previous page's `next_cursor`). Payment-status JSON gains `next_cursor`, `total` (rows after the status filter) and `counts` (per status, over every running tenancy); the CSV export is still the whole list. Upcoming keeps `total_due` and `count` over the whole window and gains `next_cursor`. The per-contract helper queries behind both now read running tenancies only.

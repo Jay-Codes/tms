@@ -233,23 +233,36 @@ func (s *Server) handleReportPaymentStatus(w http.ResponseWriter, r *http.Reques
 	// The window does not filter the rows — a renter's standing is a fact about
 	// now, not about March — but the page around this table is driven by the
 	// shared PeriodPicker, and it needs to be told which period it is showing.
+	page := parseOffsetPage(f, qs)
 	win, ok := reportWindowOf(w, f, qs)
 	if !ok {
 		return
 	}
 	s.sweepOverdue(r, p.OrgID)
 
-	items, err := s.paymentStatusRows(r, p.OrgID, params, wantStatus)
+	all, err := s.paymentStatusRows(r, p.OrgID, params, "")
 	if err != nil {
 		s.serverError(w, r, "report.payment_status", err)
 		return
+	}
+	// Phase 23: counts per status over every tenancy (the tabs), then the
+	// status filter, then one page of it. The CSV stays whole.
+	counts := map[string]int{}
+	items := make([]paymentStatusRow, 0, len(all))
+	for _, row := range all {
+		counts[row.Status]++
+		if wantStatus == "" || row.Status == wantStatus {
+			items = append(items, row)
+		}
 	}
 	if format == "csv" {
 		writePaymentStatusCSV(w, items)
 		return
 	}
+	pageItems, next := pageOf(items, page)
 	WriteJSON(w, http.StatusOK, paymentStatusResponse{
-		Window: windowDTO(win), Previous: previousDTO(win), Items: items,
+		Window: windowDTO(win), Previous: previousDTO(win), Items: pageItems,
+		NextCursor: next, Total: len(items), Counts: counts,
 	})
 }
 

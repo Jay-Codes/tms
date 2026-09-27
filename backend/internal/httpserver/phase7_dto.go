@@ -117,6 +117,11 @@ type paymentStatusResponse struct {
 	Window   reportWindow       `json:"window"`
 	Previous reportWindow       `json:"previous"`
 	Items    []paymentStatusRow `json:"items"`
+	// Phase 23: paged. `total` is the filtered list's length; `counts` is per
+	// status over every running tenancy.
+	NextCursor *string        `json:"next_cursor"`
+	Total      int            `json:"total"`
+	Counts     map[string]int `json:"counts"`
 }
 
 // -------------------------------------------------------- platform admin --
