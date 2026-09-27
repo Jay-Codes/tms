@@ -7,6 +7,10 @@
  * new contract, only renters already known to this org can be named, and the
  * payment periods are the org's own. The form computes nothing — the backend
  * resolves the terms, prorates the schedule and hashes the snapshot.
+ *
+ * Phase 23: the unit and renter pickers search as you type (`?q=`) and show
+ * the first page of matches, so an org with more than a page of either is not
+ * silently cut short. The chosen one stays in the list whatever the search.
  */
 
 import { useEffect, useState } from 'react';
@@ -29,10 +33,20 @@ import {
 } from '../lib/api';
 import { fmtPrice, todayISO } from '../lib/format';
 
+/** How many matches a picker shows before asking for a narrower search. */
+const PICKER_LIMIT = 50;
+
 export function NewContractForm({ onCreated }: { onCreated: (c: Contract) => void }) {
   const t = useT();
   const [units, setUnits] = useState<Unit[]>([]);
   const [renters, setRenters] = useState<RenterSummary[]>([]);
+  const [unitQ, setUnitQ] = useState('');
+  const [renterQ, setRenterQ] = useState('');
+  /** More matches exist than the first page shows — the hint says to type. */
+  const [unitsMore, setUnitsMore] = useState(false);
+  const [rentersMore, setRentersMore] = useState(false);
+  const [unit, setUnit] = useState<Unit | null>(null);
+  const [renter, setRenter] = useState<RenterSummary | null>(null);
   const [periods, setPeriods] = useState<PaymentPeriod[]>([]);
   const [templates, setTemplates] = useState<ContractTemplateSummary[]>([]);
 
@@ -58,15 +72,8 @@ export function NewContractForm({ onCreated }: { onCreated: (c: Contract) => voi
 
   useEffect(() => {
     const ac = new AbortController();
-    Promise.all([
-      unitsApi.list({ status: 'vacant', limit: 200 }, ac.signal),
-      rentersApi.list({ limit: 200 }, ac.signal),
-      periodsApi.list(false, ac.signal),
-      templatesApi.list(ac.signal),
-    ])
-      .then(([u, r, p, tpl]) => {
-        setUnits(u.items ?? []);
-        setRenters(r.items ?? []);
+    Promise.all([periodsApi.list(false, ac.signal), templatesApi.list(ac.signal)])
+      .then(([p, tpl]) => {
         setPeriods(p.items ?? []);
         setTemplates(tpl.items ?? []);
         setTemplateId((tpl.items ?? []).find((x) => x.is_default)?.id ?? '');
@@ -79,8 +86,51 @@ export function NewContractForm({ onCreated }: { onCreated: (c: Contract) => voi
     return () => ac.abort();
   }, []);
 
-  const unit = units.find((u) => u.id === unitId) ?? null;
-  const renter = renters.find((r) => r.user_id === renterId) ?? null;
+  // Search as you type, debounced; each answer is the first page of matches.
+  useEffect(() => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => {
+      unitsApi
+        .list({ status: 'vacant', q: unitQ.trim() || undefined, limit: PICKER_LIMIT }, ac.signal)
+        .then((r) => {
+          setUnits(r.items ?? []);
+          setUnitsMore(Boolean(r.next_cursor));
+        })
+        .catch((e) => {
+          if (e instanceof DOMException && e.name === 'AbortError') return;
+          setLoadError(toApiError(e));
+        });
+    }, 250);
+    return () => {
+      clearTimeout(timer);
+      ac.abort();
+    };
+  }, [unitQ]);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => {
+      rentersApi
+        .list({ q: renterQ.trim() || undefined, limit: PICKER_LIMIT }, ac.signal)
+        .then((r) => {
+          setRenters(r.items ?? []);
+          setRentersMore(Boolean(r.next_cursor));
+        })
+        .catch((e) => {
+          if (e instanceof DOMException && e.name === 'AbortError') return;
+          setLoadError(toApiError(e));
+        });
+    }, 250);
+    return () => {
+      clearTimeout(timer);
+      ac.abort();
+    };
+  }, [renterQ]);
+
+  // The chosen unit/renter stays selectable even when the search hides it.
+  const unitOptions = unit && !units.some((u) => u.id === unit.id) ? [unit, ...units] : units;
+  const renterOptions =
+    renter && !renters.some((r) => r.user_id === renter.user_id) ? [renter, ...renters] : renters;
   const renterLocale = renter?.locale ?? null;
 
   useEffect(() => {
@@ -128,20 +178,31 @@ export function NewContractForm({ onCreated }: { onCreated: (c: Contract) => voi
       <Field
         id="c_unit"
         label={t('common.unit')}
-        hint={t('contracts.new.unit_hint')}
+        hint={unitsMore ? `${t('contracts.new.unit_hint')} ${t('common.type_to_search')}` : t('contracts.new.unit_hint')}
         error={error?.errors.unit_id}
       >
+        <input
+          id="c_unit_q"
+          className="input"
+          type="search"
+          value={unitQ}
+          onChange={(e) => setUnitQ(e.target.value)}
+          placeholder={t('common.search')}
+          aria-label={t('contracts.new.search_units')}
+          style={{ marginBottom: 'var(--sp-2)' }}
+        />
         <select
           id="c_unit"
           className="input"
           value={unitId}
           onChange={(e) => {
             setUnitId(e.target.value);
+            setUnit(unitOptions.find((u) => u.id === e.target.value) ?? null);
             setPeriodId('');
           }}
         >
           <option value="">{t('contracts.new.choose_unit')}</option>
-          {units.map((u) => (
+          {unitOptions.map((u) => (
             <option key={u.id} value={u.id}>
               {u.property_name} · {u.name}
               {u.current_price ? ` — ${fmtPrice(u.current_price)}` : ` — ${t('contracts.new.no_price')}`}
@@ -153,12 +214,32 @@ export function NewContractForm({ onCreated }: { onCreated: (c: Contract) => voi
       <Field
         id="c_renter"
         label={t('common.renter')}
-        hint={t('contracts.new.renter_hint')}
+        hint={
+          rentersMore ? `${t('contracts.new.renter_hint')} ${t('common.type_to_search')}` : t('contracts.new.renter_hint')
+        }
         error={error?.errors.renter_user_id}
       >
-        <select id="c_renter" className="input" value={renterId} onChange={(e) => setRenterId(e.target.value)}>
+        <input
+          id="c_renter_q"
+          className="input"
+          type="search"
+          value={renterQ}
+          onChange={(e) => setRenterQ(e.target.value)}
+          placeholder={t('common.search')}
+          aria-label={t('contracts.new.search_renters')}
+          style={{ marginBottom: 'var(--sp-2)' }}
+        />
+        <select
+          id="c_renter"
+          className="input"
+          value={renterId}
+          onChange={(e) => {
+            setRenterId(e.target.value);
+            setRenter(renterOptions.find((r) => r.user_id === e.target.value) ?? null);
+          }}
+        >
           <option value="">{t('contracts.new.choose_renter')}</option>
-          {renters.map((r) => (
+          {renterOptions.map((r) => (
             <option key={r.user_id} value={r.user_id}>
               {r.full_name} {r.phone ? `· ${r.phone}` : ''}
             </option>

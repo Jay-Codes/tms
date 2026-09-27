@@ -100,6 +100,8 @@ SELECT s.contract_id,
        count(*) FILTER (WHERE s.status = 'pending')::bigint AS pending_count
 FROM payment_schedules s
 WHERE s.org_id = sqlc.arg(org_id) AND s.deleted_at IS NULL
+  AND EXISTS (SELECT 1 FROM contracts c WHERE c.id = s.contract_id AND c.org_id = s.org_id
+              AND c.status IN ('active', 'expiring') AND c.deleted_at IS NULL)
 GROUP BY s.contract_id;
 
 -- name: ReportNextDue :many
@@ -109,6 +111,8 @@ SELECT DISTINCT ON (s.contract_id)
 FROM payment_schedules s
 WHERE s.org_id = sqlc.arg(org_id) AND s.deleted_at IS NULL
   AND s.status IN ('pending', 'partial', 'overdue')
+  AND EXISTS (SELECT 1 FROM contracts c WHERE c.id = s.contract_id AND c.org_id = s.org_id
+              AND c.status IN ('active', 'expiring') AND c.deleted_at IS NULL)
 ORDER BY s.contract_id, s.due_date, s.id;
 
 -- name: ReportLastPayments :many

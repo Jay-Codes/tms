@@ -2100,6 +2100,16 @@ export interface ReportSummary {
 /** Worst status across a renter's unsettled schedules (API.md). */
 export type PaymentStatusValue = 'paid' | 'pending' | 'overdue' | 'partial';
 
+/** `GET /reports/payment-status` JSON (Phase 23 pages it). */
+export interface PaymentStatusPage {
+  items: PaymentStatusRow[];
+  next_cursor?: string | null;
+  /** Rows after the status filter, across every page. */
+  total?: number;
+  /** Per status, over every running tenancy — the tab badges. */
+  counts?: Partial<Record<PaymentStatusValue, number>>;
+}
+
 export interface PaymentStatusRow {
   renter_user_id: string;
   renter_name: string;
@@ -2145,6 +2155,8 @@ export type UpcomingWindow = (typeof UPCOMING_WINDOWS)[number];
 
 export interface UpcomingReport {
   items: UpcomingItem[];
+  /** Phase 23 — the next page; `total_due` and `count` cover the whole window. */
+  next_cursor?: string | null;
   /** Sum of `amount − paid_amount` across the window — the backend sums it. */
   total_due: number;
   count: number;
@@ -2344,16 +2356,25 @@ export const reportsApi = {
    */
   summary: (query: PeriodQuery & { period?: string } = {}, signal?: AbortSignal) =>
     api.get<ReportSummary>('/reports/summary', { query, signal }),
+  /**
+   * Phase 23: pages with `limit` (1–500) + `cursor`; `total` is the rows after
+   * the status filter and `counts` is per status over every running tenancy.
+   */
   paymentStatus: (
-    query: PeriodQuery & { status?: PaymentStatusValue | ''; property_id?: string } = {},
+    query: PeriodQuery & {
+      status?: PaymentStatusValue | '';
+      property_id?: string;
+      cursor?: string;
+      limit?: number;
+    } = {},
     signal?: AbortSignal,
-  ) => api.get<{ items: PaymentStatusRow[] }>('/reports/payment-status', { query, signal }),
+  ) => api.get<PaymentStatusPage>('/reports/payment-status', { query, signal }),
   /**
    * Phase 16 §16.3 — what falls due inside the next `days` (7, 14 or 30;
    * default 14), sorted by due date. Unsettled rows on running contracts only.
    */
   upcoming: (
-    query: { days?: UpcomingWindow | number; property_id?: string } = {},
+    query: { days?: UpcomingWindow | number; property_id?: string; cursor?: string; limit?: number } = {},
     signal?: AbortSignal,
   ) => api.get<UpcomingReport>('/reports/upcoming', { query, signal }),
   collections: (

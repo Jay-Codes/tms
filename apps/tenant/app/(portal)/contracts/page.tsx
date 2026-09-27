@@ -12,14 +12,15 @@
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { ContractsTable, isReadyToCountersign } from '../../../components/ContractBits';
 import { ProblemNote } from '../../../components/FormBits';
 import { NewContractForm } from '../../../components/NewContractForm';
+import { LoadMore, usePagedList } from '../../../components/Paging';
 import { PageHead } from '../../../components/PageHead';
 import { Sheet } from '../../../components/Sheet';
 import { EvictionsCard, HoldoversCard } from '../../../components/UnhappyBits';
-import { ApiError, contractsApi, toApiError, type Contract, type ContractStatus } from '../../../lib/api';
+import { contractsApi, type Contract, type ContractStatus } from '../../../lib/api';
 import { useT } from '@tms/ui';
 
 type TabValue = '' | ContractStatus | 'ready';
@@ -39,35 +40,20 @@ function ContractsBody() {
   const t = useT();
   const router = useRouter();
   const [tab, setTab] = useState<TabValue>('');
-  const [items, setItems] = useState<Contract[] | null>(null);
-  const [error, setError] = useState<ApiError | null>(null);
   const [open, setOpen] = useState(false);
 
-  const load = useCallback(
-    async (signal?: AbortSignal) => {
-      setItems(null);
-      // "ready" has no server-side status of its own — read the pending page
-      // and keep the ones the renter has already signed.
+  // "ready" has no server-side status of its own — read the pending pages and
+  // keep the ones the renter has already signed, page by page.
+  const fetchPage = useCallback(
+    async (cursor: string | undefined, signal?: AbortSignal) => {
       const status = tab === 'ready' ? 'pending_signature' : tab;
-      try {
-        const res = await contractsApi.list({ status, limit: 200 }, signal);
-        const rows = res.items ?? [];
-        setItems(tab === 'ready' ? rows.filter(isReadyToCountersign) : rows);
-        setError(null);
-      } catch (e) {
-        if (e instanceof DOMException && e.name === 'AbortError') return;
-        setError(toApiError(e));
-        setItems([]);
-      }
+      const res = await contractsApi.list({ status, limit: 200, cursor }, signal);
+      const rows = res.items ?? [];
+      return { items: tab === 'ready' ? rows.filter(isReadyToCountersign) : rows, next_cursor: res.next_cursor };
     },
     [tab],
   );
-
-  useEffect(() => {
-    const ac = new AbortController();
-    void load(ac.signal);
-    return () => ac.abort();
-  }, [load]);
+  const { items, error, cursor, loadingMore, loadMore } = usePagedList<Contract>(fetchPage);
 
   return (
     <>
@@ -127,6 +113,7 @@ function ContractsBody() {
         <ContractsTable items={items} emptyText={
             error ? t('common.no_results') : t(TABS.find((x) => x.value === tab)?.empty ?? 'contracts.empty.all')
           } />
+        <LoadMore cursor={cursor} loading={loadingMore} onLoad={() => void loadMore()} />
       </div>
 
       <Sheet open={open} title={t('contracts.new')} onClose={() => setOpen(false)} width={640}>

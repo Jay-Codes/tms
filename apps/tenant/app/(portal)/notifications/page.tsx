@@ -25,6 +25,7 @@ import {
   useSmsCredits,
 } from '../../../components/NotificationBits';
 import { PageHead } from '../../../components/PageHead';
+import { LoadMore } from '../../../components/Paging';
 import { ApiError, notificationsApi, toApiError, type NotificationLogEntry } from '../../../lib/api';
 
 type TabId = 'log' | 'send';
@@ -44,6 +45,9 @@ function LogTab() {
   const [error, setError] = useState<ApiError | null>(null);
   const [filters, setFilters] = useState({ kind: '', status: '', from: '', to: '' });
   const [retrying, setRetrying] = useState<string | null>(null);
+  // Phase 23: the log pages; this is the next page's cursor.
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -51,6 +55,7 @@ function LogTab() {
       try {
         const res = await notificationsApi.log({ ...filters, limit: 200 }, signal);
         setItems(res.items ?? []);
+        setCursor(res.next_cursor ?? null);
       } catch (e) {
         if (e instanceof DOMException && e.name === 'AbortError') return;
         setError(toApiError(e));
@@ -66,6 +71,20 @@ function LogTab() {
     void load(ac.signal);
     return () => ac.abort();
   }, [load]);
+
+  const loadMore = async () => {
+    if (!cursor) return;
+    setLoadingMore(true);
+    try {
+      const res = await notificationsApi.log({ ...filters, limit: 200, cursor });
+      setItems((prev) => [...(prev ?? []), ...(res.items ?? [])]);
+      setCursor(res.next_cursor ?? null);
+    } catch (e) {
+      setError(toApiError(e));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const retry = async (entry: NotificationLogEntry) => {
     setRetrying(entry.id);
@@ -128,6 +147,7 @@ function LogTab() {
         onRetry={(n) => void retry(n)}
         retryingId={retrying}
       />
+      <LoadMore cursor={cursor} loading={loadingMore} onLoad={() => void loadMore()} />
     </div>
   );
 }

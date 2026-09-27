@@ -20,6 +20,7 @@ import { Icon } from "@iconify/react";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ProblemNote } from "../../../components/FormBits";
+import { LoadMore } from "../../../components/Paging";
 import {
   BackfillSheet,
   type BackfillTarget,
@@ -51,6 +52,7 @@ import {
   type Payment,
   type PaymentSource,
   type Schedule,
+  type UpcomingItem,
   type UpcomingWindow,
 } from "../../../lib/api";
 import { fmtTZS } from "../../../lib/format";
@@ -107,6 +109,20 @@ const EMPTY_KEY: Record<TabId, string> = {
  * `GET /reports/upcoming` so partial and overdue instalments inside the window
  * count too, and the tab agrees with the dashboard card.
  */
+/** `GET /reports/upcoming` rows, nested the way the schedules table reads them. */
+function upcomingRows(items: UpcomingItem[]): Schedule[] {
+  return items.map((r) => ({
+    ...r,
+    contract: {
+      id: r.contract_id,
+      unit_name: r.unit_name,
+      property_name: r.property_name,
+      renter_name: r.renter_name,
+      renter_user_id: r.renter_user_id,
+    },
+  }));
+}
+
 function scheduleQuery(tab: TabId) {
   if (tab === "overdue") return { status: "overdue" as const, limit: 200 };
   if (tab === "partial") return { status: "partial" as const, limit: 200 };
@@ -218,6 +234,11 @@ function PaymentsBody() {
   const [schedules, setSchedules] = useState<Schedule[] | null>(null);
   const [payments, setPayments] = useState<Payment[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
+  // Phase 23: every tab here pages; `cursor` is the active tab's next page.
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  /** "Due soon": the whole window's count and total, from the first page. */
+  const [upcomingHead, setUpcomingHead] = useState<{ count: number; total: number } | null>(null);
 
   const [recordTarget, setRecordTarget] = useState<RecordPaymentTarget | null>(
     null,
@@ -235,6 +256,7 @@ function PaymentsBody() {
   const load = useCallback(
     async (which: TabId, signal?: AbortSignal) => {
       setError(null);
+      setCursor(null);
       try {
         if (which === "proofs" || which === "former") {
           // These own their own reads (filters, cursor paging).
@@ -244,25 +266,18 @@ function PaymentsBody() {
           setPayments(null);
           const res = await paymentsApi.list({ limit: 200, source }, signal);
           setPayments(res.items ?? []);
+          setCursor(res.next_cursor ?? null);
         } else if (which === "due_soon") {
           setSchedules(null);
           const res = await reportsApi.upcoming({ days }, signal);
-          setSchedules(
-            (res.items ?? []).map((r) => ({
-              ...r,
-              contract: {
-                id: r.contract_id,
-                unit_name: r.unit_name,
-                property_name: r.property_name,
-                renter_name: r.renter_name,
-                renter_user_id: r.renter_user_id,
-              },
-            })),
-          );
+          setSchedules(upcomingRows(res.items ?? []));
+          setUpcomingHead({ count: res.count, total: res.total_due });
+          setCursor(res.next_cursor ?? null);
         } else {
           setSchedules(null);
           const res = await schedulesApi.list(scheduleQuery(which), signal);
           setSchedules(res.items ?? []);
+          setCursor(res.next_cursor ?? null);
         }
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") return;
@@ -279,6 +294,31 @@ function PaymentsBody() {
     void load(tab, ac.signal);
     return () => ac.abort();
   }, [tab, load]);
+
+  /** Follow the active tab's cursor and append. */
+  const loadMore = async () => {
+    if (!cursor) return;
+    setLoadingMore(true);
+    try {
+      if (tab === "history") {
+        const res = await paymentsApi.list({ limit: 200, source, cursor });
+        setPayments((prev) => [...(prev ?? []), ...(res.items ?? [])]);
+        setCursor(res.next_cursor ?? null);
+      } else if (tab === "due_soon") {
+        const res = await reportsApi.upcoming({ days, cursor });
+        setSchedules((prev) => [...(prev ?? []), ...upcomingRows(res.items ?? [])]);
+        setCursor(res.next_cursor ?? null);
+      } else {
+        const res = await schedulesApi.list({ ...scheduleQuery(tab), cursor });
+        setSchedules((prev) => [...(prev ?? []), ...(res.items ?? [])]);
+        setCursor(res.next_cursor ?? null);
+      }
+    } catch (e) {
+      setError(toApiError(e));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const reverse = async (reason: string) => {
     if (!reversing) return;
@@ -393,9 +433,15 @@ function PaymentsBody() {
           >
             <Icon icon="solar:wallet-money-linear" width={20} />
             <span>
-              {t.n("payments.schedule_count", schedules?.length ?? 0)} ·{" "}
+              {/* "Due soon" pages, so its headline is the whole window's,
+                  from the first page — not the rows loaded so far. */}
+              {t.n(
+                "payments.schedule_count",
+                tab === "due_soon" && upcomingHead ? upcomingHead.count : schedules?.length ?? 0,
+              )}{" "}
+              ·{" "}
               <strong style={{ color: "var(--ink)" }}>
-                {fmtTZS(outstanding)}
+                {fmtTZS(tab === "due_soon" && upcomingHead ? upcomingHead.total : outstanding)}
               </strong>{" "}
               {t("payments.still_owing")}
             </span>
@@ -428,6 +474,7 @@ function PaymentsBody() {
                 setReversing(p);
               }}
             />
+            <LoadMore cursor={cursor} loading={loadingMore} onLoad={() => void loadMore()} />
           </>
         ) : (
           <>
@@ -468,6 +515,7 @@ function PaymentsBody() {
                   : undefined
               }
             />
+            <LoadMore cursor={cursor} loading={loadingMore} onLoad={() => void loadMore()} />
           </>
         )}
       </div>

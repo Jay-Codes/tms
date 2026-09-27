@@ -7,14 +7,13 @@
  */
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { ProblemNote } from '../../../components/FormBits';
 import { FilterTabs, KycStamp, LinkStatusStamp } from '../../../components/RenterBits';
 import { PageHead } from '../../../components/PageHead';
+import { LoadMore, usePagedList } from '../../../components/Paging';
 import {
-  ApiError,
   linkRequestsApi,
-  toApiError,
   type LinkRequest,
   type LinkRequestStatus,
 } from '../../../lib/api';
@@ -27,30 +26,12 @@ const TABS: LinkRequestStatus[] = ['pending', 'approved', 'rejected', 'cancelled
 function InboxBody() {
   const t = useT();
   const [status, setStatus] = useState<LinkRequestStatus>('pending');
-  const [items, setItems] = useState<LinkRequest[] | null>(null);
-  const [error, setError] = useState<ApiError | null>(null);
-
-  const load = useCallback(
-    async (signal?: AbortSignal) => {
-      setItems(null);
-      try {
-        const res = await linkRequestsApi.list({ status, limit: 200 }, signal);
-        setItems(res.items ?? []);
-        setError(null);
-      } catch (e) {
-        if (e instanceof DOMException && e.name === 'AbortError') return;
-        setError(toApiError(e));
-        setItems([]);
-      }
-    },
+  const fetchPage = useCallback(
+    (cursor: string | undefined, signal?: AbortSignal) =>
+      linkRequestsApi.list({ status, limit: 200, cursor }, signal),
     [status],
   );
-
-  useEffect(() => {
-    const ac = new AbortController();
-    void load(ac.signal);
-    return () => ac.abort();
-  }, [load]);
+  const { items, error, cursor, loadingMore, loadMore } = usePagedList<LinkRequest>(fetchPage);
 
   return (
     <>
@@ -141,6 +122,7 @@ function InboxBody() {
           </tbody>
         </table>
         </TableScroll>
+        <LoadMore cursor={cursor} loading={loadingMore} onLoad={() => void loadMore()} />
       </div>
     </>
   );

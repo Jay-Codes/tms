@@ -9,12 +9,13 @@
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { ProblemNote } from '../../../components/FormBits';
 import { PropertyForm } from '../../../components/PropertyForm';
 import { PageHead } from '../../../components/PageHead';
+import { LoadMore, usePagedList } from '../../../components/Paging';
 import { Sheet } from '../../../components/Sheet';
-import { ApiError, propertiesApi, toApiError, type Property } from '../../../lib/api';
+import { propertiesApi, type Property } from '../../../lib/api';
 import { TableScroll, useT } from '@tms/ui';
 
 function CountChip({ label, n, tone }: { label: string; n: number; tone?: 'ink' | 'faint' }) {
@@ -40,27 +41,13 @@ function CountChip({ label, n, tone }: { label: string; n: number; tone?: 'ink' 
 function PropertiesBody() {
   const t = useT();
   const router = useRouter();
-  const [items, setItems] = useState<Property[] | null>(null);
-  const [error, setError] = useState<ApiError | null>(null);
   const [adding, setAdding] = useState(false);
 
-  const load = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const res = await propertiesApi.list({ limit: 100 }, signal);
-      setItems(res.items ?? []);
-      setError(null);
-    } catch (e) {
-      if (e instanceof DOMException && e.name === 'AbortError') return;
-      setError(toApiError(e));
-      setItems([]);
-    }
-  }, []);
-
-  useEffect(() => {
-    const ac = new AbortController();
-    void load(ac.signal);
-    return () => ac.abort();
-  }, [load]);
+  const fetchPage = useCallback(
+    (cursor: string | undefined, signal?: AbortSignal) => propertiesApi.list({ limit: 100, cursor }, signal),
+    [],
+  );
+  const { items, error, cursor, loadingMore, loadMore } = usePagedList<Property>(fetchPage);
 
   return (
     <>
@@ -142,6 +129,7 @@ function PropertiesBody() {
           </tbody>
         </table>
         </TableScroll>
+        <LoadMore cursor={cursor} loading={loadingMore} onLoad={() => void loadMore()} />
       </div>
 
       <Sheet open={adding} title={t('properties.add')} onClose={() => setAdding(false)}>

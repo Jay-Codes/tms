@@ -42,10 +42,25 @@ async function readPending(signal?: AbortSignal): Promise<number | null> {
   }
 }
 
+/**
+ * "Ready to countersign" is derived (unsigned, but the renter has signed), so
+ * no summary count carries it — `/reports/summary`'s `pending_signature`
+ * counts every unsigned contract. Phase 23: follow the cursor instead of
+ * trusting one 200-row page, and stop once the badge would read "50+".
+ */
+const COUNTERSIGN_MAX_PAGES = 10;
+
 async function readCountersign(signal?: AbortSignal): Promise<number | null> {
   try {
-    const r = await contractsApi.list({ status: 'pending_signature', limit: 200 }, signal);
-    return (r.items ?? []).filter(isReadyToCountersign).length;
+    let count = 0;
+    let cursor: string | undefined;
+    for (let page = 0; page < COUNTERSIGN_MAX_PAGES; page++) {
+      const r = await contractsApi.list({ status: 'pending_signature', limit: 200, cursor }, signal);
+      count += (r.items ?? []).filter(isReadyToCountersign).length;
+      cursor = r.next_cursor ?? undefined;
+      if (!cursor || count >= PENDING_BADGE_CAP) break;
+    }
+    return count;
   } catch {
     return null;
   }

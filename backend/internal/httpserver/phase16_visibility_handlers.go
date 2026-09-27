@@ -161,6 +161,7 @@ func (s *Server) handleReportUpcoming(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	propertyID := optQueryUUID(f, "property_id", qs.Get("property_id"))
+	page := parseOffsetPage(f, qs)
 	if !f.Empty() {
 		badRequest(w, f)
 		return
@@ -215,8 +216,11 @@ func (s *Server) handleReportUpcoming(w http.ResponseWriter, r *http.Request) {
 			DaysUntilDue: daysUntilDue(row.DueDate.Time, today),
 		})
 	}
+	// Phase 23: totals over the whole window, one page of rows.
+	pageItems, next := pageOf(items, page)
 	WriteJSON(w, http.StatusOK, map[string]any{
-		"items": items, "total_due": totalDue, "count": len(items), "days": days,
+		"items": pageItems, "next_cursor": next,
+		"total_due": totalDue, "count": len(items), "days": days,
 		"window": map[string]string{
 			"from": today.Format(dateLayout), "to": to.Format(dateLayout),
 		},

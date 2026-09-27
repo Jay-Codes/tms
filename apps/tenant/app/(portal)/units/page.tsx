@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DueChip } from '../../../components/DueBits';
 import { Field, Note, ProblemNote } from '../../../components/FormBits';
 import { PageHead } from '../../../components/PageHead';
+import { LoadMore, usePagedList } from '../../../components/Paging';
 import { Sheet } from '../../../components/Sheet';
 import { useTemplateList } from '../../../components/TemplateBits';
 import { StatusMark } from '../../../components/UnitStatus';
@@ -245,9 +246,7 @@ function UnitsBody() {
   const [propertyId, setPropertyId] = useState('');
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
-  const [items, setItems] = useState<Unit[] | null>(null);
   const [properties, setProperties] = useState<Property[]>([]);
-  const [error, setError] = useState<ApiError | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
@@ -267,29 +266,21 @@ function UnitsBody() {
     return () => ac.abort();
   }, []);
 
-  const load = useCallback(
-    async (signal?: AbortSignal) => {
-      try {
-        const res = await unitsApi.list(
-          { status: status || undefined, property_id: propertyId || undefined, q: debouncedQ || undefined, limit: 200 },
-          signal,
-        );
-        setItems(res.items ?? []);
-        setError(null);
-      } catch (e) {
-        if (e instanceof DOMException && e.name === 'AbortError') return;
-        setError(toApiError(e));
-        setItems([]);
-      }
-    },
+  const fetchPage = useCallback(
+    (cursor: string | undefined, signal?: AbortSignal) =>
+      unitsApi.list(
+        {
+          status: status || undefined,
+          property_id: propertyId || undefined,
+          q: debouncedQ || undefined,
+          limit: 200,
+          cursor,
+        },
+        signal,
+      ),
     [status, propertyId, debouncedQ],
   );
-
-  useEffect(() => {
-    const ac = new AbortController();
-    void load(ac.signal);
-    return () => ac.abort();
-  }, [load]);
+  const { items, error, cursor, loadingMore, loadMore, reload: load } = usePagedList<Unit>(fetchPage);
 
   const visibleIds = useMemo(() => (items ?? []).map((u) => u.id), [items]);
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.includes(id));
@@ -473,6 +464,7 @@ function UnitsBody() {
           </tbody>
         </table>
         </TableScroll>
+        <LoadMore cursor={cursor} loading={loadingMore} onLoad={() => void loadMore()} />
       </div>
 
       <Sheet open={bulkOpen} title={t('units.bulk.title')} onClose={() => setBulkOpen(false)}>
