@@ -35,16 +35,19 @@ import { ProofsFor } from '../../../../components/ProofBits';
 import { RecordPaymentSheet, type RecordPaymentTarget } from '../../../../components/RecordPaymentSheet';
 import { PageHead } from '../../../../components/PageHead';
 import { PolicyFacts } from '../../../../components/PolicyBits';
+import { DepositSection, SettlementSummary } from '../../../../components/SettleBits';
 import { useTemplateList } from '../../../../components/TemplateBits';
 import { Sheet } from '../../../../components/Sheet';
 import {
   ApiError,
+  PAYMENT_METHODS,
   contractsApi,
   isUnsettled,
   paymentsApi,
   remainingOn,
   toApiError,
   unwrapContract,
+  type CashMethod,
   type Contract,
   type ContractDocument,
   type ContractSignature,
@@ -52,6 +55,7 @@ import {
   type Payment,
   type Schedule,
   type ScheduleRow,
+  type SettlementPreview,
 } from '../../../../lib/api';
 import { useMe } from '../../../../lib/auth';
 import { Amount, fmtDate, fmtTZS, todayISO } from '../../../../lib/format';
@@ -163,25 +167,67 @@ function RecordOnBehalfForm({
   );
 }
 
+/** What the terminate sheet sends (Phase 22.5 adds the settle-up choices). */
+type TerminateBody = Parameters<typeof contractsApi.terminate>[1];
+
 function TerminateForm({
+  contractId,
+  settles,
   busy,
   error,
   onSubmit,
   onCancel,
 }: {
+  contractId: string;
+  /** Phase 22.5: a running contract settles up; an unsigned one keeps the simple sheet. */
+  settles: boolean;
   busy: boolean;
   error: ApiError | null;
-  onSubmit: (reason: string, effectiveDate: string) => void;
+  onSubmit: (body: TerminateBody) => void;
   onCancel: () => void;
 }) {
   const t = useT();
   const [reason, setReason] = useState('');
   const [date, setDate] = useState(todayISO());
+  const [choice, setChoice] = useState<'refund' | 'forfeit' | ''>('');
+  const [refundMethod, setRefundMethod] = useState<CashMethod>('cash');
+  const [refundReference, setRefundReference] = useState('');
+  const [preview, setPreview] = useState<SettlementPreview | null>(null);
+  const [previewError, setPreviewError] = useState<ApiError | null>(null);
+
+  // The backend works the settle-up out for the chosen last day (and choice);
+  // re-read it whenever either changes.
+  useEffect(() => {
+    if (!settles || !date) return;
+    const ac = new AbortController();
+    setPreviewError(null);
+    contractsApi
+      .settlementPreview(contractId, { effective_date: date, prepaid_action: choice || undefined }, ac.signal)
+      .then(setPreview)
+      .catch((e) => {
+        if (e instanceof DOMException && e.name === 'AbortError') return;
+        setPreview(null);
+        setPreviewError(toApiError(e));
+      });
+    return () => ac.abort();
+  }, [settles, contractId, date, choice]);
+
+  const settlement = preview?.settlement ?? null;
+  const needsChoice = Boolean(preview?.needs_choice) || Boolean(settlement?.prepaid && choice);
+  const refunding = (settlement?.refund ?? 0) > 0;
+  const choiceMissing = error?.code === 'prepaid_choice_required';
+
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        onSubmit(reason.trim(), date);
+        onSubmit({
+          reason: reason.trim(),
+          effective_date: date,
+          prepaid_action: settles && choice ? choice : undefined,
+          refund_method: settles && refunding ? refundMethod : undefined,
+          refund_reference: settles && refunding ? refundReference.trim() || undefined : undefined,
+        });
       }}
       style={{ display: 'grid', gap: 'var(--sp-4)' }}
       noValidate
@@ -204,11 +250,86 @@ function TerminateForm({
           placeholder={t('contracts.terminate.reason_placeholder')}
         />
       </Field>
-      <Field id="t_date" label={t('contracts.terminate.effective_date')} error={error?.errors.effective_date}>
+      <Field
+        id="t_date"
+        label={t('contracts.terminate.effective_date')}
+        hint={settles ? t('settle.date_hint') : undefined}
+        error={error?.errors.effective_date}
+      >
         <input id="t_date" className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
       </Field>
+
+      {settles ? (
+        <section style={{ display: 'grid', gap: 'var(--sp-3)', borderTop: '1px solid var(--rule)', paddingTop: 'var(--sp-3)' }}>
+          <h3 style={{ fontSize: 'var(--text-md)' }}>{t('settle.title')}</h3>
+          <ProblemNote error={previewError} />
+          {settlement ? (
+            <SettlementSummary settlement={settlement} />
+          ) : previewError ? null : (
+            <p style={{ color: 'var(--ink-soft)' }}>{t('settle.loading')}</p>
+          )}
+
+          {needsChoice ? (
+            <fieldset style={{ border: 0, margin: 0, padding: 0, display: 'grid', gap: 'var(--sp-2)' }}>
+              <legend style={{ fontSize: 'var(--text-sm)', color: choiceMissing ? 'var(--stamp-overdue)' : 'var(--ink-soft)' }}>
+                {choiceMissing ? t('settle.choice_required') : t('settle.choice')}
+              </legend>
+              {(['refund', 'forfeit'] as const).map((v) => (
+                <label
+                  key={v}
+                  htmlFor={`t_choice_${v}`}
+                  style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', minHeight: 'var(--touch-min)', cursor: 'pointer' }}
+                >
+                  <input
+                    id={`t_choice_${v}`}
+                    type="radio"
+                    name="t_choice"
+                    checked={choice === v}
+                    onChange={() => setChoice(v)}
+                    style={{ width: 18, height: 18 }}
+                  />
+                  {t(`settle.choice.${v}`)}
+                </label>
+              ))}
+            </fieldset>
+          ) : null}
+
+          {refunding ? (
+            <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-4)' }}>
+              <Field id="t_refund_method" label={t('settle.refund_method')} error={error?.errors.refund_method}>
+                <select
+                  id="t_refund_method"
+                  className="input"
+                  value={refundMethod}
+                  onChange={(e) => setRefundMethod(e.target.value as CashMethod)}
+                >
+                  {PAYMENT_METHODS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {t(`payments.method.${m.value}`)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field id="t_refund_ref" label={t('settle.refund_reference')} error={error?.errors.refund_reference}>
+                <input
+                  id="t_refund_ref"
+                  className="input"
+                  maxLength={80}
+                  value={refundReference}
+                  onChange={(e) => setRefundReference(e.target.value)}
+                />
+              </Field>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
-        <button type="submit" className="btn btn-danger" disabled={busy || reason.trim().length === 0}>
+        <button
+          type="submit"
+          className="btn btn-danger"
+          disabled={busy || reason.trim().length === 0 || (settles && Boolean(preview?.needs_choice) && !choice)}
+        >
           {busy ? t('contracts.terminate.submitting') : t('contracts.terminate.submit')}
         </button>
         <button type="button" className="btn btn-quiet" onClick={onCancel} disabled={busy}>
@@ -867,6 +988,29 @@ function ContractBody({ id }: { id: string }) {
           </section>
         ) : null}
 
+        {/* Phase 22.5: what termination settled, as stored with it. */}
+        {contract.settlement ? (
+          <section style={{ marginTop: 'var(--sp-6)' }}>
+            <hr className="rule rule-strong" />
+            <h2 style={{ fontSize: 'var(--text-lg)', margin: 'var(--sp-4) 0' }}>{t('settle.summary_title')}</h2>
+            <div style={{ maxWidth: 640, fontSize: 'var(--text-sm)' }}>
+              <p style={{ color: 'var(--ink-soft)', marginBottom: 'var(--sp-2)' }}>
+                {t('settle.summary_lead', { date: fmtDate(contract.settlement.effective_date) })}
+              </p>
+              <SettlementSummary settlement={contract.settlement} />
+            </div>
+          </section>
+        ) : null}
+
+        {/* Phase 22.5: the deposit ledger, once the tenancy has been signed. */}
+        {running || (closed && contract.activated_at) ? (
+          <section style={{ marginTop: 'var(--sp-6)' }}>
+            <hr className="rule rule-strong" />
+            <h2 style={{ fontSize: 'var(--text-lg)', margin: 'var(--sp-4) 0' }}>{t('deposit.title')}</h2>
+            <DepositSection contractId={id} onChanged={() => void load()} />
+          </section>
+        ) : null}
+
         {/* ------------------------------ schedules ----------------------------- */}
         <section style={{ marginTop: 'var(--sp-6)' }}>
           <hr className="rule rule-strong" />
@@ -1291,12 +1435,14 @@ function ContractBody({ id }: { id: string }) {
 
       <Sheet open={terminateOpen} title={t('contracts.terminate.title')} onClose={() => setTerminateOpen(false)} width={520}>
         <TerminateForm
+          contractId={id}
+          settles={running}
           busy={busy}
           error={actionError}
           onCancel={() => setTerminateOpen(false)}
-          onSubmit={(reason, effective_date) =>
+          onSubmit={(body) =>
             void act(
-              () => contractsApi.terminate(id, { reason, effective_date }),
+              () => contractsApi.terminate(id, body),
               'Terminated. The unit is back on the vacancy board and the renter has been notified.',
             )
           }
