@@ -152,9 +152,9 @@ func (s *Server) handleRecordPayment(w http.ResponseWriter, r *http.Request) {
 		// Recorded over a duplicate warning: the rest of the org should know.
 		if len(dups) > 0 {
 			return s.inbox(r.Context(), q, p.OrgID, p.UserID, inboxItem{
-				Kind: "payment_duplicate_confirmed",
+				Kind:  "payment_duplicate_confirmed",
 				Title: "Payment recorded despite a possible duplicate: " + formatTZS(body.Amount) + " — " + contract.RenterName,
-				Body: contract.UnitName + " · " + contract.PropertyName, EntityType: "payment",
+				Body:  contract.UnitName + " · " + contract.PropertyName, EntityType: "payment",
 				EntityID: db.MustUUID(out.PaymentID), Link: "/contracts/" + db.UUIDString(contractID),
 			})
 		}
