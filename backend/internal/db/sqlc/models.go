@@ -395,6 +395,17 @@ type PaymentSchedule struct {
 	AdjustedByUserID   pgtype.UUID        `json:"adjusted_by_user_id"`
 }
 
+type PlatformSmsPurchase struct {
+	ID               pgtype.UUID        `json:"id"`
+	SmsCount         int32              `json:"sms_count"`
+	Cost             int64              `json:"cost"`
+	PurchasedOn      pgtype.Date        `json:"purchased_on"`
+	Reference        *string            `json:"reference"`
+	Note             string             `json:"note"`
+	CreatedByAdminID pgtype.UUID        `json:"created_by_admin_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
 type PlatformTemplate struct {
 	Kind             string             `json:"kind"`
 	Sw               string             `json:"sw"`
@@ -503,6 +514,47 @@ type SmsCreditLedger struct {
 	AdminUserID    pgtype.UUID        `json:"admin_user_id"`
 	Note           string             `json:"note"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type SmsCreditOrder struct {
+	ID              pgtype.UUID        `json:"id"`
+	OrgID           pgtype.UUID        `json:"org_id"`
+	PackageID       pgtype.UUID        `json:"package_id"`
+	PackageName     string             `json:"package_name"`
+	Credits         int32              `json:"credits"`
+	Amount          int64              `json:"amount"`
+	PayerPhone      string             `json:"payer_phone"`
+	OrderCode       string             `json:"order_code"`
+	SnippeReference *string            `json:"snippe_reference"`
+	Status          string             `json:"status"`
+	FailureReason   *string            `json:"failure_reason"`
+	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
+	LastCheckedAt   pgtype.Timestamptz `json:"last_checked_at"`
+	CreditedAt      pgtype.Timestamptz `json:"credited_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SmsCreditPackage struct {
+	ID               pgtype.UUID        `json:"id"`
+	Name             string             `json:"name"`
+	Credits          int32              `json:"credits"`
+	Price            int64              `json:"price"`
+	Active           bool               `json:"active"`
+	SortOrder        int32              `json:"sort_order"`
+	CreatedByAdminID pgtype.UUID        `json:"created_by_admin_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SnippeWebhookEvent struct {
+	EventID    string             `json:"event_id"`
+	EventType  string             `json:"event_type"`
+	Reference  *string            `json:"reference"`
+	OrderID    pgtype.UUID        `json:"order_id"`
+	Outcome    string             `json:"outcome"`
+	Payload    []byte             `json:"payload"`
+	ReceivedAt pgtype.Timestamptz `json:"received_at"`
 }
 
 type Unit struct {

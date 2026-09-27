@@ -102,6 +102,54 @@ type Config struct {
 	// TrustedProxyCIDRs is the comma-separated set of networks whose requests
 	// may carry X-Forwarded-For / X-Real-IP on a caller's behalf.
 	TrustedProxyCIDRs string
+
+	// --- Phase 27: SMS credit purchases through Snippe ---
+
+	// SnippeAPIKey is the Bearer key for the Snippe payments API
+	// (SNIPPE_API_KEY). Empty switches purchases off.
+	SnippeAPIKey string
+	// SnippeWebhookSecret is the key Snippe signs webhooks with
+	// (SNIPPE_WEBHOOK_SECRET). Empty switches purchases off too: a payment
+	// the API cannot verify is never offered.
+	SnippeWebhookSecret string
+	// SnippeBaseURL is the API origin (SNIPPE_BASE_URL, default
+	// DefaultSnippeBaseURL). Tests point it at a fake.
+	SnippeBaseURL string
+	// SnippeWebhookURLOverride is SNIPPE_WEBHOOK_URL: the public URL Snippe
+	// calls back. Read it through SnippeWebhookURL(), which applies the
+	// fallback.
+	SnippeWebhookURLOverride string
+	// SMSStockBuffer is how many SMS of platform stock the admin stock page
+	// wants above what orgs hold before it raises the low-stock flag
+	// (SMS_STOCK_BUFFER, default DefaultSMSStockBuffer).
+	SMSStockBuffer int
+}
+
+// DefaultSnippeBaseURL is the Snippe API origin (docs.snippe.sh).
+const DefaultSnippeBaseURL = "https://api.snippe.sh"
+
+// DefaultSMSStockBuffer is the SMS_STOCK_BUFFER default.
+const DefaultSMSStockBuffer = 1000
+
+// snippeWebhookPath is where the Go API serves the Snippe webhook — the API
+// prefix plus the route (httpserver: POST /webhooks/snippe).
+const snippeWebhookPath = "/api/v1/webhooks/snippe"
+
+// SnippeEnabled reports whether landlords may buy credits: both the API key
+// and the webhook signing key are set.
+func (c Config) SnippeEnabled() bool {
+	return strings.TrimSpace(c.SnippeAPIKey) != "" && strings.TrimSpace(c.SnippeWebhookSecret) != ""
+}
+
+// SnippeWebhookURL is the URL Snippe is told to call: SNIPPE_WEBHOOK_URL,
+// else "{PublicBaseURL or AppBaseURL}/api/v1/webhooks/snippe" — right for the
+// single-origin proxy layout, where that origin also serves /api. A deploy
+// with the API on its own host sets SNIPPE_WEBHOOK_URL.
+func (c Config) SnippeWebhookURL() string {
+	if v := strings.TrimSpace(c.SnippeWebhookURLOverride); v != "" {
+		return v
+	}
+	return c.publicOrigin() + snippeWebhookPath
 }
 
 // Load reads configuration from the process environment.
@@ -137,6 +185,13 @@ func Load() Config {
 		SMSCreditExemptKinds: getenv("SMS_CREDIT_EXEMPT_KINDS", ""),
 
 		TrustedProxyCIDRs: getenv("TRUSTED_PROXY_CIDRS", DefaultTrustedProxyCIDRs),
+
+		// Phase 27: Snippe (mobile-money SMS credit purchases).
+		SnippeAPIKey:             getenv("SNIPPE_API_KEY", ""),
+		SnippeWebhookSecret:      getenv("SNIPPE_WEBHOOK_SECRET", ""),
+		SnippeBaseURL:            getenv("SNIPPE_BASE_URL", DefaultSnippeBaseURL),
+		SnippeWebhookURLOverride: getenv("SNIPPE_WEBHOOK_URL", ""),
+		SMSStockBuffer:           getint("SMS_STOCK_BUFFER", DefaultSMSStockBuffer),
 
 		EnduserBaseURL: getenv("ENDUSER_BASE_URL", ""),
 		TenantBaseURL:  getenv("TENANT_BASE_URL", ""),

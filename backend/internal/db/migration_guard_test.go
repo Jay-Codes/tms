@@ -22,6 +22,9 @@ var schemaMigrations = []struct{ up, down string }{
 	{"../../migrations/000018_payment_proofs.up.sql", "../../migrations/000018_payment_proofs.down.sql"},
 	{"../../migrations/000019_imports.up.sql", "../../migrations/000019_imports.down.sql"},
 	{"../../migrations/000020_assist_sessions.up.sql", "../../migrations/000020_assist_sessions.down.sql"},
+	// Phase 27: SMS credit orders (org-scoped), packages, webhook events and
+	// platform SMS purchases (platform-level, no org_id).
+	{"../../migrations/000031_sms_purchases.up.sql", "../../migrations/000031_sms_purchases.down.sql"},
 }
 
 // guardExemptTables carry an org_id column but are deliberately absent from

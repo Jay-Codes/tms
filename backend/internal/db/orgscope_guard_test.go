@@ -53,6 +53,10 @@ var orgScopedTables = []string{
 	// that run outside an org context (the auth handlers, which have none)
 	// carry a `guard-exempt` line naming why.
 	"assist_sessions",
+	// Part 2 (Phase 27): an org's own SMS credit purchases. The webhook and
+	// the reconciliation job reach an order by Snippe's reference with no
+	// session; those queries carry a `guard-exempt` line naming why.
+	"sms_credit_orders",
 }
 
 var (
