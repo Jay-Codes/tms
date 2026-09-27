@@ -199,6 +199,11 @@ func (s *Server) handlePatchProperty(w http.ResponseWriter, r *http.Request) {
 		Lat          *json.RawMessage `json:"lat"`
 		Lng          *json.RawMessage `json:"lng"`
 		Notes        *json.RawMessage `json:"notes"`
+		// Phase 28: the investment fields; null clears one. Not pointers: a
+		// pointer decodes an explicit null as "absent".
+		PurchasePrice json.RawMessage `json:"purchase_price"`
+		PurchaseDate  json.RawMessage `json:"purchase_date"`
+		CurrentValue  json.RawMessage `json:"current_value"`
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
@@ -217,6 +222,9 @@ func (s *Server) handlePatchProperty(w http.ResponseWriter, r *http.Request) {
 	params.SetLat, params.Lat = jsonNumberPtr(f, "lat", body.Lat, -90, 90)
 	params.SetLng, params.Lng = jsonNumberPtr(f, "lng", body.Lng, -180, 180)
 	params.SetNotes, params.Notes = jsonStringPtr(f, "notes", body.Notes, propertyNotesMax)
+	params.SetPurchasePrice, params.PurchasePrice = jsonMoneyPtr(f, "purchase_price", body.PurchasePrice)
+	params.SetPurchaseDate, params.PurchaseDate = jsonPastDatePtr(f, "purchase_date", body.PurchaseDate)
+	params.SetCurrentValue, params.CurrentValue = jsonMoneyPtr(f, "current_value", body.CurrentValue)
 	if !f.Empty() {
 		badRequest(w, f)
 		return

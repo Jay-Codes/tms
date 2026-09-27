@@ -87,11 +87,14 @@ type receiptBlock struct {
 
 // categoryResponse is the `category` shape (API.md Phase 10).
 type categoryResponse struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	IsDefault bool      `json:"is_default"`
-	SortOrder int       `json:"sort_order"`
-	Active    bool      `json:"active"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	IsDefault bool   `json:"is_default"`
+	SortOrder int    `json:"sort_order"`
+	Active    bool   `json:"active"`
+	// IsCapital (Phase 28): spend filed here is investment, not a running
+	// cost, in the projection.
+	IsCapital bool      `json:"is_capital"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -102,6 +105,7 @@ func toCategory(c sqlc.ExpenseCategory) categoryResponse {
 		IsDefault: c.IsDefault,
 		SortOrder: int(c.SortOrder),
 		Active:    c.Active,
+		IsCapital: c.IsCapital,
 		CreatedAt: c.CreatedAt.Time,
 	}
 }
