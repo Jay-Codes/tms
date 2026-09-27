@@ -47,6 +47,7 @@ import {
 import { Field, ProblemNote } from '../../../components/FormBits';
 import { PaymentStatusStampCell, SectionHead, TabBar, TileRow, type TabDef } from '../../../components/ReportBits';
 import { PageHead } from '../../../components/PageHead';
+import { ProjectionsTab } from '../../../components/ProjectionBits';
 import { LoadMore } from '../../../components/Paging';
 import {
   ApiError,
@@ -69,10 +70,19 @@ import {
 import { fmtDate, fmtDateTime, fmtTZS } from '../../../lib/format';
 import { loadReportPeriod, periodQuery, saveReportPeriod } from '../../../lib/reportPeriod';
 
-type TabId = 'overview' | 'revenue' | 'expenses' | 'occupancy' | 'payment_status' | 'collections';
+type TabId = 'overview' | 'revenue' | 'expenses' | 'occupancy' | 'payment_status' | 'collections' | 'projections';
 
 /** Tab ids in order; the strip labels them through `reports.tab.*`. */
-const TAB_IDS: readonly TabId[] = ['overview', 'revenue', 'expenses', 'occupancy', 'payment_status', 'collections'];
+const TAB_IDS: readonly TabId[] = [
+  'overview',
+  'revenue',
+  'expenses',
+  'occupancy',
+  'payment_status',
+  'collections',
+  // Phase 28: looks forward from this month; the period picker does not apply.
+  'projections',
+];
 
 const STATUS_OPTIONS: { value: PaymentStatusValue | ''; key: string }[] = [
   { value: '', key: 'reports.status.all' },
@@ -1229,6 +1239,7 @@ function ReportsBody() {
         {tab === 'occupancy' ? <OccupancyTab {...scope} /> : null}
         {tab === 'payment_status' ? <PaymentStatusTab {...scope} /> : null}
         {tab === 'collections' ? <CollectionsTab {...scope} /> : null}
+        {tab === 'projections' ? <ProjectionsTab propertyId={propertyId} /> : null}
       </div>
     </>
   );

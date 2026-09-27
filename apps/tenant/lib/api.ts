@@ -360,6 +360,10 @@ export interface Property {
    * unit names its own; null means the org default.
    */
   contract_template_id?: string | null;
+  /** Phase 28 — the landlord's investment, all optional (whole TZS / YYYY-MM-DD). */
+  purchase_price?: number | null;
+  purchase_date?: string | null;
+  current_value?: number | null;
 }
 
 export interface Price {
@@ -482,6 +486,9 @@ export const propertiesApi = {
       lat?: number | null;
       lng?: number | null;
       notes?: string | null;
+      purchase_price?: number | null;
+      purchase_date?: string | null;
+      current_value?: number | null;
     },
   ) => api.patch<{ property: Property } | Property>(`/properties/${id}`, body),
   remove: (id: string) => api.del<void>(`/properties/${id}`),
@@ -2517,6 +2524,8 @@ export interface ExpenseCategory {
   is_default: boolean;
   sort_order: number;
   active: boolean;
+  /** Phase 28 — spend filed here is investment, not a running cost. */
+  is_capital?: boolean;
   created_at: string;
 }
 
@@ -2671,9 +2680,12 @@ export async function uploadReceipt(ticket: ReceiptTicket, file: File): Promise<
 export const expenseCategoriesApi = {
   list: (signal?: AbortSignal) =>
     api.get<{ items: ExpenseCategory[] }>('/org/expense-categories', { signal }),
-  create: (body: { name: string; sort_order?: number }) =>
+  create: (body: { name: string; sort_order?: number; is_capital?: boolean }) =>
     api.post<{ category: ExpenseCategory } | ExpenseCategory>('/org/expense-categories', body),
-  update: (id: string, body: { name?: string; sort_order?: number; active?: boolean }) =>
+  update: (
+    id: string,
+    body: { name?: string; sort_order?: number; active?: boolean; is_capital?: boolean },
+  ) =>
     api.patch<{ category: ExpenseCategory } | ExpenseCategory>(
       `/org/expense-categories/${id}`,
       body,
@@ -3053,3 +3065,133 @@ export function importRowFailure(e: ApiError): { line: number; column: string; r
     reason: typeof e.body.reason === 'string' ? e.body.reason : e.detail,
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* Phase 28 — projections, break-even and ROI (API.md Phase 28).       */
+/* Every figure is computed by the backend; the screen sends the       */
+/* scenario and draws the answer.                                      */
+/* ------------------------------------------------------------------ */
+
+export interface ProjectionParams {
+  /** 1–120, default 24. */
+  horizon_months?: number;
+  /** −100…500; applies to vacant units and re-lettings, not signed contracts. */
+  rent_change_pct?: number;
+  /** 0–100, or null/omitted for the trailing twelve months. */
+  occupancy_pct?: number | null;
+  collection_rate_pct?: number | null;
+  /** −100…500, on running costs. */
+  expense_change_pct?: number;
+}
+
+export type RateSource = 'scenario' | 'trailing' | 'default';
+
+export type BreakEvenStatus =
+  | 'reached'
+  | 'projected'
+  | 'beyond_horizon'
+  | 'not_profitable'
+  | 'no_purchase_price';
+
+export interface ProjectionMonth {
+  /** YYYY-MM */
+  month: string;
+  income: number;
+  running_expenses: number;
+  net: number;
+  /** Cash made since purchase, at the end of this month. */
+  cumulative: number;
+}
+
+export interface ProjectionBaseline {
+  history_from: string;
+  history_to: string;
+  history_months: number;
+  collected: number;
+  expected: number;
+  collection_rate_pct: number | null;
+  occupancy_pct: number | null;
+  running_expenses: number;
+  capital_expenses: number;
+  running_expenses_monthly: number;
+  categories: { id: string; name: string; monthly: number }[];
+  net: number;
+  units_total: number;
+  units_let: number;
+  units_open: number;
+  market_rent_monthly: number;
+}
+
+export interface ProjectionApplied {
+  horizon_months: number;
+  rent_change_pct: number;
+  occupancy_pct: number;
+  occupancy_source: RateSource;
+  collection_rate_pct: number;
+  collection_rate_source: RateSource;
+  expense_change_pct: number;
+}
+
+export interface ProjectionInvestment {
+  purchase_price: number | null;
+  capital_spend: number;
+  total: number | null;
+  current_value: number | null;
+  cash_to_date: number;
+  break_even_month: string | null;
+  break_even_status: BreakEvenStatus;
+  trailing_annual_net: number;
+  projected_annual_net: number;
+  roi_trailing_pct: number | null;
+  roi_projected_pct: number | null;
+  yield_pct: number | null;
+  payback_years: number | null;
+  incomplete: boolean;
+  priced_properties: number;
+  missing_price_property_ids: string[];
+}
+
+export interface ProjectionPropertyRow {
+  id: string;
+  name: string;
+  has_purchase_price: boolean;
+  projected_annual_net: number;
+  roi_projected_pct: number | null;
+  yield_pct: number | null;
+  payback_years: number | null;
+  break_even_month: string | null;
+  break_even_status: BreakEvenStatus;
+}
+
+export interface ProjectionReport {
+  scope: 'property' | 'portfolio';
+  property: { id: string; name: string } | null;
+  start_month: string;
+  baseline: ProjectionBaseline;
+  applied: ProjectionApplied;
+  months: ProjectionMonth[];
+  totals: { income: number; running_expenses: number; net: number };
+  investment: ProjectionInvestment;
+  properties: ProjectionPropertyRow[];
+}
+
+export interface ProjectionScenario {
+  id: string;
+  name: string;
+  horizon_months: number;
+  rent_change_pct: number;
+  occupancy_pct: number | null;
+  collection_rate_pct: number | null;
+  expense_change_pct: number;
+  created_at: string;
+}
+
+export const projectionApi = {
+  run: (body: ProjectionParams & { property_id?: string }, signal?: AbortSignal) =>
+    api.post<ProjectionReport>('/reports/projection', body, { signal }),
+  scenarios: (signal?: AbortSignal) =>
+    api.get<{ items: ProjectionScenario[] }>('/reports/projection/scenarios', { signal }),
+  saveScenario: (body: ProjectionParams & { name: string }) =>
+    api.post<{ scenario: ProjectionScenario }>('/reports/projection/scenarios', body),
+  removeScenario: (id: string) => api.del<void>(`/reports/projection/scenarios/${id}`),
+};

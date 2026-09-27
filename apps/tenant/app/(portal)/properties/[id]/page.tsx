@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Field, Note, ProblemNote } from '../../../../components/FormBits';
 import { PropertyExpenses } from '../../../../components/PropertyExpenses';
 import { PropertyForm } from '../../../../components/PropertyForm';
+import { PropertyInvestment } from '../../../../components/ProjectionBits';
 import { PageHead } from '../../../../components/PageHead';
 import { Sheet } from '../../../../components/Sheet';
 import { useTemplateList } from '../../../../components/TemplateBits';
@@ -197,6 +198,7 @@ function PropertyBody({ id }: { id: string }) {
         ) : null}
 
         {property ? <PropertyTemplate property={property} onSaved={setProperty} /> : null}
+        {property ? <PropertyInvestment property={property} onSaved={setProperty} /> : null}
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-4)' }}>
           <h2 style={{ fontSize: 'var(--text-lg)' }}>
