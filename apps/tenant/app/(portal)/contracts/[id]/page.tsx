@@ -34,6 +34,7 @@ import { DaysOverdue, PaymentsTable, ReverseSheet, SourceChip } from '../../../.
 import { ProofsFor } from '../../../../components/ProofBits';
 import { RecordPaymentSheet, type RecordPaymentTarget } from '../../../../components/RecordPaymentSheet';
 import { PageHead } from '../../../../components/PageHead';
+import { LoadMore } from '../../../../components/Paging';
 import { PolicyFacts } from '../../../../components/PolicyBits';
 import { DepositSection, SettlementSummary } from '../../../../components/SettleBits';
 import { useTemplateList } from '../../../../components/TemplateBits';
@@ -515,6 +516,9 @@ function ContractBody({ id }: { id: string }) {
   const [doc, setDoc] = useState<ContractDocument | null>(null);
   const [schedules, setSchedules] = useState<ScheduleRow[] | null>(null);
   const [payments, setPayments] = useState<Payment[] | null>(null);
+  // Phase 23: the payment history pages; this is its next page.
+  const [paymentsCursor, setPaymentsCursor] = useState<string | null>(null);
+  const [paymentsMore, setPaymentsMore] = useState(false);
   const [verification, setVerification] = useState<ContractVerification | null>(null);
 
   const [recordTarget, setRecordTarget] = useState<RecordPaymentTarget | null>(null);
@@ -571,6 +575,7 @@ function ContractBody({ id }: { id: string }) {
       try {
         const res = await paymentsApi.list({ contract_id: id, limit: 200 }, signal);
         setPayments(res.items ?? []);
+        setPaymentsCursor(res.next_cursor ?? null);
       } catch (e) {
         if (!(e instanceof DOMException)) setPayments([]);
       }
@@ -620,6 +625,20 @@ function ContractBody({ id }: { id: string }) {
       setActionError(toApiError(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const morePayments = async () => {
+    if (!paymentsCursor) return;
+    setPaymentsMore(true);
+    try {
+      const res = await paymentsApi.list({ contract_id: id, limit: 200, cursor: paymentsCursor });
+      setPayments((prev) => [...(prev ?? []), ...(res.items ?? [])]);
+      setPaymentsCursor(res.next_cursor ?? null);
+    } catch (e) {
+      setActionError(toApiError(e));
+    } finally {
+      setPaymentsMore(false);
     }
   };
 
@@ -1367,6 +1386,7 @@ function ContractBody({ id }: { id: string }) {
               setReversing(p);
             }}
           />
+          <LoadMore cursor={paymentsCursor} loading={paymentsMore} onLoad={() => void morePayments()} />
         </section>
 
         {/* -------------------------------- proofs ------------------------------- */}

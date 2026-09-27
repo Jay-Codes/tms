@@ -47,6 +47,7 @@ import {
 import { Field, ProblemNote } from '../../../components/FormBits';
 import { PaymentStatusStampCell, SectionHead, TabBar, TileRow, type TabDef } from '../../../components/ReportBits';
 import { PageHead } from '../../../components/PageHead';
+import { LoadMore } from '../../../components/Paging';
 import {
   ApiError,
   propertiesApi,
@@ -56,6 +57,7 @@ import {
   type CollectionsReport,
   type ExpenseSummary,
   type OccupancyReport,
+  type PaymentStatusPage,
   type PaymentStatusRow,
   type PaymentStatusValue,
   type Property,
@@ -832,12 +834,46 @@ function PaymentStatusTab({ period, propertyId }: Scope) {
   const t = useT();
   const [status, setStatus] = useState<PaymentStatusValue | ''>('');
 
-  const read = useRead<{ items: PaymentStatusRow[] }>(
+  const read = useRead<PaymentStatusPage>(
     (s) => reportsApi.paymentStatus({ ...q, status: status || undefined, property_id: propertyId || undefined }, s),
     [q.from, q.to, q.cadence, status, propertyId],
   );
 
-  const rows = read.data?.items ?? [];
+  // Phase 23: the report pages. Later pages append to the first; a new first
+  // page (filters changed) starts again.
+  const [more, setMore] = useState<PaymentStatusRow[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreError, setMoreError] = useState<ApiError | null>(null);
+  useEffect(() => {
+    setMore([]);
+    setCursor(read.data?.next_cursor ?? null);
+  }, [read.data]);
+
+  const loadMore = async () => {
+    if (!cursor) return;
+    setLoadingMore(true);
+    try {
+      const res = await reportsApi.paymentStatus({
+        ...q,
+        status: status || undefined,
+        property_id: propertyId || undefined,
+        cursor,
+      });
+      setMore((prev) => [...prev, ...(res.items ?? [])]);
+      setCursor(res.next_cursor ?? null);
+      setMoreError(null);
+    } catch (e) {
+      setMoreError(asError(e));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const rows = [...(read.data?.items ?? []), ...more];
+  const counts = read.data?.counts;
+  const countOf = (v: PaymentStatusValue | '') =>
+    counts ? (v ? (counts[v] ?? 0) : Object.values(counts).reduce((a, b) => a + (b ?? 0), 0)) : null;
   const outstanding = rows.reduce((t, r) => t + (r.outstanding ?? 0), 0);
 
   return (
@@ -855,6 +891,7 @@ function PaymentStatusTab({ period, propertyId }: Scope) {
               {STATUS_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
                   {t(o.key)}
+                  {countOf(o.value) !== null ? ` (${countOf(o.value)})` : ''}
                 </option>
               ))}
             </select>
@@ -878,10 +915,11 @@ function PaymentStatusTab({ period, propertyId }: Scope) {
         </div>
 
         <ProblemNote error={read.error} />
+        <ProblemNote error={moreError} />
 
         {rows.length > 0 ? (
           <p style={{ color: 'var(--ink-soft)' }}>
-            {t.n('reports.payment_status.renters', rows.length)} ·{' '}
+            {t.n('reports.payment_status.renters', read.data?.total ?? rows.length)} ·{' '}
             <strong style={{ color: 'var(--ink)' }}>{fmtTZS(outstanding)}</strong>{' '}
             {t('reports.payment_status.outstanding_suffix')}
           </p>
@@ -968,6 +1006,12 @@ function PaymentStatusTab({ period, propertyId }: Scope) {
             </tbody>
           </table>
         </TableScroll>
+        {cursor ? (
+          <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+            {t('reports.payment_status.shown', { shown: rows.length, total: read.data?.total ?? rows.length })}
+          </p>
+        ) : null}
+        <LoadMore cursor={cursor} loading={loadingMore} onLoad={() => void loadMore()} />
       </div>
     </Loading>
   );

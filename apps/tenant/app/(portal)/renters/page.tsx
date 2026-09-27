@@ -12,10 +12,9 @@ import { NextDueCell } from '../../../components/DueBits';
 import { Field, ProblemNote } from '../../../components/FormBits';
 import { FilterTabs, KycStamp, linkStatusLabel, localeLabel } from '../../../components/RenterBits';
 import { PageHead } from '../../../components/PageHead';
+import { LoadMore, usePagedList } from '../../../components/Paging';
 import {
-  ApiError,
   rentersApi,
-  toApiError,
   type KycStatus,
   type RenterSummary,
 } from '../../../lib/api';
@@ -32,8 +31,8 @@ const KYC_TABS: { value: KycStatus | ''; key: string }[] = [
 
 /**
  * `GET /renters` takes no `sort` parameter (API.md), so the Next-due ordering
- * is applied to the page that was loaded — the whole directory at `limit: 200`
- * for every org this product is built for. A renter with no next due sorts to
+ * is applied to the rows loaded so far — the whole directory at `limit: 200`
+ * for most orgs, with "Load more" (Phase 23) for the rest. A renter with no next due sorts to
  * the end in both directions, because "nothing owing" is never the answer to
  * "who is next".
  */
@@ -53,38 +52,19 @@ function DirectoryBody() {
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
   const [kyc, setKyc] = useState<KycStatus | ''>('');
-  const [items, setItems] = useState<RenterSummary[] | null>(null);
   const [sort, setSort] = useState<'' | 'asc' | 'desc'>('');
-  const [error, setError] = useState<ApiError | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q.trim()), 250);
     return () => clearTimeout(t);
   }, [q]);
 
-  const load = useCallback(
-    async (signal?: AbortSignal) => {
-      try {
-        const res = await rentersApi.list(
-          { q: debouncedQ || undefined, kyc_status: kyc || undefined, limit: 200 },
-          signal,
-        );
-        setItems(res.items ?? []);
-        setError(null);
-      } catch (e) {
-        if (e instanceof DOMException && e.name === 'AbortError') return;
-        setError(toApiError(e));
-        setItems([]);
-      }
-    },
+  const fetchPage = useCallback(
+    (cursor: string | undefined, signal?: AbortSignal) =>
+      rentersApi.list({ q: debouncedQ || undefined, kyc_status: kyc || undefined, limit: 200, cursor }, signal),
     [debouncedQ, kyc],
   );
-
-  useEffect(() => {
-    const ac = new AbortController();
-    void load(ac.signal);
-    return () => ac.abort();
-  }, [load]);
+  const { items, error, cursor, loadingMore, loadMore } = usePagedList<RenterSummary>(fetchPage);
 
   const rows = useMemo(
     () => (items === null || sort === '' ? items : byNextDue(items, sort)),
@@ -231,6 +211,7 @@ function DirectoryBody() {
           </tbody>
         </table>
         </TableScroll>
+        <LoadMore cursor={cursor} loading={loadingMore} onLoad={() => void loadMore()} />
       </div>
     </>
   );
