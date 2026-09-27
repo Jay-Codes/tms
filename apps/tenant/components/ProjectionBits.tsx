@@ -58,6 +58,12 @@ const pct = (v: number | null | undefined) =>
   v === null || v === undefined ? '—' : `${v.toLocaleString('en-US', { maximumFractionDigits: 1 })}%`;
 
 const monthTick = (m: string) => bucketTick(`${m}-01`, 'month');
+/**
+ * Past a year the chart skips labels to keep them apart, so the ones it keeps
+ * land on arbitrary months — `Sep, Aug, Jul…` read as time running backwards.
+ * Long horizons therefore label every tick with its year (`Sep 2026`).
+ */
+const longTick = (m: string) => bucketHeading(`${m}-01`, 'month');
 const monthHeading = (m: string) => bucketHeading(`${m}-01`, 'month');
 
 function breakEvenValue(t: Translator, status: BreakEvenStatus, month: string | null): string {
@@ -310,7 +316,7 @@ export function ProjectionsTab({ propertyId }: { propertyId: string }) {
   const base = data?.baseline;
   const inv = data?.investment;
   const months = data?.months ?? [];
-  const labels = months.map((m) => monthTick(m.month));
+  const labels = months.map((m) => (months.length > 12 ? longTick(m.month) : monthTick(m.month)));
   const headings = months.map((m) => monthHeading(m.month));
   const beIndex =
     inv?.break_even_status === 'projected' && inv.break_even_month

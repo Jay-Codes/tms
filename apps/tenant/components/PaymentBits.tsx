@@ -25,7 +25,7 @@ import {
   isUnsettled,
   remainingOn,
 } from '../lib/api';
-import { fmtDate, fmtDateTime, fmtTZS, todayISO } from '../lib/format';
+import { fmtDate, fmtPaidAt, fmtTZS, todayISO } from '../lib/format';
 import { TableScroll, useT, type Translator } from '@tms/ui';
 
 /**
@@ -413,7 +413,7 @@ export function PaymentsTable({
               const who = paymentWho(p);
               return (
                 <tr key={p.id} style={reversed ? { color: 'var(--ink-soft)' } : undefined}>
-                  <td>{fmtDateTime(p.paid_at)}</td>
+                  <td>{fmtPaidAt(p)}</td>
                   {showRenter ? (
                     <td>
                       {who.renterUserId ? (

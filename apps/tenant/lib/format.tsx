@@ -104,6 +104,16 @@ export function fmtDateTime(value: string | null | undefined): string {
   return `${formatDateIntl(activeLocale, value)}, ${time}`;
 }
 
+/**
+ * When a payment was made. A backfilled or imported payment carries a date
+ * only (stored as midnight UTC, which reads `03:00` in Dar es Salaam), so its
+ * time is not a fact and is not shown; money keyed in as it arrived shows the
+ * minute it was recorded for.
+ */
+export function fmtPaidAt(p: { paid_at: string | null | undefined; source?: string | null }): string {
+  return p.source === 'backfill' || p.source === 'import' ? fmtDate(p.paid_at) : fmtDateTime(p.paid_at);
+}
+
 /** `YYYY-MM-DDTHH:mm` in the browser's zone — the default for `paid_at`. */
 export function nowDatetimeLocal(): string {
   const d = new Date();
