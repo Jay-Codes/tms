@@ -634,7 +634,8 @@ export interface VerifyResponse {
   signatures: ContractSignature[];
 }
 
-export type ScheduleStatus = 'pending' | 'paid' | 'partial' | 'overdue' | 'waived';
+/** Phase 21 — `written_off`: the landlord closed the row as bad debt; it takes no money. */
+export type ScheduleStatus = 'pending' | 'paid' | 'partial' | 'overdue' | 'waived' | 'written_off';
 
 /**
  * Phase 20.3: how the money on a row reached the ledger. `manual` is a
@@ -654,6 +655,8 @@ export interface PaymentSchedule {
   paid_amount: number;
   /** Phase 20.3 — the source of this row's most recent payment, if any. */
   last_payment_source?: PaymentSource | string | null;
+  /** Phase 21 — the landlord's reason, only on `written_off` rows. */
+  write_off_reason?: string | null;
 }
 
 /** `GET /me/schedules` rows carry the contract they belong to. */

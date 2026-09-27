@@ -1148,7 +1148,7 @@ platform admin), RFC-7807 problems with the machine-readable code in `type`,
 **400** for a malformed field with `errors` populated, **404** for an id outside
 the caller's scope, **409** for a business conflict, **422** for a request that
 parsed but cannot be honoured, and one audit row per mutation. New codes:
-`last_owner`, `renter_signed`.
+`last_owner`, `renter_signed_elsewhere` (Phase 21; `renter_signed` retired).
 
 ### 19.1 NIDA reveal (landlord)
 
@@ -1215,7 +1215,7 @@ inner whitespace; anything else is a **400** naming `full_name`.
 |---|---|
 | `PATCH /org/members/me` | Org audience, any role, the caller's own row. Body `{full_name?, locale?}` — **the Phase 13 locale-only body still works unchanged**, and either key may be sent alone. → `200 {member}`. Audited `member.update` (a locale-only call keeps writing `user.locale_update`, as before). |
 | `PATCH /org/members/{id}` | Org audience, **owner only**. `{full_name?, role?}`, at least one. `role` is `owner\|manager`. Cannot change **own** role (409 `cannot_change_own_role`), cannot demote the **last owner** (409 `last_owner`). A member id outside the org → 404. → `200 {member}`. Audited `member.update`. |
-| `PATCH /renters/{user_id}` | Org audience, **owner + manager**. `{full_name}`. Relationship check and 404 are `GET /renters/{user_id}`'s. Refused once the renter has signed a contract **anywhere** — any `contract_signatures` row by this user, in any org → **409 `renter_signed`** with detail "ask the renter to correct it in their Profile". → `200 {renter, profile}` (the `GET /renters/{user_id}` blocks). Audited `renter.update`. Queues the renter SMS **`name_corrected`** (new kind, SW/EN, org-overridable, credits apply, disable-able in Notification settings). |
+| `PATCH /renters/{user_id}` | Org audience, **owner + manager**. `{full_name}`. Relationship check and 404 are `GET /renters/{user_id}`'s. `reason` (≤200) optional before any signature, **required once the renter has signed with this org** (400 on `reason`; Phase 21 — previously 409 `renter_signed`). Refused when the renter has signed a contract with **another** org → **409 `renter_signed_elsewhere`** with detail "ask the renter to correct it in their Profile". After a signature the `name_corrected` SMS is sent even if the org disabled the kind; the audit `after` carries `reason` and `after_signature: true`. Signed documents keep their snapshot. → `200 {renter, profile}` (the `GET /renters/{user_id}` blocks). Audited `renter.update`. Queues the renter SMS **`name_corrected`** (new kind, SW/EN, org-overridable, credits apply, disable-able in Notification settings). |
 | `PATCH /admin/users/{id}` | Platform admin, any user kind, **no** signed-contract restriction. `{full_name, reason: string 1…200}`. → `200 {user}` (the `user_row` shape). Audited `admin.user_update` with `before`, `after` and `reason`. Notifies the renamed account the same way: `name_corrected` SMS for a renter, the existing mailer for an org user or admin. |
 
 **The contract document is untouched by every one of these.** The rendered terms
@@ -1286,3 +1286,19 @@ DEFAULT 'manual' CHECK (source IN ('manual','import','backfill'))`, backfilled
 | `POST /imports/preview` (`kind=payments`) | The Backfill hint replaces `exceeds_contract_balance` **only when the row both fails allocation and predates the first schedule period**. | A payment dated before the book that still has an unpaid period to land on is allocated, exactly as in Phase 16 — the hint explains a refusal, it does not invent one. |
 | `PUT /org/notification-settings` | `kinds` gains **`name_corrected`** and **`backfill_done`** toggles, both defaulting to on. | PLAN2 asks for both kinds to be disable-able. They are the only two whose stored form is nullable, so a settings blob written before this phase resolves to "on" rather than silently switching both messages off. |
 | `POST /renters/{user_id}/nida/reveal` | The 200 carries `Cache-Control: no-store` and `Pragma: no-cache`. | The one response in the product holding a national ID number must not be storable by a browser, a proxy or a service worker. |
+
+## Part 2 — Phase 21: renames after signing, arrears after move-out
+
+### 21.1 Renter rename after signing
+See `PATCH /renters/{user_id}` in 19.3 (amended): `reason` required once signed with this org, 409 `renter_signed_elsewhere` when signed with another.
+
+### 21.2 Arrears after move-out
+
+| Route | Contract |
+|---|---|
+| `POST /payments`, `POST /me/proofs`, `POST /proofs/{id}/accept` | Now accept contracts in `ended` and `terminated` as well as `active`/`expiring`; 409 `contract_not_active` only for unsigned contracts. Money lands on rows still owing (`pending`/`partial`/`overdue`); an amount above what is owed → the existing exceeds-balance refusal (there is no future to roll into). `POST /contracts/{id}/backfill` stays running-only. |
+| `GET /arrears?cursor=&limit=&property_id=` | Org audience, owner + manager. Closed contracts (`ended`/`terminated`) with at least one row owing, ordered by `closed_on` desc (termination effective date, else end date), cursor-paged. → `{items:[{contract_id, contract_status, closed_on, renter:{id, full_name, phone}, unit_id, unit_name, property_id, property_name, outstanding, periods, oldest_due, last_paid_at}], next_cursor, total:{outstanding, contracts}}`. |
+| `POST /contracts/{id}/write-off` | **Owner only.** `{reason}` (required, ≤200). Every `pending`/`partial`/`overdue` row → `written_off` (paid money on a partial row stays). 409 `contract_not_closed` on a running contract, 409 `nothing_owing`. → `{periods, amount, schedules}`. Audit `contract.write_off` `{periods, amount, reason}`. |
+| `POST /contracts/{id}/write-off/undo` | **Owner only.** Rows back to `paid`/`overdue`/`partial`/`pending`, recomputed from their own money and dates. 409 `nothing_written_off`. → `{periods, amount, schedules}`. Audit `contract.write_off_undo`. |
+
+Schedule rows gain `write_off_reason` (only on `written_off`). Reports: `written_off` counts in `expected`, never in `outstanding`/`overdue`; a written-off row takes no payment.

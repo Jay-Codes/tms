@@ -150,6 +150,9 @@ type scheduleResponse struct {
 	// live payment has reached this instalment (Phase 20 §20.3). It is what
 	// puts the "imported" and "backfilled" chips on a rent-book row.
 	LastPaymentSource *string `json:"last_payment_source"`
+	// WriteOffReason is set on a `written_off` row (Phase 21): the landlord's
+	// one line on why the debt is no longer chased.
+	WriteOffReason *string `json:"write_off_reason,omitempty"`
 }
 
 // templateResponse is the `template` shape from API.md.
@@ -258,13 +261,14 @@ func toSignatures(rows []sqlc.ListContractSignaturesRow) []signatureBlock {
 
 func toSchedule(s sqlc.PaymentSchedule) scheduleResponse {
 	return scheduleResponse{
-		ID:          db.UUIDString(s.ID),
-		PeriodStart: s.PeriodStart.Time.Format(dateLayout),
-		PeriodEnd:   s.PeriodEnd.Time.Format(dateLayout),
-		DueDate:     s.DueDate.Time.Format(dateLayout),
-		Amount:      s.Amount,
-		Status:      s.Status,
-		PaidAmount:  s.PaidAmount,
+		ID:             db.UUIDString(s.ID),
+		PeriodStart:    s.PeriodStart.Time.Format(dateLayout),
+		PeriodEnd:      s.PeriodEnd.Time.Format(dateLayout),
+		DueDate:        s.DueDate.Time.Format(dateLayout),
+		Amount:         s.Amount,
+		Status:         s.Status,
+		PaidAmount:     s.PaidAmount,
+		WriteOffReason: s.WriteOffReason,
 	}
 }
 

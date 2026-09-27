@@ -187,7 +187,9 @@ function DocumentContent() {
      ids — they are a snapshot, not the ledger — so they are matched to the
      ledger by due date, which is unique within one contract. */
   const ledger = [...schedules].sort((a, b) => a.due_date.localeCompare(b.due_date));
-  const unsettled = ledger.find((row) => row.status !== 'paid' && row.status !== 'waived') ?? null;
+  const unsettled =
+    ledger.find((row) => row.status !== 'paid' && row.status !== 'waived' && row.status !== 'written_off') ??
+    null;
   const scheduleByDue = new Map(ledger.map((row) => [row.due_date, row]));
   const proofBySchedule = new Map<string, Proof>();
   for (const p of proofs) {

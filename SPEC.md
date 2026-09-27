@@ -162,7 +162,8 @@ contract_signatures  org_id, contract_id, party (renter|landlord), user_id, meth
                      -- append-only; one row per party; renter row required before activate
 unit_link_requests   org_id, unit_id, renter_user_id, status (pending|approved|rejected)
 payment_schedules    org_id, contract_id, period_start, period_end, due_date, amount,
-                     status (pending|paid|partial|overdue|waived)
+                     status (pending|paid|partial|overdue|waived|written_off),
+                     written_off_at, written_off_by_user_id, write_off_reason NULLABLE   -- Phase 21
 payments             org_id, contract_id, schedule_id NULLABLE, amount, method
                      (cash|bank_transfer|mobile_money_manual), reference, paid_at,
                      recorded_by_user_id, note, status (recorded|confirmed|reversed),

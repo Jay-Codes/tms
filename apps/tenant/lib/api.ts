@@ -691,10 +691,15 @@ export const rentersApi = {
   /** Phase 19.1. `reason` is optional for a landlord (required for admin). */
   revealNida: (userId: string, reason?: string) =>
     api.post<NidaReveal>(`/renters/${userId}/nida/reveal`, reason ? { reason } : {}),
-  /** Phase 19.3. 409 `renter_signed` once the renter has signed anywhere. */
-  rename: (userId: string, fullName: string) =>
+  /**
+   * Phase 19.3 / 21. `reason` is required once the renter has signed with this
+   * org (400 on `reason`); 409 `renter_signed_elsewhere` once they have signed
+   * with another org.
+   */
+  rename: (userId: string, fullName: string, reason?: string) =>
     api.patch<Pick<RenterDetail, 'renter' | 'profile'>>(`/renters/${userId}`, {
       full_name: fullName,
+      ...(reason ? { reason } : {}),
     }),
 };
 
@@ -843,7 +848,8 @@ export interface ContractDocument {
   generated_at: string;
 }
 
-export type ScheduleStatus = 'pending' | 'paid' | 'partial' | 'overdue' | 'waived';
+/** Phase 21 — `written_off`: bad debt on a closed tenancy; takes no money. */
+export type ScheduleStatus = 'pending' | 'paid' | 'partial' | 'overdue' | 'waived' | 'written_off';
 
 export interface ScheduleRow {
   id: string;
@@ -860,6 +866,8 @@ export interface ScheduleRow {
    * nothing has been allocated.
    */
   last_payment_source?: PaymentSource | null;
+  /** Phase 21 — why the landlord wrote the row off; only on `written_off` rows. */
+  write_off_reason?: string | null;
 }
 
 export interface ContractVerification {
@@ -1012,6 +1020,52 @@ export const contractsApi = {
    */
   backfill: (id: string, body: BackfillInput) =>
     api.post<BackfillResult>(`/contracts/${id}/backfill`, body),
+  /**
+   * Phase 21 — owner only. Closes every still-owing row of an ended or
+   * terminated contract as bad debt; reversible with `undoWriteOff`.
+   */
+  writeOff: (id: string, reason: string) =>
+    api.post<WriteOffResult>(`/contracts/${id}/write-off`, { reason }),
+  undoWriteOff: (id: string) => api.post<WriteOffResult>(`/contracts/${id}/write-off/undo`),
+};
+
+/** `200 {periods, amount, schedules}` from write-off and its undo. */
+export interface WriteOffResult {
+  periods: number;
+  amount: number;
+  schedules?: ScheduleRow[];
+}
+
+/** One closed contract that still owes (`GET /arrears`, Phase 21). */
+export interface ArrearsItem {
+  contract_id: string;
+  contract_status: 'ended' | 'terminated';
+  /** YYYY-MM-DD. */
+  closed_on: string;
+  renter: { id: string; full_name: string; phone: string | null };
+  unit_id: string;
+  unit_name: string;
+  property_id: string;
+  property_name: string;
+  outstanding: number;
+  periods: number;
+  oldest_due: string;
+  last_paid_at: string | null;
+}
+
+export interface ArrearsPage {
+  items: ArrearsItem[];
+  next_cursor: string | null;
+  /** Org-wide, on every page — not just this page's rows. */
+  total: { outstanding: number; contracts: number };
+}
+
+export const arrearsApi = {
+  /** Former tenants who still owe, newest closure first. */
+  list: (
+    query: { cursor?: string; limit?: number; property_id?: string } = {},
+    signal?: AbortSignal,
+  ) => api.get<ArrearsPage>('/arrears', { query, signal }),
 };
 
 /** `POST /contracts/{id}/backfill` body (API.md Phase 20.3). */
@@ -1133,6 +1187,8 @@ export interface ScheduleContractRef {
   property_name: string;
   renter_name: string;
   renter_user_id: string;
+  /** Phase 21 — the contract's status; a closed tenancy takes no backfill. */
+  status?: ContractStatus;
 }
 
 /**

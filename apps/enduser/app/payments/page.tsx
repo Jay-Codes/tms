@@ -19,8 +19,10 @@
  *
  * Phase 18.2: the two history lists are paged (`next_cursor` → "Show older"),
  * and the schedule groups of ended or terminated tenancies fold away under
- * "Past tenancies" — their unpaid tail is a record, not a bill, so the overdue
- * banner and the "next payment" card count live tenancies only.
+ * "Past tenancies", so the overdue banner and the "next payment" card count
+ * live tenancies only. Phase 21: a past tenancy that still owes keeps a
+ * "Send proof" on each owing row — a landlord can still collect after
+ * move-out — and a row the landlord wrote off says so.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -93,6 +95,11 @@ function groupByContract(items: MySchedule[], unitFallback: string): ContractGro
     g.rows.sort((a, b) => a.due_date.localeCompare(b.due_date));
   }
   return [...groups.values()];
+}
+
+/** Phase 21: a row that still takes money, whether or not the tenancy runs. */
+function stillOwes(row: MySchedule): boolean {
+  return row.status === 'pending' || row.status === 'partial' || row.status === 'overdue';
 }
 
 /**
@@ -404,6 +411,34 @@ function ScheduleGroup({
                       </button>
                     </>
                   )}
+                  {/* Phase 21: a live tenancy is paid through "How to pay";
+                      a closed one that still owes gets its own way in. */}
+                  {!group.live && !rejected && !awaiting && stillOwes(row) && (
+                    <>
+                      <br />
+                      <button
+                        type="button"
+                        className="btn btn-quiet"
+                        style={{
+                          width: 'auto',
+                          height: 'var(--touch-min)',
+                          paddingInline: 0,
+                        }}
+                        onClick={() =>
+                          openProof({
+                            contractId: group.id,
+                            contractLabel: [group.unitName, group.propertyName]
+                              .filter(Boolean)
+                              .join(' · '),
+                            scheduleId: row.id,
+                            amount: scheduleOutstanding(row),
+                          })
+                        }
+                      >
+                        {t('proof.send')}
+                      </button>
+                    </>
+                  )}
                 </td>
                 <td className="num">
                   <Money amount={row.amount} />
@@ -511,8 +546,8 @@ function PaymentsContent() {
   const liveGroups = useMemo(() => groups.filter((g) => g.live), [groups]);
   const pastGroups = useMemo(() => groups.filter((g) => !g.live), [groups]);
   /* §18.2: the overdue banner is a bill, so it only counts live tenancies.
-     `overdue_total` from the API includes an ended tenancy's unpaid tail, which
-     no landlord is collecting and no renter can settle here. */
+     `overdue_total` from the API includes an ended tenancy's unpaid tail; that
+     is paid row by row from "Past tenancies" (Phase 21), not from the banner. */
   const overdueTotal = useMemo(
     () =>
       liveGroups.reduce(
@@ -540,13 +575,17 @@ function PaymentsContent() {
         amount: scheduleOutstanding(nextDue),
       };
     }
-    const g = liveGroups.find((group) => group.id !== 'unknown');
+    // Phase 21: with no running tenancy, a past one that still owes is where
+    // the money goes.
+    const g =
+      liveGroups.find((group) => group.id !== 'unknown') ??
+      pastGroups.find((group) => group.id !== 'unknown' && group.rows.some(stillOwes));
     if (!g) return null;
     return {
       contractId: g.id,
       contractLabel: [g.unitName, g.propertyName].filter(Boolean).join(' · '),
     };
-  }, [nextDue, liveGroups]);
+  }, [nextDue, liveGroups, pastGroups]);
 
   function openProof(target: ProofTarget | null) {
     setProofTarget(target);

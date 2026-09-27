@@ -348,6 +348,16 @@ func (s *Server) routes() chi.Router {
 				// --- Phase 20 §20.3: settling history that predates TMS ---
 				r.Post("/contracts/{id}/backfill", s.handleContractBackfill)
 
+				// --- Phase 21 §21.2: arrears after a tenancy has closed ---
+				r.Get("/arrears", s.handleListArrears)
+				// Writing a debt off is the decision to stop expecting money:
+				// the owner's alone, like the org's own name and its staff.
+				r.Group(func(r chi.Router) {
+					r.Use(s.sessions.RequireOrg(auth.RoleOwner))
+					r.Post("/contracts/{id}/write-off", s.handleWriteOff)
+					r.Post("/contracts/{id}/write-off/undo", s.handleUndoWriteOff)
+				})
+
 				// --- Phase 18: landlord-assisted onboarding (FLOWS 2b) ---
 				//
 				// Owner and manager, the two roles that already onboard a

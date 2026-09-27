@@ -631,6 +631,30 @@ func (q *Queries) RenterHasSignedAnywhere(ctx context.Context, userID pgtype.UUI
 	return signed, err
 }
 
+const renterSignedElsewhere = `-- name: RenterSignedElsewhere :one
+SELECT EXISTS (
+    SELECT 1 FROM contract_signatures
+    WHERE user_id = $1 AND party = 'renter'
+      AND org_id <> $2
+) AS signed
+`
+
+type RenterSignedElsewhereParams struct {
+	UserID pgtype.UUID `json:"user_id"`
+	OrgID  pgtype.UUID `json:"org_id"`
+}
+
+// RenterSignedElsewhere backs the post-signing rename (Phase 21): a landlord
+// may correct the name of a renter who has signed only with them, never one
+// whose signature sits on another landlord's document.
+// guard-exempt: deliberately cross-org — it asks about every org but the caller's.
+func (q *Queries) RenterSignedElsewhere(ctx context.Context, arg RenterSignedElsewhereParams) (bool, error) {
+	row := q.db.QueryRow(ctx, renterSignedElsewhere, arg.UserID, arg.OrgID)
+	var signed bool
+	err := row.Scan(&signed)
+	return signed, err
+}
+
 const revokeSessionsForUser = `-- name: RevokeSessionsForUser :many
 UPDATE sessions SET revoked_at = now()
 WHERE user_id = $1 AND revoked_at IS NULL

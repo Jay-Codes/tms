@@ -17,6 +17,7 @@ import { Field, ProblemNote } from './FormBits';
 import { Sheet } from './Sheet';
 import {
   type ApiError,
+  type ArrearsItem,
   type Payment,
   type PaymentSource,
   paymentWho,
@@ -184,7 +185,11 @@ export function SchedulesTable({
                         {t('payments.record.action')}
                       </button>
                     ) : null}
-                    {onBackfill && isUnsettled(s) && s.due_date < today ? (
+                    {onBackfill &&
+                    isUnsettled(s) &&
+                    s.due_date < today &&
+                    s.contract?.status !== 'ended' &&
+                    s.contract?.status !== 'terminated' ? (
                       <button
                         type="button"
                         className="btn btn-quiet"
@@ -205,6 +210,80 @@ export function SchedulesTable({
               <td colSpan={2} />
             </tr>
           </>
+        )}
+      </tbody>
+    </table>
+    </TableScroll>
+  );
+}
+
+/* ----------------------------- former tenants ----------------------------- */
+
+/**
+ * Phase 21 — closed contracts that still owe (`GET /arrears`). One row per
+ * contract; the money is summed by the server, never here.
+ */
+export function ArrearsTable({
+  items,
+  emptyText,
+}: {
+  items: ArrearsItem[] | null;
+  emptyText: string;
+}) {
+  const t = useT();
+  const cols = 7;
+  return (
+    <TableScroll label={t('payments.former.table_label')}>
+    <table className="ledger">
+      <thead>
+        <tr>
+          <th>{t('common.renter')}</th>
+          <th>{t('common.unit')}</th>
+          <th>{t('payments.former.col.closed')}</th>
+          <th className="num">{t('payments.former.col.periods')}</th>
+          <th className="num">{t('payments.former.col.outstanding')}</th>
+          <th>{t('payments.former.col.last_paid')}</th>
+          <th />
+        </tr>
+      </thead>
+      <tbody>
+        {items === null ? (
+          <Loading cols={cols} text={t('common.loading')} />
+        ) : items.length === 0 ? (
+          <Loading cols={cols} text={emptyText} />
+        ) : (
+          items.map((a) => (
+            <tr key={a.contract_id}>
+              <td>
+                <Link href={`/renters/${a.renter.id}`} style={{ color: 'inherit', fontWeight: 600 }}>
+                  {a.renter.full_name}
+                </Link>
+                {a.renter.phone ? (
+                  <div style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>{a.renter.phone}</div>
+                ) : null}
+              </td>
+              <td>
+                {a.unit_name}
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>{a.property_name}</div>
+              </td>
+              <td>
+                {fmtDate(a.closed_on)}
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>
+                  {t(`contracts.status.${a.contract_status}`)}
+                </div>
+              </td>
+              <td className="num">{a.periods}</td>
+              <td className="num" style={{ color: 'var(--stamp-overdue)', fontWeight: 600 }}>
+                {fmtTZS(a.outstanding)}
+              </td>
+              <td>{a.last_paid_at ? fmtDate(a.last_paid_at) : <span className="pencil">{t('payments.former.never_paid')}</span>}</td>
+              <td>
+                <Link href={`/contracts/${a.contract_id}`} className="btn btn-secondary" style={{ minHeight: 36 }}>
+                  {t('payments.former.open')}
+                </Link>
+              </td>
+            </tr>
+          ))
         )}
       </tbody>
     </table>

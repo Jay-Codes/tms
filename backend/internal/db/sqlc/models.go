@@ -306,18 +306,21 @@ type PaymentProof struct {
 }
 
 type PaymentSchedule struct {
-	ID          pgtype.UUID        `json:"id"`
-	OrgID       pgtype.UUID        `json:"org_id"`
-	ContractID  pgtype.UUID        `json:"contract_id"`
-	PeriodStart pgtype.Date        `json:"period_start"`
-	PeriodEnd   pgtype.Date        `json:"period_end"`
-	DueDate     pgtype.Date        `json:"due_date"`
-	Amount      int64              `json:"amount"`
-	Status      string             `json:"status"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
-	PaidAmount  int64              `json:"paid_amount"`
+	ID                 pgtype.UUID        `json:"id"`
+	OrgID              pgtype.UUID        `json:"org_id"`
+	ContractID         pgtype.UUID        `json:"contract_id"`
+	PeriodStart        pgtype.Date        `json:"period_start"`
+	PeriodEnd          pgtype.Date        `json:"period_end"`
+	DueDate            pgtype.Date        `json:"due_date"`
+	Amount             int64              `json:"amount"`
+	Status             string             `json:"status"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
+	PaidAmount         int64              `json:"paid_amount"`
+	WrittenOffAt       pgtype.Timestamptz `json:"written_off_at"`
+	WrittenOffByUserID pgtype.UUID        `json:"written_off_by_user_id"`
+	WriteOffReason     *string            `json:"write_off_reason"`
 }
 
 type PlatformTemplate struct {

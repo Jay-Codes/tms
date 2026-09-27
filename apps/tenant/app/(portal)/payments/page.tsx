@@ -9,6 +9,9 @@
  * `GET /schedules` — nothing is computed here, so what is on screen is what the
  * backend believes, including `days_overdue`.
  *
+ * "Former tenants" (Phase 21) is the one tab that is not a schedule filter:
+ * closed contracts that still owe, read from `GET /arrears` a page at a time.
+ *
  * The history tab is the correction desk: every payment ever recorded, and the
  * one way to undo one (reverse, with a reason, audited — never a delete).
  */
@@ -22,6 +25,7 @@ import {
   type BackfillTarget,
 } from "../../../components/BackfillSheet";
 import {
+  ArrearsTable,
   PaymentsTable,
   ReverseSheet,
   SchedulesTable,
@@ -36,12 +40,14 @@ import { PageHead } from "../../../components/PageHead";
 import { FilterTabs } from "../../../components/RenterBits";
 import {
   ApiError,
+  arrearsApi,
   paymentsApi,
   reportsApi,
   schedulesApi,
   toApiError,
   UPCOMING_WINDOWS,
   PAYMENT_SOURCES,
+  type ArrearsPage,
   type Payment,
   type PaymentSource,
   type Schedule,
@@ -50,13 +56,21 @@ import {
 import { fmtTZS } from "../../../lib/format";
 import { useT } from "@tms/ui";
 
-type TabId = "overdue" | "due_soon" | "partial" | "all" | "history" | "proofs";
+type TabId =
+  | "overdue"
+  | "due_soon"
+  | "partial"
+  | "former"
+  | "all"
+  | "history"
+  | "proofs";
 
 /** Tab order is the order a landlord's morning goes; the labels are keys. */
 const TABS: { value: TabId; labelKey: string }[] = [
   { value: "overdue", labelKey: "payments.tab.overdue" },
   { value: "due_soon", labelKey: "payments.tab.due_soon" },
   { value: "partial", labelKey: "payments.tab.partial" },
+  { value: "former", labelKey: "payments.tab.former" },
   { value: "all", labelKey: "payments.tab.all" },
   { value: "history", labelKey: "payments.tab.history" },
 ];
@@ -82,6 +96,7 @@ const EMPTY_KEY: Record<TabId, string> = {
   overdue: "payments.empty.overdue",
   due_soon: "payments.empty.due_soon",
   partial: "payments.empty.partial",
+  former: "payments.empty.former",
   all: "payments.empty.all",
   history: "payments.empty.history",
   proofs: "proofs.empty.submitted",
@@ -96,6 +111,96 @@ function scheduleQuery(tab: TabId) {
   if (tab === "overdue") return { status: "overdue" as const, limit: 200 };
   if (tab === "partial") return { status: "partial" as const, limit: 200 };
   return { limit: 200 };
+}
+
+/**
+ * Phase 21 — former tenants who still owe. The headline is the org-wide total
+ * the server sends with every page, so it does not grow as older pages load.
+ */
+function FormerTenants() {
+  const t = useT();
+  const [page, setPage] = useState<ArrearsPage | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    arrearsApi
+      .list({ limit: 50 }, ac.signal)
+      .then((res) => {
+        setPage(res);
+        setCursor(res.next_cursor ?? null);
+      })
+      .catch((e) => {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        setError(toApiError(e));
+        setPage({
+          items: [],
+          next_cursor: null,
+          total: { outstanding: 0, contracts: 0 },
+        });
+      });
+    return () => ac.abort();
+  }, []);
+
+  const loadMore = async () => {
+    if (!cursor) return;
+    setLoadingMore(true);
+    try {
+      const res = await arrearsApi.list({ limit: 50, cursor });
+      setPage((prev) => ({
+        ...res,
+        items: [...(prev?.items ?? []), ...(res.items ?? [])],
+      }));
+      setCursor(res.next_cursor ?? null);
+    } catch (e) {
+      setError(toApiError(e));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  return (
+    <>
+      <ProblemNote error={error} />
+      {page && page.total.contracts > 0 ? (
+        <p
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--sp-3)",
+            color: "var(--ink-soft)",
+          }}
+        >
+          <Icon icon="solar:wallet-money-linear" width={20} />
+          <span>
+            {t.n("payments.former.count", page.total.contracts)} ·{" "}
+            <strong style={{ color: "var(--ink)" }}>
+              {fmtTZS(page.total.outstanding)}
+            </strong>{" "}
+            {t("payments.still_owing")}
+          </span>
+        </p>
+      ) : null}
+      <ArrearsTable
+        items={page?.items ?? null}
+        emptyText={error ? t("common.no_results") : t(EMPTY_KEY.former)}
+      />
+      {cursor ? (
+        <div>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => void loadMore()}
+            disabled={loadingMore}
+          >
+            {loadingMore ? t("common.loading_more") : t("common.load_more")}
+          </button>
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 function PaymentsBody() {
@@ -131,8 +236,8 @@ function PaymentsBody() {
     async (which: TabId, signal?: AbortSignal) => {
       setError(null);
       try {
-        if (which === "proofs") {
-          // The queue owns its own reads (status filter, cursor paging).
+        if (which === "proofs" || which === "former") {
+          // These own their own reads (filters, cursor paging).
           return;
         }
         if (which === "history") {
@@ -193,7 +298,7 @@ function PaymentsBody() {
   // A running total under the head, so the tab answers "how much?" as well as
   // "how many?" — the overdue figure is the one the dashboard card repeats.
   const outstanding =
-    tab === "history" || schedules === null
+    tab === "history" || tab === "former" || schedules === null
       ? null
       : schedules.reduce(
           (sum, s) => sum + Math.max(0, (s.amount ?? 0) - (s.paid_amount ?? 0)),
@@ -297,7 +402,9 @@ function PaymentsBody() {
           </p>
         ) : null}
 
-        {tab === "proofs" ? null : tab === "history" ? (
+        {tab === "former" ? <FormerTenants /> : null}
+
+        {tab === "proofs" || tab === "former" ? null : tab === "history" ? (
           <>
             <div style={{ marginBottom: "var(--sp-3)" }}>
               <FilterTabs<string>

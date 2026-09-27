@@ -518,9 +518,13 @@ func (s *Server) writeMemberOf(w http.ResponseWriter, r *http.Request, orgID pgt
 // handlePatchRenter is a landlord correcting a renter's name — a CSV import
 // typo, or a name misheard across a desk during in-person onboarding.
 //
-// It stops the moment the renter has signed anything, anywhere: from then on the
-// name is on a document the renter put their own name to, and only they may
-// change it (from their Profile, which has always been able to).
+// Before any signature the correction is free. Once the renter has signed with
+// this org (Phase 21) it still goes through, but with a reason on the audit row
+// and an SMS the org cannot switch off — the renter must learn that the name on
+// their account moved. The signed document itself never changes: its terms are
+// a snapshot. A signature with **another** org still refuses (409
+// `renter_signed_elsewhere`): that name sits on a document this landlord does
+// not hold, and only the renter may change it from their Profile.
 func (s *Server) handlePatchRenter(w http.ResponseWriter, r *http.Request) {
 	if s.dbUnavailable(w) {
 		return
@@ -533,25 +537,39 @@ func (s *Server) handlePatchRenter(w http.ResponseWriter, r *http.Request) {
 
 	var body struct {
 		FullName string `json:"full_name"`
+		Reason   string `json:"reason"`
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
 	}
 	f := validate.Fields{}
 	name := cleanFullName(f, "full_name", body.FullName)
+	reason := f.MaxLen("reason", strings.TrimSpace(body.Reason), adminReasonMax)
 	if !f.Empty() {
 		badRequest(w, f)
 		return
 	}
 
+	elsewhere, err := s.q.RenterSignedElsewhere(r.Context(), sqlc.RenterSignedElsewhereParams{
+		UserID: row.UserID, OrgID: p.OrgID,
+	})
+	if err != nil {
+		s.serverError(w, r, "renter.patch.elsewhere", err)
+		return
+	}
+	if elsewhere {
+		conflictCode(w, "renter_signed_elsewhere", "this renter has signed with another landlord",
+			"ask the renter to correct it in their Profile")
+		return
+	}
 	signed, err := s.q.RenterHasSignedAnywhere(r.Context(), row.UserID)
 	if err != nil {
 		s.serverError(w, r, "renter.patch.signed", err)
 		return
 	}
-	if signed {
-		conflictCode(w, "renter_signed", "this renter has signed a contract",
-			"ask the renter to correct it in their Profile")
+	if signed && reason == "" {
+		f.Add("reason", "required once the renter has signed a contract")
+		badRequest(w, f)
 		return
 	}
 
@@ -586,7 +604,7 @@ func (s *Server) handlePatchRenter(w http.ResponseWriter, r *http.Request) {
 			EntityType:  audit.EntityUser,
 			EntityID:    db.UUIDString(row.UserID),
 			Before:      map[string]any{"full_name": row.ProfileName},
-			After:       map[string]any{"full_name": updated.FullName},
+			After:       renameAfter(updated.FullName, reason, signed),
 		}); err != nil {
 			return err
 		}
@@ -594,7 +612,8 @@ func (s *Server) handlePatchRenter(w http.ResponseWriter, r *http.Request) {
 			OrgID: p.OrgIDString(), UserID: db.UUIDString(row.UserID),
 			Phone: db.StrVal(row.Phone), Name: name, OrgName: brand.DisplayName,
 			Lang: settings.SMSLanguage, Overrides: settings.notifyOverrides(),
-			Enabled: notificationSettingsOf(settings).Kinds.NameCorrectedEnabled(),
+			// After a signature the renter is always told, whatever the toggle says.
+			Enabled: signed || notificationSettingsOf(settings).Kinds.NameCorrectedEnabled(),
 		})
 		return err
 	}); err != nil {
@@ -606,6 +625,19 @@ func (s *Server) handlePatchRenter(w http.ResponseWriter, r *http.Request) {
 	// The response is the renter detail's own two blocks, so the tenant app
 	// redraws the card from the answer rather than re-fetching it.
 	s.handleGetRenter(w, r)
+}
+
+// renameAfter is the audit `after` of a landlord rename: the reason and the
+// signed flag ride along only when there is something to say.
+func renameAfter(name, reason string, signed bool) map[string]any {
+	after := map[string]any{"full_name": name}
+	if reason != "" {
+		after["reason"] = reason
+	}
+	if signed {
+		after["after_signature"] = true
+	}
+	return after
 }
 
 // nameCorrectedMessage carries what the `name_corrected` SMS needs across the

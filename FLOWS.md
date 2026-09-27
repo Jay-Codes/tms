@@ -101,6 +101,7 @@ The landlord's phone becomes the code channel. Nothing is sent by SMS; the rente
 3. Contract lifecycle: `draft → pending_signature → active → expiring → ended | terminated`.
 4. ~30 days before end date contract flags **expiring**; landlord prompted to renew (new contract, current price, renter confirms via SMS link) or let lapse.
 5. Early termination: landlord terminates with reason; remaining schedules cancelled/waived; unit → vacant; SMS to renter.
+6. **Arrears after move-out (Phase 21).** Periods the renter lived through stand after a termination or a natural end. The landlord keeps collecting them: Record payment and the renter's proof of payment both still work on a terminated or ended contract, for what is owed (nothing rolls into the future). Payments → **Former tenants** lists every closed tenancy that still owes, newest first, with the total. When the money will never come, the **owner** writes the rest off with a reason: the rows become `written_off`, leave `outstanding` and the Former tenants list, stay in `expected` (so the collection rate shows the loss), and can be **undone** if the former tenant turns up.
 
 ---
 

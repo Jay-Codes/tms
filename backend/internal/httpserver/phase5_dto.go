@@ -92,9 +92,9 @@ type paymentResponse struct {
 	// kind of movement it was, and is what the ledger filter and the chips read.
 	Source       string    `json:"source"`
 	UnitName     string    `json:"unit_name"`
-	PropertyName  string    `json:"property_name"`
-	RenterName    string    `json:"renter_name"`
-	CreatedAt     time.Time `json:"created_at"`
+	PropertyName string    `json:"property_name"`
+	RenterName   string    `json:"renter_name"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // scheduleContract is the identity block each schedule of the landlord's board
@@ -105,6 +105,9 @@ type scheduleContract struct {
 	PropertyName string `json:"property_name"`
 	RenterName   string `json:"renter_name"`
 	RenterUserID string `json:"renter_user_id"`
+	// Status is the contract's own status (Phase 21): a closed tenancy's row
+	// still takes a payment, but not a backfill.
+	Status string `json:"status,omitempty"`
 }
 
 // scheduleItem is the `schedule` shape from API.md Phase 5.
@@ -199,6 +202,7 @@ func toScheduleItem(r sqlc.ListSchedulesRow, today time.Time) scheduleItem {
 		PropertyName: r.PropertyName,
 		RenterName:   r.RenterName,
 		RenterUserID: db.UUIDString(r.RenterUserID),
+		Status:       r.ContractStatus,
 	}, today)
 }
 

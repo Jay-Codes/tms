@@ -38,6 +38,17 @@ SELECT EXISTS (
     WHERE user_id = sqlc.arg(user_id) AND party = 'renter'
 ) AS signed;
 
+-- RenterSignedElsewhere backs the post-signing rename (Phase 21): a landlord
+-- may correct the name of a renter who has signed only with them, never one
+-- whose signature sits on another landlord's document.
+-- guard-exempt: deliberately cross-org — it asks about every org but the caller's.
+-- name: RenterSignedElsewhere :one
+SELECT EXISTS (
+    SELECT 1 FROM contract_signatures
+    WHERE user_id = sqlc.arg(user_id) AND party = 'renter'
+      AND org_id <> sqlc.arg(org_id)
+) AS signed;
+
 -- SetRenterProfileFullName writes the profile half of a rename. The users half
 -- goes through the existing SetUserFullName, so both callers write the same two
 -- rows in the same transaction.

@@ -9,6 +9,7 @@
  *   pending → pencil
  *   partial → pencil, "TZS x of y"
  *   waived  → pencil
+ *   written_off → pencil (Phase 21: the landlord wrote it off)
  *
  * Home and the payments tab both render through here so the two screens can
  * never drift apart.
@@ -35,6 +36,8 @@ export function scheduleStatusText(t: Translator, schedule: ScheduleLike): strin
       });
     case 'waived':
       return t('schedule.waived');
+    case 'written_off':
+      return t('schedule.writtenOff');
     default:
       return t('schedule.due');
   }
@@ -122,6 +125,9 @@ export function CountdownChip({
   }
   if (schedule.status === 'waived') {
     return <span className="pencil">{t('schedule.waived')}</span>;
+  }
+  if (schedule.status === 'written_off') {
+    return <span className="pencil">{t('schedule.writtenOff')}</span>;
   }
 
   const left =
