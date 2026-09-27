@@ -53,9 +53,9 @@ function RenterBody({ userId }: { userId: string }) {
   const [messages, setMessages] = useState<NotificationLogEntry[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
 
-  // Phase 19.3 — the landlord's own typo, fixed while the renter has signed
-  // nothing. Whether they have is the server's call: a 409 `renter_signed` is
-  // what turns the button off, and the hint it carries is what explains it.
+  // Phase 19.3 / 21 — the landlord's own typo. After the renter signs with this
+  // org it takes a reason; a signature with another org is the server's 409
+  // `renter_signed_elsewhere`, which turns the button off and explains why.
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameBusy, setRenameBusy] = useState(false);
   const [renameError, setRenameError] = useState<ApiError | null>(null);
@@ -115,17 +115,19 @@ function RenterBody({ userId }: { userId: string }) {
     return () => ac.abort();
   }, [load]);
 
-  const rename = async (fullName: string) => {
+  const rename = async (fullName: string, reason: string) => {
     setRenameBusy(true);
     setRenameError(null);
     try {
-      await rentersApi.rename(userId, fullName);
+      await rentersApi.rename(userId, fullName, reason);
       setRenameOpen(false);
       await load();
     } catch (e) {
       const err = toApiError(e);
       setRenameError(err);
-      if (err.code === 'renter_signed') setRenameBlocked(err.detail);
+      if (err.code === 'renter_signed_elsewhere' || err.code === 'renter_signed') {
+        setRenameBlocked(err.detail);
+      }
     } finally {
       setRenameBusy(false);
     }
@@ -365,8 +367,9 @@ function RenterBody({ userId }: { userId: string }) {
         busy={renameBusy}
         error={renameError}
         hint={t('renters.rename.hint')}
+        withReason
         onClose={() => setRenameOpen(false)}
-        onSubmit={(name) => void rename(name)}
+        onSubmit={(name, reason) => void rename(name, reason)}
       />
     </>
   );

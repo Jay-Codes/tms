@@ -1668,11 +1668,13 @@ const messages: Messages = {
   'renters.nida.revealing': 'Inafungua…',
   'renters.rename.title': 'Sahihisha jina la mpangaji huyu',
   'renters.rename.hint':
-    'Kwa kosa la kuandika ulilofanya wakati wa kuingiza data au mtu akiwa mbele yako. Mpangaji hupewa SMS kuhusu mabadiliko. Baada ya kusaini mkataba wowote, yeye tu anaweza kulisahihisha, kutoka kwenye Wasifu wake.',
+    'Mpangaji hupewa SMS kuhusu mabadiliko. Mikataba iliyokwisha sainiwa inabaki na jina lililotumika wakati wa kusaini. Kama mpangaji amesaini na mwenye nyumba mwingine, yeye tu anaweza kulisahihisha, kutoka kwenye Wasifu wake.',
   'names.edit': 'Hariri',
   'names.save': 'Hifadhi jina',
   'names.field.full_name': 'Jina kamili',
   'names.field.full_name.hint': 'Herufi kati ya 2 na 80.',
+  'names.field.reason': 'Sababu ya mabadiliko',
+  'names.field.reason.hint': 'Inahitajika baada ya mpangaji kusaini mkataba na wewe. Huhifadhiwa kwenye kumbukumbu za ukaguzi.',
   'settings.you.heading': 'Wewe',
   'settings.you.hint':
     'Jina lililo kwenye orodha ya wafanyakazi, kwenye kumbukumbu za matukio na kwenye sahihi ya mwenye nyumba katika mikataba itakayoanzishwa kuanzia sasa. Mkataba uliokwisha kusainiwa unabaki na jina lililokuwa wakati wa kusaini.',

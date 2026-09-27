@@ -691,10 +691,15 @@ export const rentersApi = {
   /** Phase 19.1. `reason` is optional for a landlord (required for admin). */
   revealNida: (userId: string, reason?: string) =>
     api.post<NidaReveal>(`/renters/${userId}/nida/reveal`, reason ? { reason } : {}),
-  /** Phase 19.3. 409 `renter_signed` once the renter has signed anywhere. */
-  rename: (userId: string, fullName: string) =>
+  /**
+   * Phase 19.3 / 21. `reason` is required once the renter has signed with this
+   * org (400 on `reason`); 409 `renter_signed_elsewhere` once they have signed
+   * with another org.
+   */
+  rename: (userId: string, fullName: string, reason?: string) =>
     api.patch<Pick<RenterDetail, 'renter' | 'profile'>>(`/renters/${userId}`, {
       full_name: fullName,
+      ...(reason ? { reason } : {}),
     }),
 };
 

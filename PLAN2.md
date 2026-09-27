@@ -306,6 +306,12 @@ What exists: Phase 16 `payments` CSV import allocates rows against a contract's 
 - [x] Reports: collection rate and revenue by default **exclude** `source=backfill` payments from the *period they are recorded in* and count them in the period their `paid_at` falls in (that is what `paid_at` is for) — verify the report queries bucket by `paid_at`, not `created_at`; add a test with a backfilled year.
 - [x] Tests: past `start_date` accepted for manual/import, refused for application; backfill paid/waived; skips paid rows; 409/422 branches; renter sees chips; single SMS; audit rows; report bucketing by `paid_at`; import row before first schedule gets the hint.
 
+## Phase 21 — Field feedback round 2 (27 Sep 2026) — 🔨 in progress, branch `phase-21-rename-after-sign`
+
+- [x] Landlord renames a renter **after signing** (client decision): `PATCH /renters/{user_id}` takes `reason` (required once signed with this org), SMS always sent after a signature, 409 `renter_signed_elsewhere` when signed with another org. Tenant sheet gains the reason box. DECISIONS row supersedes Phase 19.3's.
+- [ ] Pagination: tenant list pages that load one page and drop the rest (payments, schedules, contracts, units, renters, link requests, notifications log, properties, new-contract pickers); paginate `GET /reports/payment-status`, `/reports/upcoming`, `/me/schedules`.
+- [ ] Unhappy-path scenarios (termination, arrears after move-out, deposits, prepaid refunds, eviction): catalogue with the client, then scope.
+
 ## Open questions (answer whenever; defaults applied if unanswered)
 
 1. **Credit unit**: 1 credit per 160-char GSM segment (default; 70 for UCS-2) vs 1 credit per message regardless of length. OTP/security messages exempt (default yes).

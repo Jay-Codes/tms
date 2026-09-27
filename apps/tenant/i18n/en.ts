@@ -1670,11 +1670,13 @@ const messages: Messages = {
   'renters.nida.revealing': 'Opening…',
   'renters.rename.title': 'Correct this renter’s name',
   'renters.rename.hint':
-    'For a typo you made on import or in person. The renter is sent an SMS about the change. Once they have signed a contract anywhere, only they can fix it, from their own Profile.',
+    'The renter is sent an SMS about the change. Contracts already signed keep the name they were signed with. If the renter has signed with another landlord, only they can fix it, from their own Profile.',
   'names.edit': 'Edit',
   'names.save': 'Save name',
   'names.field.full_name': 'Full name',
   'names.field.full_name.hint': 'Between 2 and 80 characters.',
+  'names.field.reason': 'Why the change',
+  'names.field.reason.hint': 'Required once the renter has signed a contract with you. Kept in the audit log.',
   'settings.you.heading': 'You',
   'settings.you.hint':
     'The name on the staff list, on audit rows and in the landlord signature of contracts activated from now on. A contract already signed keeps the name it was signed with.',

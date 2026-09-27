@@ -246,9 +246,9 @@ func TestPhase19OwnerRenamesAManagerAndCannotEmptyTheOrg(t *testing.T) {
 	}
 }
 
-// TestPhase19LandlordRenamesRenterOnlyBeforeSigning is the rule the phase turns
-// on: a typo is the landlord's to fix, a signature is not.
-func TestPhase19LandlordRenamesRenterOnlyBeforeSigning(t *testing.T) {
+// TestPhase19LandlordRenamesRenterBeforeAndAfterSigning: a typo is the
+// landlord's to fix; after the renter signs with this org it takes a reason.
+func TestPhase19LandlordRenamesRenterBeforeAndAfterSigning(t *testing.T) {
 	h := newHarness(t)
 	fix := h.newContractFixture(t, "RenameRenter", "0719001200", "+255719001201")
 
@@ -280,15 +280,49 @@ func TestPhase19LandlordRenamesRenterOnlyBeforeSigning(t *testing.T) {
 		t.Errorf("renter.update rows = %v, want one carrying before and after", rows)
 	}
 
-	// Once signed, it is the renter's own name on their own document.
+	// Once signed with this org (Phase 21), the rename needs a reason.
 	h.signAsRenter(t, fix.renter, fix.contractID, fix.renterPhone)
 	refused := fix.owner.do(http.MethodPatch, "/renters/"+fix.renterID,
-		map[string]any{"full_name": "Wrong Again"})
-	if refused.Code != http.StatusConflict {
-		t.Fatalf("rename after signing status = %d, want 409 — body: %s", refused.Code, refused.Raw)
+		map[string]any{"full_name": "Asha M. Mrisho"})
+	if refused.Code != http.StatusBadRequest {
+		t.Fatalf("rename after signing without reason = %d, want 400 — body: %s", refused.Code, refused.Raw)
 	}
-	if got := refused.str(t, "type"); got != "renter_signed" {
-		t.Errorf("type = %q, want renter_signed", got)
+	fix.owner.do(http.MethodPatch, "/renters/"+fix.renterID,
+		map[string]any{"full_name": "Asha M. Mrisho", "reason": "middle initial missing"}).
+		mustStatus(t, http.StatusOK, "rename after signing with reason")
+	if sent := ofKind(h.notifications(t), notify.KindNameCorrected); len(sent) != 2 {
+		t.Errorf("name_corrected messages = %d, want 2", len(sent))
+	}
+	rows := h.auditPayloads(t, "renter.update")
+	if len(rows) != 2 || !strings.Contains(rows[len(rows)-1]+rows[0], "middle initial missing") {
+		t.Errorf("renter.update rows = %v, want the second carrying the reason", rows)
+	}
+}
+
+// TestPhase21RenameRefusedWhenSignedWithAnotherLandlord keeps Phase 19's
+// cross-org rule where it matters: a name on another landlord's document is
+// the renter's to change, not this landlord's.
+func TestPhase21RenameRefusedWhenSignedWithAnotherLandlord(t *testing.T) {
+	h := newHarness(t)
+	fix := h.newContractFixture(t, "RenameHome", "0719001250", "+255719001251")
+
+	other := h.newOrgWithUnits("RenameAway", "renameaway@jjne.test", "0719001252",
+		[]string{"Flat A"}, phase4Rent)
+	applied := fix.renter.do(http.MethodPost, "/units/"+other.unitCodes[0]+"/link",
+		linkBody(other.client.periodIDByDays(t, 30), testTermDays)).
+		mustStatus(t, http.StatusCreated, "apply elsewhere")
+	approved := other.client.do(http.MethodPost,
+		"/link-requests/"+applied.str(t, "request", "id")+"/approve", nil).
+		mustStatus(t, http.StatusOK, "approve elsewhere")
+	h.signAsRenter(t, fix.renter, approved.str(t, "contract", "id"), fix.renterPhone)
+
+	refused := fix.owner.do(http.MethodPatch, "/renters/"+fix.renterID,
+		map[string]any{"full_name": "Someone Else", "reason": "typo"})
+	if refused.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 — body: %s", refused.Code, refused.Raw)
+	}
+	if got := refused.str(t, "type"); got != "renter_signed_elsewhere" {
+		t.Errorf("type = %q, want renter_signed_elsewhere", got)
 	}
 }
 
