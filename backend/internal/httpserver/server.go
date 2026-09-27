@@ -257,6 +257,19 @@ func (s *Server) routes() chi.Router {
 			r.Get("/contracts/{id}/settlement", s.handleSettlementPreview)
 			r.Get("/contracts/{id}/deposit", s.handleGetDeposit)
 			r.Post("/contracts/{id}/deposit", s.handlePostDeposit)
+			// §22.5 (rest): period relief, notice, holdover, eviction.
+			r.Post("/schedules/{id}/adjust", s.handleAdjustSchedule)
+			r.Post("/schedules/{id}/adjust/undo", s.handleUndoScheduleAdjust)
+			r.Post("/contracts/{id}/notice", s.handleGiveNotice)
+			r.Delete("/contracts/{id}/notice", s.handleWithdrawNotice)
+			r.Get("/holdovers", s.handleListHoldovers)
+			r.Post("/contracts/{id}/moved-out", s.handleConfirmMovedOut)
+			r.Get("/contracts/{id}/eviction", s.handleContractEvictions)
+			r.Post("/contracts/{id}/eviction", s.handleOpenEviction)
+			r.Get("/evictions", s.handleListEvictions)
+			r.Post("/evictions/{id}/notice", s.handleEvictionNotice)
+			r.Post("/evictions/{id}/withdraw", s.handleWithdrawEviction)
+			r.Get("/evictions/{id}/letter", s.handleEvictionLetter)
 			r.Post("/contract-templates/{id}/reissue-pending", s.handleReissueStale)
 
 			// --- Phase 4: contracts ---
@@ -421,6 +434,9 @@ func (s *Server) routes() chi.Router {
 			r.Post("/contracts/{id}/sign/otp", s.handleContractSignOTP)
 			r.Post("/contracts/{id}/signature-upload", s.handleSignatureUpload)
 			r.Post("/contracts/{id}/sign", s.handleSignContract)
+			// §22.5: the renter's own notice to leave.
+			r.Post("/me/contracts/{id}/notice", s.handleGiveNotice)
+			r.Delete("/me/contracts/{id}/notice", s.handleWithdrawNotice)
 
 			// --- Phase 5: the renter's own payment history ---
 			r.Get("/me/payments", s.handleListMyPayments)

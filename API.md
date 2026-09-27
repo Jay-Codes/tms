@@ -1359,3 +1359,23 @@ Migration 000027: `rent_refunds` (+ `rent_refund_items` per payment), `deposit_e
 **Deposit ledger** — `GET /contracts/{id}/deposit` → `{deposit: {required, received, held, owed_beyond_deposit, entries[], rent_refunds[]}}`. `POST /contracts/{id}/deposit {kind, amount, method?, reference?, reason?, occurred_at?}` (signed contracts only, 409 `contract_not_signed`): `received`/`refund` need a method; `deduction` needs a reason and may exceed what is held only if the policy allows (`deductions_may_exceed_deposit`; the excess shows as `owed_beyond_deposit`), else 422 `exceeds_deposit_held {held}`; `refund`/`applied_to_rent` ≤ held. `applied_to_rent` becomes an ordinary rent payment (method `deposit`) through the allocator. Audit `deposit.record`.
 
 **Reports**: cash figures (summary `collected`, collections, revenue daily and by property) subtract rent refunds in the period they were paid out. **Reversal**: 409 `payment_refunded` for a payment part of which was refunded; 409 `deposit_payment` for money applied from the deposit.
+
+### 22.5 (rest) Period relief, notice to leave, holdover, eviction
+Migration 000028: schedule `original_amount`, `adjustment_kind|reason|at|by`; contract `notice_given_at`, `notice_leave_on`, `notice_reason`, `moved_out_confirmed_at`; table `eviction_cases`; SMS kinds `notice_received`, `eviction_demand`, `eviction_notice`, `eviction_withdrawn` (SW/EN, credits apply; `{{date}}` platform-only).
+
+| Route | Contract |
+|---|---|
+| `POST /schedules/{id}/adjust` | Org. `{kind: waive\|discount, discount?, reason}` on an unsettled, unadjusted period. Waive → `waived` (money paid stays); discount (1 … amount−1) → amount lowered, status recomputed. 409 `not_adjustable`. Audit `schedule.adjust`. Schedule rows gain `original_amount`, `adjustment_kind`, `adjustment_reason`. |
+| `POST /schedules/{id}/adjust/undo` | Org. Restores the amount and recomputes status. 409 `not_adjusted`. |
+| `POST /me/contracts/{id}/notice`, `POST /contracts/{id}/notice` | Renter (own contract) or org (told in person). `{leave_on, reason?}` on a running contract; `leave_on ≥ today + policy.tenant_notice_days` (422 `notice_too_short {earliest}`) and before `end_date` (422 `after_end_date`). SMS `notice_received`. Audit `contract.notice`. Contract gains `notice_given_at`, `notice_leave_on`, `notice_reason`. |
+| `DELETE /me/contracts/{id}/notice`, `DELETE /contracts/{id}/notice` | Withdraws it; 409 `no_notice`. |
+| `GET /holdovers` | Org. Tenancies that **ran out** (status `ended`) in the last 90 days, not renewed, not confirmed moved out → `{items:[{contract_id, end_date, renter, unit_id, unit_name, property_name}]}`. |
+| `POST /contracts/{id}/moved-out` | Org. Confirms an ended/terminated tenancy is empty (`moved_out_confirmed_at`); 409 `not_closed`. |
+| `POST /contracts/{id}/amend` | Now also renews an **ended** contract when `effective_date` = its end date (holdover renewal); refused if the unit has been let since. On activation the ended contract is linked (`superseded_by_contract_id`), nothing waived. |
+| `POST /contracts/{id}/eviction` | Org. Opens a case at **demand**: running contract with arrears past the grace days (409 `no_arrears`), one open case per contract (409 `eviction_open`). `{pay_by?}` default today+7. `notice_days` = policy `eviction_notice_days` (else 30). SMS `eviction_demand` (amount, pay-by). → 201 `{eviction}`. |
+| `POST /evictions/{id}/notice` | Demand → **notice**: `vacate_by` = today + notice days; SMS `eviction_notice`. 409 `not_at_demand`. |
+| `POST /evictions/{id}/withdraw` | `{reason}` → **withdrawn**; SMS `eviction_withdrawn`. 409 `case_closed`. Terminating the contract closes an open case as **vacated**. |
+| `GET /contracts/{id}/eviction`, `GET /evictions` | The open case (with `arrears_now`) and history; the org's open cases. |
+| `GET /evictions/{id}/letter?kind=demand\|notice&lang=sw\|en` | `{html, kind, lang, total}` — printable letter with today's arrears statement (periods past due, rent, paid, owing, total). Platform wording, not org-editable. 409 `no_notice_yet` for a notice letter before the notice. |
+
+Audit actions `schedule.adjust`, `schedule.adjust_undo`, `contract.notice`, `contract.notice_withdraw`, `contract.moved_out`, `contract.eviction`.

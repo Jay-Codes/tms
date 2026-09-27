@@ -284,6 +284,28 @@ var isoRoutes = []isoCase{
 	{method: "GET", pattern: "/units/{id}/template", aud: isoOrg, path: "/units/{unitA}/template"},
 	{method: "POST", pattern: "/contracts/{id}/reissue", aud: isoOrg, path: "/contracts/{contractA}/reissue"},
 	{method: "GET", pattern: "/contracts/{id}/settlement", aud: isoOrg, path: "/contracts/{contractA}/settlement"},
+	// §22.5 (rest). Another org's period, contract or case is the usual 404.
+	{
+		method: "POST", pattern: "/schedules/{id}/adjust", aud: isoOrg, path: "/schedules/{scheduleA}/adjust",
+		body: map[string]any{"kind": "waive", "reason": "hijack"},
+	},
+	{method: "POST", pattern: "/schedules/{id}/adjust/undo", aud: isoOrg, path: "/schedules/{scheduleA}/adjust/undo"},
+	{
+		method: "POST", pattern: "/contracts/{id}/notice", aud: isoOrg, path: "/contracts/{contractA}/notice",
+		body: map[string]any{"leave_on": "{today}"},
+	},
+	{method: "DELETE", pattern: "/contracts/{id}/notice", aud: isoOrg, path: "/contracts/{contractA}/notice"},
+	{method: "GET", pattern: "/holdovers", aud: isoOrg, want: []int{200}},
+	{method: "POST", pattern: "/contracts/{id}/moved-out", aud: isoOrg, path: "/contracts/{contractA}/moved-out"},
+	{method: "GET", pattern: "/contracts/{id}/eviction", aud: isoOrg, path: "/contracts/{contractA}/eviction"},
+	{method: "POST", pattern: "/contracts/{id}/eviction", aud: isoOrg, path: "/contracts/{contractA}/eviction"},
+	{method: "GET", pattern: "/evictions", aud: isoOrg, want: []int{200}},
+	{method: "POST", pattern: "/evictions/{id}/notice", aud: isoOrg, path: "/evictions/{contractA}/notice"},
+	{
+		method: "POST", pattern: "/evictions/{id}/withdraw", aud: isoOrg, path: "/evictions/{contractA}/withdraw",
+		body: map[string]any{"reason": "hijack"},
+	},
+	{method: "GET", pattern: "/evictions/{id}/letter", aud: isoOrg, path: "/evictions/{contractA}/letter?kind=demand"},
 	{method: "GET", pattern: "/contracts/{id}/deposit", aud: isoOrg, path: "/contracts/{contractA}/deposit"},
 	{
 		method: "POST", pattern: "/contracts/{id}/deposit", aud: isoOrg, path: "/contracts/{contractA}/deposit",
@@ -589,6 +611,12 @@ var isoRoutes = []isoCase{
 		method: "POST", pattern: "/contracts/{id}/sign", aud: isoRenter,
 		path: "/contracts/{contractA}/sign", body: map[string]any{"otp_code": "123456"},
 	},
+	// §22.5: another renter's notice to leave is theirs alone.
+	{
+		method: "POST", pattern: "/me/contracts/{id}/notice", aud: isoRenter,
+		path: "/me/contracts/{contractA}/notice", body: map[string]any{"leave_on": "{today}"},
+	},
+	{method: "DELETE", pattern: "/me/contracts/{id}/notice", aud: isoRenter, path: "/me/contracts/{contractA}/notice"},
 
 	// ------------------------------------------- proofs of payment (16.1) --
 	//

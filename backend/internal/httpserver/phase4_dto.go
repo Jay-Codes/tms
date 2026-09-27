@@ -144,14 +144,19 @@ type contractResponse struct {
 	// after it was written — offer a reissue. Set on the single read only.
 	TemplateChanged bool `json:"template_changed"`
 	// Settlement is what ending this tenancy applied (§22.5), absent until then.
-	Settlement        json.RawMessage  `json:"settlement,omitempty"`
-	Signatures        []signatureBlock `json:"signatures"`
-	LinkRequestID     *string          `json:"link_request_id"`
-	CreatedAt         time.Time        `json:"created_at"`
-	ActivatedAt       *time.Time       `json:"activated_at"`
-	TerminatedAt      *time.Time       `json:"terminated_at"`
-	TerminationReason *string          `json:"termination_reason"`
-	SchedulesSummary  schedulesSummary `json:"schedules_summary"`
+	Settlement json.RawMessage `json:"settlement,omitempty"`
+	// §22.5: the renter's notice to leave, and the holdover confirmation.
+	NoticeGivenAt       *time.Time       `json:"notice_given_at"`
+	NoticeLeaveOn       *string          `json:"notice_leave_on"`
+	NoticeReason        *string          `json:"notice_reason"`
+	MovedOutConfirmedAt *time.Time       `json:"moved_out_confirmed_at"`
+	Signatures          []signatureBlock `json:"signatures"`
+	LinkRequestID       *string          `json:"link_request_id"`
+	CreatedAt           time.Time        `json:"created_at"`
+	ActivatedAt         *time.Time       `json:"activated_at"`
+	TerminatedAt        *time.Time       `json:"terminated_at"`
+	TerminationReason   *string          `json:"termination_reason"`
+	SchedulesSummary    schedulesSummary `json:"schedules_summary"`
 }
 
 // scheduleResponse is one payment_schedules row.
@@ -170,6 +175,10 @@ type scheduleResponse struct {
 	// WriteOffReason is set on a `written_off` row (Phase 21): the landlord's
 	// one line on why the debt is no longer chased.
 	WriteOffReason *string `json:"write_off_reason,omitempty"`
+	// §22.5: a waiver or discount on this one period, and what it was before.
+	OriginalAmount   *int64  `json:"original_amount,omitempty"`
+	AdjustmentKind   *string `json:"adjustment_kind,omitempty"`
+	AdjustmentReason *string `json:"adjustment_reason,omitempty"`
 }
 
 // templateResponse is the `template` shape from API.md.
@@ -234,6 +243,10 @@ func toContract(r contractRow, signatures []signatureBlock) contractResponse {
 		SnapshotHash:             db.StrVal(r.SnapshotHash),
 		Policy:                   parsedPolicy(r.Policy),
 		Settlement:               json.RawMessage(r.Settlement),
+		NoticeGivenAt:            optTime(r.NoticeGivenAt),
+		NoticeLeaveOn:            optDateString(r.NoticeLeaveOn),
+		NoticeReason:             r.NoticeReason,
+		MovedOutConfirmedAt:      optTime(r.MovedOutConfirmedAt),
 		SupersedesContractID:     optUUIDString(r.SupersedesContractID),
 		AmendmentEffectiveDate:   optDateString(r.AmendmentEffectiveDate),
 		AmendmentReason:          r.AmendmentReason,
@@ -296,14 +309,17 @@ func toSignatures(rows []sqlc.ListContractSignaturesRow) []signatureBlock {
 
 func toSchedule(s sqlc.PaymentSchedule) scheduleResponse {
 	return scheduleResponse{
-		ID:             db.UUIDString(s.ID),
-		PeriodStart:    s.PeriodStart.Time.Format(dateLayout),
-		PeriodEnd:      s.PeriodEnd.Time.Format(dateLayout),
-		DueDate:        s.DueDate.Time.Format(dateLayout),
-		Amount:         s.Amount,
-		Status:         s.Status,
-		PaidAmount:     s.PaidAmount,
-		WriteOffReason: s.WriteOffReason,
+		ID:               db.UUIDString(s.ID),
+		PeriodStart:      s.PeriodStart.Time.Format(dateLayout),
+		PeriodEnd:        s.PeriodEnd.Time.Format(dateLayout),
+		DueDate:          s.DueDate.Time.Format(dateLayout),
+		Amount:           s.Amount,
+		Status:           s.Status,
+		PaidAmount:       s.PaidAmount,
+		WriteOffReason:   s.WriteOffReason,
+		OriginalAmount:   s.OriginalAmount,
+		AdjustmentKind:   s.AdjustmentKind,
+		AdjustmentReason: s.AdjustmentReason,
 	}
 }
 

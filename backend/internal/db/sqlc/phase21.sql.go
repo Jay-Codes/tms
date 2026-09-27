@@ -148,7 +148,7 @@ SET status = CASE
     written_off_at = NULL, written_off_by_user_id = NULL, write_off_reason = NULL
 WHERE org_id = $2 AND contract_id = $3
   AND status = 'written_off' AND deleted_at IS NULL
-RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason
+RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id
 `
 
 type RestoreWrittenOffParams struct {
@@ -184,6 +184,11 @@ func (q *Queries) RestoreWrittenOff(ctx context.Context, arg RestoreWrittenOffPa
 			&i.WrittenOffAt,
 			&i.WrittenOffByUserID,
 			&i.WriteOffReason,
+			&i.OriginalAmount,
+			&i.AdjustmentKind,
+			&i.AdjustmentReason,
+			&i.AdjustedAt,
+			&i.AdjustedByUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -201,7 +206,7 @@ SET status = 'written_off', written_off_at = now(),
     written_off_by_user_id = $1, write_off_reason = $2
 WHERE org_id = $3 AND contract_id = $4
   AND status IN ('pending', 'partial', 'overdue') AND deleted_at IS NULL
-RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason
+RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason, original_amount, adjustment_kind, adjustment_reason, adjusted_at, adjusted_by_user_id
 `
 
 type WriteOffSchedulesParams struct {
@@ -243,6 +248,11 @@ func (q *Queries) WriteOffSchedules(ctx context.Context, arg WriteOffSchedulesPa
 			&i.WrittenOffAt,
 			&i.WrittenOffByUserID,
 			&i.WriteOffReason,
+			&i.OriginalAmount,
+			&i.AdjustmentKind,
+			&i.AdjustmentReason,
+			&i.AdjustedAt,
+			&i.AdjustedByUserID,
 		); err != nil {
 			return nil, err
 		}

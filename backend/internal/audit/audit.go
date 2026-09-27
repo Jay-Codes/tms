@@ -235,6 +235,13 @@ const (
 	// §22.5: the settlement a termination applied, and each deposit movement.
 	ActionContractSettle = "contract.settle"
 	ActionDepositRecord  = "deposit.record"
+	// §22.5 (rest): period relief, notice to leave, holdover, eviction.
+	ActionScheduleAdjust         = "schedule.adjust"
+	ActionScheduleAdjustUndo     = "schedule.adjust_undo"
+	ActionContractNotice         = "contract.notice"
+	ActionContractNoticeWithdraw = "contract.notice_withdraw"
+	ActionContractMovedOut       = "contract.moved_out"
+	ActionEviction               = "contract.eviction"
 )
 
 // Entity types.

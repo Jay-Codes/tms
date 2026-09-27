@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -493,11 +494,16 @@ func (s *Server) handleAmendContract(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, f)
 		return
 	}
-	if old.Status != contractActive && old.Status != contractExpiring {
+	// A tenancy that ran out may still be renewed from its end date (the
+	// holdover case): the renter never left.
+	renewEnded := old.Status == contractEnded && !old.SupersededByContractID.Valid &&
+		effective.Format(dateLayout) == old.EndDate.Time.Format(dateLayout)
+	if old.Status != contractActive && old.Status != contractExpiring && !renewEnded {
 		conflictCode(w, "contract_not_active", "contract not running",
-			"only a running contract can be amended or renewed")
+			"only a running contract can be amended, or an ended one renewed from its end date")
 		return
 	}
+	in.AmendsClosed = renewEnded
 
 	// The effective date must open one of this contract's own periods (or be
 	// its end, for a renewal): a date inside a period would charge that period
@@ -616,6 +622,11 @@ func (s *Server) supersedeTx(
 	if err != nil {
 		return 0, err
 	}
+	if locked.Status == contractEnded && effective.Equal(amendmentOldEnd(ctx, q, org, oldID)) {
+		// A renewal of a tenancy that had already run out: nothing to waive
+		// or move, only the link.
+		return 0, q.LinkRenewalOfEnded(ctx, sqlc.LinkRenewalOfEndedParams{NewID: amendment.ID, OrgID: org, ID: oldID})
+	}
 	if locked.Status != contractActive && locked.Status != contractExpiring {
 		return 0, errAmendmentStale
 	}
@@ -709,4 +720,13 @@ func (s *Server) supersedeTx(
 			"waived": waived, "carried": carried,
 		},
 	})
+}
+
+// amendmentOldEnd is the end date of the contract an amendment replaces.
+func amendmentOldEnd(ctx context.Context, q *sqlc.Queries, org, id pgtype.UUID) time.Time {
+	row, err := q.GetContract(ctx, sqlc.GetContractParams{ID: id, OrgID: org})
+	if err != nil {
+		return time.Time{}
+	}
+	return row.EndDate.Time
 }
