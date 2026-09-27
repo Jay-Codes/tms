@@ -280,3 +280,8 @@ deliberately removes the ability to overpay a named row.
 **Notes**: `apps/admin` has no i18n dictionary (English-only by existing design), so PLAN2's "SW/EN
 strings" for 19.2 does not apply there. `apps/*/tsconfig.tsbuildinfo` is now ignored centrally. Phase 18.2
 assist UI (tenant `renters/assist`, enduser `?assist=`) is still open in a parallel session.
+
+## Phase 29 — Backfill before the contract's start date (27 Sep 2026) — branch `phase-29-backfill-before-start`
+
+Backfill takes `from` (real move-in) + `period_amount` (rent then) + `dry_run`; creates the missing periods up to the contract start, owned by the batch (migration 000033), settles up to `until`, leaves the rest overdue; undo removes them; CSV columns `from`/`period_amount`; contract document excludes them. Tenant Backfill sheet has a "began before" section with a server dry-run preview. `phase29_test.go` (5 tests); full Go suite and workspace tests green; walked through in the browser on the dev stack (create → list → undo).
+

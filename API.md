@@ -1440,6 +1440,18 @@ Migration 000030: `backfill_batches` (`org_id, contract_id, mode paid|waived, un
 | Undo | `POST /imports/{id}/undo` undoes each of the import's batches exactly like `POST /backfills/{id}/undo` (reason `import undone`). A batch refused as touched/refunded is **kept and not counted**, like anything else an import undo leaves; it can still be undone from the contract page later. `undone.backfills` counts the rest. |
 
 `created` and `undone` gain a **`backfills`** count for every kind (0 elsewhere).
+## Part 2 — Phase 29: backfill before the contract's start date
+
+Migration 000033: `payment_schedules.created_by_backfill_id` (periods a backfill created), `backfill_batches.from_date`, `backfill_batches.created_periods`.
+
+| Route | Contract |
+|---|---|
+| `POST /contracts/{id}/backfill` | Body gains **`from?: "YYYY-MM-DD"`** — the real move-in; must be before the contract's `start_date` and at most 3650 days before it (else 422 naming `from`) — **`period_amount?: int`** — rent per payment period for the created periods, whole TZS, `0 < x < 10^12`, default the contract's per-period rent; without `from` → 400 naming `period_amount` — and **`dry_run?: bool`**. With `from`: the periods from `from` up to the day before `start_date` are generated at the contract's payment-period cadence and due day (last one truncated and prorated), status `overdue` past due + grace else `pending`, stamped `created_by_backfill_id`; then every unsettled row due ≤ `until` is settled as before. `until` must be ≥ `from` (422). Without `from`, `until` must be ≥ the first existing period (the contract's `start_date` unless an earlier backfill created history) (422). `from` while the contract already has periods before `start_date` → **409 `history_exists`**. Response gains **`created`** (periods created). A call that created periods keeps its batch even if it settled none. `dry_run: true` runs the whole call and rolls it back: same response with `dry_run: true`, `backfill_id: null`, nothing written, no SMS. `contract.backfill` audit gains `from`, `created`. |
+| `GET /contracts/{id}/backfills` | Each item gains `from` (date or null) and `created_periods`. |
+| `POST /backfills/{id}/undo` | Also soft-deletes the periods the batch created, after reversing their money; response gains `periods_removed`. `touched_since` also counts a later non-batch payment allocated to a created period. |
+| `GET /contracts/{id}/document` | `schedule` leaves out created periods — history, not signed terms. |
+| CSV `backfill` kind | Optional columns **`from`**, **`period_amount`** (same rules; `period_amount` without `from` is a row error; `from` on a contract with history is a row error). Preview `resolved` gains `from` and `created`; `periods`/`amount` include the created periods. |
+
 ## Part 2 — Phase 28: projections, break-even and ROI
 
 Migration 000032: `properties.purchase_price` (BIGINT > 0), `purchase_date` (DATE), `current_value` (BIGINT > 0) — all nullable; `expense_categories.is_capital` (BOOLEAN, default false); table `projection_scenarios` (per org, unique name case-insensitively, at most 50).

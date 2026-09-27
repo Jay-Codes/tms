@@ -77,7 +77,8 @@ export function BackfillsList({
       const res = await backfillsApi.undo(undoing.id, reason.trim());
       setUndoing(null);
       setDone(
-        t('backfills.undo.done', { reversed: res.payments_reversed, reopened: res.periods_reopened }),
+        t('backfills.undo.done', { reversed: res.payments_reversed, reopened: res.periods_reopened }) +
+          (res.periods_removed ? ` ${t('backfills.undo.done_removed', { n: res.periods_removed })}` : ''),
       );
       await load();
       onChanged();
@@ -132,7 +133,14 @@ export function BackfillsList({
                   ) : null}
                 </td>
                 <td>{t(`backfill.mode.${b.mode}`)}</td>
-                <td>{fmtDate(b.until)}</td>
+                <td>
+                  {fmtDate(b.until)}
+                  {b.from ? (
+                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
+                      {t('backfills.from', { date: fmtDate(b.from), n: b.created_periods ?? 0 })}
+                    </div>
+                  ) : null}
+                </td>
                 <td className="num">{b.periods}</td>
                 <td className="num">{fmtTZS(b.amount)}</td>
                 <td>{b.created_by?.name || t('import.history.someone')}</td>
@@ -186,6 +194,9 @@ export function BackfillsList({
                 {undoing.mode === 'paid'
                   ? t('backfills.undo.warning_paid', { count: undoing.periods, amount: fmtTZS(undoing.amount) })
                   : t('backfills.undo.warning_waived', { count: undoing.periods })}
+                {undoing.created_periods
+                  ? ` ${t('backfills.undo.warning_created', { n: undoing.created_periods })}`
+                  : ''}
               </span>
             </p>
             <Field
