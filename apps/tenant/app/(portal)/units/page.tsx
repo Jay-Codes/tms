@@ -3,7 +3,8 @@
 /**
  * Vacancy board (FLOWS flow 4). Every unit in the org, filterable by status,
  * property and free text, with days-vacant read off `vacant_since`.
- * Selecting rows enables a bulk price change (FLOWS flow 5 step 3).
+ * Selecting rows enables a bulk price change (FLOWS flow 5 step 3) and, from
+ * Phase 22, one contract template for all of them.
  */
 
 import { Icon } from '@iconify/react';
@@ -13,6 +14,7 @@ import { DueChip } from '../../../components/DueBits';
 import { Field, Note, ProblemNote } from '../../../components/FormBits';
 import { PageHead } from '../../../components/PageHead';
 import { Sheet } from '../../../components/Sheet';
+import { useTemplateList } from '../../../components/TemplateBits';
 import { StatusMark } from '../../../components/UnitStatus';
 import {
   ApiError,
@@ -165,6 +167,76 @@ function BulkPriceForm({
   );
 }
 
+/* ---------------------------- bulk template ------------------------------ */
+
+function BulkTemplateForm({
+  unitIds,
+  onDone,
+  onCancel,
+}: {
+  unitIds: string[];
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const t = useT();
+  const templates = useTemplateList();
+  // '' = clear, so each unit follows its property again.
+  const [templateId, setTemplateId] = useState('');
+  const [error, setError] = useState<ApiError | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await unitsApi.bulkTemplate(unitIds, templateId || null);
+      onDone();
+    } catch (err) {
+      setError(toApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} style={{ display: 'grid', gap: 'var(--sp-4)' }} noValidate>
+      <ProblemNote error={error} />
+      <p style={{ color: 'var(--ink-soft)' }}>
+        {t.n('units.bulk.selected', unitIds.length)} {t('units.bulk_template.note')}
+      </p>
+      <Field
+        id="bt_template"
+        label={t('units.template.label')}
+        error={error?.errors.template_id ?? error?.errors.unit_ids}
+      >
+        <select
+          id="bt_template"
+          className="input"
+          value={templateId}
+          disabled={templates === null}
+          onChange={(e) => setTemplateId(e.target.value)}
+        >
+          <option value="">{t('units.template.inherit')}</option>
+          {(templates ?? []).map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+        <button type="submit" className="btn btn-primary" disabled={busy}>
+          {busy ? t('units.bulk.applying') : t('units.bulk.apply')}
+        </button>
+        <button type="button" className="btn btn-quiet" onClick={onCancel}>
+          {t('common.cancel')}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 /* -------------------------------- board ---------------------------------- */
 
 function UnitsBody() {
@@ -178,6 +250,7 @@ function UnitsBody() {
   const [error, setError] = useState<ApiError | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
   useEffect(() => {
@@ -230,15 +303,26 @@ function UnitsBody() {
         title={t('nav.units')}
         lead={t('units.lead')}
         actions={
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={selected.length === 0}
-            onClick={() => setBulkOpen(true)}
-          >
-            <Icon icon="solar:tag-price-linear" width={20} /> {t('units.bulk_price')}
-            {selected.length ? ` (${selected.length})` : ''}
-          </button>
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={selected.length === 0}
+              onClick={() => setTemplateOpen(true)}
+            >
+              <Icon icon="solar:document-text-linear" width={20} /> {t('units.bulk_template')}
+              {selected.length ? ` (${selected.length})` : ''}
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={selected.length === 0}
+              onClick={() => setBulkOpen(true)}
+            >
+              <Icon icon="solar:tag-price-linear" width={20} /> {t('units.bulk_price')}
+              {selected.length ? ` (${selected.length})` : ''}
+            </button>
+          </>
         }
       />
 
@@ -401,6 +485,19 @@ function UnitsBody() {
             void load();
           }}
           onCancel={() => setBulkOpen(false)}
+        />
+      </Sheet>
+
+      <Sheet open={templateOpen} title={t('units.bulk_template.title')} onClose={() => setTemplateOpen(false)}>
+        <BulkTemplateForm
+          unitIds={selected}
+          onDone={() => {
+            setTemplateOpen(false);
+            setSelected([]);
+            setNote(t('units.template_updated'));
+            void load();
+          }}
+          onCancel={() => setTemplateOpen(false)}
         />
       </Sheet>
     </>

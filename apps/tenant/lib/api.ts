@@ -348,6 +348,11 @@ export interface Property {
   notes: string | null;
   unit_counts: UnitCounts;
   created_at: string;
+  /**
+   * Phase 22 — the template this property's units are written on unless a
+   * unit names its own; null means the org default.
+   */
+  contract_template_id?: string | null;
 }
 
 export interface Price {
@@ -381,6 +386,18 @@ export interface Unit {
    * with nothing outstanding.
    */
   next_due_date?: string | null;
+  /** Phase 22 — the unit's own template; null inherits from its property. */
+  contract_template_id?: string | null;
+}
+
+/** Where a unit's template came from (Phase 22 resolution order). */
+export type TemplateSource = 'unit' | 'property' | 'default';
+
+/** `GET /units/{id}/template` — null when the org has no template at all. */
+export interface ResolvedTemplate {
+  id: string;
+  name: string;
+  source: TemplateSource;
 }
 
 export interface QrSheetItem {
@@ -474,6 +491,11 @@ export const propertiesApi = {
     api.post<{ items: Unit[] }>(`/properties/${id}/units/bulk`, body),
   qrSheet: (id: string, signal?: AbortSignal) =>
     api.get<{ items: QrSheetItem[] }>(`/properties/${id}/qr-sheet`, { signal }),
+  /** Phase 22. `null` puts the property back on the org default. */
+  setTemplate: (id: string, templateId: string | null) =>
+    api.put<{ contract_template_id: string | null }>(`/properties/${id}/template`, {
+      template_id: templateId,
+    }),
 };
 
 export const unitsApi = {
@@ -499,6 +521,18 @@ export const unitsApi = {
     period_days?: number;
     effective_from?: string;
   }) => api.post<{ items: Price[] }>('/units/bulk-price', body),
+  /** Phase 22: which template a tenancy of this unit would be written on, and why. */
+  template: (id: string, signal?: AbortSignal) =>
+    api.get<{ template: ResolvedTemplate | null }>(`/units/${id}/template`, { signal }),
+  /**
+   * Phase 22. `template_id` is always sent — `null` clears, so the units
+   * inherit from their property again. Ids outside the org match nothing.
+   */
+  bulkTemplate: (unitIds: string[], templateId: string | null) =>
+    api.post<{ updated: number; contract_template_id: string | null }>('/units/bulk-template', {
+      unit_ids: unitIds,
+      template_id: templateId,
+    }),
 };
 
 export const publicApi = {
@@ -657,10 +691,15 @@ export const linkRequestsApi = {
     ),
   get: (id: string, signal?: AbortSignal) =>
     api.get<LinkRequestDetail | LinkRequest>(`/link-requests/${id}`, { signal }),
-  /** Phase 4: approval also creates the contract, returned alongside the request. */
-  approve: (id: string) =>
+  /**
+   * Phase 4: approval also creates the contract, returned alongside the request.
+   * Phase 22: `templateId` writes it on that template; without it the unit's
+   * resolved template is used.
+   */
+  approve: (id: string, templateId?: string) =>
     api.post<{ request: LinkRequest; contract?: Contract } | LinkRequest>(
       `/link-requests/${id}/approve`,
+      templateId ? { template_id: templateId } : undefined,
     ),
   reject: (id: string, reason: string) =>
     api.post<{ request: LinkRequest } | LinkRequest>(`/link-requests/${id}/reject`, { reason }),
@@ -752,6 +791,8 @@ export interface ContractTemplateSummary {
   is_default: boolean;
   updated_at: string;
   created_at: string;
+  /** Phase 22 — how many units and properties name this template. */
+  usage?: { units: number; properties: number };
 }
 
 export interface ContractTemplate extends ContractTemplateSummary {
@@ -959,6 +1000,16 @@ export type BrandingAsset = 'logo' | 'letterhead';
 /* ------------------------------------------------------------------ */
 /* Phase 4 endpoint helpers (audience org)                              */
 /* ------------------------------------------------------------------ */
+
+/**
+ * `409 template_in_use` from `DELETE /contract-templates/{id}` (Phase 22)
+ * carries how many units and properties still name the template.
+ */
+export function templateInUse(err: unknown): { units: number; properties: number } | null {
+  if (!(err instanceof ApiError) || err.code !== 'template_in_use') return null;
+  const n = (v: unknown) => (typeof v === 'number' ? v : 0);
+  return { units: n(err.body.units), properties: n(err.body.properties) };
+}
 
 export const templatesApi = {
   list: (signal?: AbortSignal) =>
