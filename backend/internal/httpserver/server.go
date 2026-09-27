@@ -19,6 +19,8 @@ import (
 	"tms/backend/internal/httpx"
 	"tms/backend/internal/notify"
 	"tms/backend/internal/ratelimit"
+	"tms/backend/internal/smspay"
+	"tms/backend/internal/snippe"
 	"tms/backend/internal/storage"
 )
 
@@ -68,6 +70,13 @@ type Server struct {
 	templates *notify.PlatformStore
 
 	proxyTrust httpx.ProxyTrust
+
+	// --- Phase 27: SMS credit purchases (Snippe) ---
+	// snippe is the payments client (unconfigured when SNIPPE_API_KEY is
+	// blank); smspay settles orders for the webhook, the order reads and the
+	// reconciliation ticker.
+	snippe *snippe.Client
+	smspay *smspay.Service
 }
 
 // New builds a Server with the full middleware stack and routes mounted.
@@ -104,6 +113,11 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) *Server {
 	s.templates = &notify.PlatformStore{Q: s.q, Redis: redisClient, Logger: logger}
 	notify.UsePlatformStore(s.templates)
 	s.limiter = ratelimit.New(redisClient, logger)
+	// Phase 27: Snippe. A blank key leaves the client unconfigured and the
+	// purchase routes answer 503; the service still settles webhooks and
+	// expires stale orders.
+	s.snippe = snippe.New(cfg.SnippeAPIKey, cfg.SnippeBaseURL)
+	s.smspay = &smspay.Service{Pool: deps.Pool, Snippe: s.snippe, Redis: redisClient, Logger: logger}
 	// Defaults for tests and the dev loop. In ENV=prod the dev log providers
 	// are refused (they would print OTP codes and invite links to the log);
 	// cmd/api fails startup on the same condition before reaching here.
@@ -527,6 +541,30 @@ func (s *Server) routes() chi.Router {
 			r.Patch("/org/members/{id}", s.handlePatchMember)
 			r.Delete("/org/members/{id}", s.handleDeleteMember)
 		})
+
+		// --- Phase 27: SMS credits bought with mobile money (Snippe) ---
+		r.Group(func(r chi.Router) {
+			r.Use(s.sessions.RequireOrg())
+			r.Get("/org/sms-credits/packages", s.handleOrgSMSPackages)
+			r.Post("/org/sms-credits/orders", s.handleCreateSMSOrder)
+			r.Get("/org/sms-credits/orders", s.handleListSMSOrders)
+			r.Get("/org/sms-credits/orders/{id}", s.handleGetSMSOrder)
+		})
+		r.Group(func(r chi.Router) {
+			r.Use(s.sessions.RequireAdmin())
+			r.Get("/admin/sms/packages", s.handleAdminListSMSPackages)
+			r.Post("/admin/sms/packages", s.handleAdminCreateSMSPackage)
+			r.Patch("/admin/sms/packages/{id}", s.handleAdminPatchSMSPackage)
+			r.Get("/admin/sms/orders", s.handleAdminListSMSOrders)
+			r.Post("/admin/sms/orders/reconcile", s.handleAdminReconcileSMSOrders)
+			r.Get("/admin/sms/purchases", s.handleAdminListPlatformSMSPurchases)
+			r.Post("/admin/sms/purchases", s.handleAdminCreatePlatformSMSPurchase)
+			r.Get("/admin/sms/stock", s.handleAdminSMSStock)
+			r.Get("/admin/sms/margin", s.handleAdminSMSMargin)
+		})
+		// Public: Snippe holds no session. The HMAC signature over the raw
+		// body and the timestamp are the authorisation (TECHSTACK, Snippe).
+		r.Post("/webhooks/snippe", s.handleSnippeWebhook)
 	})
 
 	return r
