@@ -756,6 +756,7 @@ export function ProofReview({
             schedule_id: body.schedule_id,
             paid_at: body.paid_at,
             allow_overpay_rollover: body.allow_overpay_rollover,
+            confirm_duplicate: body.confirm_duplicate,
           }),
       }
     : null;

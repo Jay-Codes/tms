@@ -338,7 +338,7 @@ Why: every approved application was written on the org's single default template
 ## Phase 24 — Payment corrections and landlord notices (27 Sep 2026) — 🔨 branch `phase-24-payment-corrections`
 
 - [x] Backend (migration 000029, tests): duplicate guard on record payment and proof accept (`possible_duplicate`, `confirm_duplicate`), `Idempotency-Key` replay, `POST /payments/{id}/correct` (reverse + record in one transaction), renter SMS on reversal/correction, landlord in-app inbox (`/inbox`) fed by reversals, corrections, confirmed duplicates, proofs submitted and renters' notices.
-- [ ] Tenant UI: duplicate confirm sheet on record/accept, Correct sheet on a payment, bell with unread count and inbox page.
+- [x] Tenant UI: duplicate confirm step on record/accept (Idempotency-Key per sheet), Correct sheet on payments, bell with unread count, /inbox page.
 
 ## Open questions (answer whenever; defaults applied if unanswered)
 
