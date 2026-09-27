@@ -126,8 +126,11 @@ type contractResponse struct {
 	DueDay        *int32          `json:"due_day"`
 	// Language is the language the terms were rendered in, frozen with them
 	// (Phase 13). Contracts issued before Part 2 read 'en'.
-	Language          string           `json:"language"`
-	SnapshotHash      string           `json:"snapshot_hash"`
+	Language     string `json:"language"`
+	SnapshotHash string `json:"snapshot_hash"`
+	// Policy is the rules this tenancy was signed under (Phase 22), null for
+	// a contract written without one.
+	Policy            *contract.Policy `json:"policy"`
 	Signatures        []signatureBlock `json:"signatures"`
 	LinkRequestID     *string          `json:"link_request_id"`
 	CreatedAt         time.Time        `json:"created_at"`
@@ -166,6 +169,9 @@ type templateResponse struct {
 	BodyHTMLSW string   `json:"body_html_sw,omitempty"`
 	IsDefault  bool     `json:"is_default"`
 	Variables  []string `json:"variables,omitempty"`
+	// Policy is what contracts written on this template will stipulate
+	// (Phase 22), null when the template sets none.
+	Policy *contract.Policy `json:"policy"`
 	// Usage is where the template is assigned (Phase 22), on the list only.
 	Usage     *templateUsage `json:"usage,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
@@ -212,6 +218,7 @@ func toContract(r contractRow, signatures []signatureBlock) contractResponse {
 		DueDay:       r.DueDay,
 		Language:     r.Language,
 		SnapshotHash: db.StrVal(r.SnapshotHash),
+		Policy:       parsedPolicy(r.Policy),
 		Signatures:   signatures,
 		CreatedAt:    r.CreatedAt.Time,
 		ActivatedAt:  timePtr(r.ActivatedAt.Valid, r.ActivatedAt.Time),
@@ -280,8 +287,19 @@ func toSchedule(s sqlc.PaymentSchedule) scheduleResponse {
 	}
 }
 
+// parsedPolicy is a stored policy for a response; one that does not parse is
+// shown as none rather than failing the read.
+func parsedPolicy(raw []byte) *contract.Policy {
+	p, err := contract.ParsePolicy(raw)
+	if err != nil {
+		return nil
+	}
+	return p
+}
+
 func toTemplateSummary(t sqlc.ContractTemplate) templateResponse {
 	return templateResponse{
+		Policy:    parsedPolicy(t.Policy),
 		ID:        db.UUIDString(t.ID),
 		Name:      t.Name,
 		IsDefault: t.IsDefault,

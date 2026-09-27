@@ -52,6 +52,24 @@ func (q *Queries) ResolveUnitTemplate(ctx context.Context, arg ResolveUnitTempla
 	return i, err
 }
 
+const setContractPolicy = `-- name: SetContractPolicy :exec
+UPDATE contracts SET policy = $1
+WHERE org_id = $2 AND id = $3 AND policy IS NULL
+`
+
+type SetContractPolicyParams struct {
+	Policy []byte      `json:"policy"`
+	OrgID  pgtype.UUID `json:"org_id"`
+	ID     pgtype.UUID `json:"id"`
+}
+
+// SetContractPolicy stores the policy copy on a contract written in the same
+// transaction; it only ever touches a contract that has none yet.
+func (q *Queries) SetContractPolicy(ctx context.Context, arg SetContractPolicyParams) error {
+	_, err := q.db.Exec(ctx, setContractPolicy, arg.Policy, arg.OrgID, arg.ID)
+	return err
+}
+
 const setPropertyTemplate = `-- name: SetPropertyTemplate :one
 UPDATE properties SET contract_template_id = $1
 WHERE org_id = $2 AND id = $3 AND deleted_at IS NULL
@@ -74,6 +92,39 @@ func (q *Queries) SetPropertyTemplate(ctx context.Context, arg SetPropertyTempla
 	row := q.db.QueryRow(ctx, setPropertyTemplate, arg.TemplateID, arg.OrgID, arg.ID)
 	var i SetPropertyTemplateRow
 	err := row.Scan(&i.ID, &i.ContractTemplateID)
+	return i, err
+}
+
+const setTemplatePolicy = `-- name: SetTemplatePolicy :one
+
+UPDATE contract_templates SET policy = $1
+WHERE org_id = $2 AND id = $3 AND deleted_at IS NULL
+RETURNING id, org_id, name, body_html, is_default, created_at, updated_at, deleted_at, body_html_sw, policy
+`
+
+type SetTemplatePolicyParams struct {
+	Policy []byte      `json:"policy"`
+	OrgID  pgtype.UUID `json:"org_id"`
+	ID     pgtype.UUID `json:"id"`
+}
+
+// ---------------------------------------------- §22.2 contract policies --
+// SetTemplatePolicy writes (or, with NULL, clears) a template's policy.
+func (q *Queries) SetTemplatePolicy(ctx context.Context, arg SetTemplatePolicyParams) (ContractTemplate, error) {
+	row := q.db.QueryRow(ctx, setTemplatePolicy, arg.Policy, arg.OrgID, arg.ID)
+	var i ContractTemplate
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.BodyHtml,
+		&i.IsDefault,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.BodyHtmlSw,
+		&i.Policy,
+	)
 	return i, err
 }
 

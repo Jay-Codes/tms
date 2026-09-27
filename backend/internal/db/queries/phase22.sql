@@ -43,3 +43,17 @@ SELECT t.id,
         WHERE p.org_id = t.org_id AND p.contract_template_id = t.id AND p.deleted_at IS NULL)::bigint AS properties
 FROM contract_templates t
 WHERE t.org_id = sqlc.arg(org_id) AND t.deleted_at IS NULL;
+
+-- ---------------------------------------------- §22.2 contract policies --
+
+-- SetTemplatePolicy writes (or, with NULL, clears) a template's policy.
+-- name: SetTemplatePolicy :one
+UPDATE contract_templates SET policy = sqlc.narg(policy)
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND deleted_at IS NULL
+RETURNING *;
+
+-- SetContractPolicy stores the policy copy on a contract written in the same
+-- transaction; it only ever touches a contract that has none yet.
+-- name: SetContractPolicy :exec
+UPDATE contracts SET policy = sqlc.arg(policy)
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND policy IS NULL;

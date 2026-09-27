@@ -1,6 +1,8 @@
 package httpserver
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -100,10 +102,11 @@ func (s *Server) handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 	p := auth.MustFromContext(r.Context())
 
 	var body struct {
-		Name       string `json:"name"`
-		BodyHTML   string `json:"body_html"`
-		BodyHTMLSW string `json:"body_html_sw"`
-		IsDefault  bool   `json:"is_default"`
+		Name       string          `json:"name"`
+		BodyHTML   string          `json:"body_html"`
+		BodyHTMLSW string          `json:"body_html_sw"`
+		IsDefault  bool            `json:"is_default"`
+		Policy     json.RawMessage `json:"policy"`
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
@@ -112,6 +115,7 @@ func (s *Server) handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 	name := f.MaxLen("name", f.Required("name", body.Name), templateNameMax)
 	html := templateBody(f, "body_html", body.BodyHTML, true)
 	htmlSW := templateBody(f, "body_html_sw", body.BodyHTMLSW, false)
+	policySet, policy := templatePolicy(f, body.Policy)
 	if !f.Empty() {
 		badRequest(w, f)
 		return
@@ -136,6 +140,13 @@ func (s *Server) handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			return err
+		}
+		if policySet && policy != nil {
+			if created, err = q.SetTemplatePolicy(r.Context(), sqlc.SetTemplatePolicyParams{
+				Policy: policy, OrgID: p.OrgID, ID: created.ID,
+			}); err != nil {
+				return err
+			}
 		}
 		return audit.Record(r.Context(), q, audit.Entry{
 			OrgID:       p.OrgIDString(),
@@ -174,10 +185,11 @@ func (s *Server) handlePatchTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Name       *string `json:"name"`
-		BodyHTML   *string `json:"body_html"`
-		BodyHTMLSW *string `json:"body_html_sw"`
-		IsDefault  *bool   `json:"is_default"`
+		Name       *string         `json:"name"`
+		BodyHTML   *string         `json:"body_html"`
+		BodyHTMLSW *string         `json:"body_html_sw"`
+		IsDefault  *bool           `json:"is_default"`
+		Policy     json.RawMessage `json:"policy"`
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
@@ -203,6 +215,7 @@ func (s *Server) handlePatchTemplate(w http.ResponseWriter, r *http.Request) {
 	if body.IsDefault != nil && !*body.IsDefault && existing.IsDefault {
 		f.Add("is_default", "promote another template instead of clearing the default")
 	}
+	policySet, policy := templatePolicy(f, body.Policy)
 	if !f.Empty() {
 		badRequest(w, f)
 		return
@@ -225,6 +238,13 @@ func (s *Server) handlePatchTemplate(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		if policySet {
+			if updated, err = q.SetTemplatePolicy(r.Context(), sqlc.SetTemplatePolicyParams{
+				Policy: policy, OrgID: p.OrgID, ID: existing.ID,
+			}); err != nil {
+				return err
+			}
+		}
 		before := map[string]any{"name": existing.Name, "is_default": existing.IsDefault}
 		after := map[string]any{"name": updated.Name, "is_default": updated.IsDefault}
 		// The body itself is too large for the audit row, but its size makes a
@@ -232,6 +252,12 @@ func (s *Server) handlePatchTemplate(w http.ResponseWriter, r *http.Request) {
 		if updated.BodyHtml != existing.BodyHtml {
 			before["body_bytes"] = len(existing.BodyHtml)
 			after["body_bytes"] = len(updated.BodyHtml)
+		}
+		// The policy is small and is what settlement will act on: both sides
+		// go in whole.
+		if string(updated.Policy) != string(existing.Policy) {
+			before["policy"] = parsedPolicy(existing.Policy)
+			after["policy"] = parsedPolicy(updated.Policy)
 		}
 		if updated.BodyHtmlSw != existing.BodyHtmlSw {
 			before["body_sw_bytes"] = len(existing.BodyHtmlSw)
@@ -394,4 +420,27 @@ func templateBody(f validate.Fields, field, in string, required bool) string {
 		f.Add(field, "contains no usable content once sanitized")
 	}
 	return clean
+}
+
+// templatePolicy reads the optional `policy` member (Phase 22 §22.2). Absent
+// leaves the template's policy alone; `null` clears it; an object must pass
+// every rule and is stored normalised. set=false means "absent".
+func templatePolicy(f validate.Fields, raw json.RawMessage) (set bool, stored []byte) {
+	if len(raw) == 0 {
+		return false, nil
+	}
+	if string(raw) == "null" {
+		return true, nil
+	}
+	var p contract.Policy
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&p); err != nil {
+		f.Add("policy", "must be a policy object or null")
+		return true, nil
+	}
+	for field, msg := range p.Problems() {
+		f.Add(field, msg)
+	}
+	return true, []byte(p.Normalized().Canonical())
 }

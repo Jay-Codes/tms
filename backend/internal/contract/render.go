@@ -24,6 +24,15 @@ const DefaultTemplateName = "Standard tenancy agreement"
 var Variables = []string{
 	"renter_name", "unit", "property", "rent", "rent_basis", "start_date", "end_date",
 	"payment_period", "org_name", "term_days", "due_day",
+	// Phase 22 §22.2 — filled from the template's policy, blank without one.
+	"deposit", "tenant_notice_days", "eviction_notice_days",
+}
+
+// PolicyVariables are the Variables that only a template with a policy fills
+// (Phase 22). The seeded default template has no policy, so it does not use
+// them — a blank "deposit of ." would be worse than no sentence.
+var PolicyVariables = map[string]bool{
+	"deposit": true, "tenant_notice_days": true, "eviction_notice_days": true,
 }
 
 // varPattern matches `{{name}}`, tolerating inner whitespace. Names are the
@@ -161,5 +170,9 @@ func SampleVars(orgName string) map[string]string {
 		"org_name":       orgName,
 		"term_days":      "180",
 		"due_day":        "day 1",
+		// Phase 22 — what a template with a policy fills in.
+		"deposit":              "TZS 500,000",
+		"tenant_notice_days":   "30",
+		"eviction_notice_days": "30",
 	}
 }

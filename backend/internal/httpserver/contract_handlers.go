@@ -232,7 +232,21 @@ func (s *Server) createContractTx(
 		wanted = renter.Locale
 	}
 	body, lang := contract.BodyFor(wanted, tpl.BodyHtml, tpl.BodyHtmlSw)
-	terms := contract.Render(contract.SanitizeHTML(body), map[string]string{
+	// Phase 22 §22.2: the template's policy, resolved onto this tenancy (a
+	// deposit in months becomes an amount), is copied onto the contract and
+	// covered by its hash.
+	tplPolicy, err := contract.ParsePolicy(tpl.Policy)
+	if err != nil {
+		return zero, "", err
+	}
+	var policy *contract.Policy
+	policyCanonical := ""
+	if tplPolicy != nil {
+		cp := tplPolicy.ForContract(unit.PriceAmount, int(unit.PricePeriodDays))
+		policy = &cp
+		policyCanonical = cp.Canonical()
+	}
+	vars := map[string]string{
 		"renter_name":    renter.FullName,
 		"unit":           unit.Name,
 		"property":       unit.PropertyName,
@@ -244,7 +258,15 @@ func (s *Server) createContractTx(
 		"org_name":       displayName,
 		"term_days":      strconv.Itoa(int(in.TermDays)),
 		"due_day":        contract.DueDayPhraseFor(lang, intPtr(dueDay)),
-	})
+	}
+	depositText := ""
+	if policy != nil {
+		depositText = formatTZS(policy.DepositAmount)
+	}
+	for k, v := range contract.PolicyVars(policy, lang, depositText) {
+		vars[k] = v
+	}
+	terms := contract.Render(contract.SanitizeHTML(body), vars)
 
 	hash := contract.Snapshot{
 		TermsHTML:         terms,
@@ -257,6 +279,7 @@ func (s *Server) createContractTx(
 		StartDate:         start.Format(dateLayout),
 		EndDate:           end.Format(dateLayout),
 		DueDay:            intPtr(dueDay),
+		Policy:            policyCanonical,
 	}.Hash()
 
 	created, err := q.CreateContract(ctx, sqlc.CreateContractParams{
@@ -280,6 +303,14 @@ func (s *Server) createContractTx(
 		return zero, "", err
 	}
 
+	if policy != nil {
+		if err := q.SetContractPolicy(ctx, sqlc.SetContractPolicyParams{
+			Policy: []byte(policyCanonical), OrgID: in.OrgID, ID: created.ID,
+		}); err != nil {
+			return zero, "", err
+		}
+	}
+
 	if err := audit.Record(ctx, q, audit.Entry{
 		OrgID:       db.UUIDString(in.OrgID),
 		ActorUserID: in.ActorUserID,
@@ -293,7 +324,7 @@ func (s *Server) createContractTx(
 			"rent_period_days": unit.PricePeriodDays, "payment_period_days": period.Days,
 			"term_days": in.TermDays, "start_date": start.Format(dateLayout),
 			"end_date": end.Format(dateLayout), "due_day": dueDayString(dueDay),
-			"status": contractPendingSignature, "snapshot_hash": hash,
+			"status": contractPendingSignature, "snapshot_hash": hash, "policy": policy,
 			"language": lang,
 		},
 	}); err != nil {
@@ -1534,7 +1565,23 @@ func hashOf(row sqlc.GetContractRow) string {
 		StartDate:         row.StartDate.Time.Format(dateLayout),
 		EndDate:           row.EndDate.Time.Format(dateLayout),
 		DueDay:            intPtr(row.DueDay),
+		Policy:            storedPolicyCanonical(row.Policy),
 	}.Hash()
+}
+
+// storedPolicyCanonical re-canonicalises a stored policy for the hash. JSONB
+// may hand the keys back in any order; the struct round trip fixes it. A
+// column that does not parse contributes itself, so it fails verification
+// rather than being ignored.
+func storedPolicyCanonical(raw []byte) string {
+	p, err := contract.ParsePolicy(raw)
+	if err != nil {
+		return string(raw)
+	}
+	if p == nil {
+		return ""
+	}
+	return p.Canonical()
 }
 
 // signPurpose keys a signing OTP to one contract.

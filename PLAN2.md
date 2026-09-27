@@ -320,10 +320,10 @@ Why: every approved application was written on the org's single default template
 ### 22.1 Template assignment
 - [x] Migration 000023: `units.contract_template_id`, `properties.contract_template_id`. Resolution picked → unit → property → default in `createContractTx`; `template_source` in the audit row.
 - [x] `GET /units/{id}/template`, `POST /units/bulk-template`, `PUT /properties/{id}/template`; approve takes optional `{template_id}`; template list `usage`; delete guard 409 `template_in_use`. Tests: resolution order, approval uses resolved/picked, delete guard, cross-org.
-- [ ] Tenant UI: approve sheet shows/changes the template; property and unit settings; units bulk action; usage on the templates list.
+- [x] Tenant UI: approve sheet shows/changes the template; property and unit settings; units bulk action; usage and delete (409 surfaced) on the templates list.
 
 ### 22.2 Contract policies on the template (client answers)
-- [ ] Structured `policy` on templates, snapshotted on each contract and covered by the hash: `move_out_proration` (full_month|pro_rata), `early_exit_prepaid` (refund|forfeit|landlord_decides), `deposit` (none|fixed amount|N months) + `deductions_may_exceed_deposit`, `tenant_notice_days`, `eviction_notice_days`. New variables `{{deposit}}`, `{{notice_days}}` for the text. Existing contracts keep an empty policy (hash unchanged).
+- [x] Backend (migration 000024, `contract/policy.go`, tests incl. hash stability and verify after template change). [ ] Template editor UI. — Structured `policy` on templates, snapshotted on each contract and covered by the hash: `move_out_proration` (full_month|pro_rata), `early_exit_prepaid` (refund|forfeit|landlord_decides), `deposit` (none|fixed amount|N months) + `deductions_may_exceed_deposit`, `tenant_notice_days`, `eviction_notice_days`. New variables `{{deposit}}`, `{{notice_days}}` for the text. Existing contracts keep an empty policy (hash unchanged).
 
 ### 22.3 Stale unsigned contracts
 - [ ] Editing a template flags its `pending_signature` contracts "wording changed — reissue?"; reissue = withdraw + fresh contract from the same parameters (Phase 17 `reissue`).

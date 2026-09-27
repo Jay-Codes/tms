@@ -1318,3 +1318,11 @@ Resolution, first hit wins: template named at approval/creation → unit's → p
 | `DELETE /contract-templates/{id}` | 409 `template_in_use` `{units, properties}` while assigned. |
 
 Unit and property responses gain `contract_template_id` (own assignment, null = inherit).
+
+### 22.2 Contract policies
+`contract_templates.policy` and `contracts.policy` (JSONB, migration 000024). Shape:
+`{move_out_proration: full_month|pro_rata, early_exit_prepaid: refund|forfeit|landlord_decides, deposit_mode: none|fixed|months, deposit_amount, deposit_months (1..24), deductions_may_exceed_deposit, tenant_notice_days (0..365), eviction_notice_days (0..365)}`.
+
+- `POST /contract-templates`, `PATCH /contract-templates/{id}`: optional `policy` — absent leaves it, `null` clears, an object is validated (400 with `policy.<field>` errors; unknown members refused) and stored normalised (fields the deposit mode does not use are zeroed). Template responses carry `policy` (null when none). Patch audit carries policy before/after.
+- Contract creation copies the template's policy onto the contract with the deposit **resolved to an amount** (`months` × the unit price scaled to 30 days). `contract.policy` on every contract response (null before Phase 22). The snapshot hash appends the policy's canonical JSON **only when present**, so every earlier hash still verifies.
+- New document variables `{{deposit}}` (amount, or "none"/"hakuna"), `{{tenant_notice_days}}`, `{{eviction_notice_days}}` — blank on a template without a policy.

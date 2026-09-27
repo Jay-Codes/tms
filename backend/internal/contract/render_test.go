@@ -106,6 +106,9 @@ func TestSampleVarsCoverEveryVariable(t *testing.T) {
 // will ever issue, so it is also the working example of the vocabulary.
 func TestDefaultTemplateUsesEveryVariable(t *testing.T) {
 	for _, name := range contract.Variables {
+		if contract.PolicyVariables[name] {
+			continue
+		}
 		if !strings.Contains(contract.DefaultTemplateBody, "{{"+name+"}}") {
 			t.Errorf("the default template body never uses {{%s}}", name)
 		}

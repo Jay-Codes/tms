@@ -66,6 +66,7 @@ type Contract struct {
 	TerminationEffectiveDate pgtype.Date        `json:"termination_effective_date"`
 	LinkRequestID            pgtype.UUID        `json:"link_request_id"`
 	Language                 string             `json:"language"`
+	Policy                   []byte             `json:"policy"`
 }
 
 type ContractSignature struct {
@@ -96,6 +97,7 @@ type ContractTemplate struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt  pgtype.Timestamptz `json:"deleted_at"`
 	BodyHtmlSw string             `json:"body_html_sw"`
+	Policy     []byte             `json:"policy"`
 }
 
 type Expense struct {
