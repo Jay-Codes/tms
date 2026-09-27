@@ -587,6 +587,15 @@ export interface Contract {
   terminated_at?: string | null;
   termination_reason?: string | null;
   schedules_summary?: SchedulesSummary | null;
+  /**
+   * Phase 22.4 — on an amendment: the contract it changes, the day it takes
+   * effect (YYYY-MM-DD) and the landlord's reason. On the old contract, once
+   * the amendment is signed, the one that replaced it.
+   */
+  supersedes_contract_id?: string | null;
+  amendment_effective_date?: string | null;
+  amendment_reason?: string | null;
+  superseded_by_contract_id?: string | null;
 }
 
 /** One line of the payment schedule shown inside the document. */

@@ -28,6 +28,7 @@ import {
 } from '../../../../components/ContractBits';
 import { DocumentPaper, PrintStyles } from '../../../../components/DocumentPaper';
 import { Field, Note, ProblemNote } from '../../../../components/FormBits';
+import { AmendForm, type AmendMode } from '../../../../components/AmendForm';
 import { BackfillSheet, needsBackfill } from '../../../../components/BackfillSheet';
 import { DaysOverdue, PaymentsTable, ReverseSheet, SourceChip } from '../../../../components/PaymentBits';
 import { ProofsFor } from '../../../../components/ProofBits';
@@ -55,6 +56,13 @@ import {
 import { useMe } from '../../../../lib/auth';
 import { Amount, fmtDate, fmtTZS, todayISO } from '../../../../lib/format';
 import { LOCALE_LABELS, TableScroll, isLocale, useT } from '@tms/ui';
+
+/** `YYYY-MM-DD` plus one day — the day a superseded contract hands over. */
+function dayAfter(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
 
 /* ----------------------------- signature block ---------------------------- */
 
@@ -398,6 +406,9 @@ function ContractBody({ id }: { id: string }) {
   const [backfillOpen, setBackfillOpen] = useState(false);
   const [writeOffOpen, setWriteOffOpen] = useState(false);
   const [reissueOpen, setReissueOpen] = useState(false);
+  const [amendMode, setAmendMode] = useState<AmendMode | null>(null);
+  // Phase 22.4: an unsigned amendment of this contract, if one is open.
+  const [openAmendment, setOpenAmendment] = useState<Contract | null>(null);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -441,6 +452,27 @@ function ContractBody({ id }: { id: string }) {
     void load(ac.signal);
     return () => ac.abort();
   }, [load]);
+
+  // Phase 22.4: the backend allows one open amendment per contract; find it
+  // among the unit's unsigned contracts so this page can point at it.
+  const unitId = contract?.unit?.id;
+  const runningNow = contract?.status === 'active' || contract?.status === 'expiring';
+  useEffect(() => {
+    if (!unitId || !runningNow) {
+      setOpenAmendment(null);
+      return;
+    }
+    const ac = new AbortController();
+    contractsApi
+      .list({ unit_id: unitId, status: 'pending_signature', limit: 50 }, ac.signal)
+      .then((r) =>
+        setOpenAmendment(
+          (r.items ?? []).find((c) => c.supersedes_contract_id === id && c.amendment_effective_date) ?? null,
+        ),
+      )
+      .catch(() => setOpenAmendment(null));
+    return () => ac.abort();
+  }, [id, unitId, runningNow]);
 
   const act = async (run: () => Promise<unknown>, done: string) => {
     setBusy(true);
@@ -515,7 +547,12 @@ function ContractBody({ id }: { id: string }) {
   const canActivate = contract.status === 'pending_signature' && signedByRenter !== null;
   const canTerminate = ['pending_signature', 'active', 'expiring'].includes(contract.status);
   /** Phase 22.3 — only a contract nobody has signed can be written again. */
-  const canReissue = contract.status === 'pending_signature' && !signedByRenter && !signedByLandlord;
+  const canReissue =
+    contract.status === 'pending_signature' && !signedByRenter && !signedByLandlord && !contract.amendment_effective_date;
+  /** Phase 22.4 — an amendment (or renewal) of another contract. */
+  const isAmendment = Boolean(contract.amendment_effective_date && contract.supersedes_contract_id);
+  const canAmend =
+    (contract.status === 'active' || contract.status === 'expiring') && !contract.superseded_by_contract_id;
   const rows = schedules ?? [];
   const org = doc?.org;
   const summary = contract.schedules_summary;
@@ -563,6 +600,11 @@ function ContractBody({ id }: { id: string }) {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
           <ContractStatusStamp status={contract.status} />
+          {contract.superseded_by_contract_id ? (
+            <span className="stamp">{t('contracts.amend.chip_replaced')}</span>
+          ) : isAmendment ? (
+            <span className="stamp">{t('contracts.amend.chip')}</span>
+          ) : null}
           <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
             {t('contracts.meta.written', { date: fmtDate(contract.created_at) })}
             {contract.activated_at
@@ -622,7 +664,45 @@ function ContractBody({ id }: { id: string }) {
           </div>
         ) : null}
 
-        {contract.supersedes_contract_id ? (
+        {isAmendment && contract.supersedes_contract_id ? (
+          <p style={{ marginTop: 'var(--sp-3)', fontSize: 'var(--text-sm)' }}>
+            <Link href={`/contracts/${contract.supersedes_contract_id}`} style={{ color: 'inherit' }}>
+              {t('contracts.amend.of', {
+                ref: contract.supersedes_contract_id.slice(0, 8),
+                date: fmtDate(contract.amendment_effective_date),
+              })}
+            </Link>
+            {contract.amendment_reason ? (
+              <span style={{ color: 'var(--ink-soft)' }}>
+                {' '}
+                {t('contracts.amend.reason_line', { reason: contract.amendment_reason })}
+              </span>
+            ) : null}
+          </p>
+        ) : null}
+
+        {contract.superseded_by_contract_id ? (
+          <p style={{ marginTop: 'var(--sp-3)', fontSize: 'var(--text-sm)' }}>
+            <Link href={`/contracts/${contract.superseded_by_contract_id}`} style={{ color: 'inherit' }}>
+              {contract.termination_effective_date
+                ? t('contracts.amend.replaced_by', {
+                    ref: contract.superseded_by_contract_id.slice(0, 8),
+                    date: fmtDate(dayAfter(contract.termination_effective_date)),
+                  })
+                : t('contracts.amend.replaced_by_nodate', { ref: contract.superseded_by_contract_id.slice(0, 8) })}
+            </Link>
+          </p>
+        ) : null}
+
+        {openAmendment && !contract.superseded_by_contract_id ? (
+          <p style={{ marginTop: 'var(--sp-3)', fontSize: 'var(--text-sm)' }}>
+            <Link href={`/contracts/${openAmendment.id}`} style={{ color: 'inherit' }}>
+              {t('contracts.amend.open_pending', { date: fmtDate(openAmendment.amendment_effective_date) })}
+            </Link>
+          </p>
+        ) : null}
+
+        {contract.supersedes_contract_id && !isAmendment ? (
           <p style={{ marginTop: 'var(--sp-3)', fontSize: 'var(--text-sm)' }}>
             <Link href={`/contracts/${contract.supersedes_contract_id}`} style={{ color: 'var(--ink-soft)' }}>
               {t('contracts.reissue.replaces', { ref: contract.supersedes_contract_id.slice(0, 8) })}
@@ -695,9 +775,34 @@ function ContractBody({ id }: { id: string }) {
                   {t('contracts.reissue.open')}
                 </button>
               ) : null}
+              {canAmend ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setAmendMode('amend')}
+                    disabled={busy || openAmendment !== null}
+                    title={openAmendment ? t('contracts.amend.blocked') : undefined}
+                  >
+                    <Icon icon="solar:pen-linear" width={20} /> {t('contracts.amend.open')}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setAmendMode('renew')}
+                    disabled={busy || openAmendment !== null}
+                    title={openAmendment ? t('contracts.amend.blocked') : undefined}
+                  >
+                    <Icon icon="solar:refresh-linear" width={20} /> {t('contracts.amend.renew')}
+                  </button>
+                </>
+              ) : null}
               {canTerminate ? (
                 <button type="button" className="btn btn-danger" onClick={() => setTerminateOpen(true)} disabled={busy}>
-                  <Icon icon="solar:close-circle-linear" width={20} /> {t('contracts.terminate')}
+                  <Icon icon="solar:close-circle-linear" width={20} />{' '}
+                  {isAmendment && contract.status === 'pending_signature'
+                    ? t('contracts.amend.withdraw')
+                    : t('contracts.terminate')}
                 </button>
               ) : null}
             </div>
@@ -1151,6 +1256,26 @@ function ContractBody({ id }: { id: string }) {
             void act(() => contractsApi.writeOff(id, reason), t('contracts.writeoff.done'))
           }
         />
+      </Sheet>
+
+      <Sheet
+        open={amendMode !== null}
+        title={amendMode === 'renew' ? t('contracts.amend.title_renew') : t('contracts.amend.title')}
+        onClose={() => setAmendMode(null)}
+        width={640}
+      >
+        {amendMode ? (
+          <AmendForm
+            contract={contract}
+            schedules={rows}
+            mode={amendMode}
+            onCancel={() => setAmendMode(null)}
+            onDone={(created) => {
+              setAmendMode(null);
+              router.push(`/contracts/${created.id}`);
+            }}
+          />
+        ) : null}
       </Sheet>
 
       <Sheet open={reissueOpen} title={t('contracts.reissue.title')} onClose={() => setReissueOpen(false)} width={520}>
