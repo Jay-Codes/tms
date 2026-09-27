@@ -385,7 +385,7 @@ func (s *Server) handleCreateProof(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return audit.Record(r.Context(), q, audit.Entry{
+		if err := audit.Record(r.Context(), q, audit.Entry{
 			OrgID:       db.UUIDString(contract.OrgID),
 			ActorUserID: p.UserIDString(),
 			Action:      audit.ActionProofSubmit,
@@ -396,6 +396,14 @@ func (s *Server) handleCreateProof(w http.ResponseWriter, r *http.Request) {
 				"method": method, "paid_at": paidAt.Format(time.RFC3339),
 				"object_key": objectKey, "content_type": contentType, "size_bytes": info.Size,
 			},
+		}); err != nil {
+			return err
+		}
+		// Phase 24: the landlord's bell.
+		return s.inbox(r.Context(), q, contract.OrgID, p.UserID, inboxItem{
+			Kind: "proof_submitted", Title: "Proof of payment: " + formatTZS(body.Amount) + " — " + contract.RenterName,
+			Body: contract.UnitName + " · " + contract.PropertyName, EntityType: "payment_proof",
+			EntityID: created.ID, Link: "/payments?tab=proofs",
 		})
 	}); err != nil {
 		s.serverError(w, r, "proof.create.tx", err)
@@ -654,6 +662,8 @@ func (s *Server) handleAcceptProof(w http.ResponseWriter, r *http.Request) {
 		ScheduleID           *string `json:"schedule_id"`
 		PaidAt               *string `json:"paid_at"`
 		AllowOverpayRollover bool    `json:"allow_overpay_rollover"`
+		// Phase 24: accept even though the money looks already recorded.
+		ConfirmDuplicate bool `json:"confirm_duplicate"`
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
@@ -704,6 +714,19 @@ func (s *Server) handleAcceptProof(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.serverError(w, r, "proof.accept.contract", err)
 		return
+	}
+	// Phase 24: the commonest double entry — cash recorded by hand, then the
+	// renter's proof for the same money accepted too.
+	if !body.ConfirmDuplicate {
+		dups, err := s.possibleDuplicates(r.Context(), p.OrgID, row.ContractID, amount, paidAt, row.Reference, pgtype.UUID{})
+		if err != nil {
+			s.serverError(w, r, "proof.accept.duplicates", err)
+			return
+		}
+		if len(dups) > 0 {
+			writeDuplicate(w, dups)
+			return
+		}
 	}
 	org, err := s.q.GetOrg(r.Context(), p.OrgID)
 	if err != nil {

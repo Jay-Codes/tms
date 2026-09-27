@@ -355,6 +355,14 @@ var isoRoutes = []isoCase{
 		method: "POST", pattern: "/payments/{id}/reverse", aud: isoOrg,
 		path: "/payments/{paymentA}/reverse", body: map[string]any{"reason": "hijack"},
 	},
+	{
+		method: "POST", pattern: "/payments/{id}/correct", aud: isoOrg,
+		path: "/payments/{paymentA}/correct", body: map[string]any{"reason": "hijack"},
+	},
+	// Phase 24: the inbox is always the caller's own org's.
+	{method: "GET", pattern: "/inbox", aud: isoOrg, want: []int{200}},
+	{method: "GET", pattern: "/inbox/unread", aud: isoOrg, want: []int{200}},
+	{method: "POST", pattern: "/inbox/read", aud: isoOrg, body: map[string]any{"all": true}, want: []int{200}},
 	{method: "GET", pattern: "/org/bank-account", aud: isoOrg, want: []int{200}},
 	{
 		method: "PUT", pattern: "/org/bank-account", aud: isoOrg,

@@ -284,6 +284,12 @@ func (s *Server) routes() chi.Router {
 			r.Get("/payments", s.handleListPayments)
 			r.Get("/payments/{id}", s.handleGetPayment)
 			r.Post("/payments/{id}/reverse", s.handleReversePayment)
+			// Phase 24: correct = reverse + record, in one transaction.
+			r.Post("/payments/{id}/correct", s.handleCorrectPayment)
+			// Phase 24: the landlord's in-app notices (the bell).
+			r.Get("/inbox", s.handleListInbox)
+			r.Get("/inbox/unread", s.handleInboxUnread)
+			r.Post("/inbox/read", s.handleInboxRead)
 			r.Get("/org/bank-account", s.handleGetBankAccount)
 			r.Put("/org/bank-account", s.handlePutBankAccount)
 

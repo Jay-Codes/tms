@@ -1383,3 +1383,17 @@ Audit actions `schedule.adjust`, `schedule.adjust_undo`, `contract.notice`, `con
 ## Part 2 — Phase 23: pagination
 
 `GET /reports/payment-status` and `GET /reports/upcoming` now page the finished list: `?limit=` (1–500, default 100) and `?cursor=` (opaque; the previous page's `next_cursor`). Payment-status JSON gains `next_cursor`, `total` (rows after the status filter) and `counts` (per status, over every running tenancy); the CSV export is still the whole list. Upcoming keeps `total_due` and `count` over the whole window and gains `next_cursor`. The per-contract helper queries behind both now read running tenancies only.
+
+## Part 2 — Phase 24: payment corrections and landlord notices
+
+Migration 000029: `payments.idempotency_key` (unique per org), `payments.corrects_payment_id`; `org_inbox` + `org_inbox_reads`; SMS kinds `payment_reversed`, `payment_corrected` (always sent; `{{reason}}`, `{{date}}`, `{{next_amount}}` platform-only).
+
+| Route | Contract |
+|---|---|
+| `POST /payments` | Header `Idempotency-Key` (≤80): a repeat with the same key → **200** `{payment, replayed: true}`, nothing written. **409 `possible_duplicate`** `{matches: [{id, amount, paid_at, method, reference}]}` when a live payment on the same contract has the same amount within ±3 days, or any payment in the org has the same reference (case-insensitive) within 90 days; body `confirm_duplicate: true` records it anyway and writes an inbox notice. |
+| `POST /proofs/{id}/accept` | Same duplicate check against the proof's amount/date/reference; `confirm_duplicate: true` to accept anyway. |
+| `POST /payments/{id}/correct` | Org. `{reason (required), amount?, contract_id?, schedule_id?, paid_at?, method?, reference?, allow_overpay_rollover?}` — reverses the payment and records the corrected one in **one transaction** (anything not sent is copied from the original; allocator refusals as for `POST /payments`). New payment carries `corrects_payment_id`. Same refusals as reverse (`already_reversed`, `deposit_payment`, `payment_refunded`). → 201 `{payment, reversed}`. Audit `payment.correct`. SMS `payment_corrected` to the original renter. |
+| `POST /payments/{id}/reverse` | Unchanged contract; now also texts the renter (`payment_reversed`) and writes an inbox notice. |
+| `GET /inbox?cursor=&limit=` | Org. The landlord's notices, newest first, each with `read` for the caller: `{id, kind, title, body, entity_type, entity_id, link, read, created_at}`. Kinds so far: `payment_reversed`, `payment_corrected`, `payment_duplicate_confirmed`, `proof_submitted`, `notice_given`. |
+| `GET /inbox/unread` | `{unread}` for the caller. |
+| `POST /inbox/read` | `{ids: [...]}` or `{all: true}` → `{unread}`. Read state is per user. |
