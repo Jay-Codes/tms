@@ -176,6 +176,7 @@ type ExpenseCategory struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+	IsCapital bool               `json:"is_capital"`
 }
 
 type ImportBatch struct {
@@ -430,6 +431,19 @@ type PricePlan struct {
 	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
 }
 
+type ProjectionScenario struct {
+	ID                pgtype.UUID        `json:"id"`
+	OrgID             pgtype.UUID        `json:"org_id"`
+	Name              string             `json:"name"`
+	HorizonMonths     int32              `json:"horizon_months"`
+	RentChangePct     float64            `json:"rent_change_pct"`
+	OccupancyPct      *float64           `json:"occupancy_pct"`
+	CollectionRatePct *float64           `json:"collection_rate_pct"`
+	ExpenseChangePct  float64            `json:"expense_change_pct"`
+	CreatedByUserID   pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 type Property struct {
 	ID                 pgtype.UUID        `json:"id"`
 	OrgID              pgtype.UUID        `json:"org_id"`
@@ -442,6 +456,9 @@ type Property struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
 	ContractTemplateID pgtype.UUID        `json:"contract_template_id"`
+	PurchasePrice      *int64             `json:"purchase_price"`
+	PurchaseDate       pgtype.Date        `json:"purchase_date"`
+	CurrentValue       *int64             `json:"current_value"`
 }
 
 type RentRefund struct {

@@ -330,7 +330,7 @@ func (q *Queries) FindContractForUnitAndRenter(ctx context.Context, arg FindCont
 
 const findPropertyByName = `-- name: FindPropertyByName :many
 
-SELECT id, org_id, name, location_text, lat, lng, notes, created_at, updated_at, deleted_at, contract_template_id FROM properties
+SELECT id, org_id, name, location_text, lat, lng, notes, created_at, updated_at, deleted_at, contract_template_id, purchase_price, purchase_date, current_value FROM properties
 WHERE org_id = $1 AND deleted_at IS NULL
   AND lower(btrim(name)) = lower(btrim($2::text))
 ORDER BY created_at
@@ -367,6 +367,9 @@ func (q *Queries) FindPropertyByName(ctx context.Context, arg FindPropertyByName
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.ContractTemplateID,
+			&i.PurchasePrice,
+			&i.PurchaseDate,
+			&i.CurrentValue,
 		); err != nil {
 			return nil, err
 		}

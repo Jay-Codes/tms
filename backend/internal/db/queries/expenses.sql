@@ -25,8 +25,8 @@ SELECT * FROM expense_categories
 WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND deleted_at IS NULL;
 
 -- name: CreateExpenseCategory :one
-INSERT INTO expense_categories (org_id, name, is_default, sort_order)
-VALUES (sqlc.arg(org_id), sqlc.arg(name), sqlc.arg(is_default), sqlc.arg(sort_order))
+INSERT INTO expense_categories (org_id, name, is_default, sort_order, is_capital)
+VALUES (sqlc.arg(org_id), sqlc.arg(name), sqlc.arg(is_default), sqlc.arg(sort_order), sqlc.arg(is_capital))
 RETURNING *;
 
 -- name: MaxExpenseCategorySortOrder :one
@@ -38,7 +38,8 @@ WHERE org_id = sqlc.arg(org_id) AND deleted_at IS NULL;
 UPDATE expense_categories
 SET name       = COALESCE(sqlc.narg(name)::text, name),
     sort_order = COALESCE(sqlc.narg(sort_order)::int, sort_order),
-    active     = COALESCE(sqlc.narg(active)::boolean, active)
+    active     = COALESCE(sqlc.narg(active)::boolean, active),
+    is_capital = COALESCE(sqlc.narg(is_capital)::boolean, is_capital)
 WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND deleted_at IS NULL
 RETURNING *;
 

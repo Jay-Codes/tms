@@ -111,9 +111,9 @@ func (q *Queries) CreateExpense(ctx context.Context, arg CreateExpenseParams) (E
 }
 
 const createExpenseCategory = `-- name: CreateExpenseCategory :one
-INSERT INTO expense_categories (org_id, name, is_default, sort_order)
-VALUES ($1, $2, $3, $4)
-RETURNING id, org_id, name, is_default, sort_order, active, created_at, updated_at, deleted_at
+INSERT INTO expense_categories (org_id, name, is_default, sort_order, is_capital)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, org_id, name, is_default, sort_order, active, created_at, updated_at, deleted_at, is_capital
 `
 
 type CreateExpenseCategoryParams struct {
@@ -121,6 +121,7 @@ type CreateExpenseCategoryParams struct {
 	Name      string      `json:"name"`
 	IsDefault bool        `json:"is_default"`
 	SortOrder int32       `json:"sort_order"`
+	IsCapital bool        `json:"is_capital"`
 }
 
 func (q *Queries) CreateExpenseCategory(ctx context.Context, arg CreateExpenseCategoryParams) (ExpenseCategory, error) {
@@ -129,6 +130,7 @@ func (q *Queries) CreateExpenseCategory(ctx context.Context, arg CreateExpenseCa
 		arg.Name,
 		arg.IsDefault,
 		arg.SortOrder,
+		arg.IsCapital,
 	)
 	var i ExpenseCategory
 	err := row.Scan(
@@ -141,6 +143,7 @@ func (q *Queries) CreateExpenseCategory(ctx context.Context, arg CreateExpenseCa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.IsCapital,
 	)
 	return i, err
 }
@@ -416,7 +419,7 @@ func (q *Queries) GetExpense(ctx context.Context, arg GetExpenseParams) (GetExpe
 }
 
 const getExpenseCategory = `-- name: GetExpenseCategory :one
-SELECT id, org_id, name, is_default, sort_order, active, created_at, updated_at, deleted_at FROM expense_categories
+SELECT id, org_id, name, is_default, sort_order, active, created_at, updated_at, deleted_at, is_capital FROM expense_categories
 WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
 `
 
@@ -438,6 +441,7 @@ func (q *Queries) GetExpenseCategory(ctx context.Context, arg GetExpenseCategory
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.IsCapital,
 	)
 	return i, err
 }
@@ -445,7 +449,7 @@ func (q *Queries) GetExpenseCategory(ctx context.Context, arg GetExpenseCategory
 const listExpenseCategories = `-- name: ListExpenseCategories :many
 
 
-SELECT id, org_id, name, is_default, sort_order, active, created_at, updated_at, deleted_at FROM expense_categories
+SELECT id, org_id, name, is_default, sort_order, active, created_at, updated_at, deleted_at, is_capital FROM expense_categories
 WHERE org_id = $1 AND deleted_at IS NULL
 ORDER BY sort_order, name, id
 `
@@ -480,6 +484,7 @@ func (q *Queries) ListExpenseCategories(ctx context.Context, orgID pgtype.UUID) 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.IsCapital,
 		); err != nil {
 			return nil, err
 		}
@@ -746,7 +751,7 @@ const softDeleteExpenseCategory = `-- name: SoftDeleteExpenseCategory :one
 UPDATE expense_categories
 SET deleted_at = now()
 WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, org_id, name, is_default, sort_order, active, created_at, updated_at, deleted_at
+RETURNING id, org_id, name, is_default, sort_order, active, created_at, updated_at, deleted_at, is_capital
 `
 
 type SoftDeleteExpenseCategoryParams struct {
@@ -767,6 +772,7 @@ func (q *Queries) SoftDeleteExpenseCategory(ctx context.Context, arg SoftDeleteE
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.IsCapital,
 	)
 	return i, err
 }
@@ -850,15 +856,17 @@ const updateExpenseCategory = `-- name: UpdateExpenseCategory :one
 UPDATE expense_categories
 SET name       = COALESCE($1::text, name),
     sort_order = COALESCE($2::int, sort_order),
-    active     = COALESCE($3::boolean, active)
-WHERE org_id = $4 AND id = $5 AND deleted_at IS NULL
-RETURNING id, org_id, name, is_default, sort_order, active, created_at, updated_at, deleted_at
+    active     = COALESCE($3::boolean, active),
+    is_capital = COALESCE($4::boolean, is_capital)
+WHERE org_id = $5 AND id = $6 AND deleted_at IS NULL
+RETURNING id, org_id, name, is_default, sort_order, active, created_at, updated_at, deleted_at, is_capital
 `
 
 type UpdateExpenseCategoryParams struct {
 	Name      *string     `json:"name"`
 	SortOrder *int32      `json:"sort_order"`
 	Active    *bool       `json:"active"`
+	IsCapital *bool       `json:"is_capital"`
 	OrgID     pgtype.UUID `json:"org_id"`
 	ID        pgtype.UUID `json:"id"`
 }
@@ -868,6 +876,7 @@ func (q *Queries) UpdateExpenseCategory(ctx context.Context, arg UpdateExpenseCa
 		arg.Name,
 		arg.SortOrder,
 		arg.Active,
+		arg.IsCapital,
 		arg.OrgID,
 		arg.ID,
 	)
@@ -882,6 +891,7 @@ func (q *Queries) UpdateExpenseCategory(ctx context.Context, arg UpdateExpenseCa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.IsCapital,
 	)
 	return i, err
 }
