@@ -145,6 +145,8 @@ org_members          org_id, user_id, role (org_owner|org_manager)
 renter_profiles      user_id, full_name, nida_number, next_of_kin_name, next_of_kin_phone, kyc_status, kyc_doc_object_key
 properties           org_id, name, location_text, lat/lng NULLABLE, notes,
                      contract_template_id NULLABLE   -- Phase 22: default template for its units
+                     purchase_price, purchase_date, current_value NULLABLE
+                                                     -- Phase 28: investment inputs for projections / ROI
 units                org_id, property_id, name, unit_code UNIQUE, status (vacant|occupied|unlisted|maintenance),
                      allowed_period_ids UUID[] NULLABLE   -- NULL = all org periods offered for this unit
                      contract_template_id NULLABLE   -- Phase 22: overrides the property's template
@@ -183,7 +185,8 @@ import_batches       org_id, kind (units|renters|payments), filename, row_count,
                      committed_at, undone_at
 import_rows          batch_id, org_id, line INT, raw JSONB, errors JSONB NULLABLE,
                      entity_type NULLABLE, entity_id NULLABLE   -- what the row became on commit
-expense_categories   org_id, name, is_default, sort_order, active
+expense_categories   org_id, name, is_default, sort_order, active,
+                     is_capital BOOL DEFAULT false   -- Phase 28: capital spend = investment, not running cost
                      -- seeded: Repairs & maintenance, Utilities, Security, Cleaning,
                      --         Taxes & levies, Insurance, Management fees, Other
 expenses             org_id, property_id, unit_id NULLABLE, category_id, amount (TZS), incurred_on (date),
@@ -201,6 +204,9 @@ org_sms_credits      org_id PK, balance INT NOT NULL DEFAULT 0, low_watermark IN
 sms_credit_ledger    org_id, delta INT, balance_after INT, reason (topup|adjust|debit|refund),
                      notification_id NULLABLE, admin_user_id NULLABLE, note, created_at
                      -- append-only (trigger); no expiry, no monthly reset
+projection_scenarios org_id, name (unique per org, case-insensitive), horizon_months, rent_change_pct,
+                     occupancy_pct NULLABLE, collection_rate_pct NULLABLE, expense_change_pct,
+                     created_by_user_id   -- Phase 28: saved "what if" parameter sets
 platform_templates   kind PK, sw TEXT, en TEXT, variables TEXT[], locked BOOL NOT NULL DEFAULT false,
                      updated_by_admin_id, updated_at, version INT      -- `otp` seeded locked
 platform_template_versions  kind, version, sw, en, admin_user_id, created_at   -- history, append-only
@@ -386,6 +392,8 @@ GET /reports/payment-status       per renter: paid | pending | overdue (+ CSV ex
 GET /reports/collections          collections over time
 GET /reports/revenue              expected vs collected vs expenses vs net, bucketed series + trend
 GET /reports/occupancy            units occupied per bucket end
+POST /reports/projection          Phase 28: monthly forecast, break-even, ROI, yield, payback
+                                  (per property or portfolio); GET/POST/DELETE /reports/projection/scenarios
 GET /reports/upcoming?days=7|14|30&property_id=   schedules falling due inside the window:
                                   {items:[{schedule…, renter_name, phone, unit_name,
                                   property_name, days_until_due}], total_due, count},

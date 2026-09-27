@@ -17,6 +17,7 @@ RETURNING *;
 -- name: ListProperties :many
 SELECT p.id, p.org_id, p.name, p.location_text, p.lat, p.lng, p.notes,
        p.created_at, p.updated_at, p.contract_template_id,
+       p.purchase_price, p.purchase_date, p.current_value,
        c.total, c.vacant, c.occupied, c.maintenance, c.unlisted
 FROM properties p
 LEFT JOIN LATERAL (
@@ -37,6 +38,7 @@ LIMIT sqlc.arg(row_limit);
 -- name: GetProperty :one
 SELECT p.id, p.org_id, p.name, p.location_text, p.lat, p.lng, p.notes,
        p.created_at, p.updated_at, p.contract_template_id,
+       p.purchase_price, p.purchase_date, p.current_value,
        c.total, c.vacant, c.occupied, c.maintenance, c.unlisted
 FROM properties p
 LEFT JOIN LATERAL (
@@ -56,7 +58,14 @@ SET name          = COALESCE(sqlc.narg(name), name),
     location_text = COALESCE(sqlc.narg(location_text), location_text),
     lat           = CASE WHEN sqlc.arg(set_lat)::boolean THEN sqlc.narg(lat)::double precision ELSE lat END,
     lng           = CASE WHEN sqlc.arg(set_lng)::boolean THEN sqlc.narg(lng)::double precision ELSE lng END,
-    notes         = CASE WHEN sqlc.arg(set_notes)::boolean THEN sqlc.narg(notes)::text ELSE notes END
+    notes         = CASE WHEN sqlc.arg(set_notes)::boolean THEN sqlc.narg(notes)::text ELSE notes END,
+    -- Phase 28: the investment fields, each settable to null.
+    purchase_price = CASE WHEN sqlc.arg(set_purchase_price)::boolean
+                          THEN sqlc.narg(purchase_price)::bigint ELSE purchase_price END,
+    purchase_date  = CASE WHEN sqlc.arg(set_purchase_date)::boolean
+                          THEN sqlc.narg(purchase_date)::date ELSE purchase_date END,
+    current_value  = CASE WHEN sqlc.arg(set_current_value)::boolean
+                          THEN sqlc.narg(current_value)::bigint ELSE current_value END
 WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND deleted_at IS NULL
 RETURNING *;
 

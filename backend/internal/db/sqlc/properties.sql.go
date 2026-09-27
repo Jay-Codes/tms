@@ -44,7 +44,7 @@ VALUES (
     $5,
     $6
 )
-RETURNING id, org_id, name, location_text, lat, lng, notes, created_at, updated_at, deleted_at, contract_template_id
+RETURNING id, org_id, name, location_text, lat, lng, notes, created_at, updated_at, deleted_at, contract_template_id, purchase_price, purchase_date, current_value
 `
 
 type CreatePropertyParams struct {
@@ -81,6 +81,9 @@ func (q *Queries) CreateProperty(ctx context.Context, arg CreatePropertyParams) 
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.ContractTemplateID,
+		&i.PurchasePrice,
+		&i.PurchaseDate,
+		&i.CurrentValue,
 	)
 	return i, err
 }
@@ -88,6 +91,7 @@ func (q *Queries) CreateProperty(ctx context.Context, arg CreatePropertyParams) 
 const getProperty = `-- name: GetProperty :one
 SELECT p.id, p.org_id, p.name, p.location_text, p.lat, p.lng, p.notes,
        p.created_at, p.updated_at, p.contract_template_id,
+       p.purchase_price, p.purchase_date, p.current_value,
        c.total, c.vacant, c.occupied, c.maintenance, c.unlisted
 FROM properties p
 LEFT JOIN LATERAL (
@@ -118,6 +122,9 @@ type GetPropertyRow struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	ContractTemplateID pgtype.UUID        `json:"contract_template_id"`
+	PurchasePrice      *int64             `json:"purchase_price"`
+	PurchaseDate       pgtype.Date        `json:"purchase_date"`
+	CurrentValue       *int64             `json:"current_value"`
 	Total              int64              `json:"total"`
 	Vacant             int64              `json:"vacant"`
 	Occupied           int64              `json:"occupied"`
@@ -139,6 +146,9 @@ func (q *Queries) GetProperty(ctx context.Context, arg GetPropertyParams) (GetPr
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ContractTemplateID,
+		&i.PurchasePrice,
+		&i.PurchaseDate,
+		&i.CurrentValue,
 		&i.Total,
 		&i.Vacant,
 		&i.Occupied,
@@ -151,6 +161,7 @@ func (q *Queries) GetProperty(ctx context.Context, arg GetPropertyParams) (GetPr
 const listProperties = `-- name: ListProperties :many
 SELECT p.id, p.org_id, p.name, p.location_text, p.lat, p.lng, p.notes,
        p.created_at, p.updated_at, p.contract_template_id,
+       p.purchase_price, p.purchase_date, p.current_value,
        c.total, c.vacant, c.occupied, c.maintenance, c.unlisted
 FROM properties p
 LEFT JOIN LATERAL (
@@ -187,6 +198,9 @@ type ListPropertiesRow struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	ContractTemplateID pgtype.UUID        `json:"contract_template_id"`
+	PurchasePrice      *int64             `json:"purchase_price"`
+	PurchaseDate       pgtype.Date        `json:"purchase_date"`
+	CurrentValue       *int64             `json:"current_value"`
 	Total              int64              `json:"total"`
 	Vacant             int64              `json:"vacant"`
 	Occupied           int64              `json:"occupied"`
@@ -219,6 +233,9 @@ func (q *Queries) ListProperties(ctx context.Context, arg ListPropertiesParams) 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ContractTemplateID,
+			&i.PurchasePrice,
+			&i.PurchaseDate,
+			&i.CurrentValue,
 			&i.Total,
 			&i.Vacant,
 			&i.Occupied,
@@ -238,7 +255,7 @@ func (q *Queries) ListProperties(ctx context.Context, arg ListPropertiesParams) 
 const softDeleteProperty = `-- name: SoftDeleteProperty :one
 UPDATE properties SET deleted_at = now()
 WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, org_id, name, location_text, lat, lng, notes, created_at, updated_at, deleted_at, contract_template_id
+RETURNING id, org_id, name, location_text, lat, lng, notes, created_at, updated_at, deleted_at, contract_template_id, purchase_price, purchase_date, current_value
 `
 
 type SoftDeletePropertyParams struct {
@@ -261,6 +278,9 @@ func (q *Queries) SoftDeleteProperty(ctx context.Context, arg SoftDeleteProperty
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.ContractTemplateID,
+		&i.PurchasePrice,
+		&i.PurchaseDate,
+		&i.CurrentValue,
 	)
 	return i, err
 }
@@ -286,22 +306,35 @@ SET name          = COALESCE($1, name),
     location_text = COALESCE($2, location_text),
     lat           = CASE WHEN $3::boolean THEN $4::double precision ELSE lat END,
     lng           = CASE WHEN $5::boolean THEN $6::double precision ELSE lng END,
-    notes         = CASE WHEN $7::boolean THEN $8::text ELSE notes END
-WHERE org_id = $9 AND id = $10 AND deleted_at IS NULL
-RETURNING id, org_id, name, location_text, lat, lng, notes, created_at, updated_at, deleted_at, contract_template_id
+    notes         = CASE WHEN $7::boolean THEN $8::text ELSE notes END,
+    -- Phase 28: the investment fields, each settable to null.
+    purchase_price = CASE WHEN $9::boolean
+                          THEN $10::bigint ELSE purchase_price END,
+    purchase_date  = CASE WHEN $11::boolean
+                          THEN $12::date ELSE purchase_date END,
+    current_value  = CASE WHEN $13::boolean
+                          THEN $14::bigint ELSE current_value END
+WHERE org_id = $15 AND id = $16 AND deleted_at IS NULL
+RETURNING id, org_id, name, location_text, lat, lng, notes, created_at, updated_at, deleted_at, contract_template_id, purchase_price, purchase_date, current_value
 `
 
 type UpdatePropertyParams struct {
-	Name         *string     `json:"name"`
-	LocationText *string     `json:"location_text"`
-	SetLat       bool        `json:"set_lat"`
-	Lat          *float64    `json:"lat"`
-	SetLng       bool        `json:"set_lng"`
-	Lng          *float64    `json:"lng"`
-	SetNotes     bool        `json:"set_notes"`
-	Notes        *string     `json:"notes"`
-	OrgID        pgtype.UUID `json:"org_id"`
-	ID           pgtype.UUID `json:"id"`
+	Name             *string     `json:"name"`
+	LocationText     *string     `json:"location_text"`
+	SetLat           bool        `json:"set_lat"`
+	Lat              *float64    `json:"lat"`
+	SetLng           bool        `json:"set_lng"`
+	Lng              *float64    `json:"lng"`
+	SetNotes         bool        `json:"set_notes"`
+	Notes            *string     `json:"notes"`
+	SetPurchasePrice bool        `json:"set_purchase_price"`
+	PurchasePrice    *int64      `json:"purchase_price"`
+	SetPurchaseDate  bool        `json:"set_purchase_date"`
+	PurchaseDate     pgtype.Date `json:"purchase_date"`
+	SetCurrentValue  bool        `json:"set_current_value"`
+	CurrentValue     *int64      `json:"current_value"`
+	OrgID            pgtype.UUID `json:"org_id"`
+	ID               pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) UpdateProperty(ctx context.Context, arg UpdatePropertyParams) (Property, error) {
@@ -314,6 +347,12 @@ func (q *Queries) UpdateProperty(ctx context.Context, arg UpdatePropertyParams) 
 		arg.Lng,
 		arg.SetNotes,
 		arg.Notes,
+		arg.SetPurchasePrice,
+		arg.PurchasePrice,
+		arg.SetPurchaseDate,
+		arg.PurchaseDate,
+		arg.SetCurrentValue,
+		arg.CurrentValue,
 		arg.OrgID,
 		arg.ID,
 	)
@@ -330,6 +369,9 @@ func (q *Queries) UpdateProperty(ctx context.Context, arg UpdatePropertyParams) 
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.ContractTemplateID,
+		&i.PurchasePrice,
+		&i.PurchaseDate,
+		&i.CurrentValue,
 	)
 	return i, err
 }

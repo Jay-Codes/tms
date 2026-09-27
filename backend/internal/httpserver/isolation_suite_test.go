@@ -537,6 +537,21 @@ var isoRoutes = []isoCase{
 	// Phase 16 §16.3. The window names no id, so org B gets its own 200; the
 	// sweep for org A's ids in the body is what proves the rows are B's.
 	{method: "GET", pattern: "/reports/upcoming", aud: isoOrg, want: []int{200}},
+	// Phase 28: projections. Naming org A's property is a 404; the portfolio
+	// forecast and the saved scenarios are org B's own, swept for A's ids.
+	{
+		method: "POST", pattern: "/reports/projection", aud: isoOrg,
+		body: map[string]any{"property_id": "{propertyA}"},
+	},
+	{method: "GET", pattern: "/reports/projection/scenarios", aud: isoOrg, want: []int{200}},
+	{
+		method: "POST", pattern: "/reports/projection/scenarios", aud: isoOrg,
+		body: map[string]any{"name": "Beta plan"}, want: []int{201, 409},
+	},
+	{
+		method: "DELETE", pattern: "/reports/projection/scenarios/{id}", aud: isoOrg,
+		path: "/reports/projection/scenarios/{scenarioA}",
+	},
 
 	// ----------------------------------------------------------- branding --
 	{method: "GET", pattern: "/org/branding", aud: isoOrg, want: []int{200}},
@@ -913,6 +928,8 @@ var isoSecretIDs = []string{
 	"assistA",
 	// Phase 26: a backfill batch is one org's decision about its rent book.
 	"backfillA",
+	// Phase 28: a saved projection scenario is one org's planning.
+	"scenarioA",
 }
 
 func (f *isoFixture) secrets() map[string]string {
@@ -1026,6 +1043,11 @@ func newIsoFixture(t *testing.T, h *harness) *isoFixture {
 	f.ids["memberA"] = base.owner.do(http.MethodPost, "/org/members", map[string]any{
 		"email": "alpha-staff@iso.test", "full_name": "Alpha Staff", "role": "org_manager",
 	}).mustStatus(t, http.StatusCreated, "org A member").str(t, "member", "id")
+
+	// A saved projection scenario (Phase 28) for the other org to try to delete.
+	f.ids["scenarioA"] = base.owner.do(http.MethodPost, "/reports/projection/scenarios", map[string]any{
+		"name": "Alpha plan", "horizon_months": 36, "rent_change_pct": 5,
+	}).mustStatus(t, http.StatusCreated, "org A projection scenario").str(t, "scenario", "id")
 
 	// An audit row and a notification row: both exist because the flow above
 	// wrote them, so the ids are read back rather than manufactured.

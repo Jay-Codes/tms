@@ -69,6 +69,7 @@ func (s *Server) handleCreateExpenseCategory(w http.ResponseWriter, r *http.Requ
 	var body struct {
 		Name      string `json:"name"`
 		SortOrder *int32 `json:"sort_order"`
+		IsCapital bool   `json:"is_capital"` // Phase 28
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
@@ -100,6 +101,7 @@ func (s *Server) handleCreateExpenseCategory(w http.ResponseWriter, r *http.Requ
 		var err error
 		created, err = q.CreateExpenseCategory(r.Context(), sqlc.CreateExpenseCategoryParams{
 			OrgID: p.OrgID, Name: name, IsDefault: false, SortOrder: sortOrder,
+			IsCapital: body.IsCapital,
 		})
 		if err != nil {
 			return err
@@ -142,12 +144,15 @@ func (s *Server) handlePatchExpenseCategory(w http.ResponseWriter, r *http.Reque
 		Name      *string `json:"name"`
 		SortOrder *int32  `json:"sort_order"`
 		Active    *bool   `json:"active"`
+		IsCapital *bool   `json:"is_capital"` // Phase 28
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
 	}
 	f := validate.Fields{}
-	params := sqlc.UpdateExpenseCategoryParams{OrgID: p.OrgID, ID: id, Active: body.Active}
+	params := sqlc.UpdateExpenseCategoryParams{
+		OrgID: p.OrgID, ID: id, Active: body.Active, IsCapital: body.IsCapital,
+	}
 	if body.Name != nil {
 		name := f.MaxLen("name", f.Required("name", *body.Name), categoryNameMax)
 		params.Name = &name

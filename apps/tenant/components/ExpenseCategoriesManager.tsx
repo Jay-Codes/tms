@@ -69,7 +69,7 @@ function Row({
   if (editing) {
     return (
       <tr>
-        <td colSpan={3}>
+        <td colSpan={4}>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -117,6 +117,23 @@ function Row({
           ) : null}
           {category.active ? null : <span className="pencil">{t('expcat.inactive')}</span>}
         </span>
+      </td>
+      <td>
+        {/* Phase 28: capital spend is investment in the projection, not a
+            running cost. */}
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', minHeight: 32 }}>
+          <input
+            type="checkbox"
+            checked={Boolean(category.is_capital)}
+            disabled={busy}
+            onChange={(e) => {
+              const next = e.target.checked;
+              void run(() => expenseCategoriesApi.update(category.id, { is_capital: next }));
+            }}
+            aria-label={t('expcat.capital_aria', { name: category.name })}
+          />
+          <span style={{ fontSize: 'var(--text-sm)' }}>{category.is_capital ? t('expcat.capital.yes') : t('expcat.capital.no')}</span>
+        </label>
       </td>
       <td className="num" style={{ whiteSpace: 'nowrap' }}>
         {category.active ? (
@@ -205,6 +222,7 @@ export function ExpenseCategoriesManager({ heading }: { heading?: string }) {
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [name, setName] = useState('');
+  const [capital, setCapital] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -235,8 +253,9 @@ export function ExpenseCategoriesManager({ heading }: { heading?: string }) {
     setActionError(null);
     setNote(null);
     try {
-      await expenseCategoriesApi.create({ name: name.trim() });
+      await expenseCategoriesApi.create({ name: name.trim(), is_capital: capital });
       setName('');
+      setCapital(false);
       setNote(t('expcat.added'));
       await reload();
     } catch (err) {
@@ -265,6 +284,7 @@ export function ExpenseCategoriesManager({ heading }: { heading?: string }) {
           <thead>
             <tr>
               <th>{t('expcat.col.category')}</th>
+              <th>{t('expcat.col.capital')}</th>
               <th className="num">{t('expcat.col.order')}</th>
               <th className="num" />
             </tr>
@@ -272,13 +292,13 @@ export function ExpenseCategoriesManager({ heading }: { heading?: string }) {
           <tbody>
             {items === null ? (
               <tr>
-                <td colSpan={3} style={{ color: 'var(--ink-soft)' }}>
+                <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
                   {t('common.loading')}
                 </td>
               </tr>
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={3} style={{ color: 'var(--ink-soft)' }}>
+                <td colSpan={4} style={{ color: 'var(--ink-soft)' }}>
                   {t('expcat.empty')}
                 </td>
               </tr>
@@ -299,6 +319,7 @@ export function ExpenseCategoriesManager({ heading }: { heading?: string }) {
       </TableScroll>
 
       <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{t('expcat.note.deactivate')}</p>
+      <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{t('expcat.note.capital')}</p>
 
       <form onSubmit={add} style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'flex-end', flexWrap: 'wrap' }} noValidate>
         <Field
@@ -317,6 +338,10 @@ export function ExpenseCategoriesManager({ heading }: { heading?: string }) {
             style={{ width: 260 }}
           />
         </Field>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', minHeight: 40 }}>
+          <input type="checkbox" checked={capital} onChange={(e) => setCapital(e.target.checked)} />
+          <span style={{ fontSize: 'var(--text-sm)' }}>{t('expcat.capital.label')}</span>
+        </label>
         <button type="submit" className="btn btn-primary" disabled={busy || !name.trim()} style={{ minHeight: 40 }}>
           <Icon icon="solar:add-circle-linear" width={20} /> {t('expcat.add')}
         </button>

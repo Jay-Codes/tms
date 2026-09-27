@@ -320,6 +320,15 @@ func (s *Server) routes() chi.Router {
 			// --- Phase 16 §16.3: what falls due next ---
 			r.Get("/reports/upcoming", s.handleReportUpcoming)
 
+			// --- Phase 28: projections, break-even and ROI ---
+			//
+			// POST because the scenario is a body of parameters, not a
+			// resource; it writes nothing. Same audience as the reports above.
+			r.Post("/reports/projection", s.handleReportProjection)
+			r.Get("/reports/projection/scenarios", s.handleListProjectionScenarios)
+			r.Post("/reports/projection/scenarios", s.handleCreateProjectionScenario)
+			r.Delete("/reports/projection/scenarios/{id}", s.handleDeleteProjectionScenario)
+
 			// --- Phase 10: the expense ledger ---
 			//
 			// Owner and manager, the org's two roles: whoever may record a

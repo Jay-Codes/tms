@@ -62,8 +62,13 @@ type propertyResponse struct {
 	UnitCounts   unitCounts `json:"unit_counts"`
 	// ContractTemplateID is the property's template (Phase 22), inherited by
 	// its units that name none; null means the org default.
-	ContractTemplateID *string   `json:"contract_template_id"`
-	CreatedAt          time.Time `json:"created_at"`
+	ContractTemplateID *string `json:"contract_template_id"`
+	// Phase 28: the landlord's investment, all optional. Without a purchase
+	// price the projection leaves ROI, break-even and payback blank.
+	PurchasePrice *int64    `json:"purchase_price"`
+	PurchaseDate  *string   `json:"purchase_date"`
+	CurrentValue  *int64    `json:"current_value"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // priceResponse is one price plan (`current_price` and the history rows).
@@ -148,6 +153,9 @@ func toProperty(p sqlc.Property, counts unitCounts) propertyResponse {
 		Notes:              p.Notes,
 		UnitCounts:         counts,
 		ContractTemplateID: optUUIDString(p.ContractTemplateID),
+		PurchasePrice:      p.PurchasePrice,
+		PurchaseDate:       optDateString(p.PurchaseDate),
+		CurrentValue:       p.CurrentValue,
 		CreatedAt:          p.CreatedAt.Time,
 	}
 }
@@ -165,6 +173,9 @@ func toPropertyRow(r sqlc.ListPropertiesRow) propertyResponse {
 			Maintenance: r.Maintenance, Unlisted: r.Unlisted,
 		},
 		ContractTemplateID: optUUIDString(r.ContractTemplateID),
+		PurchasePrice:      r.PurchasePrice,
+		PurchaseDate:       optDateString(r.PurchaseDate),
+		CurrentValue:       r.CurrentValue,
 		CreatedAt:          r.CreatedAt.Time,
 	}
 }
