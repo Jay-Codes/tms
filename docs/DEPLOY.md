@@ -49,6 +49,8 @@ Edit `.env.deploy`. The keys that matter:
 | `DATABASE_URL`, `REDIS_URL`, `MINIO_ENDPOINT`, `MINIO_ROOT_USER/PASSWORD` | Where the infra is |
 | `NIDA_ENC_KEY`, `ADMIN_PASSWORD`, `POSTGRES_PASSWORD`, `MINIO_ROOT_PASSWORD` | Real secrets (`openssl rand -hex 32`) |
 | `BEEM_*` | Real SMS. Blank = OTP codes land in `make docker-logs` |
+| `SNIPPE_API_KEY`, `SNIPPE_WEBHOOK_SECRET` | Landlords buying SMS credits (Phase 27). Blank = purchases switched off (503 `purchases_disabled`), everything else works. Both are secrets |
+| `SNIPPE_WEBHOOK_URL` | `https://api.tms.kuzo.co.tz/api/v1/webhooks/snippe` — must be explicit on this layout (see below) |
 
 ### Reuse mode (default): existing postgres / redis / minio
 
@@ -217,6 +219,31 @@ How cross-origin works:
 - **PWA**: manifest, icons and the service worker scope all derive from
   `NEXT_PUBLIC_BASE_PATH` (`app/manifest.ts`, `lib/basePath.ts`,
   `public/sw.js` reads its own URL), so each app installs from its domain root.
+
+## 5a. Snippe webhook (SMS credit purchases, Phase 27)
+
+Snippe calls `POST /api/v1/webhooks/snippe` on the API host. **No proxy or
+nginx change is needed**: the edge proxy forwards `/api` unchanged and the
+nginx template forwards everything, body and headers intact (the HMAC
+signature is over the raw body). Steps once the client has a Snippe account:
+
+1. Put `SNIPPE_API_KEY` and `SNIPPE_WEBHOOK_SECRET` (the signing key from the
+   Snippe dashboard) in `.env.deploy`; set
+   `SNIPPE_WEBHOOK_URL=https://api.tms.kuzo.co.tz/api/v1/webhooks/snippe`. The
+   fallback (`{PUBLIC_BASE_URL or APP_BASE_URL}/api/v1/webhooks/snippe`) is only
+   right for the single-origin dev proxy; here `APP_BASE_URL` is the renter app.
+2. Register the same URL in the Snippe dashboard (each payment also carries it
+   as `webhook_url`).
+3. `make docker-restart`. The admin app → **SMS sales → Packages** now says
+   purchases are on; add the priced bundles there (no prices live in code) and
+   record the Beem stock under **Beem purchases** (an opening balance is a
+   purchase at cost 0).
+4. Smoke test with the smallest bundle (Snippe's minimum is TZS 500): the
+   order turns *Paid* and the org's ledger shows a `purchase` row. If the
+   webhook cannot reach the API, the reconciliation job still settles orders
+   by polling Snippe after 5 minutes (and the landlord's waiting screen polls
+   too), so a silent webhook shows up as orders that complete slowly —
+   check `make docker-logs` for `snippe webhook refused`.
 
 ## 6. Known limits
 
