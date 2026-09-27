@@ -175,11 +175,19 @@ func (s *Server) createContractTx(
 		return zero, "", errPeriodNotOffered
 	}
 
+	// Phase 22: a template named by the caller wins; otherwise the unit's,
+	// then its property's, then the org default (ResolveUnitTemplate).
 	var tpl sqlc.ContractTemplate
+	templateSource := templateSourceExplicit
 	if in.TemplateID.Valid {
 		tpl, err = q.GetContractTemplate(ctx, sqlc.GetContractTemplateParams{OrgID: in.OrgID, ID: in.TemplateID})
 	} else {
-		tpl, err = q.GetDefaultContractTemplate(ctx, in.OrgID)
+		var resolved sqlc.ResolveUnitTemplateRow
+		resolved, err = q.ResolveUnitTemplate(ctx, sqlc.ResolveUnitTemplateParams{OrgID: in.OrgID, UnitID: unit.ID})
+		if err == nil {
+			templateSource = resolved.Source
+			tpl, err = q.GetContractTemplate(ctx, sqlc.GetContractTemplateParams{OrgID: in.OrgID, ID: resolved.ID})
+		}
 	}
 	if isNoRows(err) {
 		return zero, "", errTemplateNotFound
@@ -280,7 +288,8 @@ func (s *Server) createContractTx(
 		EntityID:    db.UUIDString(created.ID),
 		After: map[string]any{
 			"unit_id": db.UUIDString(unit.ID), "renter_user_id": db.UUIDString(renter.ID),
-			"template_id": db.UUIDString(tpl.ID), "rent_amount": unit.PriceAmount,
+			"template_id": db.UUIDString(tpl.ID), "template_source": templateSource,
+			"rent_amount":      unit.PriceAmount,
 			"rent_period_days": unit.PricePeriodDays, "payment_period_days": period.Days,
 			"term_days": in.TermDays, "start_date": start.Format(dateLayout),
 			"end_date": end.Format(dateLayout), "due_day": dueDayString(dueDay),

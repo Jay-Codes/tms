@@ -41,9 +41,17 @@ func (s *Server) handleListTemplates(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "template.list", err)
 		return
 	}
+	usage, err := s.templateUsage(r.Context(), p.OrgID)
+	if err != nil {
+		s.serverError(w, r, "template.list.usage", err)
+		return
+	}
 	items := make([]templateResponse, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, toTemplateSummary(row))
+		it := toTemplateSummary(row)
+		u := usage[db.UUIDString(row.ID)]
+		it.Usage = &u
+		items = append(items, it)
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"items": items})
 }
@@ -267,6 +275,19 @@ func (s *Server) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 	if existing.IsDefault {
 		conflictCode(w, "template_is_default", "template is the default",
 			"promote another template to default before deleting this one")
+		return
+	}
+	// Phase 22: a template still assigned to units or properties would leave
+	// them silently falling back to the default; the landlord reassigns first.
+	usage, err := s.templateUsage(r.Context(), p.OrgID)
+	if err != nil {
+		s.serverError(w, r, "template.delete.usage", err)
+		return
+	}
+	if u := usage[db.UUIDString(existing.ID)]; u.Units > 0 || u.Properties > 0 {
+		httpx.WriteProblemExtra(w, http.StatusConflict, "template_in_use", "template is assigned",
+			"reassign the units and properties using this template before deleting it",
+			map[string]any{"units": u.Units, "properties": u.Properties})
 		return
 	}
 

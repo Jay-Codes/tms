@@ -143,9 +143,11 @@ users                phone, email, password_hash, kind (renter|org_user|platform
                      locale TEXT NOT NULL DEFAULT 'sw' CHECK (locale IN ('sw','en'))
 org_members          org_id, user_id, role (org_owner|org_manager)
 renter_profiles      user_id, full_name, nida_number, next_of_kin_name, next_of_kin_phone, kyc_status, kyc_doc_object_key
-properties           org_id, name, location_text, lat/lng NULLABLE, notes
+properties           org_id, name, location_text, lat/lng NULLABLE, notes,
+                     contract_template_id NULLABLE   -- Phase 22: default template for its units
 units                org_id, property_id, name, unit_code UNIQUE, status (vacant|occupied|unlisted|maintenance),
                      allowed_period_ids UUID[] NULLABLE   -- NULL = all org periods offered for this unit
+                     contract_template_id NULLABLE   -- Phase 22: overrides the property's template
 price_plans          org_id, unit_id, amount, currency (TZS), period_days (default 30), effective_from
                      -- price history preserved; amount is per `period_days`, other periods prorated
 contract_templates   org_id, name, body_html, is_default   -- edited in-app (rich text editor); sanitized HTML

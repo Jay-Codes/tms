@@ -220,6 +220,10 @@ const (
 	// the periods and the amount it closed (or reopened).
 	ActionContractWriteOff     = "contract.write_off"
 	ActionContractWriteOffUndo = "contract.write_off_undo"
+
+	// Phase 22 — which template a unit's or a property's tenancies use.
+	ActionUnitTemplateSet     = "unit.template_set"
+	ActionPropertyTemplateSet = "property.template_set"
 )
 
 // Entity types.

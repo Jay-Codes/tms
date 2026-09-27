@@ -1302,3 +1302,19 @@ See `PATCH /renters/{user_id}` in 19.3 (amended): `reason` required once signed 
 | `POST /contracts/{id}/write-off/undo` | **Owner only.** Rows back to `paid`/`overdue`/`partial`/`pending`, recomputed from their own money and dates. 409 `nothing_written_off`. → `{periods, amount, schedules}`. Audit `contract.write_off_undo`. |
 
 Schedule rows gain `write_off_reason` (only on `written_off`). Reports: `written_off` counts in `expected`, never in `outstanding`/`overdue`; a written-off row takes no payment.
+
+## Part 2 — Phase 22: contract templates per unit
+
+### 22.1 Template assignment
+Resolution, first hit wins: template named at approval/creation → unit's → property's → org default (soft-deleted assignments skipped). The contract-create audit row carries `template_source` (`explicit|unit|property|default`).
+
+| Route | Contract |
+|---|---|
+| `GET /units/{id}/template` | Org audience. → `{template: {id, name, source} \| null}` — what a tenancy of this unit would be written on. |
+| `POST /units/bulk-template` | Org audience. `{unit_ids: uuid[1..500], template_id: uuid \| null}` (key required; `null` clears). Ids outside the org match nothing. → `{updated, contract_template_id}`. Audit `unit.template_set` per unit. 400 on a template not in the org. |
+| `PUT /properties/{id}/template` | Org audience. `{template_id: uuid \| null}` → `{contract_template_id}`. Audit `property.template_set` (before/after). |
+| `POST /link-requests/{id}/approve` | Optional body `{template_id}` overrides the unit's resolved template for this one contract. 409 `template_not_found` when it is not a live template of the org. |
+| `GET /contract-templates` | Items gain `usage: {units, properties}`. |
+| `DELETE /contract-templates/{id}` | 409 `template_in_use` `{units, properties}` while assigned. |
+
+Unit and property responses gain `contract_template_id` (own assignment, null = inherit).

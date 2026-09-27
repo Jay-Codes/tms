@@ -245,6 +245,11 @@ func (s *Server) routes() chi.Router {
 			r.Delete("/contract-templates/{id}", s.handleDeleteTemplate)
 			r.Post("/contract-templates/{id}/preview", s.handlePreviewTemplate)
 
+			// --- Phase 22 §22.1: template assignment ---
+			r.Post("/units/bulk-template", s.handleBulkUnitTemplate)
+			r.Get("/units/{id}/template", s.handleGetUnitTemplate)
+			r.Put("/properties/{id}/template", s.handleSetPropertyTemplate)
+
 			// --- Phase 4: contracts ---
 			r.Get("/contracts", s.handleListContracts)
 			r.Post("/contracts", s.handleCreateContract)

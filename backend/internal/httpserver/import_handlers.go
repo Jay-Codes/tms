@@ -1505,7 +1505,7 @@ func (s *Server) createImportedTenancy(
 		return zero, zero, "", err
 	}
 
-	contract, notifyID, made, err := s.onLinkApproved(ctx, q, link, p.UserIDString())
+	contract, notifyID, made, err := s.onLinkApproved(ctx, q, link, p.UserIDString(), pgtype.UUID{})
 	if err != nil {
 		var createErr error = err
 		if code := importCreateFailure(createErr); code != "" {

@@ -44,7 +44,7 @@ VALUES (
     $5,
     $6
 )
-RETURNING id, org_id, name, location_text, lat, lng, notes, created_at, updated_at, deleted_at
+RETURNING id, org_id, name, location_text, lat, lng, notes, created_at, updated_at, deleted_at, contract_template_id
 `
 
 type CreatePropertyParams struct {
@@ -80,13 +80,14 @@ func (q *Queries) CreateProperty(ctx context.Context, arg CreatePropertyParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.ContractTemplateID,
 	)
 	return i, err
 }
 
 const getProperty = `-- name: GetProperty :one
 SELECT p.id, p.org_id, p.name, p.location_text, p.lat, p.lng, p.notes,
-       p.created_at, p.updated_at,
+       p.created_at, p.updated_at, p.contract_template_id,
        c.total, c.vacant, c.occupied, c.maintenance, c.unlisted
 FROM properties p
 LEFT JOIN LATERAL (
@@ -107,20 +108,21 @@ type GetPropertyParams struct {
 }
 
 type GetPropertyRow struct {
-	ID           pgtype.UUID        `json:"id"`
-	OrgID        pgtype.UUID        `json:"org_id"`
-	Name         string             `json:"name"`
-	LocationText string             `json:"location_text"`
-	Lat          *float64           `json:"lat"`
-	Lng          *float64           `json:"lng"`
-	Notes        *string            `json:"notes"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	Total        int64              `json:"total"`
-	Vacant       int64              `json:"vacant"`
-	Occupied     int64              `json:"occupied"`
-	Maintenance  int64              `json:"maintenance"`
-	Unlisted     int64              `json:"unlisted"`
+	ID                 pgtype.UUID        `json:"id"`
+	OrgID              pgtype.UUID        `json:"org_id"`
+	Name               string             `json:"name"`
+	LocationText       string             `json:"location_text"`
+	Lat                *float64           `json:"lat"`
+	Lng                *float64           `json:"lng"`
+	Notes              *string            `json:"notes"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ContractTemplateID pgtype.UUID        `json:"contract_template_id"`
+	Total              int64              `json:"total"`
+	Vacant             int64              `json:"vacant"`
+	Occupied           int64              `json:"occupied"`
+	Maintenance        int64              `json:"maintenance"`
+	Unlisted           int64              `json:"unlisted"`
 }
 
 func (q *Queries) GetProperty(ctx context.Context, arg GetPropertyParams) (GetPropertyRow, error) {
@@ -136,6 +138,7 @@ func (q *Queries) GetProperty(ctx context.Context, arg GetPropertyParams) (GetPr
 		&i.Notes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ContractTemplateID,
 		&i.Total,
 		&i.Vacant,
 		&i.Occupied,
@@ -147,7 +150,7 @@ func (q *Queries) GetProperty(ctx context.Context, arg GetPropertyParams) (GetPr
 
 const listProperties = `-- name: ListProperties :many
 SELECT p.id, p.org_id, p.name, p.location_text, p.lat, p.lng, p.notes,
-       p.created_at, p.updated_at,
+       p.created_at, p.updated_at, p.contract_template_id,
        c.total, c.vacant, c.occupied, c.maintenance, c.unlisted
 FROM properties p
 LEFT JOIN LATERAL (
@@ -174,20 +177,21 @@ type ListPropertiesParams struct {
 }
 
 type ListPropertiesRow struct {
-	ID           pgtype.UUID        `json:"id"`
-	OrgID        pgtype.UUID        `json:"org_id"`
-	Name         string             `json:"name"`
-	LocationText string             `json:"location_text"`
-	Lat          *float64           `json:"lat"`
-	Lng          *float64           `json:"lng"`
-	Notes        *string            `json:"notes"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	Total        int64              `json:"total"`
-	Vacant       int64              `json:"vacant"`
-	Occupied     int64              `json:"occupied"`
-	Maintenance  int64              `json:"maintenance"`
-	Unlisted     int64              `json:"unlisted"`
+	ID                 pgtype.UUID        `json:"id"`
+	OrgID              pgtype.UUID        `json:"org_id"`
+	Name               string             `json:"name"`
+	LocationText       string             `json:"location_text"`
+	Lat                *float64           `json:"lat"`
+	Lng                *float64           `json:"lng"`
+	Notes              *string            `json:"notes"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ContractTemplateID pgtype.UUID        `json:"contract_template_id"`
+	Total              int64              `json:"total"`
+	Vacant             int64              `json:"vacant"`
+	Occupied           int64              `json:"occupied"`
+	Maintenance        int64              `json:"maintenance"`
+	Unlisted           int64              `json:"unlisted"`
 }
 
 func (q *Queries) ListProperties(ctx context.Context, arg ListPropertiesParams) ([]ListPropertiesRow, error) {
@@ -214,6 +218,7 @@ func (q *Queries) ListProperties(ctx context.Context, arg ListPropertiesParams) 
 			&i.Notes,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ContractTemplateID,
 			&i.Total,
 			&i.Vacant,
 			&i.Occupied,
@@ -233,7 +238,7 @@ func (q *Queries) ListProperties(ctx context.Context, arg ListPropertiesParams) 
 const softDeleteProperty = `-- name: SoftDeleteProperty :one
 UPDATE properties SET deleted_at = now()
 WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, org_id, name, location_text, lat, lng, notes, created_at, updated_at, deleted_at
+RETURNING id, org_id, name, location_text, lat, lng, notes, created_at, updated_at, deleted_at, contract_template_id
 `
 
 type SoftDeletePropertyParams struct {
@@ -255,6 +260,7 @@ func (q *Queries) SoftDeleteProperty(ctx context.Context, arg SoftDeleteProperty
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.ContractTemplateID,
 	)
 	return i, err
 }
@@ -282,7 +288,7 @@ SET name          = COALESCE($1, name),
     lng           = CASE WHEN $5::boolean THEN $6::double precision ELSE lng END,
     notes         = CASE WHEN $7::boolean THEN $8::text ELSE notes END
 WHERE org_id = $9 AND id = $10 AND deleted_at IS NULL
-RETURNING id, org_id, name, location_text, lat, lng, notes, created_at, updated_at, deleted_at
+RETURNING id, org_id, name, location_text, lat, lng, notes, created_at, updated_at, deleted_at, contract_template_id
 `
 
 type UpdatePropertyParams struct {
@@ -323,6 +329,7 @@ func (q *Queries) UpdateProperty(ctx context.Context, arg UpdatePropertyParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.ContractTemplateID,
 	)
 	return i, err
 }

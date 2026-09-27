@@ -278,6 +278,19 @@ var isoRoutes = []isoCase{
 		path: "/contracts/{contractA}/write-off/undo",
 	},
 	{method: "GET", pattern: "/arrears", aud: isoOrg, want: []int{200}},
+	// Phase 22 §22.1. Another org's unit or property is the usual 404; bulk
+	// ids from another org match nothing, so the bulk route answers 200 with
+	// updated: 0 — never touching org A.
+	{method: "GET", pattern: "/units/{id}/template", aud: isoOrg, path: "/units/{unitA}/template"},
+	{
+		method: "PUT", pattern: "/properties/{id}/template", aud: isoOrg,
+		path: "/properties/{propertyA}/template", body: map[string]any{"template_id": nil},
+	},
+	{
+		method: "POST", pattern: "/units/bulk-template", aud: isoOrg,
+		body: map[string]any{"unit_ids": []any{"{unitA}"}, "template_id": nil},
+		want: []int{200},
+	},
 	{
 		method: "POST", pattern: "/contracts/{id}/terminate", aud: isoOrg,
 		path: "/contracts/{contractA}/terminate",

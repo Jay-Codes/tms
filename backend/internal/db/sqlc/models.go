@@ -359,16 +359,17 @@ type PricePlan struct {
 }
 
 type Property struct {
-	ID           pgtype.UUID        `json:"id"`
-	OrgID        pgtype.UUID        `json:"org_id"`
-	Name         string             `json:"name"`
-	LocationText string             `json:"location_text"`
-	Lat          *float64           `json:"lat"`
-	Lng          *float64           `json:"lng"`
-	Notes        *string            `json:"notes"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
+	ID                 pgtype.UUID        `json:"id"`
+	OrgID              pgtype.UUID        `json:"org_id"`
+	Name               string             `json:"name"`
+	LocationText       string             `json:"location_text"`
+	Lat                *float64           `json:"lat"`
+	Lng                *float64           `json:"lng"`
+	Notes              *string            `json:"notes"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
+	ContractTemplateID pgtype.UUID        `json:"contract_template_id"`
 }
 
 type RenterProfile struct {
@@ -413,17 +414,18 @@ type SmsCreditLedger struct {
 }
 
 type Unit struct {
-	ID               pgtype.UUID        `json:"id"`
-	OrgID            pgtype.UUID        `json:"org_id"`
-	PropertyID       pgtype.UUID        `json:"property_id"`
-	Name             string             `json:"name"`
-	UnitCode         string             `json:"unit_code"`
-	Status           string             `json:"status"`
-	AllowedPeriodIds []pgtype.UUID      `json:"allowed_period_ids"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
-	StatusOverride   bool               `json:"status_override"`
+	ID                 pgtype.UUID        `json:"id"`
+	OrgID              pgtype.UUID        `json:"org_id"`
+	PropertyID         pgtype.UUID        `json:"property_id"`
+	Name               string             `json:"name"`
+	UnitCode           string             `json:"unit_code"`
+	Status             string             `json:"status"`
+	AllowedPeriodIds   []pgtype.UUID      `json:"allowed_period_ids"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
+	StatusOverride     bool               `json:"status_override"`
+	ContractTemplateID pgtype.UUID        `json:"contract_template_id"`
 }
 
 type UnitLinkRequest struct {

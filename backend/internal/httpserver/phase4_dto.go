@@ -163,11 +163,19 @@ type templateResponse struct {
 	// BodyHTMLSW is the Swahili body (Phase 13). It is sent alongside
 	// `body_html` on the single-template reads, empty when the org has not
 	// written one — the editor shows two tabs and only one of them is filled.
-	BodyHTMLSW string    `json:"body_html_sw,omitempty"`
-	IsDefault  bool      `json:"is_default"`
-	Variables  []string  `json:"variables,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	BodyHTMLSW string   `json:"body_html_sw,omitempty"`
+	IsDefault  bool     `json:"is_default"`
+	Variables  []string `json:"variables,omitempty"`
+	// Usage is where the template is assigned (Phase 22), on the list only.
+	Usage     *templateUsage `json:"usage,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+}
+
+// templateUsage counts the units and properties a template is assigned to.
+type templateUsage struct {
+	Units      int64 `json:"units"`
+	Properties int64 `json:"properties"`
 }
 
 // brandingResponse is GET/PUT /org/branding.
