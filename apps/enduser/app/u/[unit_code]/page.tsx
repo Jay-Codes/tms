@@ -7,6 +7,11 @@
  * no session, so the renter sees their landlord's branding, the unit and the
  * price before deciding to register. A renter who already has an account is
  * sent straight on to the connect step (flow 2's "alternate entry").
+ *
+ * `?assist={session}` (FLOWS 2b, Phase 25): the landlord is showing a code on
+ * their screen. lib/assist.ts remembers the session for the tab, so register
+ * and login skip "Send code"; this page leads with whichever of the two the
+ * landlord's code is for.
  */
 
 import { useEffect, useState } from 'react';
@@ -18,6 +23,7 @@ import { ApiError, publicApi, type PublicUnit } from '../../../lib/api';
 import { useMe } from '../../../lib/auth';
 import { errorMessage, money, priceLine } from '../../../lib/format';
 import { rememberScannedUnit } from '../../../lib/scan';
+import { useAssist } from '../../../lib/assist';
 import { OrgHeader, useOrgTheme } from '../../../components/OrgHeader';
 import { Notice, Screen } from '../../../components/Screen';
 import { LanguageToggle } from '../../../components/LanguageToggle';
@@ -28,6 +34,7 @@ export default function UnitLandingPage() {
   const unitCode = typeof params?.unit_code === 'string' ? params.unit_code : '';
   const router = useRouter();
   const auth = useMe();
+  const assist = useAssist();
 
   const [unit, setUnit] = useState<PublicUnit | null>(null);
   const [loading, setLoading] = useState(true);
@@ -110,6 +117,9 @@ export default function UnitLandingPage() {
 
   const registerHref = `/register?next=${encodeURIComponent(`/u/${unitCode}`)}`;
   const loginHref = `/login?next=${encodeURIComponent(`/u/${unitCode}`)}`;
+  /* A landlord's code for this unit; a QR for another unit is ignored. */
+  const assisted = assist.state === 'open' && assist.unit_code === unitCode;
+  const loginFirst = assisted && assist.state === 'open' && assist.purpose === 'login';
 
   return (
     <Screen>
@@ -126,6 +136,11 @@ export default function UnitLandingPage() {
         </p>
         <h1 style={{ fontSize: 'var(--text-2xl)' }}>{unit.unit.name}</h1>
       </header>
+
+      {assisted && auth.status !== 'authenticated' ? (
+        <Notice>{t(loginFirst ? 'assist.unitNotice.login' : 'assist.unitNotice.register')}</Notice>
+      ) : null}
+      {assist.state === 'ended' ? <Notice tone="error">{t('assist.ended')}</Notice> : null}
 
       {unit.price ? (
         <p className="amount" style={{ fontSize: 'var(--text-xl)', margin: 0 }}>
@@ -213,10 +228,14 @@ export default function UnitLandingPage() {
               </Link>
             ) : (
               <>
-                <Link className="btn btn-primary" href={registerHref}>
+                <Link className={loginFirst ? 'btn btn-quiet' : 'btn btn-primary'} href={registerHref}>
                   {t('unit.register')}
                 </Link>
-                <Link className="btn btn-quiet" href={loginHref}>
+                <Link
+                  className={loginFirst ? 'btn btn-primary' : 'btn btn-quiet'}
+                  href={loginHref}
+                  style={loginFirst ? { order: -1 } : undefined}
+                >
                   {t('unit.login')}
                 </Link>
               </>

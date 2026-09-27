@@ -959,3 +959,21 @@ export interface ProofInput {
 /** Uploads a renter may send as proof, and the ceiling the API enforces. */
 export const PROOF_TYPES = ['image/jpeg', 'image/png', 'application/pdf'] as const;
 export const PROOF_MAX_BYTES = 5 * 1024 * 1024;
+
+/* Phase 25 — landlord-assisted onboarding (API.md Phase 18, FLOWS 2b). */
+
+/**
+ * `GET /public/assist/{id}` — all the renter's device learns from the QR:
+ * which unit, whether the landlord's code is a `register` or `login` code,
+ * and whether the session is still open. Never the phone.
+ */
+export interface PublicAssist {
+  unit_code: string;
+  purpose: 'register' | 'login';
+  status: 'open' | 'closed';
+}
+
+export const assistPublicApi = {
+  get: (id: string, signal?: AbortSignal) =>
+    api.get<PublicAssist>(`/public/assist/${encodeURIComponent(id)}`, { signal }),
+};

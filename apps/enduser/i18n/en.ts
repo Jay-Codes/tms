@@ -471,6 +471,18 @@ const messages: Messages = {
   /* --------------------------------------------------------- comingSoon */
   'comingSoon.eyebrow': 'Coming soon',
   'comingSoon.empty': 'Nothing here yet.',
+
+  /* ------------------------------------------ assist (Phase 25, FLOWS 2b) */
+  'assist.unitNotice.register':
+    'Your landlord is helping you sign up. No SMS will come — use the code on their screen.',
+  'assist.unitNotice.login':
+    'This number already has an account. Log in with your PIN, or with the code on your landlord’s screen.',
+  'assist.ended': 'That code session has ended. Ask your landlord to show a new code, or continue with an SMS code.',
+  'assist.lead.phone': 'Enter your phone number, then the code your landlord shows you. No SMS is sent.',
+  'assist.codeLead': 'Enter the code your landlord shows you.',
+  'assist.noResend': 'Code expired or not working? Ask your landlord to show a new one.',
+  'assist.useCode': 'Use the code your landlord shows you',
+  'sign.witnessed': 'My landlord is showing me a code',
 };
 
 export default messages;

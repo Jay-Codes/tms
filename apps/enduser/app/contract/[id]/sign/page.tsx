@@ -12,6 +12,11 @@
  * PNG → `sign` with the returned `signature_object_key`. Skipping the drawing
  * signs with the OTP alone (method `otp_accept`), which is a complete
  * signature in its own right.
+ *
+ * Witnessed (FLOWS 2b step 6, Phase 25): when the landlord is in the room
+ * and the SMS does not come, "My landlord is showing me a code" goes straight
+ * to the code step without sending — the landlord's Witness signing sheet
+ * wrote the code into the same sign slot — and there is no resend.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -65,6 +70,8 @@ function SignContent() {
   const [error, setError] = useState<string | null>(null);
   const [alreadySigned, setAlreadySigned] = useState(false);
   const [padEmpty, setPadEmpty] = useState(true);
+  /** The code is on the landlord's screen, not on its way by SMS. */
+  const [witnessed, setWitnessed] = useState(false);
 
   const padRef = useRef<SignaturePadHandle | null>(null);
 
@@ -115,6 +122,7 @@ function SignContent() {
     try {
       const res = await contractApi.sendSignOtp(id);
       setCooldown(res?.resend_after_seconds ?? 60);
+      setWitnessed(false);
       setStep('code');
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
@@ -329,6 +337,19 @@ function SignContent() {
             >
               {busy ? t('common.sending') : t('sign.sendCode')}
             </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={busy}
+              onClick={() => {
+                setWitnessed(true);
+                setError(null);
+                setCode('');
+                setStep('code');
+              }}
+            >
+              {t('sign.witnessed')}
+            </button>
             <Link className="btn btn-quiet" href={docHref}>
               {t('sign.readAgain')}
             </Link>
@@ -352,7 +373,9 @@ function SignContent() {
           noValidate
         >
           <p style={{ color: 'var(--ink-soft)' }}>
-            {t('otp.sentTo', { phone: user ? displayPhone(user.phone) : t('sign.yourPhone') })}
+            {witnessed
+              ? t('assist.codeLead')
+              : t('otp.sentTo', { phone: user ? displayPhone(user.phone) : t('sign.yourPhone') })}
           </p>
           <div className="field">
             <label htmlFor="sign-code">{t('field.code')}</label>
@@ -377,14 +400,20 @@ function SignContent() {
           <button className="btn btn-primary" type="submit" disabled={busy || code.length < 6}>
             {t('common.continue')}
           </button>
-          <button
-            type="button"
-            className="btn btn-quiet"
-            disabled={busy || cooldown > 0}
-            onClick={() => void sendOtp()}
-          >
-            {cooldown > 0 ? t('otp.resendIn', { time: countdown(cooldown) }) : t('otp.resend')}
-          </button>
+          {witnessed ? (
+            <p style={{ margin: 0, color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+              {t('assist.noResend')}
+            </p>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-quiet"
+              disabled={busy || cooldown > 0}
+              onClick={() => void sendOtp()}
+            >
+              {cooldown > 0 ? t('otp.resendIn', { time: countdown(cooldown) }) : t('otp.resend')}
+            </button>
+          )}
         </form>
       )}
 
