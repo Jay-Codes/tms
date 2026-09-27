@@ -257,6 +257,11 @@ export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
   const [busy, setBusy] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [saved, setSaved] = useState(false);
+  // Phase 22.3: unsigned contracts still on the wording before this save.
+  const [stalePending, setStalePending] = useState(0);
+  const [reissueError, setReissueError] = useState<ApiError | null>(null);
+  const [reissued, setReissued] = useState<number | null>(null);
+  const [reissuing, setReissuing] = useState(false);
 
   // Kept in a ref so the load effect can announce the template without making
   // an inline parent callback a dependency (and re-running the load).
@@ -348,6 +353,9 @@ export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
       });
       const tpl = unwrapTemplate(res);
       setTemplate(tpl);
+      setStalePending(res.stale_pending ?? 0);
+      setReissued(null);
+      setReissueError(null);
       setName(tpl.name ?? name);
       setIsDefault(Boolean(tpl.is_default));
       setPolicy(tpl.policy ? toDraft(tpl.policy) : null);
@@ -358,6 +366,21 @@ export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
       setSaveError(toApiError(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const reissueAll = async () => {
+    if (!window.confirm(t.n('tpl.stale.confirm', stalePending))) return;
+    setReissuing(true);
+    setReissueError(null);
+    try {
+      const res = await templatesApi.reissuePending(templateId);
+      setReissued(res.reissued);
+      setStalePending(0);
+    } catch (e) {
+      setReissueError(toApiError(e));
+    } finally {
+      setReissuing(false);
     }
   };
 
@@ -388,6 +411,16 @@ export function TemplateEditor({ templateId, onSaved }: TemplateEditorProps) {
 
       <ProblemNote error={saveError} />
       {saved ? <Note>{t('tpl.saved')}</Note> : null}
+      <ProblemNote error={reissueError} />
+      {reissued !== null ? <Note>{t.n('tpl.stale.done', reissued)}</Note> : null}
+      {stalePending > 0 ? (
+        <p style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap', fontSize: 'var(--text-sm)' }}>
+          <span>{t.n('tpl.stale.count', stalePending)}</span>
+          <button type="button" className="btn btn-secondary" onClick={() => void reissueAll()} disabled={reissuing}>
+            {reissuing ? t('tpl.stale.reissuing') : t('tpl.stale.reissue_all')}
+          </button>
+        </p>
+      ) : null}
 
       <div
         // Editor and preview side by side only where both are usable: below

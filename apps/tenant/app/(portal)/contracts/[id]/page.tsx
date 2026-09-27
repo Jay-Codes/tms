@@ -17,7 +17,7 @@
 
 import { Icon } from '@iconify/react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ContractStatusStamp,
@@ -34,6 +34,7 @@ import { ProofsFor } from '../../../../components/ProofBits';
 import { RecordPaymentSheet, type RecordPaymentTarget } from '../../../../components/RecordPaymentSheet';
 import { PageHead } from '../../../../components/PageHead';
 import { PolicyFacts } from '../../../../components/PolicyBits';
+import { useTemplateList } from '../../../../components/TemplateBits';
 import { Sheet } from '../../../../components/Sheet';
 import {
   ApiError,
@@ -211,6 +212,93 @@ function TerminateForm({
 }
 
 /**
+ * Phase 22.3 — withdraw an unsigned contract and write it again, on the same
+ * template's new wording or on another. The sheet owns its call because the
+ * answer is a different contract: the page moves to it rather than reloading.
+ */
+function ReissueForm({
+  contract,
+  onDone,
+  onCancel,
+}: {
+  contract: Contract;
+  onDone: (created: Contract) => void;
+  onCancel: () => void;
+}) {
+  const t = useT();
+  const templates = useTemplateList();
+  const [reason, setReason] = useState('');
+  const [templateId, setTemplateId] = useState(contract.template_id ?? '');
+  const [error, setError] = useState<ApiError | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await contractsApi.reissue(contract.id, {
+        reason: reason.trim() || undefined,
+        // Only a real change is sent; otherwise the backend keeps its own template.
+        template_id: templateId && templateId !== contract.template_id ? templateId : undefined,
+      });
+      onDone(unwrapContract(res));
+    } catch (err) {
+      setError(toApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} style={{ display: 'grid', gap: 'var(--sp-4)' }} noValidate>
+      <ProblemNote error={error} />
+      <p style={{ color: 'var(--ink-soft)' }}>{t('contracts.reissue.lead')}</p>
+      <Field id="ri_template" label={t('tpl.one')} error={error?.errors.template_id}>
+        <select
+          id="ri_template"
+          className="input"
+          value={templateId}
+          disabled={templates === null}
+          onChange={(e) => setTemplateId(e.target.value)}
+        >
+          {!contract.template_id ? <option value="">{t('contracts.reissue.template_resolved')}</option> : null}
+          {(templates ?? []).map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.id === contract.template_id ? t('contracts.reissue.template_same', { name: x.name }) : x.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field
+        id="ri_reason"
+        label={t('contracts.reissue.reason')}
+        hint={t('contracts.chars_max', { n: reason.length })}
+        error={error?.errors.reason}
+      >
+        <textarea
+          id="ri_reason"
+          className="input"
+          rows={2}
+          maxLength={200}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder={t('contracts.reissue.reason_placeholder')}
+        />
+      </Field>
+      <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+        <button type="submit" className="btn btn-primary" disabled={busy}>
+          {busy ? t('contracts.reissue.busy') : t('contracts.reissue.submit')}
+        </button>
+        <button type="button" className="btn btn-quiet" onClick={onCancel} disabled={busy}>
+          {t('common.cancel')}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/**
  * Phase 21 — writing off what a former tenant still owes. The reason is
  * required because the write-off is audited; the warning says plainly that it
  * is not a deletion and can be undone.
@@ -287,6 +375,7 @@ function WriteOffForm({
 
 function ContractBody({ id }: { id: string }) {
   const t = useT();
+  const router = useRouter();
   const { org: me } = useMe();
   const [contract, setContract] = useState<Contract | null>(null);
   const [doc, setDoc] = useState<ContractDocument | null>(null);
@@ -308,6 +397,7 @@ function ContractBody({ id }: { id: string }) {
   const [terminateOpen, setTerminateOpen] = useState(false);
   const [backfillOpen, setBackfillOpen] = useState(false);
   const [writeOffOpen, setWriteOffOpen] = useState(false);
+  const [reissueOpen, setReissueOpen] = useState(false);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -424,6 +514,8 @@ function ContractBody({ id }: { id: string }) {
   const signedByLandlord = landlordSignature(contract);
   const canActivate = contract.status === 'pending_signature' && signedByRenter !== null;
   const canTerminate = ['pending_signature', 'active', 'expiring'].includes(contract.status);
+  /** Phase 22.3 — only a contract nobody has signed can be written again. */
+  const canReissue = contract.status === 'pending_signature' && !signedByRenter && !signedByLandlord;
   const rows = schedules ?? [];
   const org = doc?.org;
   const summary = contract.schedules_summary;
@@ -530,6 +622,38 @@ function ContractBody({ id }: { id: string }) {
           </div>
         ) : null}
 
+        {contract.supersedes_contract_id ? (
+          <p style={{ marginTop: 'var(--sp-3)', fontSize: 'var(--text-sm)' }}>
+            <Link href={`/contracts/${contract.supersedes_contract_id}`} style={{ color: 'var(--ink-soft)' }}>
+              {t('contracts.reissue.replaces', { ref: contract.supersedes_contract_id.slice(0, 8) })}
+            </Link>
+          </p>
+        ) : null}
+
+        {canReissue && contract.template_changed ? (
+          <p
+            role="status"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--sp-3)',
+              flexWrap: 'wrap',
+              marginTop: 'var(--sp-4)',
+              padding: 'var(--sp-3) var(--sp-4)',
+              border: '1px solid var(--rule)',
+              borderLeft: '3px solid var(--stamp-overdue)',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: 'var(--text-sm)',
+              maxWidth: 'none',
+            }}
+          >
+            <span style={{ flex: '1 1 280px' }}>{t('contracts.reissue.changed')}</span>
+            <button type="button" className="btn btn-primary" onClick={() => setReissueOpen(true)} disabled={busy}>
+              {t('contracts.reissue.open_new')}
+            </button>
+          </p>
+        ) : null}
+
         {contract.termination_reason ? (
           <p style={{ marginTop: 'var(--sp-3)', color: 'var(--ink-soft)' }}>
             {t('contracts.reason_given', { reason: contract.termination_reason })}
@@ -564,6 +688,11 @@ function ContractBody({ id }: { id: string }) {
               {contract.status === 'pending_signature' && !canActivate ? (
                 <button type="button" className="btn btn-quiet" onClick={() => setBehalfOpen(true)} disabled={busy}>
                   {t('contracts.behalf.open')}
+                </button>
+              ) : null}
+              {canReissue && !contract.template_changed ? (
+                <button type="button" className="btn btn-quiet" onClick={() => setReissueOpen(true)} disabled={busy}>
+                  {t('contracts.reissue.open')}
                 </button>
               ) : null}
               {canTerminate ? (
@@ -1021,6 +1150,17 @@ function ContractBody({ id }: { id: string }) {
           onSubmit={(reason) =>
             void act(() => contractsApi.writeOff(id, reason), t('contracts.writeoff.done'))
           }
+        />
+      </Sheet>
+
+      <Sheet open={reissueOpen} title={t('contracts.reissue.title')} onClose={() => setReissueOpen(false)} width={520}>
+        <ReissueForm
+          contract={contract}
+          onCancel={() => setReissueOpen(false)}
+          onDone={(created) => {
+            setReissueOpen(false);
+            router.push(`/contracts/${created.id}`);
+          }}
         />
       </Sheet>
 

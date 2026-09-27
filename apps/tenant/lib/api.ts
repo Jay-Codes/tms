@@ -896,6 +896,13 @@ export interface Contract {
   schedules_summary: SchedulesSummary | null;
   /** Phase 22.2 — the rules copied from the template; null before Phase 22. */
   policy?: ContractPolicy | null;
+  /**
+   * Phase 22.3 — unsigned by anyone and written before its template's wording
+   * or rules last changed. Only the single read computes it.
+   */
+  template_changed?: boolean;
+  /** Phase 22.3 — the contract this one was reissued from. */
+  supersedes_contract_id?: string | null;
 }
 
 export interface ContractDocument {
@@ -1064,11 +1071,19 @@ export const templatesApi = {
       /** Absent leaves the rules, null clears them (Phase 22.2). */
       policy?: ContractPolicy | null;
     },
-  ) => api.patch<{ template: ContractTemplate } | ContractTemplate>(`/contract-templates/${id}`, body),
+  ) =>
+    // Phase 22.3: `stale_pending` counts unsigned contracts still on the old content.
+    api.patch<({ template: ContractTemplate } | ContractTemplate) & { stale_pending?: number }>(
+      `/contract-templates/${id}`,
+      body,
+    ),
   remove: (id: string) => api.del<void>(`/contract-templates/${id}`),
   /** `language` picks which body is rendered; the backend defaults to English. */
   preview: (id: string, sample = true, language?: Locale) =>
     api.post<TemplatePreview>(`/contract-templates/${id}/preview`, { sample, language }),
+  /** Phase 22.3 — reissue every stale unsigned contract of this template, all or none. */
+  reissuePending: (id: string, reason?: string) =>
+    api.post<{ reissued: number }>(`/contract-templates/${id}/reissue-pending`, reason ? { reason } : {}),
 };
 
 export const contractsApi = {
@@ -1110,6 +1125,13 @@ export const contractsApi = {
   writeOff: (id: string, reason: string) =>
     api.post<WriteOffResult>(`/contracts/${id}/write-off`, { reason }),
   undoWriteOff: (id: string) => api.post<WriteOffResult>(`/contracts/${id}/write-off/undo`),
+  /**
+   * Phase 22.3 — withdraw an unsigned contract and write a new one on
+   * `template_id` (else its own, reworded, template). 201 with the NEW
+   * contract; 409 `not_pending_signature` / `already_signed`.
+   */
+  reissue: (id: string, body: { reason?: string; template_id?: string } = {}) =>
+    api.post<{ contract: Contract } | Contract>(`/contracts/${id}/reissue`, body),
 };
 
 /** `200 {periods, amount, schedules}` from write-off and its undo. */
