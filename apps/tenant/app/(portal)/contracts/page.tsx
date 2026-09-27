@@ -18,6 +18,7 @@ import { ProblemNote } from '../../../components/FormBits';
 import { NewContractForm } from '../../../components/NewContractForm';
 import { PageHead } from '../../../components/PageHead';
 import { Sheet } from '../../../components/Sheet';
+import { EvictionsCard, HoldoversCard } from '../../../components/UnhappyBits';
 import { ApiError, contractsApi, toApiError, type Contract, type ContractStatus } from '../../../lib/api';
 import { useT } from '@tms/ui';
 
@@ -84,6 +85,12 @@ function ContractsBody() {
           </>
         }
       />
+
+      {/* Phase 22.5: what needs a decision — tenancies that ran out, open evictions. */}
+      <div style={{ display: 'grid', gap: 'var(--sp-4)', marginBottom: 'var(--sp-5)' }}>
+        <HoldoversCard onRenewed={(c) => router.push(`/contracts/${c.id}`)} />
+        <EvictionsCard />
+      </div>
 
       <div role="tablist" aria-label={t('contracts.filter_tabs')} style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)', marginBottom: 'var(--sp-4)' }}>
         {TABS.map((item) => {

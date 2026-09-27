@@ -37,6 +37,7 @@ import { PageHead } from '../../../../components/PageHead';
 import { PolicyFacts } from '../../../../components/PolicyBits';
 import { DepositSection, SettlementSummary } from '../../../../components/SettleBits';
 import { useTemplateList } from '../../../../components/TemplateBits';
+import { EvictionSection, RecordNoticeForm, ReliefForm, adjustmentText } from '../../../../components/UnhappyBits';
 import { Sheet } from '../../../../components/Sheet';
 import {
   ApiError,
@@ -45,6 +46,7 @@ import {
   isUnsettled,
   paymentsApi,
   remainingOn,
+  schedulesApi,
   toApiError,
   unwrapContract,
   type CashMethod,
@@ -173,6 +175,7 @@ type TerminateBody = Parameters<typeof contractsApi.terminate>[1];
 function TerminateForm({
   contractId,
   settles,
+  initialDate,
   busy,
   error,
   onSubmit,
@@ -181,6 +184,8 @@ function TerminateForm({
   contractId: string;
   /** Phase 22.5: a running contract settles up; an unsigned one keeps the simple sheet. */
   settles: boolean;
+  /** Phase 22.5: the renter's notice date, when the sheet is opened from it. */
+  initialDate?: string;
   busy: boolean;
   error: ApiError | null;
   onSubmit: (body: TerminateBody) => void;
@@ -188,7 +193,7 @@ function TerminateForm({
 }) {
   const t = useT();
   const [reason, setReason] = useState('');
-  const [date, setDate] = useState(todayISO());
+  const [date, setDate] = useState(initialDate ?? todayISO());
   const [choice, setChoice] = useState<'refund' | 'forfeit' | ''>('');
   const [refundMethod, setRefundMethod] = useState<CashMethod>('cash');
   const [refundReference, setRefundReference] = useState('');
@@ -528,6 +533,11 @@ function ContractBody({ id }: { id: string }) {
   const [writeOffOpen, setWriteOffOpen] = useState(false);
   const [reissueOpen, setReissueOpen] = useState(false);
   const [amendMode, setAmendMode] = useState<AmendMode | null>(null);
+  // Phase 22.5 (rest): relief on one period, a notice recorded in person, and
+  // the terminate sheet opened at the renter's notice date.
+  const [reliefFor, setReliefFor] = useState<ScheduleRow | null>(null);
+  const [noticeOpen, setNoticeOpen] = useState(false);
+  const [terminateDate, setTerminateDate] = useState<string | undefined>(undefined);
   // Phase 22.4: an unsigned amendment of this contract, if one is open.
   const [openAmendment, setOpenAmendment] = useState<Contract | null>(null);
 
@@ -604,6 +614,7 @@ function ContractBody({ id }: { id: string }) {
       setBehalfOpen(false);
       setTerminateOpen(false);
       setWriteOffOpen(false);
+      setReliefFor(null);
       await load();
     } catch (e) {
       setActionError(toApiError(e));
@@ -674,6 +685,12 @@ function ContractBody({ id }: { id: string }) {
   const isAmendment = Boolean(contract.amendment_effective_date && contract.supersedes_contract_id);
   const canAmend =
     (contract.status === 'active' || contract.status === 'expiring') && !contract.superseded_by_contract_id;
+  /**
+   * Phase 22.5 — a tenancy that ran out with nobody saying what happened
+   * (a holdover): renew it on its end date, or confirm the unit is empty.
+   */
+  const holdover =
+    contract.status === 'ended' && !contract.superseded_by_contract_id && !contract.moved_out_confirmed_at;
   const rows = schedules ?? [];
   const org = doc?.org;
   const summary = contract.schedules_summary;
@@ -733,6 +750,9 @@ function ContractBody({ id }: { id: string }) {
               : ''}
             {contract.terminated_at
               ? ` · ${t('contracts.meta.terminated', { date: fmtDate(contract.terminated_at) })}`
+              : ''}
+            {contract.moved_out_confirmed_at
+              ? ` · ${t('contracts.meta.moved_out', { date: fmtDate(contract.moved_out_confirmed_at) })}`
               : ''}
           </span>
         </div>
@@ -861,10 +881,73 @@ function ContractBody({ id }: { id: string }) {
           </p>
         ) : null}
 
+        {/* Phase 22.5: the renter said they are leaving before the end date. */}
+        {running && contract.notice_leave_on ? (
+          <div
+            role="status"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--sp-3)',
+              flexWrap: 'wrap',
+              marginTop: 'var(--sp-4)',
+              padding: 'var(--sp-3) var(--sp-4)',
+              border: '1px solid var(--rule)',
+              borderLeft: '3px solid var(--primary)',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: 'var(--text-sm)',
+            }}
+          >
+            <span style={{ flex: '1 1 280px' }}>
+              {contract.notice_reason
+                ? t('notice.banner_reason', { date: fmtDate(contract.notice_leave_on), reason: contract.notice_reason })
+                : t('notice.banner', { date: fmtDate(contract.notice_leave_on) })}
+            </span>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={busy}
+              onClick={() => {
+                setTerminateDate(contract.notice_leave_on ?? undefined);
+                setTerminateOpen(true);
+              }}
+            >
+              {t('notice.end_on_date')}
+            </button>
+            <button
+              type="button"
+              className="btn btn-quiet"
+              disabled={busy}
+              onClick={() => void act(() => contractsApi.withdrawNotice(id), t('notice.withdrawn'))}
+            >
+              {t('notice.withdraw')}
+            </button>
+          </div>
+        ) : null}
+
         <div style={{ display: 'grid', gap: 'var(--sp-3)', marginTop: 'var(--sp-4)' }}>
           {note ? <Note>{note}</Note> : null}
           <ProblemNote error={actionError} />
         </div>
+
+        {holdover ? (
+          <section style={{ marginTop: 'var(--sp-5)', display: 'grid', gap: 'var(--sp-2)' }}>
+            <p style={{ color: 'var(--ink-soft)' }}>{t('holdover.contract_lead')}</p>
+            <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={busy}
+                onClick={() => void act(() => contractsApi.movedOut(id), t('holdover.moved_out_done'))}
+              >
+                {t('holdover.moved_out')}
+              </button>
+              <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => setAmendMode('renew')}>
+                <Icon icon="solar:refresh-linear" width={20} /> {t('contracts.amend.renew')}
+              </button>
+            </div>
+          </section>
+        ) : null}
 
         {/* ------------------------------ decisions ----------------------------- */}
         {contract.status === 'pending_signature' || canTerminate ? (
@@ -918,8 +1001,21 @@ function ContractBody({ id }: { id: string }) {
                   </button>
                 </>
               ) : null}
+              {running && !contract.notice_leave_on ? (
+                <button type="button" className="btn btn-quiet" onClick={() => setNoticeOpen(true)} disabled={busy}>
+                  {t('notice.record')}
+                </button>
+              ) : null}
               {canTerminate ? (
-                <button type="button" className="btn btn-danger" onClick={() => setTerminateOpen(true)} disabled={busy}>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={() => {
+                    setTerminateDate(undefined);
+                    setTerminateOpen(true);
+                  }}
+                  disabled={busy}
+                >
                   <Icon icon="solar:close-circle-linear" width={20} />{' '}
                   {isAmendment && contract.status === 'pending_signature'
                     ? t('contracts.amend.withdraw')
@@ -1008,6 +1104,19 @@ function ContractBody({ id }: { id: string }) {
             <hr className="rule rule-strong" />
             <h2 style={{ fontSize: 'var(--text-lg)', margin: 'var(--sp-4) 0' }}>{t('deposit.title')}</h2>
             <DepositSection contractId={id} onChanged={() => void load()} />
+          </section>
+        ) : null}
+
+        {/* Phase 22.5: eviction as stages with letters; past cases stay listed. */}
+        {running || (closed && contract.activated_at) ? (
+          <section style={{ marginTop: 'var(--sp-6)' }}>
+            <hr className="rule rule-strong" />
+            <h2 style={{ fontSize: 'var(--text-lg)', margin: 'var(--sp-4) 0' }}>{t('eviction.title')}</h2>
+            <EvictionSection
+              contractId={id}
+              running={running}
+              hasOverdue={(summary?.overdue_count ?? 0) > 0}
+            />
           </section>
         ) : null}
 
@@ -1178,6 +1287,21 @@ function ContractBody({ id }: { id: string }) {
                             {t('contracts.schedule.still_owing', { amount: fmtTZS(remainingOn(s)) })}
                           </div>
                         ) : null}
+                        {/* Phase 22.5: relief the landlord granted on this period. */}
+                        {s.adjustment_kind ? (
+                          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
+                            {adjustmentText(t, s)}{' '}
+                            <button
+                              type="button"
+                              className="btn btn-quiet"
+                              style={{ minHeight: 0, padding: '0 var(--sp-1)', fontSize: 'var(--text-xs)' }}
+                              disabled={busy}
+                              onClick={() => void act(() => schedulesApi.undoAdjust(s.id), t('relief.undone'))}
+                            >
+                              {t('relief.undo')}
+                            </button>
+                          </div>
+                        ) : null}
                         {s.status === 'written_off' && s.write_off_reason ? (
                           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
                             {s.write_off_reason}
@@ -1186,16 +1310,28 @@ function ContractBody({ id }: { id: string }) {
                         <SourceChip source={s.last_payment_source} />
                       </td>
                       <td>
-                        {canRecord && isUnsettled(s) ? (
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            style={{ minHeight: 36 }}
-                            onClick={() => openRecord(s.id)}
-                          >
-                            {t('contracts.schedule.record')}
-                          </button>
-                        ) : null}
+                        <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', justifyContent: 'flex-end' }}>
+                          {canRecord && isUnsettled(s) ? (
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ minHeight: 36 }}
+                              onClick={() => openRecord(s.id)}
+                            >
+                              {t('contracts.schedule.record')}
+                            </button>
+                          ) : null}
+                          {canRecord && isUnsettled(s) && !s.adjustment_kind ? (
+                            <button
+                              type="button"
+                              className="btn btn-quiet"
+                              style={{ minHeight: 36 }}
+                              onClick={() => setReliefFor(s)}
+                            >
+                              {t('relief.open')}
+                            </button>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1433,10 +1569,40 @@ function ContractBody({ id }: { id: string }) {
         />
       </Sheet>
 
+      <Sheet open={reliefFor !== null} title={t('relief.title')} onClose={() => setReliefFor(null)} width={480}>
+        {reliefFor ? (
+          <ReliefForm
+            schedule={reliefFor}
+            onCancel={() => setReliefFor(null)}
+            onDone={() => {
+              setReliefFor(null);
+              setNote(t('relief.done'));
+              void load();
+            }}
+          />
+        ) : null}
+      </Sheet>
+
+      <Sheet open={noticeOpen} title={t('notice.record')} onClose={() => setNoticeOpen(false)} width={480}>
+        {noticeOpen ? (
+          <RecordNoticeForm
+            contract={contract}
+            onCancel={() => setNoticeOpen(false)}
+            onDone={(c) => {
+              setNoticeOpen(false);
+              setContract(c);
+              setNote(t('notice.recorded'));
+            }}
+          />
+        ) : null}
+      </Sheet>
+
       <Sheet open={terminateOpen} title={t('contracts.terminate.title')} onClose={() => setTerminateOpen(false)} width={520}>
         <TerminateForm
+          key={terminateDate ?? 'today'}
           contractId={id}
           settles={running}
+          initialDate={terminateDate}
           busy={busy}
           error={actionError}
           onCancel={() => setTerminateOpen(false)}
