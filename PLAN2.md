@@ -383,13 +383,14 @@ Needs from the client: confirm the inputs per property (purchase price, purchase
 
 - [x] Phases 25–28 walked through on the local stack (dev DB migrated to 32): assisted onboarding end to end; backfill → Backfills list → Undo restores the months; Backfill CSV template served; Projections with and without a purchase price (ROI/yield/payback checked by hand, break-even month marked on the chart); Buy credits shows the switched-off state; admin SMS sales page renders.
 - [x] Projection chart: long horizons label every tick with its year (month names alone read as time running backwards).
+- [x] **Projections rework (client feedback, 27 Sep 2026; DECISIONS 27 Sep):** occupancy slider replaced by a **basis** select — signed contracts only / contracts + units I pick / best case (every unit let, contracts assumed renewed) — and a unit picker listing each unit's own price and contract end. ROI, break-even and payback now measured **against expenses logged** (purchase price optional, added to spend); chart shows cumulative income against cumulative spend. Migration 000034 (saved scenarios: `basis`, `unit_ids`; `occupancy_pct` dropped).
 - [x] Backfilled and imported payments show the date only (they carry no real time; midnight UTC read as 03:00).
 - [x] `null` now clears nullable PATCH fields — property `lat`/`lng`/`notes`, org `settings.due_day`, unit `allowed_period_ids` (pinned by `TestPatchNullClearsNullableFields`).
 
 ## Waiting on the client (nothing to build until these arrive)
 
 - **Snippe (Phase 27 is switched off until then):** bundle sizes and prices (entered by admin), `SNIPPE_API_KEY` + `SNIPPE_WEBHOOK_SECRET`, the webhook URL `https://api.tms.kuzo.co.tz/api/v1/webhooks/snippe` registered in the Snippe dashboard, VAT/receipt rules, whether Snippe has a sandbox (the request body, phone format, amount shape and signature format are now confirmed from the docs; still unknown: whether a 5xx on create means the prompt was sent), and the Beem bundles already bought (opening stock).
-- **Projections (Phase 28 defaults to confirm):** rent-change slider affects vacant units and re-lettings only; occupancy and collection default to 100% without history; months before joining TMS count as zero; renovations count as investment when their category is marked Capital.
+- **Projections (Phase 28 defaults to confirm):** rent-change slider affects units counted as let, not signed contracts; the collection rate defaults to 100% without history; months before joining TMS count as zero; renovations count as spend (not a monthly cost) when their category is marked Capital; best case assumes every contract is renewed at the unit's current price.
 - **Beem:** approved sender ID, then the live SMS smoke test below.
 - **Notifications to landlords:** in-app bell is the default (Phase 24); say if owners should also get SMS or e-mail.
 

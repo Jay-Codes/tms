@@ -3181,13 +3181,23 @@ export const backfillsApi = {
 /* scenario and draws the answer.                                      */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Which units the forecast assumes let beyond their signed contracts: none,
+ * the ones picked in `unit_ids`, or every lettable unit (contracts assumed
+ * renewed at the unit's price).
+ */
+export type ProjectionBasis = 'contracts' | 'selected' | 'best_case';
+
 export interface ProjectionParams {
   /** 1–120, default 24. */
   horizon_months?: number;
-  /** −100…500; applies to vacant units and re-lettings, not signed contracts. */
+  /** Default `contracts`. */
+  basis?: ProjectionBasis;
+  /** The picked units; used only by `selected`. */
+  unit_ids?: string[];
+  /** −100…500; applies to units assumed let, not signed contracts. */
   rent_change_pct?: number;
   /** 0–100, or null/omitted for the trailing twelve months. */
-  occupancy_pct?: number | null;
   collection_rate_pct?: number | null;
   /** −100…500, on running costs. */
   expense_change_pct?: number;
@@ -3200,7 +3210,7 @@ export type BreakEvenStatus =
   | 'projected'
   | 'beyond_horizon'
   | 'not_profitable'
-  | 'no_purchase_price';
+  | 'no_costs';
 
 export interface ProjectionMonth {
   /** YYYY-MM */
@@ -3208,7 +3218,10 @@ export interface ProjectionMonth {
   income: number;
   running_expenses: number;
   net: number;
-  /** Cash made since purchase, at the end of this month. */
+  /** Since purchase (or the start of the book), at the end of this month. */
+  cumulative_income: number;
+  cumulative_spent: number;
+  /** Income less spend: break-even is where it turns positive. */
   cumulative: number;
 }
 
@@ -3219,7 +3232,6 @@ export interface ProjectionBaseline {
   collected: number;
   expected: number;
   collection_rate_pct: number | null;
-  occupancy_pct: number | null;
   running_expenses: number;
   capital_expenses: number;
   running_expenses_monthly: number;
@@ -3228,36 +3240,57 @@ export interface ProjectionBaseline {
   units_total: number;
   units_let: number;
   units_open: number;
-  market_rent_monthly: number;
+  units_assumed: number;
+  assumed_rent_monthly: number;
 }
 
 export interface ProjectionApplied {
   horizon_months: number;
+  basis: ProjectionBasis;
+  unit_ids: string[];
   rent_change_pct: number;
-  occupancy_pct: number;
-  occupancy_source: RateSource;
   collection_rate_pct: number;
   collection_rate_source: RateSource;
   expense_change_pct: number;
 }
 
+/** Returns are measured against what has been spent (expenses, plus the purchase price when entered). */
 export interface ProjectionInvestment {
   purchase_price: number | null;
   capital_spend: number;
-  total: number | null;
-  current_value: number | null;
+  running_spend: number;
+  spent_to_date: number;
+  income_to_date: number;
+  /** Income less spend so far. */
   cash_to_date: number;
+  current_value: number | null;
   break_even_month: string | null;
   break_even_status: BreakEvenStatus;
   trailing_annual_net: number;
+  trailing_annual_spend: number;
   projected_annual_net: number;
+  projected_annual_expenses: number;
+  /** Net ÷ expenses. */
   roi_trailing_pct: number | null;
   roi_projected_pct: number | null;
   yield_pct: number | null;
+  /** Years until income covers the spend to date; 0 once it has. */
   payback_years: number | null;
-  incomplete: boolean;
-  priced_properties: number;
-  missing_price_property_ids: string[];
+}
+
+export interface ProjectionUnitRow {
+  id: string;
+  name: string;
+  property_id: string;
+  property_name: string;
+  status: string;
+  /** The unit's own price, per month. */
+  monthly_rent: number;
+  /** End of the running contract, YYYY-MM-DD. */
+  let_until: string | null;
+  lettable: boolean;
+  /** This forecast assumes it let once no contract covers it. */
+  assumed: boolean;
 }
 
 export interface ProjectionPropertyRow {
@@ -3265,6 +3298,8 @@ export interface ProjectionPropertyRow {
   name: string;
   has_purchase_price: boolean;
   projected_annual_net: number;
+  projected_annual_expenses: number;
+  spent_to_date: number;
   roi_projected_pct: number | null;
   yield_pct: number | null;
   payback_years: number | null;
@@ -3281,6 +3316,7 @@ export interface ProjectionReport {
   months: ProjectionMonth[];
   totals: { income: number; running_expenses: number; net: number };
   investment: ProjectionInvestment;
+  units: ProjectionUnitRow[];
   properties: ProjectionPropertyRow[];
 }
 
@@ -3288,8 +3324,9 @@ export interface ProjectionScenario {
   id: string;
   name: string;
   horizon_months: number;
+  basis: ProjectionBasis;
+  unit_ids: string[];
   rent_change_pct: number;
-  occupancy_pct: number | null;
   collection_rate_pct: number | null;
   expense_change_pct: number;
   created_at: string;

@@ -91,12 +91,10 @@ WHERE s.org_id = sqlc.arg(org_id) AND s.deleted_at IS NULL AND s.status <> 'waiv
   AND (sqlc.narg(property_id)::uuid IS NULL OR u.property_id = sqlc.narg(property_id)::uuid)
 GROUP BY 1, 2;
 
--- ProjectionUnits is every live unit with what the market would pay for it:
--- its current price (or, without one, the rent of its latest tenancy) and the
--- day its running tenancy, if any, ends.
+-- ProjectionUnits is every live unit with its own price (or, without one, the
+-- rent of its latest tenancy) and the day its running tenancy, if any, ends.
 -- name: ProjectionUnits :many
-SELECT u.id, u.property_id, u.status,
-       (u.created_at AT TIME ZONE 'Africa/Dar_es_Salaam')::date AS created_on,
+SELECT u.id, u.property_id, u.name, u.status,
        COALESCE(pp.amount, 0)::bigint        AS price_amount,
        COALESCE(pp.period_days, 0)::int      AS price_period_days,
        COALESCE(lc.rent_amount, 0)::bigint   AS last_rent_amount,
@@ -127,7 +125,7 @@ LEFT JOIN LATERAL (
 ) rc ON true
 WHERE u.org_id = sqlc.arg(org_id) AND u.deleted_at IS NULL
   AND (sqlc.narg(property_id)::uuid IS NULL OR u.property_id = sqlc.narg(property_id)::uuid)
-ORDER BY u.property_id, u.id;
+ORDER BY u.property_id, u.name, u.id;
 
 -- ------------------------------------------------------ saved scenarios --
 
@@ -141,11 +139,12 @@ SELECT count(*) FROM projection_scenarios WHERE org_id = sqlc.arg(org_id);
 
 -- name: CreateProjectionScenario :one
 INSERT INTO projection_scenarios (
-    org_id, name, horizon_months, rent_change_pct, occupancy_pct,
+    org_id, name, horizon_months, basis, unit_ids, rent_change_pct,
     collection_rate_pct, expense_change_pct, created_by_user_id
 ) VALUES (
-    sqlc.arg(org_id), sqlc.arg(name), sqlc.arg(horizon_months), sqlc.arg(rent_change_pct),
-    sqlc.narg(occupancy_pct), sqlc.narg(collection_rate_pct), sqlc.arg(expense_change_pct),
+    sqlc.arg(org_id), sqlc.arg(name), sqlc.arg(horizon_months), sqlc.arg(basis),
+    sqlc.arg(unit_ids)::uuid[], sqlc.arg(rent_change_pct),
+    sqlc.narg(collection_rate_pct), sqlc.arg(expense_change_pct),
     sqlc.arg(created_by_user_id)
 )
 RETURNING *;

@@ -146,11 +146,50 @@ func TestPhase28ProjectionEndpoint(t *testing.T) {
 	if n := len(arrayOf(t, portfolio, "properties")); n != 2 {
 		t.Errorf("properties = %d, want 2", n)
 	}
-	if s := portfolio.str(t, "investment", "break_even_status"); s != "no_purchase_price" {
-		t.Errorf("break-even status without prices = %q", s)
+	// Without any purchase price the returns are still measured, against spend.
+	if s := portfolio.str(t, "investment", "break_even_status"); s == "" {
+		t.Errorf("break-even status without prices is empty")
 	}
-	if inv, _ := portfolio.Body["investment"].(map[string]any); inv["roi_projected_pct"] != nil || inv["total"] != nil {
-		t.Errorf("investment without prices = %v", inv)
+	if v := num(t, portfolio, "investment", "spent_to_date"); v != float64(fix.expenseAmount) {
+		t.Errorf("spent to date without prices = %v, want the running expense %v", v, fix.expenseAmount)
+	}
+	if s := portfolio.str(t, "applied", "basis"); s != "contracts" {
+		t.Errorf("default basis = %q, want contracts", s)
+	}
+
+	// The unit picker: every live unit with its price, and which the basis assumes let.
+	units := arrayOf(t, portfolio, "units")
+	if len(units) == 0 {
+		t.Fatalf("no units in the projection: %s", portfolio.Raw)
+	}
+	for _, u := range units {
+		if u["assumed"] != false || u["name"] == "" || u["property_name"] == "" {
+			t.Errorf("unit under signed contracts only = %v", u)
+		}
+	}
+	best := fix.owner.projection(map[string]any{"basis": "best_case"}).mustStatus(t, http.StatusOK, "best case")
+	var picked string
+	for _, u := range arrayOf(t, best, "units") {
+		if u["lettable"] == true && u["assumed"] != true {
+			t.Errorf("best case leaves out lettable unit %v", u)
+		}
+		if u["let_until"] == nil && u["lettable"] == true && picked == "" {
+			picked, _ = u["id"].(string)
+		}
+	}
+	if num(t, best, "totals", "income") < num(t, portfolio, "totals", "income") {
+		t.Errorf("best case income %v below signed contracts %v",
+			num(t, best, "totals", "income"), num(t, portfolio, "totals", "income"))
+	}
+	if picked != "" {
+		sel := fix.owner.projection(map[string]any{"basis": "selected", "unit_ids": []string{picked}}).
+			mustStatus(t, http.StatusOK, "selected unit")
+		if v := num(t, sel, "baseline", "units_assumed"); v != 1 {
+			t.Errorf("selected units assumed = %v, want 1", v)
+		}
+		if ids, _ := sel.Body["applied"].(map[string]any)["unit_ids"].([]any); len(ids) != 1 || ids[0] != picked {
+			t.Errorf("applied unit ids = %v", ids)
+		}
 	}
 
 	// One property, with a price and some capital spend.
@@ -177,9 +216,9 @@ func TestPhase28ProjectionEndpoint(t *testing.T) {
 	if n := len(arrayOf(t, one, "months")); n != 12 {
 		t.Errorf("months = %d, want 12", n)
 	}
-	// Capital spend is investment, not a running cost.
-	if v := num(t, one, "investment", "total"); v != 1_200_000 {
-		t.Errorf("investment total = %v, want 1,200,000", v)
+	// Capital spend is spent money, not a running cost; the price adds to it.
+	if v := num(t, one, "investment", "spent_to_date"); v != float64(1_200_000+fix.expenseAmount) {
+		t.Errorf("spent to date = %v, want price + capital + running", v)
 	}
 	if v := num(t, one, "investment", "capital_spend"); v != 200_000 {
 		t.Errorf("capital spend = %v", v)
@@ -198,11 +237,8 @@ func TestPhase28ProjectionEndpoint(t *testing.T) {
 	if s := one.str(t, "applied", "collection_rate_source"); s != "scenario" {
 		t.Errorf("collection source = %q", s)
 	}
-	if s := one.str(t, "applied", "occupancy_source"); s == "scenario" {
-		t.Errorf("occupancy source = %q, want the trailing figure", s)
-	}
-	if s := one.str(t, "investment", "break_even_status"); s == "no_purchase_price" {
-		t.Errorf("a priced property still reports %q", s)
+	if s := one.str(t, "investment", "break_even_status"); s == "no_costs" || s == "reached" {
+		t.Errorf("a property 1,200,000 behind reports %q", s)
 	}
 	// The cumulative line starts from the cash made to date.
 	months := arrayOf(t, one, "months")
@@ -211,15 +247,17 @@ func TestPhase28ProjectionEndpoint(t *testing.T) {
 		t.Errorf("month 0 cumulative %v != cash to date %v + net %v",
 			first["cumulative"], cash, first["net"])
 	}
-	if want := float64(fix.rent - refund - fix.expenseAmount); cash != want {
+	if want := float64(fix.rent - refund - fix.expenseAmount - 200_000 - 1_000_000); cash != want {
 		t.Errorf("cash to date = %v, want %v", cash, want)
 	}
+	if first := months[0]; mustFloat(t, first, "cumulative") != mustFloat(t, first, "cumulative_income")-mustFloat(t, first, "cumulative_spent") {
+		t.Errorf("month 0 cumulative is not income less spend: %v", first)
+	}
 
-	// The portfolio now covers one priced property of two, and says so.
+	// The portfolio counts every property; the one price adds to its spend.
 	portfolio = fix.owner.projection(map[string]any{}).mustStatus(t, http.StatusOK, "portfolio again")
-	inv, _ := portfolio.Body["investment"].(map[string]any)
-	if inv["incomplete"] != true || inv["priced_properties"] != float64(1) {
-		t.Errorf("portfolio investment = %v", inv)
+	if v := num(t, portfolio, "investment", "purchase_price"); v != 1_000_000 {
+		t.Errorf("portfolio purchase price = %v", v)
 	}
 }
 
@@ -234,7 +272,8 @@ func TestPhase28ProjectionValidation(t *testing.T) {
 	}{
 		{"horizon zero", map[string]any{"horizon_months": 0}, "horizon_months"},
 		{"horizon too long", map[string]any{"horizon_months": 121}, "horizon_months"},
-		{"occupancy over 100", map[string]any{"occupancy_pct": 101}, "occupancy_pct"},
+		{"unknown basis", map[string]any{"basis": "wishful"}, "basis"},
+		{"malformed unit", map[string]any{"basis": "selected", "unit_ids": []string{"nope"}}, "unit_ids"},
 		{"collection below 0", map[string]any{"collection_rate_pct": -1}, "collection_rate_pct"},
 		{"rent below -100", map[string]any{"rent_change_pct": -150}, "rent_change_pct"},
 		{"expenses above 500", map[string]any{"expense_change_pct": 900}, "expense_change_pct"},
@@ -266,9 +305,16 @@ func TestPhase28ProjectionScenarios(t *testing.T) {
 	const path = "/reports/projection/scenarios"
 
 	created := owner.do(http.MethodPost, path, map[string]any{
-		"name": "Rent up 10%", "horizon_months": 36, "rent_change_pct": 10, "occupancy_pct": 90,
+		"name": "Rent up 10%", "horizon_months": 36, "rent_change_pct": 10,
+		"basis": "selected", "unit_ids": []string{"7f0c1c2e-1111-4a4a-9b9b-000000000001"},
 	}).mustStatus(t, http.StatusCreated, "save scenario")
 	id := created.str(t, "scenario", "id")
+	if s := created.str(t, "scenario", "basis"); s != "selected" {
+		t.Errorf("basis = %q", s)
+	}
+	if ids, _ := created.Body["scenario"].(map[string]any)["unit_ids"].([]any); len(ids) != 1 {
+		t.Errorf("unit ids = %v", ids)
+	}
 	if v := num(t, created, "scenario", "horizon_months"); v != 36 {
 		t.Errorf("horizon = %v", v)
 	}
@@ -281,6 +327,9 @@ func TestPhase28ProjectionScenarios(t *testing.T) {
 	if v := num(t, plain, "scenario", "horizon_months"); v != 24 {
 		t.Errorf("default horizon = %v", v)
 	}
+	if s := plain.str(t, "scenario", "basis"); s != "contracts" {
+		t.Errorf("default basis = %q", s)
+	}
 
 	if r := owner.do(http.MethodPost, path, map[string]any{"name": "rent UP 10%"}); r.Code != http.StatusConflict {
 		t.Errorf("duplicate name (any case): status %d, want 409", r.Code)
@@ -288,8 +337,8 @@ func TestPhase28ProjectionScenarios(t *testing.T) {
 	if r := owner.do(http.MethodPost, path, map[string]any{"name": " "}); r.Code != http.StatusBadRequest {
 		t.Errorf("blank name: status %d, want 400", r.Code)
 	}
-	if r := owner.do(http.MethodPost, path, map[string]any{"name": "x", "occupancy_pct": 200}); r.Code != http.StatusBadRequest {
-		t.Errorf("bad occupancy: status %d, want 400", r.Code)
+	if r := owner.do(http.MethodPost, path, map[string]any{"name": "x", "basis": "hopeful"}); r.Code != http.StatusBadRequest {
+		t.Errorf("bad basis: status %d, want 400", r.Code)
 	}
 	if n := len(listOf(t, owner.do(http.MethodGet, path, nil).mustStatus(t, http.StatusOK, "list"))); n != 2 {
 		t.Errorf("scenarios = %d, want 2", n)
