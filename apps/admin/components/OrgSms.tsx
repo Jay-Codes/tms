@@ -60,13 +60,15 @@ function Figure({
 /** A ledger reason stamped the way a money status is — it already happened. */
 function ReasonStamp({ reason }: { reason: string }) {
   const cls =
-    reason === 'topup' || reason === 'refund'
+    reason === 'topup' || reason === 'refund' || reason === 'purchase'
       ? 'stamp stamp-paid'
       : reason === 'adjust'
         ? 'stamp'
         : 'stamp stamp-overdue';
   const title =
-    reason === 'topup'
+    reason === 'purchase'
+      ? 'Credits the org bought with mobile money (Phase 27)'
+      : reason === 'topup'
       ? 'Credits added by the platform'
       : reason === 'refund'
         ? 'Credits returned after a send that never left'
@@ -75,7 +77,9 @@ function ReasonStamp({ reason }: { reason: string }) {
           : 'Spent sending a message';
   return (
     <span className={cls} title={title} style={reason === 'adjust' ? { color: 'var(--ink-soft)' } : undefined}>
-      {reason === 'topup'
+      {reason === 'purchase'
+        ? 'Purchase'
+        : reason === 'topup'
         ? 'Top-up'
         : reason === 'adjust'
           ? 'Adjust'

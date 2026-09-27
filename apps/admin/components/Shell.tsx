@@ -31,6 +31,8 @@ export const NAV: NavItem[] = [
   { href: '/templates', label: 'Templates', icon: 'solar:chat-square-code-linear' },
   { href: '/audit', label: 'Audit', icon: 'solar:history-linear' },
   { href: '/jobs', label: 'Jobs', icon: 'solar:refresh-circle-linear' },
+  // Phase 27: SMS credit sales (Snippe) and the platform's Beem stock.
+  { href: '/sms', label: 'SMS sales', icon: 'solar:wallet-money-linear' },
 ];
 
 function isCurrent(pathname: string, href: string): boolean {

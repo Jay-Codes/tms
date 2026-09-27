@@ -327,7 +327,7 @@ export function jobKey(job: AdminJob): string {
 /* Phase 14 — SMS credits & platform templates (API.md Part 2)          */
 /* ------------------------------------------------------------------ */
 
-export type SmsLedgerReason = 'topup' | 'adjust' | 'debit' | 'refund' | string;
+export type SmsLedgerReason = 'topup' | 'adjust' | 'debit' | 'refund' | 'purchase' | string;
 
 /** One append-only row of `sms_credit_ledger`. */
 export interface AdminSmsLedgerEntry {
@@ -733,3 +733,111 @@ export function unwrapOrgDetail(res: AdminOrgDetail | AdminOrgSummary): AdminOrg
   const settings = (o.settings ?? flat.settings ?? null) as Record<string, unknown> | null;
   return { org, members: Array.isArray(members) ? members : [], settings };
 }
+
+/* ------------------------------------------------------------------ */
+/* Phase 27 — SMS credit sales (Snippe) and the platform's SMS stock   */
+/* ------------------------------------------------------------------ */
+
+export interface AdminSmsPackage {
+  id: string;
+  name: string;
+  credits: number;
+  /** Integer TZS; Snippe's minimum is 500. */
+  price: number;
+  active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type AdminSmsOrderStatus = 'pending' | 'completed' | 'failed' | 'expired' | 'mismatch';
+
+export interface AdminSmsOrder {
+  id: string;
+  order_code: string;
+  package_name: string;
+  credits: number;
+  amount: number;
+  payer_phone: string;
+  status: AdminSmsOrderStatus;
+  failure_reason: string | null;
+  reference: string | null;
+  created_at: string;
+  credited_at: string | null;
+  org_id: string;
+  org_name: string;
+}
+
+export interface AdminPlatformSmsPurchase {
+  id: string;
+  sms_count: number;
+  cost: number;
+  purchased_on: string;
+  reference: string | null;
+  note: string;
+  admin_name?: string;
+  created_at: string;
+}
+
+export interface AdminSmsStock {
+  sms_bought: number;
+  beem_cost: number;
+  avg_cost_per_sms: number;
+  sms_sent: number;
+  credits_debited: number;
+  uncharged_sent: number;
+  /** Bought − sent. */
+  stock: number;
+  /** Credits every org still holds: SMS the platform has promised. */
+  liability: number;
+  credits_purchased: number;
+  credits_granted: number;
+  buffer: number;
+  headroom: number;
+  low_stock: boolean;
+}
+
+export interface AdminSmsMargin {
+  from: string;
+  to: string;
+  orders: number;
+  sales: number;
+  credits_sold: number;
+  snippe_fee: number;
+  fee_percent: number;
+  avg_cost_per_sms: number;
+  beem_cost: number;
+  margin: number;
+  by_package: { package_name: string; orders: number; sales: number; credits_sold: number }[];
+}
+
+export interface AdminReconcileResult {
+  checked: number;
+  completed: number;
+  failed: number;
+  expired: number;
+  mismatch: number;
+  pending: number;
+  errors: number;
+}
+
+export const adminSmsApi = {
+  packages: (signal?: AbortSignal) =>
+    api.get<{ items: AdminSmsPackage[]; purchases_enabled: boolean }>('/admin/sms/packages', { signal }),
+  createPackage: (body: { name: string; credits: number; price: number; active?: boolean; sort_order?: number }) =>
+    api.post<{ package: AdminSmsPackage }>('/admin/sms/packages', body),
+  updatePackage: (
+    id: string,
+    body: Partial<{ name: string; credits: number; price: number; active: boolean; sort_order: number }>,
+  ) => api.patch<{ package: AdminSmsPackage }>(`/admin/sms/packages/${id}`, body),
+  orders: (query: { status?: string; org_id?: string; limit?: number } = {}, signal?: AbortSignal) =>
+    api.get<{ items: AdminSmsOrder[]; counts: Record<string, number> }>('/admin/sms/orders', { query, signal }),
+  reconcile: () => api.post<AdminReconcileResult>('/admin/sms/orders/reconcile'),
+  purchases: (signal?: AbortSignal) =>
+    api.get<{ items: AdminPlatformSmsPurchase[] }>('/admin/sms/purchases', { signal }),
+  recordPurchase: (body: { sms_count: number; cost: number; purchased_on?: string; reference?: string; note?: string }) =>
+    api.post<{ purchase: AdminPlatformSmsPurchase }>('/admin/sms/purchases', body),
+  stock: (signal?: AbortSignal) => api.get<AdminSmsStock>('/admin/sms/stock', { signal }),
+  margin: (query: { from?: string; to?: string } = {}, signal?: AbortSignal) =>
+    api.get<AdminSmsMargin>('/admin/sms/margin', { query, signal }),
+};

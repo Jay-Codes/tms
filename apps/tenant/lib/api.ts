@@ -3053,3 +3053,51 @@ export function importRowFailure(e: ApiError): { line: number; column: string; r
     reason: typeof e.body.reason === 'string' ? e.body.reason : e.detail,
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* Phase 27 — buy SMS credits with mobile money (Snippe)              */
+/* ------------------------------------------------------------------ */
+
+/** A bundle on sale. Prices are the platform's; integer TZS. */
+export interface SmsPackage {
+  id: string;
+  name: string;
+  credits: number;
+  price: number;
+}
+
+/** `pending` → `completed` (credited) | `failed` | `expired` | `mismatch` (platform checks it). */
+export type SmsOrderStatus = 'pending' | 'completed' | 'failed' | 'expired' | 'mismatch';
+
+export interface SmsOrder {
+  id: string;
+  order_code: string;
+  package_id: string | null;
+  package_name: string;
+  credits: number;
+  amount: number;
+  payer_phone: string;
+  status: SmsOrderStatus;
+  failure_reason: string | null;
+  reference: string | null;
+  created_at: string;
+  credited_at: string | null;
+}
+
+export interface SmsPackagesResponse {
+  /** False until the platform has set up Snippe: the screen explains, it does not offer a button. */
+  enabled: boolean;
+  default_phone: string;
+  items: SmsPackage[];
+}
+
+export const smsPurchaseApi = {
+  packages: (signal?: AbortSignal) => api.get<SmsPackagesResponse>('/org/sms-credits/packages', { signal }),
+  /** 503 `purchases_disabled` while switched off; 502 when Snippe refuses or does not answer. */
+  order: (body: { package_id: string; phone?: string }) =>
+    api.post<{ order: SmsOrder }>('/org/sms-credits/orders', body),
+  orders: (signal?: AbortSignal) =>
+    api.get<{ items: SmsOrder[]; enabled: boolean }>('/org/sms-credits/orders', { signal }),
+  /** Polled while the payer approves the prompt; the server settles it (webhook or its own check). */
+  get: (id: string, signal?: AbortSignal) => api.get<{ order: SmsOrder }>(`/org/sms-credits/orders/${id}`, { signal }),
+};
