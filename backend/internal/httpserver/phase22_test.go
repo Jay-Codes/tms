@@ -387,3 +387,183 @@ func TestPhase22AmendRefusedOnAnUnsignedContract(t *testing.T) {
 		t.Errorf("amend unsigned = %d, want 409", r.Code)
 	}
 }
+
+// ------------------------------------------------ 22.5 settle-up, deposits --
+
+type policyTenancy struct {
+	owner, renter *client
+	contractID    string
+	rows          []map[string]any
+}
+
+// policyTenancy is a signed, active tenancy written on a template with the
+// given policy, rent 300,000 per 30 days.
+func (h *harness) policyTenancy(t *testing.T, tag, phone string, policy map[string]any) policyTenancy {
+	t.Helper()
+	fix := h.newOrgWithUnits(tag, strings.ToLower(tag)+"@jjne.test", "0733"+phone[len(phone)-6:], []string{"Flat 1"}, 300_000)
+	c := fix.client
+	tplID := c.do(http.MethodPost, "/contract-templates", map[string]any{
+		"name": "Rules", "policy": policy, "body_html": "<p>Rent {{rent}}. Deposit {{deposit}}.</p>",
+	}).mustStatus(t, http.StatusCreated, "template").str(t, "template", "id")
+	c.do(http.MethodPost, "/units/bulk-template", map[string]any{"unit_ids": []string{fix.unitIDs[0]}, "template_id": tplID}).
+		mustStatus(t, http.StatusOK, "assign")
+	renter := h.registerRenter(phone, tag+" Renter", defaultPIN)
+	renter.completeProfile(t, tag+" Renter", validNIDA)
+	reqID := renter.do(http.MethodPost, "/units/"+fix.unitCodes[0]+"/link", linkBody(c.periodIDByDays(t, 30), testTermDays)).
+		mustStatus(t, http.StatusCreated, "apply").str(t, "request", "id")
+	id := c.do(http.MethodPost, "/link-requests/"+reqID+"/approve", nil).
+		mustStatus(t, http.StatusOK, "approve").str(t, "contract", "id")
+	h.signAsRenter(t, renter, id, phone)
+	c.do(http.MethodPost, "/contracts/"+id+"/activate", nil).mustStatus(t, http.StatusOK, "activate")
+	return policyTenancy{owner: c, renter: renter, contractID: id, rows: scheduleRows(t, c, id)}
+}
+
+func depositHeldOf(t *testing.T, c *client, id string) float64 {
+	t.Helper()
+	d := c.do(http.MethodGet, "/contracts/"+id+"/deposit", nil).mustStatus(t, http.StatusOK, "deposit")
+	dep, _ := d.Body["deposit"].(map[string]any)
+	return mustFloat(t, dep, "held")
+}
+
+func TestPhase22SettleUpProRataRefundAndDeposit(t *testing.T) {
+	h := newHarness(t)
+	tn := h.policyTenancy(t, "SettleA", "+255722000801", map[string]any{
+		"move_out_proration": "pro_rata", "early_exit_prepaid": "refund",
+		"deposit_mode": "fixed", "deposit_amount": 500_000,
+		"tenant_notice_days": 30, "eviction_notice_days": 30,
+	})
+	c, id := tn.owner, tn.contractID
+	c.do(http.MethodPost, "/contracts/"+id+"/deposit", map[string]any{
+		"kind": "received", "amount": 500_000, "method": "cash",
+	}).mustStatus(t, http.StatusCreated, "deposit received")
+	c.recordPayment(map[string]any{
+		"contract_id": id, "amount": 900_000, "method": "cash", "allow_overpay_rollover": true,
+	}).mustStatus(t, http.StatusCreated, "three months ahead")
+
+	// Leaves after 10 days of the second period.
+	start, _ := time.Parse("2006-01-02", tn.rows[1]["period_start"].(string))
+	eff := start.AddDate(0, 0, 9).Format("2006-01-02")
+	pv := c.do(http.MethodGet, "/contracts/"+id+"/settlement?effective_date="+eff, nil).
+		mustStatus(t, http.StatusOK, "preview")
+	st, _ := pv.Body["settlement"].(map[string]any)
+	straddle, _ := st["straddle"].(map[string]any)
+	if got := mustFloat(t, straddle, "charged"); got != 100_000 {
+		t.Errorf("prorated charge = %v, want 100000", got)
+	}
+	wantRefund := mustFloat(t, st, "refund")
+	if wantRefund != 200_000+300_000 {
+		t.Errorf("preview refund = %v, want 500000", wantRefund)
+	}
+
+	// No method, no refund.
+	c.do(http.MethodPost, "/contracts/"+id+"/terminate", map[string]any{
+		"reason": "moving away", "effective_date": eff,
+	}).mustStatus(t, http.StatusBadRequest, "refund without a method")
+	done := c.do(http.MethodPost, "/contracts/"+id+"/terminate", map[string]any{
+		"reason": "moving away", "effective_date": eff, "refund_method": "mobile_money_manual",
+	}).mustStatus(t, http.StatusOK, "terminate with settlement")
+	applied, _ := done.Body["contract"].(map[string]any)["settlement"].(map[string]any)
+	if got := mustFloat(t, applied, "refund"); got != wantRefund {
+		t.Errorf("applied refund = %v, want the preview's %v", got, wantRefund)
+	}
+	rows := scheduleRows(t, c, id)
+	if got := mustFloat(t, rows[1], "amount"); got != 100_000 {
+		t.Errorf("second period re-priced to %v, want 100000", got)
+	}
+	if got := mustFloat(t, rows[1], "paid_amount"); got != 100_000 {
+		t.Errorf("second period keeps %v paid, want 100000", got)
+	}
+	for i, r := range rows[2:] {
+		if r["status"] != "waived" || mustFloat(t, r, "paid_amount") != 0 {
+			t.Errorf("period %d after the end = %v paid %v, want waived and refunded", i+2, r["status"], r["paid_amount"])
+		}
+	}
+	// Cash reports net the refund off in the period it was paid out.
+	sum := c.do(http.MethodGet, "/reports/summary", nil).mustStatus(t, http.StatusOK, "summary")
+	period, _ := sum.Body["period"].(map[string]any)
+	if got := mustFloat(t, period, "collected"); got != 900_000-wantRefund {
+		t.Errorf("collected this period = %v, want %v (900000 less the refund)", got, 900_000-wantRefund)
+	}
+	var paymentID string
+	for _, p := range listOf(t, c.do(http.MethodGet, "/payments?contract_id="+id, nil).mustStatus(t, http.StatusOK, "payments")) {
+		paymentID, _ = p["id"].(string)
+	}
+	rev := c.do(http.MethodPost, "/payments/"+paymentID+"/reverse", map[string]any{"reason": "oops"})
+	if rev.Code != http.StatusConflict || rev.str(t, "type") != "payment_refunded" {
+		t.Errorf("reverse refunded payment = %d %s", rev.Code, rev.Raw)
+	}
+
+	// The deposit is settled from its own ledger.
+	c.do(http.MethodPost, "/contracts/"+id+"/deposit", map[string]any{
+		"kind": "deduction", "amount": 100_000, "reason": "broken window",
+	}).mustStatus(t, http.StatusCreated, "deduction")
+	over := c.do(http.MethodPost, "/contracts/"+id+"/deposit", map[string]any{
+		"kind": "deduction", "amount": 500_000, "reason": "more",
+	})
+	if over.Code != http.StatusUnprocessableEntity {
+		t.Errorf("deduction beyond the deposit = %d, want 422 (policy forbids)", over.Code)
+	}
+	c.do(http.MethodPost, "/contracts/"+id+"/deposit", map[string]any{
+		"kind": "refund", "amount": 400_000, "method": "cash",
+	}).mustStatus(t, http.StatusCreated, "deposit refund")
+	if got := depositHeldOf(t, c, id); got != 0 {
+		t.Errorf("deposit held after settling = %v, want 0", got)
+	}
+}
+
+func TestPhase22SettleUpLandlordDecides(t *testing.T) {
+	h := newHarness(t)
+	tn := h.policyTenancy(t, "SettleB", "+255722000901", map[string]any{
+		"move_out_proration": "full_month", "early_exit_prepaid": "landlord_decides",
+		"deposit_mode": "none", "tenant_notice_days": 30, "eviction_notice_days": 30,
+	})
+	c, id := tn.owner, tn.contractID
+	c.recordPayment(map[string]any{
+		"contract_id": id, "amount": 600_000, "method": "cash", "allow_overpay_rollover": true,
+	}).mustStatus(t, http.StatusCreated, "two months")
+	eff := tn.rows[0]["period_end"].(string)
+	r := c.do(http.MethodPost, "/contracts/"+id+"/terminate", map[string]any{"reason": "leaving", "effective_date": eff})
+	if r.Code != http.StatusUnprocessableEntity || r.str(t, "type") != "prepaid_choice_required" {
+		t.Fatalf("terminate without a choice = %d %s", r.Code, r.Raw)
+	}
+	done := c.do(http.MethodPost, "/contracts/"+id+"/terminate", map[string]any{
+		"reason": "leaving", "effective_date": eff, "prepaid_action": "forfeit",
+	}).mustStatus(t, http.StatusOK, "terminate keeping the money")
+	st, _ := done.Body["contract"].(map[string]any)["settlement"].(map[string]any)
+	if mustFloat(t, st, "refund") != 0 || mustFloat(t, st, "prepaid") != 300_000 {
+		t.Errorf("settlement = %v", st)
+	}
+	if got := scheduleRows(t, c, id)[1]["status"]; got != "waived" {
+		t.Errorf("kept month = %v, want waived (not owed, money kept)", got)
+	}
+}
+
+func TestPhase22DepositAppliedToRent(t *testing.T) {
+	h := newHarness(t)
+	tn := h.policyTenancy(t, "SettleC", "+255722001001", map[string]any{
+		"move_out_proration": "full_month", "early_exit_prepaid": "forfeit",
+		"deposit_mode": "months", "deposit_months": 1, "tenant_notice_days": 30, "eviction_notice_days": 30,
+	})
+	c, id := tn.owner, tn.contractID
+	c.do(http.MethodPost, "/contracts/"+id+"/deposit", map[string]any{"kind": "received", "amount": 300_000, "method": "cash"}).
+		mustStatus(t, http.StatusCreated, "received")
+	c.do(http.MethodPost, "/contracts/"+id+"/deposit", map[string]any{"kind": "applied_to_rent", "amount": 300_000}).
+		mustStatus(t, http.StatusCreated, "applied")
+	if got := scheduleRows(t, c, id)[0]["status"]; got != "paid" {
+		t.Errorf("first period = %v, want paid from the deposit", got)
+	}
+	var paymentID string
+	for _, p := range listOf(t, c.do(http.MethodGet, "/payments?contract_id="+id, nil).mustStatus(t, http.StatusOK, "payments")) {
+		paymentID, _ = p["id"].(string)
+		if p["method"] != "deposit" {
+			t.Errorf("payment method = %v, want deposit", p["method"])
+		}
+	}
+	rev := c.do(http.MethodPost, "/payments/"+paymentID+"/reverse", map[string]any{"reason": "x"})
+	if rev.Code != http.StatusConflict || rev.str(t, "type") != "deposit_payment" {
+		t.Errorf("reverse deposit payment = %d %s", rev.Code, rev.Raw)
+	}
+	if got := depositHeldOf(t, c, id); got != 0 {
+		t.Errorf("held = %v, want 0", got)
+	}
+}

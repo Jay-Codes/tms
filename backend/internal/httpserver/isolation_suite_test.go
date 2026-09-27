@@ -283,6 +283,12 @@ var isoRoutes = []isoCase{
 	// updated: 0 — never touching org A.
 	{method: "GET", pattern: "/units/{id}/template", aud: isoOrg, path: "/units/{unitA}/template"},
 	{method: "POST", pattern: "/contracts/{id}/reissue", aud: isoOrg, path: "/contracts/{contractA}/reissue"},
+	{method: "GET", pattern: "/contracts/{id}/settlement", aud: isoOrg, path: "/contracts/{contractA}/settlement"},
+	{method: "GET", pattern: "/contracts/{id}/deposit", aud: isoOrg, path: "/contracts/{contractA}/deposit"},
+	{
+		method: "POST", pattern: "/contracts/{id}/deposit", aud: isoOrg, path: "/contracts/{contractA}/deposit",
+		body: map[string]any{"kind": "received", "amount": 1000, "method": "cash"},
+	},
 	{
 		method: "POST", pattern: "/contracts/{id}/amend", aud: isoOrg, path: "/contracts/{contractA}/amend",
 		body: map[string]any{"effective_date": "{today}", "reason": "hijack"},

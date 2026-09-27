@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -141,7 +142,9 @@ type contractResponse struct {
 	TerminationEffectiveDate *string `json:"termination_effective_date"`
 	// TemplateChanged: unsigned, and its template's wording or policy changed
 	// after it was written — offer a reissue. Set on the single read only.
-	TemplateChanged   bool             `json:"template_changed"`
+	TemplateChanged bool `json:"template_changed"`
+	// Settlement is what ending this tenancy applied (§22.5), absent until then.
+	Settlement        json.RawMessage  `json:"settlement,omitempty"`
 	Signatures        []signatureBlock `json:"signatures"`
 	LinkRequestID     *string          `json:"link_request_id"`
 	CreatedAt         time.Time        `json:"created_at"`
@@ -230,6 +233,7 @@ func toContract(r contractRow, signatures []signatureBlock) contractResponse {
 		Language:                 r.Language,
 		SnapshotHash:             db.StrVal(r.SnapshotHash),
 		Policy:                   parsedPolicy(r.Policy),
+		Settlement:               json.RawMessage(r.Settlement),
 		SupersedesContractID:     optUUIDString(r.SupersedesContractID),
 		AmendmentEffectiveDate:   optDateString(r.AmendmentEffectiveDate),
 		AmendmentReason:          r.AmendmentReason,

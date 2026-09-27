@@ -388,6 +388,23 @@ func (s *Server) handleReversePayment(w http.ResponseWriter, r *http.Request) {
 			"this payment has already been reversed")
 		return
 	}
+	// §22.5: money that came from the deposit is undone from the deposit
+	// ledger, and money partly refunded cannot be reversed as if all held.
+	if row.Method == methodDeposit {
+		conflictCode(w, "deposit_payment", "paid from the deposit",
+			"this payment was applied from the deposit; it cannot be reversed here")
+		return
+	}
+	if refunded, err := s.q.PaymentRefunded(r.Context(), sqlc.PaymentRefundedParams{
+		OrgID: p.OrgID, PaymentID: row.ID,
+	}); err != nil {
+		s.serverError(w, r, "payment.reverse.refunded", err)
+		return
+	} else if refunded {
+		conflictCode(w, "payment_refunded", "payment partly refunded",
+			"part of this payment was refunded when the tenancy ended; it cannot be reversed")
+		return
+	}
 	org, err := s.q.GetOrg(r.Context(), p.OrgID)
 	if err != nil {
 		s.serverError(w, r, "payment.reverse.org", err)

@@ -913,6 +913,103 @@ export interface Contract {
   superseded_by_contract_id?: string | null;
   /** Phase 22.4 — the last day the old contract governs. */
   termination_effective_date?: string | null;
+  /** Phase 22.5 — what termination settled, stored with it. */
+  settlement?: Settlement | null;
+}
+
+/** The period a tenancy ends inside (Phase 22.5). */
+export interface SettlementStraddle {
+  schedule_id: string;
+  amount: number;
+  charged: number;
+  days_lived: number;
+  period_days: number;
+}
+
+/**
+ * Phase 22.5 — settle-up on termination, from the contract's policy. `net`
+ * is from the landlord's side: > 0 the renter still owes; < 0 the landlord
+ * owes (refund + deposit held). `prepaid_action` is '' while it is the
+ * landlord's call.
+ */
+export interface Settlement {
+  effective_date: string;
+  proration: MoveOutProration | string;
+  straddle: SettlementStraddle | null;
+  arrears: number;
+  prepaid: number;
+  prepaid_action: 'refund' | 'forfeit' | '';
+  refund: number;
+  deposit_required: number;
+  deposit_held: number;
+  net: number;
+}
+
+export interface SettlementPreview {
+  settlement: Settlement;
+  policy: ContractPolicy | null;
+  needs_choice: boolean;
+}
+
+export type DepositKind = 'received' | 'deduction' | 'refund' | 'applied_to_rent';
+
+export interface DepositEntry {
+  id: string;
+  kind: DepositKind;
+  amount: number;
+  method: PaymentMethod | null;
+  reference: string | null;
+  reason: string | null;
+  payment_id: string | null;
+  occurred_at: string;
+}
+
+/** Rent paid back when a tenancy settled (Phase 22.5). */
+export interface RentRefund {
+  id: string;
+  amount: number;
+  method: PaymentMethod;
+  reference: string | null;
+  reason: string;
+  refunded_at: string;
+}
+
+/** `GET /contracts/{id}/deposit`. `required` is null without a policy. */
+export interface DepositLedger {
+  required: number | null;
+  received: number;
+  held: number;
+  owed_beyond_deposit: number;
+  entries: DepositEntry[];
+  rent_refunds: RentRefund[];
+}
+
+export interface DepositInput {
+  kind: DepositKind;
+  amount: number;
+  /** Required for `received` and `refund`. */
+  method?: CashMethod;
+  reference?: string;
+  /** Required for `deduction`. */
+  reason?: string;
+  occurred_at?: string;
+}
+
+export const depositApi = {
+  get: (contractId: string, signal?: AbortSignal) =>
+    api.get<{ deposit: DepositLedger }>(`/contracts/${contractId}/deposit`, { signal }),
+  /**
+   * 409 `contract_not_signed`; 422 `exceeds_deposit_held` carries `held`.
+   * Answers the whole ledger again.
+   */
+  record: (contractId: string, body: DepositInput) =>
+    api.post<{ deposit: DepositLedger }>(`/contracts/${contractId}/deposit`, body),
+};
+
+/** `held` from a 422 `exceeds_deposit_held`, else null. */
+export function exceedsDepositHeld(err: unknown): number | null {
+  if (!(err instanceof ApiError) || err.code !== 'exceeds_deposit_held') return null;
+  return typeof err.body.held === 'number' ? err.body.held : 0;
 }
 
 /** `POST /contracts/{id}/amend` body (API.md 22.4). Omitted fields carry over. */
@@ -1139,8 +1236,28 @@ export const contractsApi = {
   /** No body = normal countersign; `landlord_recorded` is the FLOWS 3.6 escape hatch. */
   activate: (id: string, body?: { landlord_recorded: true; reason: string }) =>
     api.post<{ contract: Contract } | Contract>(`/contracts/${id}/activate`, body),
-  terminate: (id: string, body: { reason: string; effective_date?: string }) =>
-    api.post<{ contract: Contract } | Contract>(`/contracts/${id}/terminate`, body),
+  /**
+   * Phase 22.5: on a running contract termination settles by its policy.
+   * `prepaid_action` is required (422 `prepaid_choice_required`) when the
+   * policy leaves prepaid rent to the landlord; `refund_method` (400) when
+   * anything is refunded.
+   */
+  terminate: (
+    id: string,
+    body: {
+      reason: string;
+      effective_date?: string;
+      prepaid_action?: 'refund' | 'forfeit';
+      refund_method?: CashMethod;
+      refund_reference?: string;
+    },
+  ) => api.post<{ contract: Contract } | Contract>(`/contracts/${id}/terminate`, body),
+  /** Phase 22.5 — the settle-up a termination on `effective_date` would apply. */
+  settlementPreview: (
+    id: string,
+    query: { effective_date: string; prepaid_action?: 'refund' | 'forfeit' },
+    signal?: AbortSignal,
+  ) => api.get<SettlementPreview>(`/contracts/${id}/settlement`, { query, signal }),
   /**
    * Phase 20.3 — settle (or waive) every unsettled row due on or before
    * `until` in one call. The server decides which rows qualify, what each one
@@ -1299,7 +1416,13 @@ export async function uploadToPresignedUrl(ticket: UploadTicket, file: File): Pr
 /* Shapes — mirror API.md Phase 5 exactly.                             */
 /* ------------------------------------------------------------------ */
 
-export type PaymentMethod = 'cash' | 'bank_transfer' | 'mobile_money_manual';
+/**
+ * `deposit` (Phase 22.5) is money applied from the deposit — the backend
+ * writes it; the Record payment sheet never offers it.
+ */
+export type PaymentMethod = 'cash' | 'bank_transfer' | 'mobile_money_manual' | 'deposit';
+/** The methods a landlord can pick when money actually changes hands. */
+export type CashMethod = Exclude<PaymentMethod, 'deposit'>;
 export type PaymentStatus = 'recorded' | 'reversed';
 
 /**
@@ -1312,13 +1435,14 @@ export type PaymentSource = 'manual' | 'import' | 'backfill';
 export const PAYMENT_SOURCES: readonly PaymentSource[] = ['manual', 'import', 'backfill'] as const;
 
 /** Every method the MVP records. Gateway entry is post-MVP (SPEC §5.7). */
-export const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
+export const PAYMENT_METHODS: { value: CashMethod; label: string }[] = [
   { value: 'cash', label: 'Cash' },
   { value: 'bank_transfer', label: 'Bank transfer' },
   { value: 'mobile_money_manual', label: 'Mobile money' },
 ];
 
 export function methodLabel(m: string | null | undefined): string {
+  if (m === 'deposit') return 'From deposit';
   return PAYMENT_METHODS.find((x) => x.value === m)?.label ?? (m ? String(m).replace(/_/g, ' ') : '—');
 }
 

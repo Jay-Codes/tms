@@ -11,6 +11,29 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addRentRefundItem = `-- name: AddRentRefundItem :exec
+INSERT INTO rent_refund_items (refund_id, org_id, payment_id, amount)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (refund_id, payment_id) DO UPDATE SET amount = rent_refund_items.amount + EXCLUDED.amount
+`
+
+type AddRentRefundItemParams struct {
+	RefundID  pgtype.UUID `json:"refund_id"`
+	OrgID     pgtype.UUID `json:"org_id"`
+	PaymentID pgtype.UUID `json:"payment_id"`
+	Amount    int64       `json:"amount"`
+}
+
+func (q *Queries) AddRentRefundItem(ctx context.Context, arg AddRentRefundItemParams) error {
+	_, err := q.db.Exec(ctx, addRentRefundItem,
+		arg.RefundID,
+		arg.OrgID,
+		arg.PaymentID,
+		arg.Amount,
+	)
+	return err
+}
+
 const contractTemplateChanged = `-- name: ContractTemplateChanged :one
 SELECT EXISTS (
     SELECT 1 FROM contracts c
@@ -37,6 +60,104 @@ func (q *Queries) ContractTemplateChanged(ctx context.Context, arg ContractTempl
 	return changed, err
 }
 
+const createDepositEntry = `-- name: CreateDepositEntry :one
+INSERT INTO deposit_entries (org_id, contract_id, kind, amount, method, reference, reason,
+                             payment_id, occurred_at, recorded_by_user_id)
+VALUES ($1, $2, $3, $4, $5,
+        $6, $7, $8, $9,
+        $10)
+RETURNING id, org_id, contract_id, kind, amount, method, reference, reason, payment_id, occurred_at, recorded_by_user_id, created_at
+`
+
+type CreateDepositEntryParams struct {
+	OrgID            pgtype.UUID        `json:"org_id"`
+	ContractID       pgtype.UUID        `json:"contract_id"`
+	Kind             string             `json:"kind"`
+	Amount           int64              `json:"amount"`
+	Method           *string            `json:"method"`
+	Reference        *string            `json:"reference"`
+	Reason           *string            `json:"reason"`
+	PaymentID        pgtype.UUID        `json:"payment_id"`
+	OccurredAt       pgtype.Timestamptz `json:"occurred_at"`
+	RecordedByUserID pgtype.UUID        `json:"recorded_by_user_id"`
+}
+
+func (q *Queries) CreateDepositEntry(ctx context.Context, arg CreateDepositEntryParams) (DepositEntry, error) {
+	row := q.db.QueryRow(ctx, createDepositEntry,
+		arg.OrgID,
+		arg.ContractID,
+		arg.Kind,
+		arg.Amount,
+		arg.Method,
+		arg.Reference,
+		arg.Reason,
+		arg.PaymentID,
+		arg.OccurredAt,
+		arg.RecordedByUserID,
+	)
+	var i DepositEntry
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.ContractID,
+		&i.Kind,
+		&i.Amount,
+		&i.Method,
+		&i.Reference,
+		&i.Reason,
+		&i.PaymentID,
+		&i.OccurredAt,
+		&i.RecordedByUserID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createRentRefund = `-- name: CreateRentRefund :one
+INSERT INTO rent_refunds (org_id, contract_id, amount, method, reference, reason, refunded_at, recorded_by_user_id)
+VALUES ($1, $2, $3, $4,
+        $5, $6, $7, $8)
+RETURNING id, org_id, contract_id, amount, method, reference, reason, refunded_at, recorded_by_user_id, created_at
+`
+
+type CreateRentRefundParams struct {
+	OrgID            pgtype.UUID        `json:"org_id"`
+	ContractID       pgtype.UUID        `json:"contract_id"`
+	Amount           int64              `json:"amount"`
+	Method           string             `json:"method"`
+	Reference        *string            `json:"reference"`
+	Reason           string             `json:"reason"`
+	RefundedAt       pgtype.Timestamptz `json:"refunded_at"`
+	RecordedByUserID pgtype.UUID        `json:"recorded_by_user_id"`
+}
+
+func (q *Queries) CreateRentRefund(ctx context.Context, arg CreateRentRefundParams) (RentRefund, error) {
+	row := q.db.QueryRow(ctx, createRentRefund,
+		arg.OrgID,
+		arg.ContractID,
+		arg.Amount,
+		arg.Method,
+		arg.Reference,
+		arg.Reason,
+		arg.RefundedAt,
+		arg.RecordedByUserID,
+	)
+	var i RentRefund
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.ContractID,
+		&i.Amount,
+		&i.Method,
+		&i.Reference,
+		&i.Reason,
+		&i.RefundedAt,
+		&i.RecordedByUserID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const deletePaymentAllocation = `-- name: DeletePaymentAllocation :exec
 DELETE FROM payment_allocations WHERE org_id = $1 AND id = $2
 `
@@ -50,6 +171,40 @@ type DeletePaymentAllocationParams struct {
 func (q *Queries) DeletePaymentAllocation(ctx context.Context, arg DeletePaymentAllocationParams) error {
 	_, err := q.db.Exec(ctx, deletePaymentAllocation, arg.OrgID, arg.ID)
 	return err
+}
+
+const depositTotals = `-- name: DepositTotals :one
+SELECT COALESCE(sum(amount) FILTER (WHERE kind = 'received'), 0)::bigint        AS received,
+       COALESCE(sum(amount) FILTER (WHERE kind = 'deduction'), 0)::bigint       AS deducted,
+       COALESCE(sum(amount) FILTER (WHERE kind = 'refund'), 0)::bigint          AS refunded,
+       COALESCE(sum(amount) FILTER (WHERE kind = 'applied_to_rent'), 0)::bigint AS applied
+FROM deposit_entries
+WHERE org_id = $1 AND contract_id = $2
+`
+
+type DepositTotalsParams struct {
+	OrgID      pgtype.UUID `json:"org_id"`
+	ContractID pgtype.UUID `json:"contract_id"`
+}
+
+type DepositTotalsRow struct {
+	Received int64 `json:"received"`
+	Deducted int64 `json:"deducted"`
+	Refunded int64 `json:"refunded"`
+	Applied  int64 `json:"applied"`
+}
+
+// DepositTotals is the deposit ledger summed by kind.
+func (q *Queries) DepositTotals(ctx context.Context, arg DepositTotalsParams) (DepositTotalsRow, error) {
+	row := q.db.QueryRow(ctx, depositTotals, arg.OrgID, arg.ContractID)
+	var i DepositTotalsRow
+	err := row.Scan(
+		&i.Received,
+		&i.Deducted,
+		&i.Refunded,
+		&i.Applied,
+	)
+	return i, err
 }
 
 const listAllocationsFrom = `-- name: ListAllocationsFrom :many
@@ -92,6 +247,134 @@ func (q *Queries) ListAllocationsFrom(ctx context.Context, arg ListAllocationsFr
 			&i.PaymentID,
 			&i.ScheduleID,
 			&i.Amount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDepositEntries = `-- name: ListDepositEntries :many
+SELECT id, org_id, contract_id, kind, amount, method, reference, reason, payment_id, occurred_at, recorded_by_user_id, created_at FROM deposit_entries
+WHERE org_id = $1 AND contract_id = $2
+ORDER BY occurred_at, created_at
+`
+
+type ListDepositEntriesParams struct {
+	OrgID      pgtype.UUID `json:"org_id"`
+	ContractID pgtype.UUID `json:"contract_id"`
+}
+
+func (q *Queries) ListDepositEntries(ctx context.Context, arg ListDepositEntriesParams) ([]DepositEntry, error) {
+	rows, err := q.db.Query(ctx, listDepositEntries, arg.OrgID, arg.ContractID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DepositEntry{}
+	for rows.Next() {
+		var i DepositEntry
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ContractID,
+			&i.Kind,
+			&i.Amount,
+			&i.Method,
+			&i.Reference,
+			&i.Reason,
+			&i.PaymentID,
+			&i.OccurredAt,
+			&i.RecordedByUserID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLiveAllocationsForSchedule = `-- name: ListLiveAllocationsForSchedule :many
+SELECT a.id, a.payment_id, a.amount
+FROM payment_allocations a
+JOIN payments p ON p.id = a.payment_id AND p.org_id = a.org_id
+WHERE a.org_id = $1 AND a.schedule_id = $2
+  AND p.status <> 'reversed' AND p.deleted_at IS NULL
+ORDER BY a.created_at DESC, a.id DESC
+`
+
+type ListLiveAllocationsForScheduleParams struct {
+	OrgID      pgtype.UUID `json:"org_id"`
+	ScheduleID pgtype.UUID `json:"schedule_id"`
+}
+
+type ListLiveAllocationsForScheduleRow struct {
+	ID        pgtype.UUID `json:"id"`
+	PaymentID pgtype.UUID `json:"payment_id"`
+	Amount    int64       `json:"amount"`
+}
+
+// ListLiveAllocationsForSchedule: newest first, so a refund takes back the
+// most recent money first.
+func (q *Queries) ListLiveAllocationsForSchedule(ctx context.Context, arg ListLiveAllocationsForScheduleParams) ([]ListLiveAllocationsForScheduleRow, error) {
+	rows, err := q.db.Query(ctx, listLiveAllocationsForSchedule, arg.OrgID, arg.ScheduleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLiveAllocationsForScheduleRow{}
+	for rows.Next() {
+		var i ListLiveAllocationsForScheduleRow
+		if err := rows.Scan(&i.ID, &i.PaymentID, &i.Amount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRentRefunds = `-- name: ListRentRefunds :many
+SELECT id, org_id, contract_id, amount, method, reference, reason, refunded_at, recorded_by_user_id, created_at FROM rent_refunds
+WHERE org_id = $1 AND contract_id = $2
+ORDER BY refunded_at DESC
+`
+
+type ListRentRefundsParams struct {
+	OrgID      pgtype.UUID `json:"org_id"`
+	ContractID pgtype.UUID `json:"contract_id"`
+}
+
+func (q *Queries) ListRentRefunds(ctx context.Context, arg ListRentRefundsParams) ([]RentRefund, error) {
+	rows, err := q.db.Query(ctx, listRentRefunds, arg.OrgID, arg.ContractID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RentRefund{}
+	for rows.Next() {
+		var i RentRefund
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ContractID,
+			&i.Amount,
+			&i.Method,
+			&i.Reference,
+			&i.Reason,
+			&i.RefundedAt,
+			&i.RecordedByUserID,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -187,6 +470,196 @@ func (q *Queries) OpenAmendmentFor(ctx context.Context, arg OpenAmendmentForPara
 	return id, err
 }
 
+const paymentRefunded = `-- name: PaymentRefunded :one
+SELECT EXISTS (SELECT 1 FROM rent_refund_items
+               WHERE org_id = $1 AND payment_id = $2) AS refunded
+`
+
+type PaymentRefundedParams struct {
+	OrgID     pgtype.UUID `json:"org_id"`
+	PaymentID pgtype.UUID `json:"payment_id"`
+}
+
+// PaymentRefunded: a payment part of which was refunded cannot be reversed.
+func (q *Queries) PaymentRefunded(ctx context.Context, arg PaymentRefundedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, paymentRefunded, arg.OrgID, arg.PaymentID)
+	var refunded bool
+	err := row.Scan(&refunded)
+	return refunded, err
+}
+
+const refundedBuckets = `-- name: RefundedBuckets :many
+SELECT date_trunc($1::text, rf.refunded_at AT TIME ZONE 'Africa/Dar_es_Salaam')::date AS bucket_start,
+       COALESCE(sum(rf.amount), 0)::bigint AS refunded
+FROM rent_refunds rf
+WHERE rf.org_id = $2
+  AND rf.refunded_at >= $3 AND rf.refunded_at < $4
+GROUP BY 1
+ORDER BY 1
+`
+
+type RefundedBucketsParams struct {
+	Bucket string             `json:"bucket"`
+	OrgID  pgtype.UUID        `json:"org_id"`
+	FromTs pgtype.Timestamptz `json:"from_ts"`
+	ToTs   pgtype.Timestamptz `json:"to_ts"`
+}
+
+type RefundedBucketsRow struct {
+	BucketStart pgtype.Date `json:"bucket_start"`
+	Refunded    int64       `json:"refunded"`
+}
+
+func (q *Queries) RefundedBuckets(ctx context.Context, arg RefundedBucketsParams) ([]RefundedBucketsRow, error) {
+	rows, err := q.db.Query(ctx, refundedBuckets,
+		arg.Bucket,
+		arg.OrgID,
+		arg.FromTs,
+		arg.ToTs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RefundedBucketsRow{}
+	for rows.Next() {
+		var i RefundedBucketsRow
+		if err := rows.Scan(&i.BucketStart, &i.Refunded); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const refundedByProperty = `-- name: RefundedByProperty :many
+SELECT u.property_id AS property_id,
+       COALESCE(sum(rf.amount), 0)::bigint AS amount
+FROM rent_refunds rf
+JOIN contracts c ON c.id = rf.contract_id AND c.org_id = rf.org_id
+JOIN units u     ON u.id = c.unit_id AND u.org_id = c.org_id
+WHERE rf.org_id = $1
+  AND rf.refunded_at >= $2 AND rf.refunded_at < $3
+  AND ($4::uuid IS NULL OR u.property_id = $4::uuid)
+GROUP BY 1
+`
+
+type RefundedByPropertyParams struct {
+	OrgID      pgtype.UUID        `json:"org_id"`
+	FromTs     pgtype.Timestamptz `json:"from_ts"`
+	ToTs       pgtype.Timestamptz `json:"to_ts"`
+	PropertyID pgtype.UUID        `json:"property_id"`
+}
+
+type RefundedByPropertyRow struct {
+	PropertyID pgtype.UUID `json:"property_id"`
+	Amount     int64       `json:"amount"`
+}
+
+func (q *Queries) RefundedByProperty(ctx context.Context, arg RefundedByPropertyParams) ([]RefundedByPropertyRow, error) {
+	rows, err := q.db.Query(ctx, refundedByProperty,
+		arg.OrgID,
+		arg.FromTs,
+		arg.ToTs,
+		arg.PropertyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RefundedByPropertyRow{}
+	for rows.Next() {
+		var i RefundedByPropertyRow
+		if err := rows.Scan(&i.PropertyID, &i.Amount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const refundedDaily = `-- name: RefundedDaily :many
+SELECT (rf.refunded_at AT TIME ZONE 'Africa/Dar_es_Salaam')::date AS day,
+       COALESCE(sum(rf.amount), 0)::bigint AS amount
+FROM rent_refunds rf
+WHERE rf.org_id = $1
+  AND rf.refunded_at >= $2 AND rf.refunded_at < $3
+  AND ($4::uuid IS NULL OR EXISTS (
+        SELECT 1 FROM contracts c
+        JOIN units u ON u.id = c.unit_id AND u.org_id = c.org_id
+        WHERE c.id = rf.contract_id AND c.org_id = rf.org_id
+          AND u.property_id = $4::uuid))
+GROUP BY 1
+ORDER BY 1
+`
+
+type RefundedDailyParams struct {
+	OrgID      pgtype.UUID        `json:"org_id"`
+	FromTs     pgtype.Timestamptz `json:"from_ts"`
+	ToTs       pgtype.Timestamptz `json:"to_ts"`
+	PropertyID pgtype.UUID        `json:"property_id"`
+}
+
+type RefundedDailyRow struct {
+	Day    pgtype.Date `json:"day"`
+	Amount int64       `json:"amount"`
+}
+
+func (q *Queries) RefundedDaily(ctx context.Context, arg RefundedDailyParams) ([]RefundedDailyRow, error) {
+	rows, err := q.db.Query(ctx, refundedDaily,
+		arg.OrgID,
+		arg.FromTs,
+		arg.ToTs,
+		arg.PropertyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RefundedDailyRow{}
+	for rows.Next() {
+		var i RefundedDailyRow
+		if err := rows.Scan(&i.Day, &i.Amount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const refundedPeriod = `-- name: RefundedPeriod :one
+
+SELECT COALESCE(sum(amount), 0)::bigint AS refunded
+FROM rent_refunds
+WHERE org_id = $1
+  AND refunded_at >= $2 AND refunded_at < $3
+`
+
+type RefundedPeriodParams struct {
+	OrgID  pgtype.UUID        `json:"org_id"`
+	FromTs pgtype.Timestamptz `json:"from_ts"`
+	ToTs   pgtype.Timestamptz `json:"to_ts"`
+}
+
+// ------------------------------------------------ §22.5 rent refunds in reports --
+// Cash reports subtract rent refunded in the period it was paid out. Each
+// mirrors one collected-money query on the same axis; the handler subtracts.
+func (q *Queries) RefundedPeriod(ctx context.Context, arg RefundedPeriodParams) (int64, error) {
+	row := q.db.QueryRow(ctx, refundedPeriod, arg.OrgID, arg.FromTs, arg.ToTs)
+	var refunded int64
+	err := row.Scan(&refunded)
+	return refunded, err
+}
+
 const resolveUnitTemplate = `-- name: ResolveUnitTemplate :one
 
 SELECT t.id, t.name,
@@ -246,6 +719,22 @@ func (q *Queries) SetContractPolicy(ctx context.Context, arg SetContractPolicyPa
 	return err
 }
 
+const setContractSettlement = `-- name: SetContractSettlement :exec
+UPDATE contracts SET settlement = $1
+WHERE org_id = $2 AND id = $3
+`
+
+type SetContractSettlementParams struct {
+	Settlement []byte      `json:"settlement"`
+	OrgID      pgtype.UUID `json:"org_id"`
+	ID         pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) SetContractSettlement(ctx context.Context, arg SetContractSettlementParams) error {
+	_, err := q.db.Exec(ctx, setContractSettlement, arg.Settlement, arg.OrgID, arg.ID)
+	return err
+}
+
 const setContractSupersedes = `-- name: SetContractSupersedes :exec
 UPDATE contracts SET supersedes_contract_id = $1
 WHERE org_id = $2 AND id = $3
@@ -286,6 +775,76 @@ func (q *Queries) SetPropertyTemplate(ctx context.Context, arg SetPropertyTempla
 	var i SetPropertyTemplateRow
 	err := row.Scan(&i.ID, &i.ContractTemplateID)
 	return i, err
+}
+
+const setScheduleAmount = `-- name: SetScheduleAmount :one
+
+UPDATE payment_schedules
+SET amount = $1,
+    status = CASE
+        WHEN status IN ('waived', 'written_off') THEN status
+        WHEN paid_amount >= $1::bigint THEN 'paid'
+        WHEN due_date + $2::int < CURRENT_DATE THEN 'overdue'
+        WHEN paid_amount > 0 THEN 'partial'
+        ELSE 'pending'
+    END
+WHERE org_id = $3 AND id = $4 AND deleted_at IS NULL
+RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason
+`
+
+type SetScheduleAmountParams struct {
+	Amount    int64       `json:"amount"`
+	GraceDays int32       `json:"grace_days"`
+	OrgID     pgtype.UUID `json:"org_id"`
+	ID        pgtype.UUID `json:"id"`
+}
+
+// ------------------------------------------------ §22.5 settle-up, deposits --
+// SetScheduleAmount re-prices one period (pro-rata move-out) and recomputes
+// its status from its own money and dates.
+func (q *Queries) SetScheduleAmount(ctx context.Context, arg SetScheduleAmountParams) (PaymentSchedule, error) {
+	row := q.db.QueryRow(ctx, setScheduleAmount,
+		arg.Amount,
+		arg.GraceDays,
+		arg.OrgID,
+		arg.ID,
+	)
+	var i PaymentSchedule
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.ContractID,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.DueDate,
+		&i.Amount,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.PaidAmount,
+		&i.WrittenOffAt,
+		&i.WrittenOffByUserID,
+		&i.WriteOffReason,
+	)
+	return i, err
+}
+
+const setSchedulePaid = `-- name: SetSchedulePaid :exec
+UPDATE payment_schedules SET paid_amount = $1
+WHERE org_id = $2 AND id = $3 AND deleted_at IS NULL
+`
+
+type SetSchedulePaidParams struct {
+	PaidAmount int64       `json:"paid_amount"`
+	OrgID      pgtype.UUID `json:"org_id"`
+	ID         pgtype.UUID `json:"id"`
+}
+
+// SetSchedulePaid lowers a period's paid amount after money was refunded off it.
+func (q *Queries) SetSchedulePaid(ctx context.Context, arg SetSchedulePaidParams) error {
+	_, err := q.db.Exec(ctx, setSchedulePaid, arg.PaidAmount, arg.OrgID, arg.ID)
+	return err
 }
 
 const setTemplatePolicy = `-- name: SetTemplatePolicy :one
