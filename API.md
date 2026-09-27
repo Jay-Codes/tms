@@ -1397,3 +1397,37 @@ Migration 000029: `payments.idempotency_key` (unique per org), `payments.correct
 | `GET /inbox?cursor=&limit=` | Org. The landlord's notices, newest first, each with `read` for the caller: `{id, kind, title, body, entity_type, entity_id, link, read, created_at}`. Kinds so far: `payment_reversed`, `payment_corrected`, `payment_duplicate_confirmed`, `proof_submitted`, `notice_given`. |
 | `GET /inbox/unread` | `{unread}` for the caller. |
 | `POST /inbox/read` | `{ids: [...]}` or `{all: true}` → `{unread}`. Read state is per user. |
+
+## Part 2 — Phase 26: undo a whole backfill, bulk backfill by CSV
+
+Migration 000030: `backfill_batches` (`org_id, contract_id, mode paid|waived, until, periods, amount, import_batch_id?, created_by_user_id, created_at, undone_at, undone_by_user_id, undo_reason`), `payments.backfill_batch_id` (the money a `paid` batch wrote), `payment_schedules.backfill_batch_id` (the rows a `waived` batch closed); import kind `backfill`. Audience **org**, owner + manager, like the backfill itself.
+
+| Route | Contract |
+|---|---|
+| `POST /contracts/{id}/backfill` | Unchanged, except that a call which settles anything writes **one batch** and the response gains **`backfill_id`** (null when nothing was settled — no batch is kept for a call that closed nothing). Each payment's `payment.record` audit and the `contract.backfill` audit carry `backfill_id`. |
+| `GET /contracts/{id}/backfills` | → `200 {items:[backfill…]}`, newest first, undone ones included. Another org's contract → 404. |
+| `POST /backfills/{id}/undo` | `{reason}` (required, ≤200 — it becomes every reversed payment's reason, prefixed `Backfill undone: `) → `200 {backfill, payments_reversed, periods_reopened}`. In **one transaction**: every live payment of the batch is reversed through the ordinary reversal path (`payment.reverse` audit per payment, schedules debited and recomputed), and every row the batch waived goes back from `waived` to `paid\|overdue\|partial\|pending`, recomputed from `paid_amount`, due date and the org's grace days. No time window. Refusals (409, nothing written): **`touched_since`** — a live payment that is not the batch's own, recorded after the batch, is allocated to any period the batch settled or waived; **`already_undone`**; **`payment_refunded`** — a settle-up refunded part of the batch's money. Unknown id or another org's → 404. Audited **`backfill.undo`** (entity `backfill_batch`, before: contract, mode, until, periods, amount; after: reason and the counts). **No SMS** and no inbox notice. |
+
+```jsonc
+// backfill
+{ "id": "…", "contract_id": "…", "mode": "paid",        // paid | waived
+  "until": "2026-08-31", "periods": 12, "amount": 3000000, // money moved (paid) or forgiven (waived)
+  "import_batch_id": null,                                // the CSV import the line came from
+  "created_by": {"user_id": "…", "name": "Joseph Chuchu"},
+  "created_at": "2026-09-27T09:12:00Z",
+  "undone_at": null, "undone_by": null, "undo_reason": null,
+  "touched": false,                                       // other money has reached its periods since
+  "can_undo": true }                                      // not undone and not touched
+```
+
+**Import kind `backfill`** — the Phase 16 pipeline unchanged (preview → commit → 24 h undo, 2 MiB, 5 000 rows, 20 previews an hour). Columns `renter_phone, unit_code, until, mode, paid_at?, method?, reference?, note?`; template at `GET /imports/templates/backfill.csv`.
+
+| Rule | Behaviour |
+|---|---|
+| Resolution | `renter_phone` must be a renter this org knows (another org's renter and nobody give the same error); `unit_code` (the QR code, case-insensitive) must be this org's unit; the tenancy is the renter's **running** (`active\|expiring`) contract on that unit. |
+| Cell rules | As `POST /contracts/{id}/backfill`: `until` a `YYYY-MM-DD` not in the future and not before the contract's start; `mode` `paid\|waived`; `note` required for `waived`; `method` defaults to `cash`; `paid_at` blank or `due_date` = each period's own due date, or one date. |
+| Preview | Each ok row's `resolved` carries `renter_name, unit, property, contract_id, mode, until, periods, amount` — "N periods · TZS X", counted from the rent book as it is. A line that would settle nothing, and a second line for the same tenancy, are row errors. |
+| Commit | **Any row error blocks the commit — `skip_errors` is refused** with `409 batch_has_errors`. Each line runs the same core as the button, so each line is one batch (`import_batch_id` set), one `contract.backfill` audit row and at most one `backfill_done` SMS. `created.backfills` counts them; each row is stamped `entity_type:"backfill_batch"`. |
+| Undo | `POST /imports/{id}/undo` undoes each of the import's batches exactly like `POST /backfills/{id}/undo` (reason `import undone`). A batch refused as touched/refunded is **kept and not counted**, like anything else an import undo leaves; it can still be undone from the contract page later. `undone.backfills` counts the rest. |
+
+`created` and `undone` gain a **`backfills`** count for every kind (0 elsewhere).

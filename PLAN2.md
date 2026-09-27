@@ -349,14 +349,14 @@ Why: a renter whose OTP SMS never arrives cannot register or sign. The backend (
 - [ ] Enduser `/u/{unit_code}?assist=`: register/login hide "Send code" and ask for "the code your landlord shows you", no resend; the sign page reads the same.
 - [ ] Tests in the browser against the Phase 18 API; UAT row.
 
-## Phase 26 — Backfill: undo a whole backfill, bulk backfill by CSV (1 day) — 📋 planned
+## Phase 26 — Backfill: undo a whole backfill, bulk backfill by CSV (1 day) — ✅ done 27 Sep 2026
 
 Why: client ask #2 (27 Sep): "make it reversible and support bulk upload via CSV". Today each backfilled payment reverses one at a time and a *waived* backfill cannot be undone at all.
-- [ ] Migration: `backfill_batches` (org, contract, mode, until, created_by, undone_at); `payments.backfill_batch_id`; `payment_schedules.backfill_batch_id` for waived rows.
-- [ ] `POST /contracts/{id}/backfill` records its batch; `GET /contracts/{id}/backfills`; `POST /backfills/{id}/undo` — reverses the batch's payments through the normal reversal path and un-waives its rows (status recomputed); allowed while no later non-backfill payment touched those periods (409 `touched_since` otherwise), no fixed time window.
-- [ ] CSV import kind `backfill` (reuses the Phase 16 preview → commit → undo pipeline, 2 MiB): one row per tenancy — `renter_phone, unit_code, until, mode (paid|waived), paid_at?, method?, reference?, note?`; preview shows "N periods · TZS X" per row; one bad row blocks the commit; downloadable template.
-- [ ] Tenant UI: "Backfills" list on the contract page with Undo; import page gains the Backfill kind.
-- [ ] Tests: batch undo (paid and waived), refusal when touched, CSV preview/commit/undo, isolation.
+- [x] Migration: `backfill_batches` (org, contract, mode, until, created_by, undone_at); `payments.backfill_batch_id`; `payment_schedules.backfill_batch_id` for waived rows.
+- [x] `POST /contracts/{id}/backfill` records its batch; `GET /contracts/{id}/backfills`; `POST /backfills/{id}/undo` — reverses the batch's payments through the normal reversal path and un-waives its rows (status recomputed); allowed while no later non-backfill payment touched those periods (409 `touched_since` otherwise), no fixed time window.
+- [x] CSV import kind `backfill` (reuses the Phase 16 preview → commit → undo pipeline, 2 MiB): one row per tenancy — `renter_phone, unit_code, until, mode (paid|waived), paid_at?, method?, reference?, note?`; preview shows "N periods · TZS X" per row; one bad row blocks the commit; downloadable template.
+- [x] Tenant UI: "Backfills" list on the contract page with Undo; import page gains the Backfill kind.
+- [x] Tests: batch undo (paid and waived), refusal when touched, CSV preview/commit/undo, isolation.
 
 ## Phase 27 — SMS credits: buy with mobile money (Snippe) + platform SMS stock (2 days) — ⏸ blocked on client inputs
 
