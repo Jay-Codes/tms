@@ -2876,8 +2876,8 @@ export function isPendingProof(p: Pick<Proof, 'status'>): boolean {
 /* Shapes — mirror API.md Part 2 §16.2 (CSV import) exactly.           */
 /* ------------------------------------------------------------------ */
 
-export type ImportKind = 'units' | 'renters' | 'payments';
-export const IMPORT_KINDS: readonly ImportKind[] = ['units', 'renters', 'payments'] as const;
+export type ImportKind = 'units' | 'renters' | 'payments' | 'backfill';
+export const IMPORT_KINDS: readonly ImportKind[] = ['units', 'renters', 'payments', 'backfill'] as const;
 
 /** The server refuses anything larger — the page says so before the upload. */
 export const IMPORT_MAX_BYTES = 2 * 1024 * 1024;
@@ -2934,6 +2934,8 @@ export interface ImportCreatedCounts {
   renters: number;
   contracts: number;
   payments: number;
+  /** Phase 26 — one per line of a `backfill` sheet. */
+  backfills?: number;
 }
 
 export interface ImportCommitResult {
@@ -3053,3 +3055,40 @@ export function importRowFailure(e: ApiError): { line: number; column: string; r
     reason: typeof e.body.reason === 'string' ? e.body.reason : e.detail,
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* Phase 26 — backfill batches: listed and undone as a whole.          */
+/* ------------------------------------------------------------------ */
+
+/** One backfill decision (API.md Phase 26), as the contract page lists it. */
+export interface BackfillBatch {
+  id: string;
+  contract_id: string;
+  mode: 'paid' | 'waived';
+  until: string;
+  periods: number;
+  /** Money moved (`paid`) or forgiven (`waived`). */
+  amount: number;
+  /** The CSV import the line arrived on; null for the contract page's button. */
+  import_batch_id: string | null;
+  created_by: { user_id: string; name: string } | null;
+  created_at: string;
+  undone_at: string | null;
+  undone_by: { user_id: string; name: string } | null;
+  undo_reason: string | null;
+  /** Other money has since reached one of its periods — the undo would be refused. */
+  touched: boolean;
+  can_undo: boolean;
+}
+
+export interface BackfillUndoResult {
+  backfill: BackfillBatch;
+  payments_reversed: number;
+  periods_reopened: number;
+}
+
+export const backfillsApi = {
+  list: (contractId: string, signal?: AbortSignal) =>
+    api.get<{ items: BackfillBatch[] }>(`/contracts/${contractId}/backfills`, { signal }),
+  undo: (id: string, reason: string) => api.post<BackfillUndoResult>(`/backfills/${id}/undo`, { reason }),
+};

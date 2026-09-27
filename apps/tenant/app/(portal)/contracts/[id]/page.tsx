@@ -30,6 +30,7 @@ import { DocumentPaper, PrintStyles } from '../../../../components/DocumentPaper
 import { Field, Note, ProblemNote } from '../../../../components/FormBits';
 import { AmendForm, type AmendMode } from '../../../../components/AmendForm';
 import { BackfillSheet, needsBackfill } from '../../../../components/BackfillSheet';
+import { BackfillsList } from '../../../../components/BackfillsList';
 import { DaysOverdue, PaymentsTable, ReverseSheet, SourceChip } from '../../../../components/PaymentBits';
 import { ProofsFor } from '../../../../components/ProofBits';
 import { RecordPaymentSheet, type RecordPaymentTarget } from '../../../../components/RecordPaymentSheet';
@@ -1391,6 +1392,9 @@ function ContractBody({ id }: { id: string }) {
           />
           <LoadMore cursor={paymentsCursor} loading={paymentsMore} onLoad={() => void morePayments()} />
         </section>
+
+        {/* Phase 26 — every backfill of this contract, each undoable as a whole. */}
+        <BackfillsList contractId={id} refreshKey={schedules} onChanged={() => void load()} />
 
         {/* -------------------------------- proofs ------------------------------- */}
         <section style={{ marginTop: 'var(--sp-6)' }}>
