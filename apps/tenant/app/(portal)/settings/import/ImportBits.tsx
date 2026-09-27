@@ -22,7 +22,7 @@ import {
   type ImportRow,
   type ImportTemplateColumn,
 } from '../../../../lib/api';
-import { fmtDateTime } from '../../../../lib/format';
+import { fmtDateTime, fmtTZS } from '../../../../lib/format';
 
 /* ------------------------------ vocabulary ------------------------------- */
 
@@ -76,6 +76,21 @@ export function resolvedHint(
     }
     if (str('unit')) out.push(t('import.resolved.unit_match', { name: str('unit') }));
     if (resolved.contract) out.push(t('import.resolved.contract'));
+  } else if (kind === 'backfill') {
+    // Phase 26: "N periods · TZS X", the server's own count of what the line
+    // would settle on that contract.
+    if (str('renter_name')) out.push(t('import.resolved.renter_match', { name: str('renter_name') }));
+    if (str('unit')) out.push(t('import.resolved.unit_match', { name: str('unit') }));
+    const periods = typeof resolved.periods === 'number' ? resolved.periods : null;
+    const amount = typeof resolved.amount === 'number' ? resolved.amount : 0;
+    if (periods !== null) {
+      out.push(
+        t(str('mode') === 'waived' ? 'import.resolved.backfill_waived' : 'import.resolved.backfill_paid', {
+          count: periods,
+          amount: fmtTZS(amount),
+        }),
+      );
+    }
   } else {
     if (str('renter_name')) out.push(t('import.resolved.renter_match', { name: str('renter_name') }));
     if (str('unit')) out.push(t('import.resolved.unit_match', { name: str('unit') }));

@@ -22,6 +22,8 @@ var schemaMigrations = []struct{ up, down string }{
 	{"../../migrations/000018_payment_proofs.up.sql", "../../migrations/000018_payment_proofs.down.sql"},
 	{"../../migrations/000019_imports.up.sql", "../../migrations/000019_imports.down.sql"},
 	{"../../migrations/000020_assist_sessions.up.sql", "../../migrations/000020_assist_sessions.down.sql"},
+	// Phase 26: backfill batches.
+	{"../../migrations/000030_backfill_batches.up.sql", "../../migrations/000030_backfill_batches.down.sql"},
 }
 
 // guardExemptTables carry an org_id column but are deliberately absent from

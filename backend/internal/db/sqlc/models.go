@@ -40,6 +40,22 @@ type AuditLog struct {
 	At          pgtype.Timestamptz `json:"at"`
 }
 
+type BackfillBatch struct {
+	ID              pgtype.UUID        `json:"id"`
+	OrgID           pgtype.UUID        `json:"org_id"`
+	ContractID      pgtype.UUID        `json:"contract_id"`
+	Mode            string             `json:"mode"`
+	Until           pgtype.Date        `json:"until"`
+	Periods         int32              `json:"periods"`
+	Amount          int64              `json:"amount"`
+	ImportBatchID   pgtype.UUID        `json:"import_batch_id"`
+	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UndoneAt        pgtype.Timestamptz `json:"undone_at"`
+	UndoneByUserID  pgtype.UUID        `json:"undone_by_user_id"`
+	UndoReason      *string            `json:"undo_reason"`
+}
+
 type Contract struct {
 	ID                       pgtype.UUID        `json:"id"`
 	OrgID                    pgtype.UUID        `json:"org_id"`
@@ -324,6 +340,7 @@ type Payment struct {
 	Source            string             `json:"source"`
 	IdempotencyKey    *string            `json:"idempotency_key"`
 	CorrectsPaymentID pgtype.UUID        `json:"corrects_payment_id"`
+	BackfillBatchID   pgtype.UUID        `json:"backfill_batch_id"`
 }
 
 type PaymentAllocation struct {
@@ -393,6 +410,7 @@ type PaymentSchedule struct {
 	AdjustmentReason   *string            `json:"adjustment_reason"`
 	AdjustedAt         pgtype.Timestamptz `json:"adjusted_at"`
 	AdjustedByUserID   pgtype.UUID        `json:"adjusted_by_user_id"`
+	BackfillBatchID    pgtype.UUID        `json:"backfill_batch_id"`
 }
 
 type PlatformTemplate struct {

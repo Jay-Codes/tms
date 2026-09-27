@@ -244,6 +244,9 @@ const (
 	ActionEviction               = "contract.eviction"
 	// Phase 24: a correction is a reversal plus a new payment, audited as one.
 	ActionPaymentCorrect = "payment.correct"
+	// Phase 26: a whole backfill taken back — its payments reversed, its
+	// waived periods reopened — as one decision.
+	ActionBackfillUndo = "backfill.undo"
 )
 
 // Entity types.
@@ -282,6 +285,9 @@ const (
 
 	// EntityAssistSession is one landlord-assisted onboarding (Phase 18).
 	EntityAssistSession = "assist_session"
+
+	// EntityBackfillBatch is one backfill decision (Phase 26).
+	EntityBackfillBatch = "backfill_batch"
 )
 
 type ctxKey int

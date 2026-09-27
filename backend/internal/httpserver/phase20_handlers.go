@@ -166,7 +166,7 @@ func (s *Server) handleContractBackfill(w http.ResponseWriter, r *http.Request) 
 
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"settled": out.Settled, "skipped": out.Skipped, "total": out.Total,
-		"schedules": out.Schedules,
+		"schedules": out.Schedules, "backfill_id": optUUIDString(out.BatchID),
 	})
 }
 
@@ -184,6 +184,9 @@ type backfillRequest struct {
 	PaidAt       time.Time
 	OrgName      string
 	Settings     OrgSettings
+	// ImportBatchID names the CSV import a line of a `backfill` sheet arrived
+	// on (Phase 26); zero for the manual call.
+	ImportBatchID pgtype.UUID
 }
 
 // backfillOutcome is what the caller needs after the transaction commits.
@@ -193,6 +196,9 @@ type backfillOutcome struct {
 	Total     int64  `json:"total"`
 	NotifyID  string `json:"-"`
 	Schedules []scheduleResponse
+	// BatchID is the Phase 26 backfill batch the call wrote — zero when it
+	// settled nothing, because then there is nothing to undo.
+	BatchID pgtype.UUID
 }
 
 // runBackfill closes every unsettled row due on or before `until`.
@@ -217,6 +223,18 @@ func (s *Server) runBackfill(
 	if err != nil {
 		return out, err
 	}
+	// Phase 26: the decision is a row of its own, so it can be listed and
+	// undone as one. It is opened first so every payment and waived row can
+	// name it, and dropped again at the end if the call settled nothing.
+	batch, err := q.CreateBackfillBatch(ctx, sqlc.CreateBackfillBatchParams{
+		OrgID: req.OrgID, ContractID: req.Contract.ID, Mode: req.Mode,
+		Until: pgtype.Date{Time: req.Until, Valid: true}, ImportBatchID: req.ImportBatchID,
+		CreatedByUserID: req.ActorUserID,
+	})
+	if err != nil {
+		return out, err
+	}
+	var batchAmount int64
 
 	for _, row := range rows {
 		outstanding := row.Amount - row.PaidAmount
@@ -230,7 +248,9 @@ func (s *Server) runBackfill(
 		}
 
 		if req.Mode == backfillModeWaived {
-			updated, err := q.WaiveSchedule(ctx, sqlc.WaiveScheduleParams{OrgID: req.OrgID, ID: row.ID})
+			updated, err := q.WaiveBackfillSchedule(ctx, sqlc.WaiveBackfillScheduleParams{
+				BackfillBatchID: batch.ID, OrgID: req.OrgID, ID: row.ID,
+			})
 			if err != nil {
 				if isNoRows(err) {
 					// Another writer settled it between the lock and here —
@@ -242,6 +262,7 @@ func (s *Server) runBackfill(
 				return out, err
 			}
 			out.Settled++
+			batchAmount += outstanding
 			out.Schedules = append(out.Schedules, toSchedule(updated))
 			continue
 		}
@@ -257,6 +278,11 @@ func (s *Server) runBackfill(
 			Source: strPtr(sourceBackfill),
 		})
 		if err != nil {
+			return out, err
+		}
+		if err := q.StampPaymentBackfillBatch(ctx, sqlc.StampPaymentBackfillBatchParams{
+			BackfillBatchID: batch.ID, OrgID: req.OrgID, ID: pay.ID,
+		}); err != nil {
 			return out, err
 		}
 		if _, err := q.CreatePaymentAllocation(ctx, sqlc.CreatePaymentAllocationParams{
@@ -283,16 +309,32 @@ func (s *Server) runBackfill(
 				"contract_id": db.UUIDString(req.Contract.ID), "amount": outstanding,
 				"method": req.Method, "paid_at": paidAt.Format(time.RFC3339),
 				"schedule_id": db.UUIDString(row.ID), "source": sourceBackfill,
+				"backfill_id": db.UUIDString(batch.ID),
 			},
 		}); err != nil {
 			return out, err
 		}
 		out.Settled++
 		out.Total += outstanding
+		batchAmount += outstanding
 		out.Schedules = append(out.Schedules, toSchedule(updated))
 	}
 	if out.Schedules == nil {
 		out.Schedules = []scheduleResponse{}
+	}
+	if out.Settled == 0 {
+		if err := q.DeleteEmptyBackfillBatch(ctx, sqlc.DeleteEmptyBackfillBatchParams{
+			OrgID: req.OrgID, ID: batch.ID,
+		}); err != nil {
+			return out, err
+		}
+	} else {
+		if _, err := q.FinishBackfillBatch(ctx, sqlc.FinishBackfillBatchParams{
+			Periods: int32(out.Settled), Amount: batchAmount, OrgID: req.OrgID, ID: batch.ID,
+		}); err != nil {
+			return out, err
+		}
+		out.BatchID = batch.ID
 	}
 
 	// One row for the decision, carrying the counts, beside the per-payment
@@ -307,6 +349,7 @@ func (s *Server) runBackfill(
 		After: map[string]any{
 			"until": req.Until.Format(dateLayout), "mode": req.Mode,
 			"settled": out.Settled, "skipped": out.Skipped, "total": out.Total,
+			"backfill_id": optUUIDString(out.BatchID),
 		},
 	}); err != nil {
 		return out, err

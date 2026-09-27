@@ -1038,6 +1038,28 @@ items, §19, §20; FLOWS 3, 7 and 11.
 - [ ] **P22.7** A staff member's phone → refused (`not_a_renter_phone`).
       Swahili: every string above reads in Kiswahili in both apps.
       *Evidence: landlord screen at each status, the renter's code step.*
+## P26. Undo a whole backfill, bulk backfill by CSV (Phase 26)
+
+- [ ] **P26.1** Backfill a contract as **Paid** → the contract page shows a
+      **Backfills** line (date, Paid, up to, periods, amount, by) with **Undo**.
+- [ ] **P26.2** **Undo** with a reason → every payment of that backfill reads
+      *reversed*, the periods are owed again (overdue), the line reads "Undone
+      … by …", and **no SMS** goes to the renter.
+- [ ] **P26.3** Backfill another contract as **Waived** → Undo → the periods
+      reopen with the right status (partly paid stays partial/overdue, money on
+      them untouched).
+- [ ] **P26.4** Backfill, reverse one of its payments by hand, record real
+      money on that period → the line reads "Paid since — cannot undo", and
+      undoing is refused with that message.
+- [ ] **P26.5** Settings → Import data → **Backfill history**: download the
+      template, fill one line per tenancy (renter phone, unit code, until,
+      mode) → the preview shows "N periods · TZS X" per line; a bad line
+      (unknown code, waived without a note, date ahead, same tenancy twice)
+      blocks the commit and there is **no** "skip rows" button.
+- [ ] **P26.6** Commit a clean file → each tenancy is settled, each contract
+      shows a Backfills line marked "From a CSV import", one `backfill_done`
+      SMS per tenancy; **Undo this import** within 24 h takes them all back.
+      *Evidence: the Backfills list before and after, the reversed payments.*
 
 ---
 

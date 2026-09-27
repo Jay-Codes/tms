@@ -65,9 +65,11 @@ const KIND_HREF: Record<ImportKind, string> = {
   units: '/units',
   renters: '/renters',
   payments: '/payments',
+  // Phase 26: each line became a backfill on its contract.
+  backfill: '/contracts',
 };
 
-const COUNT_KEYS = ['properties', 'units', 'renters', 'contracts', 'payments'] as const;
+const COUNT_KEYS = ['properties', 'units', 'renters', 'contracts', 'payments', 'backfills'] as const;
 
 function ImportBody() {
   const t = useT();
@@ -326,6 +328,10 @@ function ImportBody() {
                 {t('import.payments.backfill_hint')}
               </p>
             ) : null}
+            {/* Phase 26 — one line per tenancy; one bad line blocks the file. */}
+            {kind === 'backfill' ? (
+              <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{t('import.backfill.hint')}</p>
+            ) : null}
           </section>
         ) : null}
 
@@ -385,7 +391,7 @@ function ImportBody() {
                   <Icon icon="solar:check-circle-linear" width={20} />{' '}
                   {committing ? t('import.commit.busy') : t('import.commit.action', { count: batch.ok_count })}
                 </button>
-                {batch.error_count > 0 && batch.ok_count > 0 ? (
+                {batch.error_count > 0 && batch.ok_count > 0 && batch.kind !== 'backfill' ? (
                   <button
                     type="button"
                     className="btn btn-secondary"

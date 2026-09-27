@@ -68,7 +68,7 @@ func (s *Server) handleImportTemplate(w http.ResponseWriter, r *http.Request) {
 	body := importer.TemplateCSV(kind)
 	if body == nil {
 		httpx.WriteProblem(w, http.StatusNotFound, "not found",
-			"no such import template; the kinds are units, renters and payments")
+			"no such import template; the kinds are units, renters, payments and backfill")
 		return
 	}
 	// Without the .csv suffix the same path answers the column reference the
@@ -127,7 +127,7 @@ func (s *Server) handleImportPreview(w http.ResponseWriter, r *http.Request) {
 	kind := strings.ToLower(strings.TrimSpace(r.FormValue("kind")))
 	if !importer.Valid(kind) {
 		f := validate.Fields{}
-		f.Add("kind", "must be units, renters or payments")
+		f.Add("kind", "must be units, renters, payments or backfill")
 		badRequest(w, f)
 		return
 	}
@@ -359,7 +359,9 @@ func (s *Server) handleCommitImport(w http.ResponseWriter, r *http.Request) {
 			"this import was undone; upload the file again to retry")
 		return
 	}
-	if existing.ErrorCount > 0 && !body.SkipErrors {
+	// Phase 26: a backfill sheet settles money, and one bad line blocks the
+	// commit — there is no "skip the rest" for history.
+	if existing.ErrorCount > 0 && (!body.SkipErrors || existing.Kind == importer.KindBackfill) {
 		writeBatchHasErrors(w, int(existing.ErrorCount))
 		return
 	}
@@ -573,9 +575,10 @@ type importRow struct {
 	resolved map[string]any
 	rowID    pgtype.UUID
 
-	unit    *importer.UnitRow
-	renter  *importer.RenterRow
-	payment *importer.PaymentRow
+	unit     *importer.UnitRow
+	renter   *importer.RenterRow
+	payment  *importer.PaymentRow
+	backfill *importer.BackfillRow // Phase 26
 
 	propertyID     pgtype.UUID
 	propertyName   string
@@ -696,6 +699,8 @@ func (s *Server) resolveImportRows(
 		return out, s.resolveRenterRows(ctx, q, p, out)
 	case importer.KindPayments:
 		return out, s.resolvePaymentRows(ctx, q, p, out)
+	case importer.KindBackfill:
+		return out, s.resolveBackfillRows(ctx, q, p, out)
 	default:
 		return out, nil
 	}
@@ -1270,7 +1275,7 @@ func (s *Server) applyImportRows(
 
 	for _, row := range rows {
 		if !row.ok() {
-			if skipErrors {
+			if skipErrors && batch.Kind != importer.KindBackfill {
 				continue
 			}
 			return created, nil, row.fail(firstErrorColumn(row.errs), firstErrorReason(row.errs))
@@ -1373,6 +1378,14 @@ func (s *Server) applyImportRows(
 				return created, nil, err
 			}
 		}
+
+	case importer.KindBackfill:
+		made, ids, err := s.applyBackfillRows(ctx, q, p, batch, rows)
+		if err != nil {
+			return created, nil, err
+		}
+		created.Backfills = made
+		notifyIDs = append(notifyIDs, ids...)
 	}
 	return created, notifyIDs, nil
 }
@@ -1693,6 +1706,15 @@ func (s *Server) undoImportBatch(
 			return out, err
 		}
 		out.Payments++
+	}
+
+	// 1b. Backfills (Phase 26): each line of a `backfill` sheet is a batch of
+	//     its own, taken back through the same undo the contract page runs.
+	if batch.Kind == importer.KindBackfill {
+		out.Backfills, err = s.undoImportedBackfills(ctx, q, p, batch.ID, graceDays)
+		if err != nil {
+			return out, err
+		}
 	}
 
 	rows, err := q.ListImportRows(ctx, sqlc.ListImportRowsParams{OrgID: p.OrgID, BatchID: batch.ID})

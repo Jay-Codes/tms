@@ -53,6 +53,8 @@ var orgScopedTables = []string{
 	// that run outside an org context (the auth handlers, which have none)
 	// carry a `guard-exempt` line naming why.
 	"assist_sessions",
+	// Part 2 (Phase 26): one row per backfill decision, undone as a whole.
+	"backfill_batches",
 }
 
 var (
