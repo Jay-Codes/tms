@@ -19,6 +19,9 @@ const (
 	ReasonAdjust = "adjust"
 	ReasonDebit  = "debit"
 	ReasonRefund = "refund"
+	// ReasonPurchase is credit an org paid for itself through Snippe
+	// (Phase 27), as distinct from a platform `topup`.
+	ReasonPurchase = "purchase"
 )
 
 // StatusHeldNoCredit is the notification_log status of a message the org

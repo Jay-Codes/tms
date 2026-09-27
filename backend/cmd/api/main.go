@@ -220,6 +220,11 @@ func serve(cfg config.Config, logger *slog.Logger) int {
 	go payment.RunOverdueTicker(ctx, deps.Pool, logger)
 
 	srv := httpserver.New(cfg, deps, logger)
+	// Phase 27: SMS credit orders the Snippe webhook has not settled are
+	// polled every minute once five minutes old, and expired at four hours
+	// (internal/smspay). Postgres only; idle while Snippe is not configured
+	// except for the expiry.
+	go srv.RunSMSOrderReconciler(ctx)
 	if err := srv.ListenAndServe(ctx); err != nil {
 		logger.Error("server stopped", "error", err)
 		return 1

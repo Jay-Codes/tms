@@ -55,6 +55,10 @@ var orgScopedTables = []string{
 	"assist_sessions",
 	// Part 2 (Phase 26): one row per backfill decision, undone as a whole.
 	"backfill_batches",
+	// Part 2 (Phase 27): an org's own SMS credit purchases. The webhook and
+	// the reconciliation job reach an order by Snippe's reference with no
+	// session; those queries carry a `guard-exempt` line naming why.
+	"sms_credit_orders",
 }
 
 var (

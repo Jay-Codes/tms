@@ -358,16 +358,17 @@ Why: client ask #2 (27 Sep): "make it reversible and support bulk upload via CSV
 - [x] Tenant UI: "Backfills" list on the contract page with Undo; import page gains the Backfill kind.
 - [x] Tests: batch undo (paid and waived), refusal when touched, CSV preview/commit/undo, isolation.
 
-## Phase 27 — SMS credits: buy with mobile money (Snippe) + platform SMS stock (2 days) — ⏸ blocked on client inputs
+## Phase 27 — SMS credits: buy with mobile money (Snippe) + platform SMS stock (2 days) — ✅ built 27 Sep 2026, switched off until the client supplies prices and Snippe keys
 
 Why: client ask (27 Sep): landlords buy SMS credits themselves; the platform tracks its own SMS stock. Today only platform admin tops up.
 Needs from the client: **bundle sizes and prices**, **Snippe API key + webhook signing key** (and whether Snippe has a sandbox), VAT/receipt requirements, whether a landlord may pay from a phone other than their account phone.
-- [ ] TECHSTACK first: Snippe as the payment provider (REST, `POST /v1/payments` USSD push, HMAC-SHA256 webhooks, TZS only, min 500, 2.5% fee).
-- [ ] Migration: `sms_credit_packages` (admin-managed: credits, price), `sms_credit_orders` (org, package, amount, payer phone, short order code ≤30 chars as idempotency key, snippe reference, status pending|completed|failed|expired, credited_at), `snippe_webhook_events` (event id unique, for dedupe).
-- [ ] `POST /org/sms-credits/orders {package_id, phone}` → USSD push; `POST /webhooks/snippe` (public via proxy/nginx): verify signature + timestamp ≤5 min, dedupe by event id, check amount/reference, then in one transaction complete the order and credit the org through the existing top-up path (ledger reason `purchase`, which also releases held messages); reconciliation poller `GET /v1/payments/{ref}` for orders pending >5 min, expire at 4 h.
-- [ ] Platform SMS stock: `platform_sms_purchases` (Beem bundles bought: sms count, cost); admin dashboard — Beem balance vs credits sold and unused (liability), alert when stock < liability + buffer; margin report (sales − Beem cost − Snippe fee).
-- [ ] UI: landlord Settings → Notifications "Buy credits" (bundles, phone, waiting-for-approval state, history); admin packages editor, orders list, stock page.
-- [ ] Tests with a fake Snippe (httptest), signature and replay cases.
+- [x] TECHSTACK first: Snippe as the payment provider (REST, `POST /v1/payments` USSD push, HMAC-SHA256 webhooks, TZS only, min 500, 2.5% fee).
+- [x] Migration: `sms_credit_packages` (admin-managed: credits, price), `sms_credit_orders` (org, package, amount, payer phone, short order code ≤30 chars as idempotency key, snippe reference, status pending|completed|failed|expired, credited_at), `snippe_webhook_events` (event id unique, for dedupe).
+- [x] `POST /org/sms-credits/orders {package_id, phone}` → USSD push; `POST /webhooks/snippe` (public via proxy/nginx): verify signature + timestamp ≤5 min, dedupe by event id, check amount/reference, then in one transaction complete the order and credit the org through the existing top-up path (ledger reason `purchase`, which also releases held messages); reconciliation poller `GET /v1/payments/{ref}` for orders pending >5 min, expire at 4 h.
+- [x] Platform SMS stock: `platform_sms_purchases` (Beem bundles bought: sms count, cost); admin dashboard — Beem balance vs credits sold and unused (liability), alert when stock < liability + buffer; margin report (sales − Beem cost − Snippe fee).
+- [x] UI: landlord Settings → Notifications "Buy credits" (bundles, phone, waiting-for-approval state, history); admin packages editor, orders list, stock page.
+- [x] Tests with a fake Snippe (httptest), signature and replay cases.
+- Defaults applied (DECISIONS 27 Sep): prices are admin rows; any Tanzanian mobile may pay (default the account phone); no VAT. Still needed from the client: bundle sizes/prices, `SNIPPE_API_KEY` + `SNIPPE_WEBHOOK_SECRET`, sandbox access for a live check, VAT/receipt rule, and the first Beem bundle figures for the stock page.
 
 ## Phase 28 — Projections, break-even and ROI (2 days) — ✅ built 27 Sep 2026 with default inputs (client confirmation of the inputs still pending; DECISIONS 27 Sep)
 

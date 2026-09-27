@@ -765,6 +765,48 @@ var isoRoutes = []isoCase{
 		method: "POST", pattern: "/admin/templates/{kind}/revert", aud: isoAdmin,
 		path: "/admin/templates/reminder_due/revert", body: map[string]any{"version": 1},
 	},
+
+	// ------------------------------- Phase 27: SMS credits bought via Snippe --
+	//
+	// The packages on sale are platform data, the same for every org; the
+	// orders are the org's own. Org B's history must not carry org A's order,
+	// and naming it is a 404. The suite runs with Snippe unconfigured, so the
+	// purchase itself answers 503 `purchases_disabled` — before any lookup.
+	{method: "GET", pattern: "/org/sms-credits/packages", aud: isoOrg, want: []int{200}},
+	{
+		method: "POST", pattern: "/org/sms-credits/orders", aud: isoOrg,
+		body: map[string]any{"package_id": "{smsOrderA}", "phone": "+255715080299"},
+		want: []int{503},
+	},
+	{method: "GET", pattern: "/org/sms-credits/orders", aud: isoOrg, want: []int{200}},
+	{
+		method: "GET", pattern: "/org/sms-credits/orders/{id}", aud: isoOrg,
+		path: "/org/sms-credits/orders/{smsOrderA}",
+	},
+	{method: "GET", pattern: "/admin/sms/packages", aud: isoAdmin},
+	{
+		method: "POST", pattern: "/admin/sms/packages", aud: isoAdmin,
+		body: map[string]any{"name": "Hijack", "credits": 10, "price": 500},
+	},
+	{
+		method: "PATCH", pattern: "/admin/sms/packages/{id}", aud: isoAdmin,
+		path: "/admin/sms/packages/{smsOrderA}", body: map[string]any{"price": 500},
+	},
+	{method: "GET", pattern: "/admin/sms/orders", aud: isoAdmin},
+	{method: "POST", pattern: "/admin/sms/orders/reconcile", aud: isoAdmin},
+	{method: "GET", pattern: "/admin/sms/purchases", aud: isoAdmin},
+	{
+		method: "POST", pattern: "/admin/sms/purchases", aud: isoAdmin,
+		body: map[string]any{"sms_count": 10, "cost": 100},
+	},
+	{method: "GET", pattern: "/admin/sms/stock", aud: isoAdmin},
+	{method: "GET", pattern: "/admin/sms/margin", aud: isoAdmin},
+	{
+		method: "POST", pattern: "/webhooks/snippe", aud: isoOpen,
+		note: "deliberately public: Snippe holds no session. The HMAC-SHA256 signature over the raw " +
+			"body with a fresh timestamp is the authorisation, and it only moves the order the " +
+			"verified payment names (TECHSTACK, Snippe; API.md Phase 27)",
+	},
 }
 
 // ------------------------------------------------- the router census --
@@ -930,6 +972,9 @@ var isoSecretIDs = []string{
 	"backfillA",
 	// Phase 28: a saved projection scenario is one org's planning.
 	"scenarioA",
+	// Phase 27: an SMS credit order carries the payer's phone and what the
+	// org spent.
+	"smsOrderA",
 }
 
 func (f *isoFixture) secrets() map[string]string {
@@ -1055,6 +1100,17 @@ func newIsoFixture(t *testing.T, h *harness) *isoFixture {
 		mustStatus(t, http.StatusOK, "org A audit log"))
 	f.ids["notificationA"] = firstID(t, base.owner.do(http.MethodGet, "/notifications/log", nil).
 		mustStatus(t, http.StatusOK, "org A notification log"))
+
+	// An SMS credit order (Phase 27). Written directly: the suite runs with
+	// Snippe unconfigured, so the purchase route would answer 503.
+	var smsOrderA string
+	if err := h.pool.QueryRow(context.Background(),
+		`INSERT INTO sms_credit_orders (org_id, package_name, credits, amount, payer_phone, order_code)
+		 VALUES ($1, 'Iso Alpha 100', 100, 5000, '+255715080100', 'SMS-ISOALPHA01')
+		 RETURNING id::text`, base.orgID).Scan(&smsOrderA); err != nil {
+		t.Fatalf("org A sms order: %v", err)
+	}
+	f.ids["smsOrderA"] = smsOrderA
 
 	// The two callers, related to none of the above.
 	f.ownerB, _ = h.createOrg("Iso Beta", "Bob Beta", "iso-beta@jjne.test", "0715080200", "supersecret")
