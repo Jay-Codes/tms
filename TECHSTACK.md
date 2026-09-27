@@ -58,6 +58,22 @@ Canonical tech stack for TMS. All architecture and implementation decisions must
 - Server (`docker-compose.deploy.yml`, `make docker-deploy`): Go API + edge proxy only, bound to loopback behind the host's TLS reverse proxy; Next.js apps on Vercel; Postgres/Redis/MinIO reused from the host or run under `INFRA=own`.
 - Configuration via `.env` (gitignored; `.env.example` committed). Data lives in named volumes.
 
+## External providers
+
+| Provider | Used for | Reached how |
+|----------|----------|-------------|
+| Beem Africa | Outbound SMS (`notify.BeemProvider`) | REST from the Go backend only; `BEEM_API_KEY`, `BEEM_SECRET_KEY`, `BEEM_SENDER_ID` |
+| Snippe (snippe.sh) | Mobile-money collection: landlords buy SMS credits (Phase 27) | REST from the Go backend only (see below) |
+
+### Snippe — payment provider (Phase 27)
+
+- **What**: a Tanzanian mobile-money gateway. `POST /v1/payments` sends a USSD push to the payer's phone (`payment_type: "mobile"`); the payer approves on the handset. TZS only, integer amounts, minimum 500 TZS; Snippe keeps a 2.5% fee.
+- **Outbound**: the Go backend calls `SNIPPE_BASE_URL` (default `https://api.snippe.sh`) with `Authorization: Bearer $SNIPPE_API_KEY` and an `Idempotency-Key` (the order's own ≤30-char code). `GET /v1/payments/{reference}` reconciles orders the webhook has not settled. The client lives in one file (`backend/internal/snippe`) and is tested against a fake Snippe (httptest); nothing else talks to Snippe.
+- **Inbound**: Snippe calls `POST /api/v1/webhooks/snippe` — a public route on the Go API, reached through the same edge proxy / nginx `/api` prefix as every other call (no proxy change). Every delivery is verified (`X-Webhook-Signature` = hex HMAC-SHA256 of `{timestamp}.{raw body}` keyed by `SNIPPE_WEBHOOK_SECRET`, constant-time compare, timestamp within 5 minutes) and deduplicated by event id in Postgres before it can credit anything.
+- **Secrets**: `SNIPPE_API_KEY`, `SNIPPE_WEBHOOK_SECRET` in `.env` / `.env.deploy` only (never in the frontends, never logged). `SNIPPE_WEBHOOK_URL` is the public URL Snippe is told to call (derived from `PUBLIC_BASE_URL`/`APP_BASE_URL` + `/api/v1/webhooks/snippe` when unset — correct for the single-origin proxy layout; set it explicitly when the API has its own host).
+- **Off by default**: with the key or the signing secret unset, the purchase routes answer 503 `purchases_disabled`; everything else works.
+- The frontends never talk to Snippe; they call the Go API and poll the order.
+
 ## Rules
 
 1. Frontend renders client-side and holds no business logic.
