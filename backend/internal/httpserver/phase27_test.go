@@ -82,6 +82,12 @@ func (f *fakeSnippe) serve(w http.ResponseWriter, r *http.Request) {
 		f.creates = append(f.creates, fakeCreate{
 			Body: body, IdempotencyKey: r.Header.Get("Idempotency-Key"), Auth: r.Header.Get("Authorization"),
 		})
+		// Refuse an incomplete body exactly as the real Snippe does.
+		if missing := snippeMissing(body); missing != "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprintf(w, `{"status":"error","code":400,"error_code":"validation_error","message":%q}`, missing)
+			return
+		}
 		if f.refuse != 0 {
 			code := f.refuse
 			f.refuse = 0
@@ -90,7 +96,8 @@ func (f *fakeSnippe) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ref := fmt.Sprintf("SNP-REF-%d", len(f.creates))
-		amount, _ := body["amount"].(float64)
+		details, _ := body["details"].(map[string]any)
+		amount, _ := details["amount"].(float64)
 		f.payments[ref] = &fakePayment{Status: "pending", Amount: int64(amount)}
 		_, _ = fmt.Fprintf(w, `{"status":"success","code":200,"data":{"reference":%q,"id":"pay_%d","status":"pending"}}`,
 			ref, len(f.creates))
@@ -299,9 +306,11 @@ func TestPhase27OrderSendsUSSDPush(t *testing.T) {
 	if sent.IdempotencyKey != code {
 		t.Errorf("Idempotency-Key = %q, want the order code %q", sent.IdempotencyKey, code)
 	}
-	if sent.Body["amount"] != float64(testPackagePrice) || sent.Body["currency"] != "TZS" ||
-		sent.Body["phone"] != "255712270001" || sent.Body["payment_type"] != "mobile" ||
-		sent.Body["webhook_url"] != testWebhookURL {
+	details, _ := sent.Body["details"].(map[string]any)
+	customer, _ := sent.Body["customer"].(map[string]any)
+	if details["amount"] != float64(testPackagePrice) || details["currency"] != "TZS" ||
+		sent.Body["phone_number"] != "255712270001" || sent.Body["payment_type"] != "mobile" ||
+		sent.Body["webhook_url"] != testWebhookURL || customer["email"] == "" || customer["firstname"] == "" {
 		t.Errorf("snippe request = %v", sent.Body)
 	}
 	if meta, _ := sent.Body["metadata"].(map[string]any); meta["order_code"] != code {
@@ -767,4 +776,28 @@ func TestPhase27OrderRateLimit(t *testing.T) {
 	if resp.str(t, "type") != "too_many_orders" {
 		t.Errorf("type = %s", resp.str(t, "type"))
 	}
+}
+
+// snippeMissing lists the required fields a create body lacks, in the words
+// the real Snippe uses ("phone_number is required; details.amount is …").
+func snippeMissing(body map[string]any) string {
+	var missing []string
+	str := func(m map[string]any, k string) bool { v, _ := m[k].(string); return v != "" }
+	details, _ := body["details"].(map[string]any)
+	customer, _ := body["customer"].(map[string]any)
+	if !str(body, "phone_number") {
+		missing = append(missing, "phone_number is required")
+	}
+	if v, _ := details["amount"].(float64); v <= 0 {
+		missing = append(missing, "details.amount is required")
+	}
+	if !str(details, "currency") {
+		missing = append(missing, "details.currency is required")
+	}
+	for _, k := range []string{"firstname", "lastname", "email"} {
+		if !str(customer, k) {
+			missing = append(missing, "customer."+k+" is required")
+		}
+	}
+	return strings.Join(missing, "; ")
 }

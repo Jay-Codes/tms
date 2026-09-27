@@ -1509,3 +1509,6 @@ Order statuses: `pending` → `completed` (credited) | `failed` (Snippe failed/v
 **Reconciliation job** (ticker in `cmd/api`, every minute, like the lifecycle job): pending orders older than 5 min and not checked in the last 2 min, up to 30 per sweep, are checked with `GET /v1/payments/{reference}` and settled exactly as a webhook would; an order still pending (or with no reference) 4 h after creation is `expired`.
 
 The org ledger (`GET /admin/orgs/{id}/sms`) shows purchases with reason `purchase` and note `Order SMS-…`.
+
+### Phase 27 correction (27 Sep 2026) — Snippe request body
+`POST /org/sms-credits/orders` now sends Snippe the documented body: `{payment_type:"mobile", details:{amount, currency:"TZS"}, phone_number:"255…", customer:{firstname, lastname, email}, webhook_url, metadata:{order_code}}`. The customer is the ordering landlord; without a name or e-mail on the account → **422 `buyer_details_missing`**.

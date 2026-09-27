@@ -87,6 +87,7 @@ func TestCreatePaymentAgainstFake(t *testing.T) {
 	p, err := c.CreatePayment(context.Background(), snippe.CreateRequest{
 		Amount: 5000, Phone: "+255712000001", IdempotencyKey: "SMS-ABCDEFGH23",
 		Metadata: map[string]string{"order_code": "SMS-ABCDEFGH23"}, WebhookURL: "https://x/api/v1/webhooks/snippe",
+		Customer: snippe.Customer{FirstName: "Jay", LastName: "Owner", Email: "owner@jjne.test"},
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -97,8 +98,13 @@ func TestCreatePaymentAgainstFake(t *testing.T) {
 	if gotKey != "SMS-ABCDEFGH23" || gotAuth != "Bearer sk_test" {
 		t.Errorf("headers: key %q auth %q", gotKey, gotAuth)
 	}
-	if gotBody["phone"] != "255712000001" || gotBody["currency"] != "TZS" ||
-		gotBody["payment_type"] != "mobile" || gotBody["amount"] != float64(5000) {
+	// The documented shape (docs.snippe.sh, Payments → Mobile Money).
+	details, _ := gotBody["details"].(map[string]any)
+	customer, _ := gotBody["customer"].(map[string]any)
+	if gotBody["phone_number"] != "255712000001" || gotBody["payment_type"] != "mobile" ||
+		details["amount"] != float64(5000) || details["currency"] != "TZS" ||
+		customer["firstname"] != "Jay" || customer["lastname"] != "Owner" || customer["email"] != "owner@jjne.test" ||
+		gotBody["webhook_url"] != "https://x/api/v1/webhooks/snippe" {
 		t.Errorf("body = %v", gotBody)
 	}
 }
@@ -121,5 +127,21 @@ func TestCreatePaymentRefusal(t *testing.T) {
 func TestNotConfigured(t *testing.T) {
 	if _, err := snippe.New("", "https://api.snippe.sh").GetPayment(context.Background(), "r"); !errors.Is(err, snippe.ErrNotConfigured) {
 		t.Errorf("err = %v, want ErrNotConfigured", err)
+	}
+}
+
+func TestSplitName(t *testing.T) {
+	cases := map[string][2]string{
+		"Jay Owner":          {"Jay", "Owner"},
+		"Asha Juma Mrisho":   {"Asha Juma", "Mrisho"},
+		"Neema":              {"Neema", "Neema"},
+		"  Baraka   Mushi  ": {"Baraka", "Mushi"},
+		"":                   {"", ""},
+	}
+	for in, want := range cases {
+		f, l := snippe.SplitName(in)
+		if f != want[0] || l != want[1] {
+			t.Errorf("SplitName(%q) = %q, %q; want %q, %q", in, f, l, want[0], want[1])
+		}
 	}
 }

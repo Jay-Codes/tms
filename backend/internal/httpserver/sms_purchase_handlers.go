@@ -215,6 +215,21 @@ func (s *Server) handleCreateSMSOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Snippe requires the payer's first name, last name and e-mail; the
+	// landlord asking is the customer (the phone may be someone else's).
+	buyer, err := s.q.GetUserByID(r.Context(), p.UserID)
+	if err != nil {
+		s.serverError(w, r, "org.sms_order.buyer", err)
+		return
+	}
+	first, last := snippe.SplitName(buyer.FullName)
+	customer := snippe.Customer{FirstName: first, LastName: last, Email: db.StrVal(buyer.Email)}
+	if customer.FirstName == "" || customer.Email == "" {
+		httpx.WriteProblemCode(w, http.StatusUnprocessableEntity, "buyer_details_missing",
+			"your name and e-mail are needed", "the payment service needs your full name and e-mail on your account")
+		return
+	}
+
 	code, err := smspay.NewOrderCode()
 	if err != nil {
 		s.serverError(w, r, "org.sms_order.code", err)
@@ -250,6 +265,7 @@ func (s *Server) handleCreateSMSOrder(w http.ResponseWriter, r *http.Request) {
 		Amount: order.Amount, Phone: phone, IdempotencyKey: order.OrderCode,
 		Metadata:   map[string]string{"order_code": order.OrderCode},
 		WebhookURL: s.cfg.SnippeWebhookURL(),
+		Customer:   customer,
 	})
 	if err != nil {
 		var se *snippe.Error

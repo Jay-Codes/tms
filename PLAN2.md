@@ -388,7 +388,7 @@ Needs from the client: confirm the inputs per property (purchase price, purchase
 
 ## Waiting on the client (nothing to build until these arrive)
 
-- **Snippe (Phase 27 is switched off until then):** bundle sizes and prices (entered by admin), `SNIPPE_API_KEY` + `SNIPPE_WEBHOOK_SECRET`, the webhook URL `https://api.tms.kuzo.co.tz/api/v1/webhooks/snippe` registered in the Snippe dashboard, VAT/receipt rules, whether Snippe has a sandbox (four details marked `UNCERTAIN:` in `backend/internal/snippe/snippe.go` to confirm there), and the Beem bundles already bought (opening stock).
+- **Snippe (Phase 27 is switched off until then):** bundle sizes and prices (entered by admin), `SNIPPE_API_KEY` + `SNIPPE_WEBHOOK_SECRET`, the webhook URL `https://api.tms.kuzo.co.tz/api/v1/webhooks/snippe` registered in the Snippe dashboard, VAT/receipt rules, whether Snippe has a sandbox (the request body, phone format, amount shape and signature format are now confirmed from the docs; still unknown: whether a 5xx on create means the prompt was sent), and the Beem bundles already bought (opening stock).
 - **Projections (Phase 28 defaults to confirm):** rent-change slider affects vacant units and re-lettings only; occupancy and collection default to 100% without history; months before joining TMS count as zero; renovations count as investment when their category is marked Capital.
 - **Beem:** approved sender ID, then the live SMS smoke test below.
 - **Notifications to landlords:** in-app bell is the default (Phase 24); say if owners should also get SMS or e-mail.

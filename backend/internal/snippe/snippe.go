@@ -101,9 +101,9 @@ func (e *Error) Error() string {
 // ErrNotConfigured is returned when no API key is set.
 var ErrNotConfigured = errors.New("snippe: not configured")
 
-// Amount is Snippe's money value. Webhooks send `{value, currency}`;
-// UNCERTAIN: whether GET /v1/payments/{ref} does the same or sends a bare
-// integer, so both decode.
+// Amount is Snippe's money value: `{value, currency}` in webhooks and in the
+// create/GET responses (docs.snippe.sh). A bare number still decodes, as a
+// guard against an older response shape.
 type Amount struct {
 	Value    int64  `json:"value"`
 	Currency string `json:"currency"`
@@ -198,15 +198,53 @@ type CreateRequest struct {
 	IdempotencyKey string
 	Metadata       map[string]string
 	WebhookURL     string
+	// Customer is who is paying; Snippe requires a first name, a last name
+	// and an e-mail on every mobile-money payment.
+	Customer Customer
 }
 
+// Customer is the payer as Snippe records it.
+type Customer struct {
+	FirstName string
+	LastName  string
+	Email     string
+}
+
+// createBody is POST /v1/payments for mobile money, exactly as documented at
+// docs.snippe.sh (2026-01-25, Payments → Mobile Money): the amount and
+// currency nest under `details`, the number is `phone_number`, and `customer`
+// with firstname/lastname/email is required.
 type createBody struct {
-	Amount      int64             `json:"amount"`
-	Currency    string            `json:"currency"`
-	Phone       string            `json:"phone"`
 	PaymentType string            `json:"payment_type"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
+	Details     createDetails     `json:"details"`
+	PhoneNumber string            `json:"phone_number"`
+	Customer    createCustomer    `json:"customer"`
 	WebhookURL  string            `json:"webhook_url,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+type createDetails struct {
+	Amount   int64  `json:"amount"`
+	Currency string `json:"currency"`
+}
+
+type createCustomer struct {
+	FirstName string `json:"firstname"`
+	LastName  string `json:"lastname"`
+	Email     string `json:"email"`
+}
+
+// SplitName turns one full name into Snippe's first and last name. A single
+// word is used for both, since Snippe requires each.
+func SplitName(full string) (first, last string) {
+	parts := strings.Fields(full)
+	switch len(parts) {
+	case 0:
+		return "", ""
+	case 1:
+		return parts[0], parts[0]
+	}
+	return strings.Join(parts[:len(parts)-1], " "), parts[len(parts)-1]
 }
 
 // envelope is Snippe's response wrapper: `{status, code, data}` on success,
@@ -219,9 +257,8 @@ type envelope struct {
 	Message   string          `json:"message"`
 }
 
-// PhoneForSnippe renders an E.164 number the way Snippe takes it.
-// UNCERTAIN: the docs show Tanzanian numbers as 2557XXXXXXXX (country code,
-// no plus); a leading `+` is dropped to match.
+// PhoneForSnippe renders an E.164 number the way Snippe takes it: the docs
+// give `255XXXXXXXXX` (country code, no plus), so the leading `+` is dropped.
 func PhoneForSnippe(e164 string) string {
 	return strings.TrimPrefix(strings.TrimSpace(e164), "+")
 }
@@ -235,12 +272,14 @@ func (c *Client) CreatePayment(ctx context.Context, req CreateRequest) (Payment,
 		return Payment{}, fmt.Errorf("snippe: idempotency key longer than %d", MaxIdempotencyKey)
 	}
 	raw, err := json.Marshal(createBody{
-		Amount:      req.Amount,
-		Currency:    Currency,
-		Phone:       PhoneForSnippe(req.Phone),
 		PaymentType: "mobile",
-		Metadata:    req.Metadata,
-		WebhookURL:  req.WebhookURL,
+		Details:     createDetails{Amount: req.Amount, Currency: Currency},
+		PhoneNumber: PhoneForSnippe(req.Phone),
+		Customer: createCustomer{
+			FirstName: req.Customer.FirstName, LastName: req.Customer.LastName, Email: req.Customer.Email,
+		},
+		Metadata:   req.Metadata,
+		WebhookURL: req.WebhookURL,
 	})
 	if err != nil {
 		return Payment{}, fmt.Errorf("snippe: marshal: %w", err)
@@ -378,8 +417,8 @@ func Verify(secret, timestamp, signature string, body []byte, now time.Time) err
 	if d := now.Sub(time.Unix(ts, 0)); d > WebhookTolerance || d < -WebhookTolerance {
 		return ErrStale
 	}
-	// UNCERTAIN: the docs show a bare hex digest; a `sha256=` prefix, as some
-	// gateways send, is tolerated.
+	// The docs specify a bare hex digest (no `sha256=` prefix); a prefix is
+	// still tolerated, harmlessly.
 	sig := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(signature), "sha256="))
 	got, err := hex.DecodeString(sig)
 	if err != nil {
