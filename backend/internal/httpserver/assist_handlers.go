@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	qrcode "github.com/skip2/go-qrcode"
 
 	"tms/backend/internal/audit"
 	"tms/backend/internal/auth"
@@ -221,6 +223,24 @@ func (s *Server) assistLink(unitCode, sessionID string) string {
 	return s.cfg.EnduserURL() + "/u/" + unitCode + "?assist=" + sessionID
 }
 
+// assistQRSize is the PNG edge in pixels. The code is scanned off a phone
+// screen held a hand's width away, not off a printed sticker, so it is half
+// the size of the unit QR.
+const assistQRSize = 256
+
+// assistLinkQR renders the link as a `data:image/png;base64,…` URL for the
+// landlord's screen (Phase 25). It travels inline rather than through the
+// `qrcodes` bucket because it lives only as long as the session and is shown
+// once: storing it would leave an object behind for every encounter. An
+// encoding failure yields "" and the screen falls back to the printed link.
+func assistLinkQR(link string) string {
+	png, err := qrcode.Encode(link, qrcode.Medium, assistQRSize)
+	if err != nil {
+		return ""
+	}
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
+}
+
 // ------------------------------------------------------ the shown record --
 
 // recordShownCode writes the notification_log row for one reveal.
@@ -397,11 +417,13 @@ func (s *Server) handleCreateAssist(w http.ResponseWriter, r *http.Request) {
 	}
 
 	row := assistRow{AssistSession: created, UnitCode: unit.UnitCode, UnitName: unit.Name}
+	link := s.assistLink(unit.UnitCode, sessionID)
 	WriteJSON(w, http.StatusCreated, map[string]any{
 		"session":         toAssistSession(row),
 		"code":            code,
 		"code_expires_at": codeExpiry,
-		"link":            s.assistLink(unit.UnitCode, sessionID),
+		"link":            link,
+		"link_qr":         assistLinkQR(link),
 	})
 }
 
@@ -548,11 +570,18 @@ func (s *Server) handleAssistCode(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Phase 25: the link and its QR ride along, so a landlord who reopens a
+	// session (from the list, or after a 409 `assist_open`) gets everything
+	// the first screen showed from the one call that reveals a code — the
+	// session read never carries either.
+	link := s.assistLink(row.UnitCode, sessionID)
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"code":              code,
 		"code_expires_at":   codeExpiry,
 		"code_issued_count": issued.CodeIssuedCount,
 		"expires_at":        issued.ExpiresAt.Time,
+		"link":              link,
+		"link_qr":           assistLinkQR(link),
 	})
 }
 

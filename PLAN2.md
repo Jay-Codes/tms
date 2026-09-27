@@ -218,7 +218,7 @@ Open questions for the client (defaults applied if unanswered):
 
 ---
 
-## Phase 18 — Landlord-assisted onboarding (OTP fallback, in person) (1 day) — 🟡 backend done; two screens left → Phase 25
+## Phase 18 — Landlord-assisted onboarding (OTP fallback, in person) (1 day) — ✅ screens landed in Phase 25
 
 Why: Beem accepted the OTP but left it `pending`; the renter never got a code and had no way forward. Landlord and renter are usually in the same room at onboarding (QR on the door), so the landlord's screen becomes the code channel. No SMS, no provider dependency. FLOWS 2b, SPEC §3 / §4 / §5.15.
 
@@ -235,8 +235,8 @@ Why: Beem accepted the OTP but left it `pending`; the renter never got a code an
 - [x] Tests: assisted code verifies through the normal endpoint; assisted issue overwrites an in-flight SMS code; cooldown bypass is assisted-only (SMS path still 429s); per-org limiter 429; staff phone refused; second open session 409; org B cannot read/refresh org A's session (isolation census); public lookup returns no phone; register stamps `renter_user_id`; link request stamps `link_request_id`; witness code → signature row carries `witnessed_by_user_id`, and the SMS-issued code does not; expired session refresh → 409 `assist_closed`.
 
 ### 18.2 Frontend
-- [ ] Tenant: `renters/assist` page (code display + QR + countdown + New code; live status via 5 s polling; "Review & approve" deep link); entry from unit detail ("Onboard in person"), Renters list ("Add renter → In person") and renter detail ("Help log in"); contract page "Witness signing" sheet with the code. SW/EN strings.
-- [ ] Enduser: `/u/{unit_code}?assist=` → register/login pages hide "Send code", show "Enter the code your landlord shows you", no resend; sign page reads the same hint. Session id kept in `sessionStorage` until the link request is created.
+- [x] Tenant: `renters/assist` page (code display + QR + countdown + New code; live status via 5 s polling; "Review & approve" deep link); entry from unit detail ("Onboard in person"), Renters list ("Add renter → In person") and renter detail ("Help log in"); contract page "Witness signing" sheet with the code. SW/EN strings.
+- [x] Enduser: `/u/{unit_code}?assist=` → register/login pages hide "Send code", show "Enter the code your landlord shows you", no resend; sign page reads the same hint. Session id kept in `sessionStorage` until the link request is created.
 - [x] Enduser: **unit code input on renter home** — a renter who registered without scanning (bare `/register`, or landlord read the code aloud) currently sees only "scan your unit's QR code" with no way forward. Add a "Have a unit code?" field to the `home.hint.none` state: 10-char Crockford code, uppercased/trimmed client-side, submit → `router.push('/u/{code}')` (the unit page already handles 404 via `unit.notFound`). No backend change. SW/EN strings.
 - [x] Enduser: **home hero per unit** — a renter with two live contracts (allowed: no renter-side uniqueness, only one live contract per unit) sees a single "next due" hero and a single proof-of-payment target, both taken from `GET /me/schedules` `next_due`; the second unit's rent is invisible on home until the first is paid. When `contracts` has more than one live row, render one due card per contract (earliest unpaid schedule of each, unit · property label, its own countdown chip and "Send proof" targeting that contract) instead of the single hero; one contract keeps today's layout. Client only: derive per-contract next due from `GET /me/schedules` `items`, no new endpoint. SW/EN strings.
 - [x] Enduser: **renter history paging** — `GET /me/payments` and `GET /me/contracts` return 50 rows (max 200) with `next_cursor`, but the enduser app never reads it: a renter past 50 receipts silently loses the oldest. Payments page "History" and "Proofs you sent", and the contracts list, get a "Show older" button that appends the next page (`?cursor=`), hidden when `next_cursor` is null; `MyPaymentsResponse` / contracts `mine()` typed with the cursor. `GET /me/schedules` is unpaged by design (whole rent book) and stays so. SW/EN strings.
@@ -342,12 +342,12 @@ Why: every approved application was written on the org's single default template
 - [x] Backend (migration 000029, tests): duplicate guard on record payment and proof accept (`possible_duplicate`, `confirm_duplicate`), `Idempotency-Key` replay, `POST /payments/{id}/correct` (reverse + record in one transaction), renter SMS on reversal/correction, landlord in-app inbox (`/inbox`) fed by reversals, corrections, confirmed duplicates, proofs submitted and renters' notices.
 - [x] Tenant UI: duplicate confirm step on record/accept (Idempotency-Key per sheet), Correct sheet on payments, bell with unread count, /inbox page.
 
-## Phase 25 — Finish landlord-assisted onboarding (Phase 18.2 screens) (½ day) — 📋 next
+## Phase 25 — Finish landlord-assisted onboarding (Phase 18.2 screens) (½ day) — 🟡 built 27 Sep 2026; browser run left
 
 Why: a renter whose OTP SMS never arrives cannot register or sign. The backend (assist sessions, code shown in person, witnessed signature) shipped in Phase 18; the two screens that use it did not.
-- [ ] Tenant `renters/assist`: start a session for a phone + unit, show the 6-digit code large with a QR and countdown, "New code", live status (5 s poll), "Review & approve" deep link when the renter has applied; entry points from the unit page and the link-requests page.
-- [ ] Enduser `/u/{unit_code}?assist=`: register/login hide "Send code" and ask for "the code your landlord shows you", no resend; the sign page reads the same.
-- [ ] Tests in the browser against the Phase 18 API; UAT row.
+- [x] Tenant `renters/assist`: start a session for a phone + unit, show the 6-digit code large with a QR and countdown, "New code", live status (5 s poll), "Review & approve" deep link when the renter has applied; entry points from the unit page and the link-requests page.
+- [x] Enduser `/u/{unit_code}?assist=`: register/login hide "Send code" and ask for "the code your landlord shows you", no resend; the sign page reads the same.
+- [ ] Tests in the browser against the Phase 18 API; UAT row. — UAT row P22 written; backend test for the QR added; browser run still to do (needs the stack up).
 
 ## Phase 26 — Backfill: undo a whole backfill, bulk backfill by CSV (1 day) — 📋 planned
 

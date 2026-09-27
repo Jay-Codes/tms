@@ -466,6 +466,18 @@ const messages: Messages = {
   /* --------------------------------------------------------- comingSoon */
   'comingSoon.eyebrow': 'Inakuja hivi karibuni',
   'comingSoon.empty': 'Bado hakuna kitu hapa.',
+
+  /* ------------------------------------------ assist (Phase 25, FLOWS 2b) */
+  'assist.unitNotice.register':
+    'Mwenye nyumba wako anakusaidia kujisajili. Hutapokea SMS — tumia msimbo ulio kwenye skrini yake.',
+  'assist.unitNotice.login':
+    'Namba hii tayari ina akaunti. Ingia kwa PIN yako, au kwa msimbo ulio kwenye skrini ya mwenye nyumba wako.',
+  'assist.ended': 'Kikao hicho cha msimbo kimeisha. Mwombe mwenye nyumba wako akuonyeshe msimbo mpya, au endelea kwa msimbo wa SMS.',
+  'assist.lead.phone': 'Weka namba yako ya simu, kisha msimbo anaokuonyesha mwenye nyumba wako. Hakuna SMS itakayotumwa.',
+  'assist.codeLead': 'Weka msimbo anaokuonyesha mwenye nyumba wako.',
+  'assist.noResend': 'Msimbo umeisha au haufanyi kazi? Mwombe mwenye nyumba wako akuonyeshe mpya.',
+  'assist.useCode': 'Tumia msimbo anaokuonyesha mwenye nyumba wako',
+  'sign.witnessed': 'Mwenye nyumba wangu ananionyesha msimbo',
 };
 
 export default messages;

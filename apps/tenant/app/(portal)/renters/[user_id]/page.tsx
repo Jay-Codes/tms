@@ -170,9 +170,17 @@ function RenterBody({ userId }: { userId: string }) {
         title={profile?.full_name || renter?.full_name || t('common.renter')}
         lead={renter?.phone ?? undefined}
         actions={
-          <Link href="/renters" className="btn btn-quiet">
-            <Icon icon="solar:arrow-left-linear" width={20} /> {t('renters.directory')}
-          </Link>
+          <>
+            <Link href="/renters" className="btn btn-quiet">
+              <Icon icon="solar:arrow-left-linear" width={20} /> {t('renters.directory')}
+            </Link>
+            {/* Phase 25 — FLOWS 2b: a login code shown here, not texted. */}
+            {renter?.user_id ? (
+              <Link href={`/renters/assist?renter=${renter.user_id}`} className="btn btn-secondary">
+                {t('assist.entry.renter')}
+              </Link>
+            ) : null}
+          </>
         }
       />
 

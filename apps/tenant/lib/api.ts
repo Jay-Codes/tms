@@ -3053,3 +3053,75 @@ export function importRowFailure(e: ApiError): { line: number; column: string; r
     reason: typeof e.body.reason === 'string' ? e.body.reason : e.detail,
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* Phase 25 — landlord-assisted onboarding (API.md Phase 18 + 25)      */
+/* ------------------------------------------------------------------ */
+
+export type AssistPurpose = 'register' | 'login';
+export type AssistStatusDetail = 'waiting' | 'registered' | 'requested' | 'approved' | 'closed';
+
+export interface AssistSession {
+  id: string;
+  org_id: string;
+  unit_id: string;
+  unit_code: string;
+  unit_name: string;
+  phone: string;
+  purpose: AssistPurpose;
+  /** An expired session already reads `closed` (API.md Phase 18 deviations). */
+  status: 'open' | 'closed';
+  code_issued_count: number;
+  expires_at: string;
+  last_code_at: string | null;
+  created_at: string;
+}
+
+/** `GET /assist/{id}` — never carries the code. */
+export interface AssistDetail {
+  session: AssistSession;
+  status_detail: AssistStatusDetail;
+  renter: { id: string; full_name: string } | null;
+  link_request: { id: string; status: LinkRequestStatus } | null;
+}
+
+/**
+ * A revealed code. `POST /assist` and `POST /assist/{id}/code` both carry the
+ * link and `link_qr` (a PNG data URL, Phase 25) so a reopened session shows
+ * everything the first screen did.
+ */
+export interface AssistCode {
+  code: string;
+  code_expires_at: string;
+  link: string;
+  link_qr: string;
+}
+
+export interface AssistOpened extends AssistCode {
+  session: AssistSession;
+}
+
+export interface AssistRefreshed extends AssistCode {
+  code_issued_count: number;
+  /** The session window, pushed out to now + 30 min by every new code. */
+  expires_at: string;
+}
+
+export const assistApi = {
+  /** 409 `assist_open` carries `session_id`; 409 `not_a_renter_phone`. */
+  open: (body: { phone: string; unit_id: string }) => api.post<AssistOpened>('/assist', body),
+  list: (signal?: AbortSignal) => api.get<{ items: AssistDetail[] }>('/assist', { signal }),
+  get: (id: string, signal?: AbortSignal) => api.get<AssistDetail>(`/assist/${id}`, { signal }),
+  /** 409 `assist_closed`; 429 after ten codes or the org's hourly budget. */
+  newCode: (id: string) => api.post<AssistRefreshed>(`/assist/${id}/code`),
+  close: (id: string) => api.post<{ session: AssistSession }>(`/assist/${id}/close`),
+  /** Witnessed signing (FLOWS 2b step 6): the sign slot's code, shown not sent. */
+  witnessCode: (contractId: string) =>
+    api.post<{ code: string; code_expires_at: string }>(`/contracts/${contractId}/witness-otp`),
+};
+
+/** The open session a 409 `assist_open` names, or null. */
+export function assistOpenSessionId(e: ApiError): string | null {
+  if (e.status !== 409 || e.code !== 'assist_open') return null;
+  return typeof e.body.session_id === 'string' ? e.body.session_id : null;
+}

@@ -37,6 +37,7 @@ import {
 } from '../../../../lib/format';
 import { buildPreview, deriveEndDate, termQuickPicks } from '../../../../lib/schedule';
 import { forgetScannedUnit, rememberScannedUnit } from '../../../../lib/scan';
+import { forgetAssist } from '../../../../lib/assist';
 import { Protected } from '../../../../components/Protected';
 import { OrgHeader, useOrgTheme } from '../../../../components/OrgHeader';
 import { Notice, Screen } from '../../../../components/Screen';
@@ -183,6 +184,9 @@ function ConnectContent() {
       });
       setSubmitted(res.request);
       forgetScannedUnit();
+      // Phase 25: the request is what the landlord's screen was waiting for;
+      // the assisted path ends here (FLOWS 2b step 5).
+      forgetAssist();
     } catch (err) {
       if (err instanceof ApiError && err.status === 412) {
         setNeedsKyc(true);

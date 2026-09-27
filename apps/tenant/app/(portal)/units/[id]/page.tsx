@@ -468,6 +468,12 @@ function UnitBody({ id }: { id: string }) {
             <Link href={`/properties/${unit.property_id}`} className="btn btn-quiet">
               {t('properties.back_to_property')}
             </Link>
+            {/* Phase 25 — FLOWS 2b: the renter is here and the SMS is not. */}
+            {unit.status !== 'occupied' ? (
+              <Link href={`/renters/assist?unit=${unit.id}`} className="btn btn-secondary">
+                <Icon icon="solar:users-group-rounded-linear" width={20} /> {t('assist.entry.unit')}
+              </Link>
+            ) : null}
             <button type="button" className="btn btn-danger" onClick={() => void remove()}>
               {t('units.delete')}
             </button>

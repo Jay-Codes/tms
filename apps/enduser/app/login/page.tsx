@@ -4,6 +4,11 @@
  * Renter login. Phone + PIN is the primary route (SPEC §3); OTP is the
  * fallback for a forgotten PIN — `POST /auth/otp/send {purpose:"login"}`
  * then `POST /auth/otp/verify {purpose:"login"}`, which sets `tms_r` itself.
+ *
+ * Assisted (FLOWS 2b, Phase 25): with an open assist session in the tab
+ * (lib/assist.ts) the OTP route sends nothing and asks for "the code your
+ * landlord shows you", with no resend. A landlord's `register` code belongs
+ * on the register page, so the button goes there instead.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -12,6 +17,7 @@ import { useRouter } from 'next/navigation';
 import { useT } from '@tms/ui';
 import { authApi } from '../../lib/api';
 import { readNextParam, useMe, useNextParam } from '../../lib/auth';
+import { useAssist } from '../../lib/assist';
 import { countdown, displayPhone, errorMessage, isValidPhone, normalizePhone } from '../../lib/format';
 import { Notice, Screen, ScreenHeader } from '../../components/Screen';
 import { PlatformTheme } from '../../components/OrgThemeSync';
@@ -24,6 +30,8 @@ export default function LoginPage() {
   const router = useRouter();
   const { setSession } = useMe();
   const nextPath = useNextParam();
+  const assist = useAssist();
+  const assisted = assist.state === 'open';
 
   const [mode, setMode] = useState<Mode>('pin');
   const [phoneInput, setPhoneInput] = useState('');
@@ -93,6 +101,13 @@ export default function LoginPage() {
       setError(t('error.phone'));
       return;
     }
+    if (assisted) {
+      // The landlord's screen already holds the code: nothing to send.
+      setPhone(e164);
+      setError(null);
+      setMode('otp-verify');
+      return;
+    }
     void sendOtp(e164);
   }
 
@@ -128,8 +143,12 @@ export default function LoginPage() {
           mode === 'pin'
             ? t('login.lead.pin')
             : mode === 'otp-send'
-              ? t('login.lead.otp')
-              : t('otp.sentTo', { phone: displayPhone(phone) })
+              ? assisted
+                ? t('assist.lead.phone')
+                : t('login.lead.otp')
+              : assisted
+                ? t('assist.codeLead')
+                : t('otp.sentTo', { phone: displayPhone(phone) })
         }
       />
 
@@ -167,16 +186,18 @@ export default function LoginPage() {
           <button className="btn btn-primary" type="submit" disabled={busy}>
             {busy ? t('login.submitting') : t('login.submit')}
           </button>
-          <button
-            className="btn btn-quiet"
-            type="button"
-            onClick={() => {
-              setMode('otp-send');
-              setError(null);
-            }}
-          >
-            {t('login.useOtp')}
-          </button>
+          {assist.state === 'open' && assist.purpose === 'register' ? null : (
+            <button
+              className={assisted ? 'btn btn-secondary' : 'btn btn-quiet'}
+              type="button"
+              onClick={() => {
+                setMode('otp-send');
+                setError(null);
+              }}
+            >
+              {assisted ? t('assist.useCode') : t('login.useOtp')}
+            </button>
+          )}
           <Link className="btn btn-quiet" href={registerHref}>
             {t('login.createAccount')}
           </Link>
@@ -199,8 +220,8 @@ export default function LoginPage() {
               onChange={(e) => setPhoneInput(e.target.value)}
             />
           </div>
-          <button className="btn btn-primary" type="submit" disabled={busy}>
-            {busy ? t('common.sending') : t('login.sendCode')}
+          <button className="btn btn-primary" type="submit" disabled={busy || assist.state === 'loading'}>
+            {busy ? t('common.sending') : assisted ? t('common.continue') : t('login.sendCode')}
           </button>
           <button
             className="btn btn-quiet"
@@ -240,14 +261,20 @@ export default function LoginPage() {
           <button className="btn btn-primary" type="submit" disabled={busy || code.length < 6}>
             {busy ? t('common.checking') : t('login.submit')}
           </button>
-          <button
-            className="btn btn-quiet"
-            type="button"
-            disabled={busy || cooldown > 0}
-            onClick={() => void sendOtp(phone)}
-          >
-            {cooldown > 0 ? t('otp.resendIn', { time: countdown(cooldown) }) : t('otp.resend')}
-          </button>
+          {assisted ? (
+            <p style={{ margin: 0, color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+              {t('assist.noResend')}
+            </p>
+          ) : (
+            <button
+              className="btn btn-quiet"
+              type="button"
+              disabled={busy || cooldown > 0}
+              onClick={() => void sendOtp(phone)}
+            >
+              {cooldown > 0 ? t('otp.resendIn', { time: countdown(cooldown) }) : t('otp.resend')}
+            </button>
+          )}
           <button
             className="btn btn-quiet"
             type="button"

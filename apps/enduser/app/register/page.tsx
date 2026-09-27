@@ -9,6 +9,11 @@
  *
  * `otp_token` lives in component state only (10-minute Redis token; never
  * persisted). Validation here is UX — the API validates again.
+ *
+ * Assisted (FLOWS 2b, Phase 25): when the tab holds an open assist session
+ * (lib/assist.ts) step 1 sends nothing — the code is already on the
+ * landlord's screen, in the slot `otp/verify` reads — and step 2 asks for
+ * "the code your landlord shows you", with no resend.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -17,6 +22,7 @@ import { useRouter } from 'next/navigation';
 import { useLocale, useT } from '@tms/ui';
 import { ApiError, authApi } from '../../lib/api';
 import { readNextParam, useMe, useNextParam } from '../../lib/auth';
+import { useAssist } from '../../lib/assist';
 import { countdown, displayPhone, errorMessage, isValidPhone, isValidPin, normalizePhone } from '../../lib/format';
 import { Notice, Screen, ScreenHeader } from '../../components/Screen';
 import { PlatformTheme } from '../../components/OrgThemeSync';
@@ -32,6 +38,8 @@ export default function RegisterPage() {
   const router = useRouter();
   const { setSession } = useMe();
   const nextPath = useNextParam();
+  const assist = useAssist();
+  const assisted = assist.state === 'open';
 
   const [step, setStep] = useState<Step>('phone');
   const [phoneInput, setPhoneInput] = useState('');
@@ -86,8 +94,24 @@ export default function RegisterPage() {
       setError(t('error.phone'));
       return;
     }
+    if (assisted) {
+      // The landlord's screen already holds the code: nothing to send.
+      setPhone(e164);
+      setError(null);
+      setPhoneTaken(false);
+      setStep('otp');
+      return;
+    }
     void sendOtp(e164);
   }
+
+  /* The landlord's code is a login code: this number already has an
+     account, so registering would only fail at the last step. */
+  useEffect(() => {
+    if (assist.state === 'open' && assist.purpose === 'login') {
+      router.replace(`/login${window.location.search}`);
+    }
+  }, [assist, router]);
 
   async function submitOtp(e: React.FormEvent) {
     e.preventDefault();
@@ -163,9 +187,13 @@ export default function RegisterPage() {
         }
         lead={
           step === 'phone'
-            ? t('register.lead.phone')
+            ? assisted
+              ? t('assist.lead.phone')
+              : t('register.lead.phone')
             : step === 'otp'
-              ? t('otp.sentTo', { phone: displayPhone(phone) })
+              ? assisted
+                ? t('assist.codeLead')
+                : t('otp.sentTo', { phone: displayPhone(phone) })
               : t('register.lead.pin')
         }
       />
@@ -197,8 +225,8 @@ export default function RegisterPage() {
             />
             <span className="hint">{t('field.phoneFormats')}</span>
           </div>
-          <button className="btn btn-primary" type="submit" disabled={busy}>
-            {busy ? t('common.sending') : t('login.sendCode')}
+          <button className="btn btn-primary" type="submit" disabled={busy || assist.state === 'loading'}>
+            {busy ? t('common.sending') : assisted ? t('common.continue') : t('login.sendCode')}
           </button>
           <Link className="btn btn-quiet" href={loginHref}>
             {t('register.haveAccount')}
@@ -231,14 +259,20 @@ export default function RegisterPage() {
           <button className="btn btn-primary" type="submit" disabled={busy || code.length < 6}>
             {busy ? t('common.checking') : t('register.verify')}
           </button>
-          <button
-            className="btn btn-quiet"
-            type="button"
-            disabled={busy || cooldown > 0}
-            onClick={() => void sendOtp(phone)}
-          >
-            {cooldown > 0 ? t('otp.resendIn', { time: countdown(cooldown) }) : t('otp.resend')}
-          </button>
+          {assisted ? (
+            <p style={{ margin: 0, color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+              {t('assist.noResend')}
+            </p>
+          ) : (
+            <button
+              className="btn btn-quiet"
+              type="button"
+              disabled={busy || cooldown > 0}
+              onClick={() => void sendOtp(phone)}
+            >
+              {cooldown > 0 ? t('otp.resendIn', { time: countdown(cooldown) }) : t('otp.resend')}
+            </button>
+          )}
           <button
             className="btn btn-quiet"
             type="button"

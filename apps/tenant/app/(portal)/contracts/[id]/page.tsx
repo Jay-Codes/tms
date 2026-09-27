@@ -41,6 +41,7 @@ import { DepositSection, SettlementSummary } from '../../../../components/Settle
 import { useTemplateList } from '../../../../components/TemplateBits';
 import { EvictionSection, RecordNoticeForm, ReliefForm, adjustmentText } from '../../../../components/UnhappyBits';
 import { Sheet } from '../../../../components/Sheet';
+import { WitnessSheet } from '../../../../components/AssistBits';
 import {
   ApiError,
   PAYMENT_METHODS,
@@ -534,6 +535,8 @@ function ContractBody({ id }: { id: string }) {
   const [busy, setBusy] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [behalfOpen, setBehalfOpen] = useState(false);
+  /** Phase 25 — FLOWS 2b step 6: a signing code shown, not texted. */
+  const [witnessOpen, setWitnessOpen] = useState(false);
   const [terminateOpen, setTerminateOpen] = useState(false);
   const [backfillOpen, setBackfillOpen] = useState(false);
   const [writeOffOpen, setWriteOffOpen] = useState(false);
@@ -988,6 +991,11 @@ function ContractBody({ id }: { id: string }) {
                   }
                 >
                   <Icon icon="solar:check-circle-linear" width={20} /> {t('contracts.activate')}
+                </button>
+              ) : null}
+              {contract.status === 'pending_signature' && !signedByRenter ? (
+                <button type="button" className="btn btn-secondary" onClick={() => setWitnessOpen(true)} disabled={busy}>
+                  <Icon icon="solar:eye-linear" width={20} /> {t('assist.witness.open')}
                 </button>
               ) : null}
               {contract.status === 'pending_signature' && !canActivate ? (
@@ -1557,6 +1565,16 @@ function ContractBody({ id }: { id: string }) {
           }
         />
       </Sheet>
+
+      <WitnessSheet
+        contractId={id}
+        renterName={renterName}
+        open={witnessOpen}
+        onClose={() => {
+          setWitnessOpen(false);
+          void load();
+        }}
+      />
 
       <Sheet open={writeOffOpen} title={t('contracts.writeoff.title')} onClose={() => setWriteOffOpen(false)} width={520}>
         <WriteOffForm

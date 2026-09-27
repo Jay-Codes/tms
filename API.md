@@ -1397,3 +1397,13 @@ Migration 000029: `payments.idempotency_key` (unique per org), `payments.correct
 | `GET /inbox?cursor=&limit=` | Org. The landlord's notices, newest first, each with `read` for the caller: `{id, kind, title, body, entity_type, entity_id, link, read, created_at}`. Kinds so far: `payment_reversed`, `payment_corrected`, `payment_duplicate_confirmed`, `proof_submitted`, `notice_given`. |
 | `GET /inbox/unread` | `{unread}` for the caller. |
 | `POST /inbox/read` | `{ids: [...]}` or `{all: true}` → `{unread}`. Read state is per user. |
+
+## Part 2 — Phase 25: landlord-assisted onboarding screens
+
+No migration. One additive change to the Phase 18 contract:
+
+| Route | Contract |
+|---|---|
+| `POST /assist`, `POST /assist/{id}/code` | Both responses also carry `link` (the renter's `{ENDUSER_URL}/u/{unit_code}?assist={session_id}`) and `link_qr` — a `data:image/png;base64,…` QR of that link (256 px, `""` if encoding failed). The QR travels inline, not through the `qrcodes` bucket, because it lives only as long as the session. `GET /assist` and `GET /assist/{id}` are unchanged and still never carry a code, link or QR. |
+
+Frontends: tenant `/renters/assist` (`?unit=`, `?renter=`, `?id=`) and the contract page's **Witness signing** sheet; enduser `/u/{unit_code}?assist={id}` keeps the id in `sessionStorage` (checked against `GET /public/assist/{id}`) until the link request is sent, and register/login/sign skip `POST /auth/otp/send` / `sign-otp` in that mode.

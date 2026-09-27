@@ -35,7 +35,15 @@ function InboxBody() {
 
   return (
     <>
-      <PageHead title={t('nav.link_requests')} lead={t('linkreq.lead')} />
+      <PageHead
+        title={t('nav.link_requests')}
+        lead={t('linkreq.lead')}
+        actions={
+          <Link href="/renters/assist" className="btn btn-secondary">
+            {t('assist.entry.add')}
+          </Link>
+        }
+      />
 
       <div style={{ marginBottom: 'var(--sp-4)' }}>
         <FilterTabs<LinkRequestStatus>
