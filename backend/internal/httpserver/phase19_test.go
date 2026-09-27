@@ -713,7 +713,7 @@ func (h *harness) twoOwnerOrg(t *testing.T, name, email, phone string) (orgFixtu
 	t.Helper()
 	fix := h.newOrgWithUnits(name, email, phone, []string{"Room 1"}, 250_000)
 	created := fix.client.do(http.MethodPost, "/org/members", map[string]any{
-		"email": "second@" + strings.ToLower(name) + ".test",
+		"email":     "second@" + strings.ToLower(name) + ".test",
 		"full_name": "Second Owner", "role": "org_manager",
 	}).mustStatus(t, http.StatusCreated, "invite the second member")
 	secondID := created.str(t, "member", "id")

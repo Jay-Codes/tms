@@ -908,9 +908,9 @@ func (s *Server) payableRenterContract(
 		s.serverError(w, r, "proof.contract", err)
 		return sqlc.GetContractRow{}, false
 	}
-	if contract.Status != contractActive && contract.Status != contractExpiring {
-		conflictCode(w, "contract_not_active", "contract not running",
-			"a proof of payment can only be filed against a running contract")
+	if !contractTakesPayments(contract.Status) {
+		conflictCode(w, "contract_not_active", "contract not payable",
+			"a proof of payment can only be filed against a signed contract")
 		return sqlc.GetContractRow{}, false
 	}
 	return contract, true

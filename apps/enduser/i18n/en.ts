@@ -304,6 +304,7 @@ const messages: Messages = {
   'schedule.paid': 'Paid',
   'schedule.overdue': 'Overdue',
   'schedule.waived': 'Waived',
+  'schedule.writtenOff': 'Written off by landlord',
   'schedule.due': 'Due',
   'schedule.partial': '{paid} of {total}',
   'schedule.partialPaid': '{paid} of {total} paid',

@@ -50,6 +50,7 @@ import {
   type Schedule,
   type ScheduleRow,
 } from '../../../../lib/api';
+import { useMe } from '../../../../lib/auth';
 import { Amount, fmtDate, fmtTZS, todayISO } from '../../../../lib/format';
 import { LOCALE_LABELS, TableScroll, isLocale, useT } from '@tms/ui';
 
@@ -208,10 +209,84 @@ function TerminateForm({
   );
 }
 
+/**
+ * Phase 21 — writing off what a former tenant still owes. The reason is
+ * required because the write-off is audited; the warning says plainly that it
+ * is not a deletion and can be undone.
+ */
+function WriteOffForm({
+  amount,
+  periods,
+  busy,
+  error,
+  onSubmit,
+  onCancel,
+}: {
+  amount: string;
+  periods: string;
+  busy: boolean;
+  error: ApiError | null;
+  onSubmit: (reason: string) => void;
+  onCancel: () => void;
+}) {
+  const t = useT();
+  const [reason, setReason] = useState('');
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSubmit(reason.trim());
+      }}
+      style={{ display: 'grid', gap: 'var(--sp-4)' }}
+      noValidate
+    >
+      <ProblemNote error={error} />
+      <p
+        style={{
+          display: 'flex',
+          gap: 'var(--sp-3)',
+          padding: 'var(--sp-3) var(--sp-4)',
+          border: '1px solid var(--stamp-overdue)',
+          borderRadius: 'var(--radius-sm)',
+          fontSize: 'var(--text-sm)',
+        }}
+      >
+        <Icon icon="solar:danger-triangle-linear" width={20} />
+        <span>{t('contracts.writeoff.warning', { amount, periods })}</span>
+      </p>
+      <Field
+        id="wo_reason"
+        label={t('contracts.writeoff.reason')}
+        hint={t('contracts.chars_max', { n: reason.length })}
+        error={error?.errors.reason}
+      >
+        <textarea
+          id="wo_reason"
+          className="input"
+          rows={3}
+          maxLength={200}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder={t('contracts.writeoff.reason_placeholder')}
+        />
+      </Field>
+      <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+        <button type="submit" className="btn btn-danger" disabled={busy || reason.trim().length === 0}>
+          {busy ? t('contracts.writeoff.submitting') : t('contracts.writeoff.submit')}
+        </button>
+        <button type="button" className="btn btn-quiet" onClick={onCancel} disabled={busy}>
+          {t('common.cancel')}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 /* --------------------------------- page ---------------------------------- */
 
 function ContractBody({ id }: { id: string }) {
   const t = useT();
+  const { org: me } = useMe();
   const [contract, setContract] = useState<Contract | null>(null);
   const [doc, setDoc] = useState<ContractDocument | null>(null);
   const [schedules, setSchedules] = useState<ScheduleRow[] | null>(null);
@@ -231,6 +306,7 @@ function ContractBody({ id }: { id: string }) {
   const [behalfOpen, setBehalfOpen] = useState(false);
   const [terminateOpen, setTerminateOpen] = useState(false);
   const [backfillOpen, setBackfillOpen] = useState(false);
+  const [writeOffOpen, setWriteOffOpen] = useState(false);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -283,6 +359,7 @@ function ContractBody({ id }: { id: string }) {
       setNote(done);
       setBehalfOpen(false);
       setTerminateOpen(false);
+      setWriteOffOpen(false);
       await load();
     } catch (e) {
       setActionError(toApiError(e));
@@ -349,8 +426,20 @@ function ContractBody({ id }: { id: string }) {
   const rows = schedules ?? [];
   const org = doc?.org;
   const summary = contract.schedules_summary;
-  /** Money can only be recorded against a live tenancy (API.md Phase 5). */
-  const canRecord = contract.status === 'active' || contract.status === 'expiring';
+  const running = contract.status === 'active' || contract.status === 'expiring';
+  /**
+   * Phase 21 — a closed tenancy still owes the periods the renter lived
+   * through, so money can land on it after move-out too.
+   */
+  const closed = contract.status === 'ended' || contract.status === 'terminated';
+  const canRecord = running || closed;
+  const owing = rows.filter(isUnsettled);
+  const owingTotal = owing.reduce((sum, s) => sum + remainingOn(s), 0);
+  const writtenOff = rows.filter((s) => s.status === 'written_off');
+  const writtenOffTotal = writtenOff.reduce((sum, s) => sum + remainingOn(s), 0);
+  const writeOffReason = writtenOff.find((s) => s.write_off_reason)?.write_off_reason ?? '';
+  /** The write-off is the owner's call (the API answers 403 to a manager). */
+  const isOwner = me?.role === 'org_owner';
   const contractLabel = `${contract.unit?.name ?? ''} · ${contract.unit?.property_name ?? ''} — ${
     contract.renter?.full_name ?? ''
   }`;
@@ -553,7 +642,7 @@ function ContractBody({ id }: { id: string }) {
             <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
               {/* Phase 20.3 — only while something past its due date is still
                   open, which is exactly the state a pre-TMS tenancy lands in. */}
-              {canRecord && needsBackfill(rows) ? (
+              {running && needsBackfill(rows) ? (
                 <button type="button" className="btn btn-quiet" onClick={() => setBackfillOpen(true)}>
                   <Icon icon="solar:history-linear" width={20} /> {t('backfill.open')}
                 </button>
@@ -571,6 +660,88 @@ function ContractBody({ id }: { id: string }) {
               </button>
             </div>
           </div>
+
+          {/* Phase 21 — arrears after move-out: collect, or write off. */}
+          {closed && owing.length > 0 ? (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 'var(--sp-3)',
+                flexWrap: 'wrap',
+                padding: 'var(--sp-3) var(--sp-4)',
+                marginBottom: 'var(--sp-4)',
+                border: '1px solid var(--stamp-overdue)',
+                borderRadius: 'var(--radius-sm)',
+              }}
+            >
+              <div>
+                <strong>
+                  {t('contracts.arrears.owes', {
+                    amount: fmtTZS(owingTotal),
+                    periods: t.n('contracts.arrears.periods', owing.length),
+                  })}
+                </strong>
+                <p style={{ marginTop: 'var(--sp-1)', color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
+                  {isOwner ? t('contracts.arrears.lead') : t('contracts.arrears.lead_manager')}
+                </p>
+              </div>
+              <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => openRecord()}>
+                  <Icon icon="solar:wallet-money-linear" width={20} /> {t('contracts.schedule.record')}
+                </button>
+                {isOwner ? (
+                  <button
+                    type="button"
+                    className="btn btn-quiet"
+                    onClick={() => {
+                      setActionError(null);
+                      setWriteOffOpen(true);
+                    }}
+                    disabled={busy}
+                  >
+                    {t('contracts.writeoff.open')}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {writtenOff.length > 0 ? (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 'var(--sp-3)',
+                flexWrap: 'wrap',
+                padding: 'var(--sp-3) var(--sp-4)',
+                marginBottom: 'var(--sp-4)',
+                border: '1px solid var(--rule)',
+                borderRadius: 'var(--radius-sm)',
+              }}
+            >
+              <span>
+                {writeOffReason
+                  ? t('contracts.writeoff.summary', { amount: fmtTZS(writtenOffTotal), reason: writeOffReason })
+                  : t('contracts.writeoff.summary_no_reason', { amount: fmtTZS(writtenOffTotal) })}
+              </span>
+              {isOwner ? (
+                <button
+                  type="button"
+                  className="btn btn-quiet"
+                  disabled={busy}
+                  onClick={() => {
+                    if (!window.confirm(t('contracts.writeoff.undo_confirm'))) return;
+                    void act(() => contractsApi.undoWriteOff(id), t('contracts.writeoff.undone'));
+                  }}
+                >
+                  <Icon icon="solar:undo-left-linear" width={20} /> {t('contracts.writeoff.undo')}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
 
           <TableScroll label={t('contracts.schedule.table_label')}>
           <table className="ledger">
@@ -615,6 +786,11 @@ function ContractBody({ id }: { id: string }) {
                         {s.status === 'partial' ? (
                           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
                             {t('contracts.schedule.still_owing', { amount: fmtTZS(remainingOn(s)) })}
+                          </div>
+                        ) : null}
+                        {s.status === 'written_off' && s.write_off_reason ? (
+                          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
+                            {s.write_off_reason}
                           </div>
                         ) : null}
                         <SourceChip source={s.last_payment_source} />
@@ -819,6 +995,19 @@ function ContractBody({ id }: { id: string }) {
               () => contractsApi.activate(id, { landlord_recorded: true, reason }),
               t('contracts.behalf.done'),
             )
+          }
+        />
+      </Sheet>
+
+      <Sheet open={writeOffOpen} title={t('contracts.writeoff.title')} onClose={() => setWriteOffOpen(false)} width={520}>
+        <WriteOffForm
+          amount={fmtTZS(owingTotal)}
+          periods={t.n('contracts.arrears.periods', owing.length)}
+          busy={busy}
+          error={actionError}
+          onCancel={() => setWriteOffOpen(false)}
+          onSubmit={(reason) =>
+            void act(() => contractsApi.writeOff(id, reason), t('contracts.writeoff.done'))
           }
         />
       </Sheet>

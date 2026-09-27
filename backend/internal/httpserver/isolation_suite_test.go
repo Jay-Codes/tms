@@ -268,6 +268,17 @@ var isoRoutes = []isoCase{
 		body: map[string]any{"until": "{today}", "mode": "waived", "note": "hijack"},
 	},
 	{
+		// Phase 21 §21.2. Writing off another org's arrears is the same 404
+		// as terminating their contract.
+		method: "POST", pattern: "/contracts/{id}/write-off", aud: isoOrg,
+		path: "/contracts/{contractA}/write-off", body: map[string]any{"reason": "hijack"},
+	},
+	{
+		method: "POST", pattern: "/contracts/{id}/write-off/undo", aud: isoOrg,
+		path: "/contracts/{contractA}/write-off/undo",
+	},
+	{method: "GET", pattern: "/arrears", aud: isoOrg, want: []int{200}},
+	{
 		method: "POST", pattern: "/contracts/{id}/terminate", aud: isoOrg,
 		path: "/contracts/{contractA}/terminate",
 		body: map[string]any{"reason": "hijack", "effective_date": "{today}"},

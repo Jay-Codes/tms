@@ -181,7 +181,7 @@ func (s *Server) allocatePayment(
 	var out allocationOutcome
 	contract := req.Contract
 
-	if contract.Status != contractActive && contract.Status != contractExpiring {
+	if !contractTakesPayments(contract.Status) {
 		return out, errContractNotPayable
 	}
 	rows, err := q.LockSchedulesForContract(ctx, sqlc.LockSchedulesForContractParams{
@@ -304,8 +304,8 @@ func (s *Server) allocationRefused(
 	case txErr == nil:
 		return true
 	case errors.Is(txErr, errContractNotPayable):
-		conflictCode(w, "contract_not_active", "contract not running",
-			"payments can only be recorded against a running contract")
+		conflictCode(w, "contract_not_active", "contract not payable",
+			"payments can only be recorded against a signed contract")
 	case errors.Is(txErr, errScheduleNotFound):
 		httpx.WriteProblem(w, http.StatusNotFound, "not found", "no such schedule on this contract")
 	case errors.Is(txErr, payment.ErrSchedulePaid):

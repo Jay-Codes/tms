@@ -57,12 +57,12 @@ FOR UPDATE;
 
 -- ApplyPaymentToSchedule credits one schedule and flips its status the way
 -- API.md describes for a recording: fully covered → `paid`, partly → `partial`.
--- A row that has been waived is never revived by a payment.
+-- A row that has been waived or written off is never revived by a payment.
 -- name: ApplyPaymentToSchedule :one
 UPDATE payment_schedules
 SET paid_amount = sqlc.arg(paid_amount),
     status = CASE
-        WHEN status = 'waived' THEN 'waived'
+        WHEN status IN ('waived', 'written_off') THEN status
         WHEN sqlc.arg(paid_amount)::bigint >= amount THEN 'paid'
         ELSE 'partial'
     END
@@ -76,7 +76,7 @@ RETURNING *;
 UPDATE payment_schedules
 SET paid_amount = GREATEST(paid_amount - sqlc.arg(delta)::bigint, 0),
     status = CASE
-        WHEN status = 'waived' THEN 'waived'
+        WHEN status IN ('waived', 'written_off') THEN status
         WHEN GREATEST(paid_amount - sqlc.arg(delta)::bigint, 0) >= amount THEN 'paid'
         WHEN due_date + sqlc.arg(grace_days)::int < CURRENT_DATE THEN 'overdue'
         WHEN GREATEST(paid_amount - sqlc.arg(delta)::bigint, 0) > 0 THEN 'partial'

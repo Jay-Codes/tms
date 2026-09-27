@@ -12,6 +12,9 @@ const (
 	StatusPaid    = "paid"
 	StatusOverdue = "overdue"
 	StatusWaived  = "waived"
+	// StatusWrittenOff is bad debt on a closed tenancy (Phase 21): owed, not
+	// paid, and no longer chased. Like a waiver it absorbs no money.
+	StatusWrittenOff = "written_off"
 )
 
 // Schedule is the part of a payment_schedules row allocation cares about. It
@@ -26,7 +29,7 @@ type Schedule struct {
 
 // Outstanding is what is still owed on a schedule (never negative).
 func (s Schedule) Outstanding() int64 {
-	if s.Status == StatusWaived {
+	if s.Status == StatusWaived || s.Status == StatusWrittenOff {
 		return 0
 	}
 	if s.PaidAmount >= s.Amount {

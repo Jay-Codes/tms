@@ -15,12 +15,12 @@ const applyPaymentToSchedule = `-- name: ApplyPaymentToSchedule :one
 UPDATE payment_schedules
 SET paid_amount = $1,
     status = CASE
-        WHEN status = 'waived' THEN 'waived'
+        WHEN status IN ('waived', 'written_off') THEN status
         WHEN $1::bigint >= amount THEN 'paid'
         ELSE 'partial'
     END
 WHERE org_id = $2 AND id = $3 AND deleted_at IS NULL
-RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount
+RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason
 `
 
 type ApplyPaymentToScheduleParams struct {
@@ -31,7 +31,7 @@ type ApplyPaymentToScheduleParams struct {
 
 // ApplyPaymentToSchedule credits one schedule and flips its status the way
 // API.md describes for a recording: fully covered → `paid`, partly → `partial`.
-// A row that has been waived is never revived by a payment.
+// A row that has been waived or written off is never revived by a payment.
 func (q *Queries) ApplyPaymentToSchedule(ctx context.Context, arg ApplyPaymentToScheduleParams) (PaymentSchedule, error) {
 	row := q.db.QueryRow(ctx, applyPaymentToSchedule, arg.PaidAmount, arg.OrgID, arg.ID)
 	var i PaymentSchedule
@@ -48,6 +48,9 @@ func (q *Queries) ApplyPaymentToSchedule(ctx context.Context, arg ApplyPaymentTo
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.PaidAmount,
+		&i.WrittenOffAt,
+		&i.WrittenOffByUserID,
+		&i.WriteOffReason,
 	)
 	return i, err
 }
@@ -59,7 +62,7 @@ VALUES (
     $1, $2, $3,
     $4, $5, $6
 )
-RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount
+RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason
 `
 
 type CreatePaymentScheduleParams struct {
@@ -97,12 +100,15 @@ func (q *Queries) CreatePaymentSchedule(ctx context.Context, arg CreatePaymentSc
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.PaidAmount,
+		&i.WrittenOffAt,
+		&i.WrittenOffByUserID,
+		&i.WriteOffReason,
 	)
 	return i, err
 }
 
 const getSchedule = `-- name: GetSchedule :one
-SELECT id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount FROM payment_schedules
+SELECT id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason FROM payment_schedules
 WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
 `
 
@@ -129,12 +135,15 @@ func (q *Queries) GetSchedule(ctx context.Context, arg GetScheduleParams) (Payme
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.PaidAmount,
+		&i.WrittenOffAt,
+		&i.WrittenOffByUserID,
+		&i.WriteOffReason,
 	)
 	return i, err
 }
 
 const listSchedules = `-- name: ListSchedules :many
-SELECT s.id, s.org_id, s.contract_id, s.period_start, s.period_end, s.due_date, s.amount, s.status, s.created_at, s.updated_at, s.deleted_at, s.paid_amount,
+SELECT s.id, s.org_id, s.contract_id, s.period_start, s.period_end, s.due_date, s.amount, s.status, s.created_at, s.updated_at, s.deleted_at, s.paid_amount, s.written_off_at, s.written_off_by_user_id, s.write_off_reason,
        c.renter_user_id, c.status AS contract_status,
        u.name AS unit_name, p.name AS property_name,
        ru.full_name AS renter_name
@@ -168,23 +177,26 @@ type ListSchedulesParams struct {
 }
 
 type ListSchedulesRow struct {
-	ID             pgtype.UUID        `json:"id"`
-	OrgID          pgtype.UUID        `json:"org_id"`
-	ContractID     pgtype.UUID        `json:"contract_id"`
-	PeriodStart    pgtype.Date        `json:"period_start"`
-	PeriodEnd      pgtype.Date        `json:"period_end"`
-	DueDate        pgtype.Date        `json:"due_date"`
-	Amount         int64              `json:"amount"`
-	Status         string             `json:"status"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
-	PaidAmount     int64              `json:"paid_amount"`
-	RenterUserID   pgtype.UUID        `json:"renter_user_id"`
-	ContractStatus string             `json:"contract_status"`
-	UnitName       string             `json:"unit_name"`
-	PropertyName   string             `json:"property_name"`
-	RenterName     string             `json:"renter_name"`
+	ID                 pgtype.UUID        `json:"id"`
+	OrgID              pgtype.UUID        `json:"org_id"`
+	ContractID         pgtype.UUID        `json:"contract_id"`
+	PeriodStart        pgtype.Date        `json:"period_start"`
+	PeriodEnd          pgtype.Date        `json:"period_end"`
+	DueDate            pgtype.Date        `json:"due_date"`
+	Amount             int64              `json:"amount"`
+	Status             string             `json:"status"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
+	PaidAmount         int64              `json:"paid_amount"`
+	WrittenOffAt       pgtype.Timestamptz `json:"written_off_at"`
+	WrittenOffByUserID pgtype.UUID        `json:"written_off_by_user_id"`
+	WriteOffReason     *string            `json:"write_off_reason"`
+	RenterUserID       pgtype.UUID        `json:"renter_user_id"`
+	ContractStatus     string             `json:"contract_status"`
+	UnitName           string             `json:"unit_name"`
+	PropertyName       string             `json:"property_name"`
+	RenterName         string             `json:"renter_name"`
 }
 
 // ListSchedules is the landlord's schedule board: every row of the org with the
@@ -222,6 +234,9 @@ func (q *Queries) ListSchedules(ctx context.Context, arg ListSchedulesParams) ([
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.PaidAmount,
+			&i.WrittenOffAt,
+			&i.WrittenOffByUserID,
+			&i.WriteOffReason,
 			&i.RenterUserID,
 			&i.ContractStatus,
 			&i.UnitName,
@@ -239,7 +254,7 @@ func (q *Queries) ListSchedules(ctx context.Context, arg ListSchedulesParams) ([
 }
 
 const listSchedulesForContract = `-- name: ListSchedulesForContract :many
-SELECT id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount FROM payment_schedules
+SELECT id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason FROM payment_schedules
 WHERE org_id = $1 AND contract_id = $2 AND deleted_at IS NULL
 ORDER BY period_start, id
 `
@@ -271,6 +286,9 @@ func (q *Queries) ListSchedulesForContract(ctx context.Context, arg ListSchedule
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.PaidAmount,
+			&i.WrittenOffAt,
+			&i.WrittenOffByUserID,
+			&i.WriteOffReason,
 		); err != nil {
 			return nil, err
 		}
@@ -354,7 +372,7 @@ func (q *Queries) ListSchedulesForRenter(ctx context.Context, renterUserID pgtyp
 
 const lockSchedulesForContract = `-- name: LockSchedulesForContract :many
 
-SELECT id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount FROM payment_schedules
+SELECT id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason FROM payment_schedules
 WHERE org_id = $1 AND contract_id = $2 AND deleted_at IS NULL
 ORDER BY due_date, period_start, id
 FOR UPDATE
@@ -391,6 +409,9 @@ func (q *Queries) LockSchedulesForContract(ctx context.Context, arg LockSchedule
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.PaidAmount,
+			&i.WrittenOffAt,
+			&i.WrittenOffByUserID,
+			&i.WriteOffReason,
 		); err != nil {
 			return nil, err
 		}
@@ -406,14 +427,14 @@ const unapplyPaymentFromSchedule = `-- name: UnapplyPaymentFromSchedule :one
 UPDATE payment_schedules
 SET paid_amount = GREATEST(paid_amount - $1::bigint, 0),
     status = CASE
-        WHEN status = 'waived' THEN 'waived'
+        WHEN status IN ('waived', 'written_off') THEN status
         WHEN GREATEST(paid_amount - $1::bigint, 0) >= amount THEN 'paid'
         WHEN due_date + $2::int < CURRENT_DATE THEN 'overdue'
         WHEN GREATEST(paid_amount - $1::bigint, 0) > 0 THEN 'partial'
         ELSE 'pending'
     END
 WHERE org_id = $3 AND id = $4 AND deleted_at IS NULL
-RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount
+RETURNING id, org_id, contract_id, period_start, period_end, due_date, amount, status, created_at, updated_at, deleted_at, paid_amount, written_off_at, written_off_by_user_id, write_off_reason
 `
 
 type UnapplyPaymentFromScheduleParams struct {
@@ -447,6 +468,9 @@ func (q *Queries) UnapplyPaymentFromSchedule(ctx context.Context, arg UnapplyPay
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.PaidAmount,
+		&i.WrittenOffAt,
+		&i.WrittenOffByUserID,
+		&i.WriteOffReason,
 	)
 	return i, err
 }

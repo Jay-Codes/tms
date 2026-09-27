@@ -44,6 +44,7 @@ export function ScheduleStatusStamp({ status }: { status: ScheduleRow['status'] 
   if (status === 'overdue') return <span className="stamp stamp-overdue">{t('contracts.schedule.status.overdue')}</span>;
   if (status === 'partial') return <span className="pencil">{t('contracts.schedule.status.partial')}</span>;
   if (status === 'waived') return <span className="pencil">{t('contracts.schedule.status.waived')}</span>;
+  if (status === 'written_off') return <span className="pencil">{t('contracts.schedule.status.written_off')}</span>;
   return <span className="pencil">{t('contracts.schedule.status.pending')}</span>;
 }
 

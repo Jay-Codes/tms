@@ -299,6 +299,7 @@ const messages: Messages = {
   'schedule.paid': 'Imelipwa',
   'schedule.overdue': 'Imechelewa',
   'schedule.waived': 'Imesamehewa',
+  'schedule.writtenOff': 'Deni limefutwa na mwenye nyumba',
   'schedule.due': 'Inadaiwa',
   'schedule.partial': '{paid} kati ya {total}',
   'schedule.partialPaid': '{paid} kati ya {total} zimelipwa',

@@ -215,6 +215,11 @@ const (
 	// to answer is "who decided that a year of this tenancy was settled?", and
 	// that is one decision however many periods it closed.
 	ActionContractBackfill = "contract.backfill"
+
+	// Phase 21 — arrears on a closed tenancy. One row per decision, carrying
+	// the periods and the amount it closed (or reopened).
+	ActionContractWriteOff     = "contract.write_off"
+	ActionContractWriteOffUndo = "contract.write_off_undo"
 )
 
 // Entity types.

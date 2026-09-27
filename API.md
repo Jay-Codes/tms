@@ -1286,3 +1286,19 @@ DEFAULT 'manual' CHECK (source IN ('manual','import','backfill'))`, backfilled
 | `POST /imports/preview` (`kind=payments`) | The Backfill hint replaces `exceeds_contract_balance` **only when the row both fails allocation and predates the first schedule period**. | A payment dated before the book that still has an unpaid period to land on is allocated, exactly as in Phase 16 — the hint explains a refusal, it does not invent one. |
 | `PUT /org/notification-settings` | `kinds` gains **`name_corrected`** and **`backfill_done`** toggles, both defaulting to on. | PLAN2 asks for both kinds to be disable-able. They are the only two whose stored form is nullable, so a settings blob written before this phase resolves to "on" rather than silently switching both messages off. |
 | `POST /renters/{user_id}/nida/reveal` | The 200 carries `Cache-Control: no-store` and `Pragma: no-cache`. | The one response in the product holding a national ID number must not be storable by a browser, a proxy or a service worker. |
+
+## Part 2 — Phase 21: renames after signing, arrears after move-out
+
+### 21.1 Renter rename after signing
+See `PATCH /renters/{user_id}` in 19.3 (amended): `reason` required once signed with this org, 409 `renter_signed_elsewhere` when signed with another.
+
+### 21.2 Arrears after move-out
+
+| Route | Contract |
+|---|---|
+| `POST /payments`, `POST /me/proofs`, `POST /proofs/{id}/accept` | Now accept contracts in `ended` and `terminated` as well as `active`/`expiring`; 409 `contract_not_active` only for unsigned contracts. Money lands on rows still owing (`pending`/`partial`/`overdue`); an amount above what is owed → the existing exceeds-balance refusal (there is no future to roll into). `POST /contracts/{id}/backfill` stays running-only. |
+| `GET /arrears?cursor=&limit=&property_id=` | Org audience, owner + manager. Closed contracts (`ended`/`terminated`) with at least one row owing, ordered by `closed_on` desc (termination effective date, else end date), cursor-paged. → `{items:[{contract_id, contract_status, closed_on, renter:{id, full_name, phone}, unit_id, unit_name, property_id, property_name, outstanding, periods, oldest_due, last_paid_at}], next_cursor, total:{outstanding, contracts}}`. |
+| `POST /contracts/{id}/write-off` | **Owner only.** `{reason}` (required, ≤200). Every `pending`/`partial`/`overdue` row → `written_off` (paid money on a partial row stays). 409 `contract_not_closed` on a running contract, 409 `nothing_owing`. → `{periods, amount, schedules}`. Audit `contract.write_off` `{periods, amount, reason}`. |
+| `POST /contracts/{id}/write-off/undo` | **Owner only.** Rows back to `paid`/`overdue`/`partial`/`pending`, recomputed from their own money and dates. 409 `nothing_written_off`. → `{periods, amount, schedules}`. Audit `contract.write_off_undo`. |
+
+Schedule rows gain `write_off_reason` (only on `written_off`). Reports: `written_off` counts in `expected`, never in `outstanding`/`overdue`; a written-off row takes no payment.
