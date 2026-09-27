@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { contractsApi, linkRequestsApi, proofsApi } from '../lib/api';
+import { contractsApi, inboxApi, linkRequestsApi, proofsApi } from '../lib/api';
 import { isReadyToCountersign } from './ContractBits';
 
 /** How many pending requests the badge will count before it gives up and says "50+". */
@@ -31,6 +31,8 @@ export interface Badges {
   countersign: number | null;
   /** Proofs of payment still waiting for an answer (Phase 16 §16.1), or null. */
   proofs: number | null;
+  /** Phase 24 — the caller's unread landlord notices (the bell), or null. */
+  inbox: number | null;
 }
 
 async function readPending(signal?: AbortSignal): Promise<number | null> {
@@ -80,6 +82,15 @@ async function readProofs(signal?: AbortSignal): Promise<number | null> {
   }
 }
 
+async function readInbox(signal?: AbortSignal): Promise<number | null> {
+  try {
+    const r = await inboxApi.unread(signal);
+    return typeof r.unread === 'number' ? r.unread : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Screens that change a count (accepting a proof, answering a link request)
  * call this so the chrome catches up at once instead of waiting for the next
@@ -96,20 +107,21 @@ export function refreshNavBadges(): void {
  * break the chrome.
  */
 export function useNavBadges(): Badges {
-  const [badges, setBadges] = useState<Badges>({ pending: null, countersign: null, proofs: null });
+  const [badges, setBadges] = useState<Badges>({ pending: null, countersign: null, proofs: null, inbox: null });
   const inflight = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
     inflight.current?.abort();
     const ac = new AbortController();
     inflight.current = ac;
-    const [pending, countersign, proofs] = await Promise.all([
+    const [pending, countersign, proofs, inbox] = await Promise.all([
       readPending(ac.signal),
       readCountersign(ac.signal),
       readProofs(ac.signal),
+      readInbox(ac.signal),
     ]);
     if (ac.signal.aborted) return;
-    setBadges({ pending, countersign, proofs });
+    setBadges({ pending, countersign, proofs, inbox });
   }, []);
 
   useEffect(() => {

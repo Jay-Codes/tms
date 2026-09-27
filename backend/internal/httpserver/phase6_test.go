@@ -255,6 +255,9 @@ func TestNotificationTemplateOverrideReachesTheRenter(t *testing.T) {
 	}).mustStatus(t, http.StatusOK, "clear override")
 	fix.owner.recordPayment(map[string]any{
 		"contract_id": fix.contractID, "amount": fix.amounts[1], "method": "cash",
+		// The second instalment is the same amount minutes later: a real
+		// payment the Phase 24 duplicate guard asks to confirm.
+		"confirm_duplicate": true,
 	}).mustStatus(t, http.StatusCreated, "second payment")
 
 	notes = ofKind(h.notifications(t), "thank_you")

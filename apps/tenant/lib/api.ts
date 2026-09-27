@@ -80,6 +80,8 @@ export interface RequestOptions {
   /** Appended as a query string; null/undefined/'' entries are dropped. */
   query?: Record<string, string | number | null | undefined>;
   signal?: AbortSignal;
+  /** Extra request headers (Phase 24: `Idempotency-Key` on a payment). */
+  headers?: Record<string, string>;
 }
 
 function buildUrl(path: string, query?: RequestOptions['query']): string {
@@ -100,7 +102,12 @@ async function request<T>(method: string, path: string, opts: RequestOptions = {
     res = await fetch(buildUrl(path, opts.query), {
       method,
       credentials: 'include',
-      headers: opts.body === undefined ? { Accept: 'application/json' } : { Accept: 'application/json', 'Content-Type': 'application/json' },
+      headers: {
+        ...(opts.body === undefined
+          ? { Accept: 'application/json' }
+          : { Accept: 'application/json', 'Content-Type': 'application/json' }),
+        ...opts.headers,
+      },
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
       signal: opts.signal,
     });
@@ -1579,6 +1586,8 @@ export interface Payment {
   /** Phase 20.3; absent on payloads written before the column existed. */
   source?: PaymentSource | null;
   import_batch_id?: string | null;
+  /** Phase 24 — set on the payment a correction recorded in place of this one. */
+  corrects_payment_id?: string | null;
   /**
    * `GET /payments` denormalises the contract onto the payment itself rather
    * than nesting it the way `GET /schedules` does. Both are tolerated —
@@ -1615,13 +1624,76 @@ export interface PaymentInput {
   paid_at?: string;
   note?: string;
   allow_overpay_rollover?: boolean;
+  /** Phase 24 — record it despite a 409 `possible_duplicate`. */
+  confirm_duplicate?: boolean;
 }
 
-/** `201 {payment, schedules}` — the rows the allocation moved. */
+/**
+ * `201 {payment, schedules}` — the rows the allocation moved. Phase 24: a
+ * repeat with the same `Idempotency-Key` answers 200 `replayed: true` and
+ * writes nothing; it is still a success.
+ */
 export interface PaymentResult {
   payment: Payment;
   schedules: Schedule[];
+  replayed?: boolean;
 }
+
+/** One live payment a 409 `possible_duplicate` says looks like this one. */
+export interface DuplicateMatch {
+  id: string;
+  amount: number;
+  paid_at: string;
+  method: PaymentMethod | string;
+  reference: string | null;
+}
+
+/** `matches` off a 409 `possible_duplicate`, else null. */
+export function duplicateMatches(err: unknown): DuplicateMatch[] | null {
+  if (!(err instanceof ApiError) || err.code !== 'possible_duplicate') return null;
+  const raw = err.body.matches;
+  return Array.isArray(raw) ? (raw as DuplicateMatch[]) : [];
+}
+
+/** A fresh `Idempotency-Key`: one per opened sheet, reused on its retries. */
+export function newIdempotencyKey(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+/** `POST /payments/{id}/correct` body; anything left out is copied from the original. */
+export interface PaymentCorrection {
+  reason: string;
+  amount?: number;
+  contract_id?: string;
+  schedule_id?: string;
+  paid_at?: string;
+  method?: CashMethod;
+  reference?: string;
+  allow_overpay_rollover?: boolean;
+}
+
+/** One landlord notice (Phase 24). `link` is a portal path. */
+export interface InboxItem {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  link: string | null;
+  read: boolean;
+  created_at: string;
+}
+
+export const inboxApi = {
+  list: (query: { cursor?: string; limit?: number } = {}, signal?: AbortSignal) =>
+    api.get<{ items: InboxItem[]; next_cursor?: string | null }>('/inbox', { query, signal }),
+  unread: (signal?: AbortSignal) => api.get<{ unread: number }>('/inbox/unread', { signal }),
+  /** `{ids}` or `{all: true}`; answers the caller's new unread count. */
+  read: (body: { ids: string[] } | { all: true }) => api.post<{ unread: number }>('/inbox/read', body),
+};
 
 /**
  * Phase 16 §16.4 — the wallet an org may take rent into. It lives beside
@@ -1735,7 +1807,19 @@ export const paymentsApi = {
   ) => api.get<{ items: Payment[]; next_cursor?: string | null }>('/payments', { query, signal }),
   get: (id: string, signal?: AbortSignal) =>
     api.get<{ payment: Payment } | Payment>(`/payments/${id}`, { signal }),
-  record: (body: PaymentInput) => api.post<PaymentResult>('/payments', body),
+  /** Phase 24: `idempotencyKey` makes a retry of the same submit a no-op replay. */
+  record: (body: PaymentInput, idempotencyKey?: string) =>
+    api.post<PaymentResult>(
+      '/payments',
+      body,
+      idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : undefined,
+    ),
+  /**
+   * Phase 24 — reverse and re-record in one transaction. 201 `{payment,
+   * reversed}`; the same refusals as reverse, and as record for the allocator.
+   */
+  correct: (id: string, body: PaymentCorrection) =>
+    api.post<{ payment: Payment; reversed: Payment }>(`/payments/${id}/correct`, body),
   reverse: (id: string, reason: string) =>
     api.post<PaymentResult>(`/payments/${id}/reverse`, { reason }),
 };
@@ -2752,6 +2836,8 @@ export interface ProofAcceptInput {
   schedule_id?: string;
   paid_at?: string;
   allow_overpay_rollover?: boolean;
+  /** Phase 24 — accept despite a 409 `possible_duplicate`. */
+  confirm_duplicate?: boolean;
 }
 
 /** `200 {proof, payment, schedules}` — a `PaymentResult` with the proof beside it. */

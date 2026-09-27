@@ -279,6 +279,16 @@ func (s *Server) handleGiveNotice(w http.ResponseWriter, r *http.Request) {
 		}); err != nil {
 			return err
 		}
+		if p.Kind == auth.KindRenter {
+			// Phase 24: the landlord's bell.
+			if err := s.inbox(r.Context(), q, row.OrgID, p.UserID, inboxItem{
+				Kind: "notice_given", Title: "Notice to leave on " + leaveOn.Format(dateLayout) + " — " + row.RenterName,
+				Body: row.UnitName + " · " + row.PropertyName, EntityType: "contract", EntityID: row.ID,
+				Link: "/contracts/" + db.UUIDString(row.ID),
+			}); err != nil {
+				return err
+			}
+		}
 		var err error
 		notifyID, err = s.queueKeyedSMS(r.Context(), q, msg, db.UUIDString(row.ID)+":"+leaveOn.Format(dateLayout))
 		return err

@@ -39,6 +39,10 @@ const (
 	KindEvictionDemand    = "eviction_demand"
 	KindEvictionNotice    = "eviction_notice"
 	KindEvictionWithdrawn = "eviction_withdrawn"
+	// Phase 24: a payment the landlord reversed or corrected is money the
+	// renter believed was recorded; they are always told.
+	KindPaymentReversed  = "payment_reversed"
+	KindPaymentCorrected = "payment_corrected"
 	KindCustom            = "custom"
 	KindOTP          = "otp"
 )
@@ -270,6 +274,14 @@ var platformTemplates = map[string]Template{
 	KindEvictionNotice: {
 		EN: "{{name}}, this is notice to vacate {{unit}} at {{org}} by {{date}} for unpaid rent of {{amount}}.",
 		SW: "{{name}}, hii ni notisi ya kuhama {{unit}} katika {{org}} ifikapo {{date}} kwa kodi isiyolipwa ya {{amount}}.",
+	},
+	KindPaymentReversed: {
+		EN: "{{name}}, the payment of {{amount}} recorded on {{date}} for {{unit}} at {{org}} was reversed: {{reason}}",
+		SW: "{{name}}, malipo ya {{amount}} yaliyorekodiwa tarehe {{date}} kwa {{unit}} katika {{org}} yamefutwa: {{reason}}",
+	},
+	KindPaymentCorrected: {
+		EN: "{{name}}, the payment of {{amount}} recorded on {{date}} for {{unit}} at {{org}} was corrected to {{next_amount}}: {{reason}}",
+		SW: "{{name}}, malipo ya {{amount}} yaliyorekodiwa tarehe {{date}} kwa {{unit}} katika {{org}} yamerekebishwa kuwa {{next_amount}}: {{reason}}",
 	},
 	KindEvictionWithdrawn: {
 		EN: "{{name}}, the notice about {{unit}} at {{org}} has been withdrawn. Thank you.",

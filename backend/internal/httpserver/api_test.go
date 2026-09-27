@@ -58,6 +58,16 @@ func newHarness(t *testing.T) *harness {
 type client struct {
 	h       *harness
 	cookies map[string]*http.Cookie
+	// headers are sent with every request while set (Phase 24's
+	// Idempotency-Key); withHeader sets one for a single call.
+	headers map[string]string
+}
+
+// withHeader runs one request with an extra header.
+func (c *client) withHeader(name, value string, fn func() response) response {
+	c.headers = map[string]string{name: value}
+	defer func() { c.headers = nil }()
+	return fn()
 }
 
 func (h *harness) client() *client {
@@ -91,6 +101,9 @@ func (c *client) do(method, path string, body any) response {
 
 	req := httptest.NewRequest(method, httpserver.APIPrefix+path, reader)
 	req.Header.Set("Content-Type", "application/json")
+	for k, v := range c.headers {
+		req.Header.Set(k, v)
+	}
 	for _, ck := range c.cookies {
 		req.AddCookie(ck)
 	}

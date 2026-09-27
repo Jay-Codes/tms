@@ -242,6 +242,8 @@ const (
 	ActionContractNoticeWithdraw = "contract.notice_withdraw"
 	ActionContractMovedOut       = "contract.moved_out"
 	ActionEviction               = "contract.eviction"
+	// Phase 24: a correction is a reversal plus a new payment, audited as one.
+	ActionPaymentCorrect = "payment.correct"
 )
 
 // Entity types.

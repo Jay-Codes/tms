@@ -52,12 +52,15 @@ func (s *Server) handleRecordPayment(w http.ResponseWriter, r *http.Request) {
 		PaidAt               string  `json:"paid_at"`
 		Note                 *string `json:"note"`
 		AllowOverpayRollover bool    `json:"allow_overpay_rollover"`
+		// Phase 24: record it even though it looks like a duplicate.
+		ConfirmDuplicate bool `json:"confirm_duplicate"`
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
 	}
 
 	f := validate.Fields{}
+	idemKey := idempotencyKey(r, f)
 	contractID := uuidField(f, "contract_id", body.ContractID, true)
 	scheduleID := uuidField(f, "schedule_id", body.ScheduleID, false)
 	checkAmount(f, "amount", body.Amount)
@@ -84,6 +87,22 @@ func (s *Server) handleRecordPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Phase 24: a retried request with the same Idempotency-Key replays the
+	// payment the first one wrote.
+	if idemKey != nil {
+		if existing, err := s.q.PaymentByIdempotencyKey(r.Context(), sqlc.PaymentByIdempotencyKeyParams{
+			OrgID: p.OrgID, Key: idemKey,
+		}); err == nil {
+			if out, ok := s.reloadPayment(w, r, db.UUIDString(existing), p.OrgID, pgtype.UUID{}, true); ok {
+				WriteJSON(w, http.StatusOK, map[string]any{"payment": out, "replayed": true})
+			}
+			return
+		} else if !isNoRows(err) {
+			s.serverError(w, r, "payment.record.idempotency", err)
+			return
+		}
+	}
+
 	contract, err := s.q.GetContract(r.Context(), sqlc.GetContractParams{ID: contractID, OrgID: p.OrgID})
 	if isNoRows(err) {
 		notFoundContract(w)
@@ -91,6 +110,15 @@ func (s *Server) handleRecordPayment(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		s.serverError(w, r, "payment.record.contract", err)
+		return
+	}
+	dups, err := s.possibleDuplicates(r.Context(), p.OrgID, contractID, body.Amount, paidAt, reference, pgtype.UUID{})
+	if err != nil {
+		s.serverError(w, r, "payment.record.duplicates", err)
+		return
+	}
+	if len(dups) > 0 && !body.ConfirmDuplicate {
+		writeDuplicate(w, dups)
 		return
 	}
 	org, err := s.q.GetOrg(r.Context(), p.OrgID)
@@ -111,7 +139,26 @@ func (s *Server) handleRecordPayment(w http.ResponseWriter, r *http.Request) {
 			AllowOverpayRollover: body.AllowOverpayRollover,
 			Settings:             settings, OrgName: brand.DisplayName,
 		})
-		return err
+		if err != nil {
+			return err
+		}
+		if idemKey != nil {
+			if err := q.SetPaymentExtras(r.Context(), sqlc.SetPaymentExtrasParams{
+				IdempotencyKey: idemKey, OrgID: p.OrgID, ID: db.MustUUID(out.PaymentID),
+			}); err != nil {
+				return err
+			}
+		}
+		// Recorded over a duplicate warning: the rest of the org should know.
+		if len(dups) > 0 {
+			return s.inbox(r.Context(), q, p.OrgID, p.UserID, inboxItem{
+				Kind: "payment_duplicate_confirmed",
+				Title: "Payment recorded despite a possible duplicate: " + formatTZS(body.Amount) + " — " + contract.RenterName,
+				Body: contract.UnitName + " · " + contract.PropertyName, EntityType: "payment",
+				EntityID: db.MustUUID(out.PaymentID), Link: "/contracts/" + db.UUIDString(contractID),
+			})
+		}
+		return nil
 	})
 	if !s.allocationRefused(w, r, txErr, "payment.record.tx") {
 		return
@@ -383,26 +430,7 @@ func (s *Server) handleReversePayment(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "payment.reverse.get", err)
 		return
 	}
-	if row.Status == paymentReversed {
-		conflictCode(w, "already_reversed", "payment already reversed",
-			"this payment has already been reversed")
-		return
-	}
-	// §22.5: money that came from the deposit is undone from the deposit
-	// ledger, and money partly refunded cannot be reversed as if all held.
-	if row.Method == methodDeposit {
-		conflictCode(w, "deposit_payment", "paid from the deposit",
-			"this payment was applied from the deposit; it cannot be reversed here")
-		return
-	}
-	if refunded, err := s.q.PaymentRefunded(r.Context(), sqlc.PaymentRefundedParams{
-		OrgID: p.OrgID, PaymentID: row.ID,
-	}); err != nil {
-		s.serverError(w, r, "payment.reverse.refunded", err)
-		return
-	} else if refunded {
-		conflictCode(w, "payment_refunded", "payment partly refunded",
-			"part of this payment was refunded when the tenancy ended; it cannot be reversed")
+	if !s.reversible(w, r, row) {
 		return
 	}
 	org, err := s.q.GetOrg(r.Context(), p.OrgID)
@@ -413,41 +441,15 @@ func (s *Server) handleReversePayment(w http.ResponseWriter, r *http.Request) {
 	grace := int32(parseSettings(org.Settings).GraceDays)
 
 	var affected []sqlc.PaymentSchedule
+	var notifyID string
 	if err := s.inTx(r.Context(), func(q *sqlc.Queries) error {
-		allocations, err := q.ListAllocationsForPayments(r.Context(), sqlc.ListAllocationsForPaymentsParams{
-			OrgID: p.OrgID, PaymentIds: []pgtype.UUID{id},
-		})
+		var err error
+		affected, err = s.reverseTx(r.Context(), q, p, row, reason, grace)
 		if err != nil {
 			return err
 		}
-		reversed, err := q.ReversePayment(r.Context(), sqlc.ReversePaymentParams{
-			ReversalReason: &reason, ReversedByUserID: p.UserID, OrgID: p.OrgID, ID: id,
-		})
-		if err != nil {
-			return err
-		}
-		affected = affected[:0]
-		for _, a := range allocations {
-			updated, err := q.UnapplyPaymentFromSchedule(r.Context(), sqlc.UnapplyPaymentFromScheduleParams{
-				Delta: a.Amount, GraceDays: grace, OrgID: p.OrgID, ID: a.ScheduleID,
-			})
-			if err != nil {
-				return err
-			}
-			affected = append(affected, updated)
-		}
-		return audit.Record(r.Context(), q, audit.Entry{
-			OrgID:       p.OrgIDString(),
-			ActorUserID: p.UserIDString(),
-			Action:      audit.ActionPaymentReverse,
-			EntityType:  audit.EntityPayment,
-			EntityID:    db.UUIDString(id),
-			Before:      map[string]any{"status": row.Status, "amount": row.Amount},
-			After: map[string]any{
-				"status": reversed.Status, "reason": reason,
-				"unapplied": allocationAudit(allocations),
-			},
-		})
+		notifyID, err = s.afterReversal(r.Context(), q, p, row, reason, nil)
+		return err
 	}); err != nil {
 		if isNoRows(err) {
 			conflictCode(w, "already_reversed", "payment already reversed",
@@ -457,6 +459,7 @@ func (s *Server) handleReversePayment(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "payment.reverse.tx", err)
 		return
 	}
+	s.enqueueNotifications(r.Context(), notifyID)
 
 	out, ok := s.reloadPayment(w, r, db.UUIDString(id), p.OrgID, pgtype.UUID{}, true)
 	if !ok {

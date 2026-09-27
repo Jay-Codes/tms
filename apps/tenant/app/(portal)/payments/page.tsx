@@ -19,6 +19,7 @@
 import { Icon } from "@iconify/react";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { CorrectPaymentSheet } from "../../../components/CorrectPaymentSheet";
 import { ProblemNote } from "../../../components/FormBits";
 import { LoadMore } from "../../../components/Paging";
 import {
@@ -244,6 +245,7 @@ function PaymentsBody() {
     null,
   );
   const [reversing, setReversing] = useState<Payment | null>(null);
+  const [correcting, setCorrecting] = useState<Payment | null>(null);
   const [reverseBusy, setReverseBusy] = useState(false);
   const [reverseError, setReverseError] = useState<ApiError | null>(null);
   const [days, setDays] = useState<UpcomingWindow>(14);
@@ -473,6 +475,7 @@ function PaymentsBody() {
                 setReverseError(null);
                 setReversing(p);
               }}
+              onCorrect={setCorrecting}
             />
             <LoadMore cursor={cursor} loading={loadingMore} onLoad={() => void loadMore()} />
           </>
@@ -532,6 +535,15 @@ function PaymentsBody() {
         target={backfillTarget}
         onClose={() => setBackfillTarget(null)}
         onDone={() => void load(tab)}
+      />
+
+      <CorrectPaymentSheet
+        payment={correcting}
+        onClose={() => setCorrecting(null)}
+        onDone={() => {
+          setCorrecting(null);
+          void load(tab);
+        }}
       />
 
       <ReverseSheet

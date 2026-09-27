@@ -256,6 +256,26 @@ type OrgBranding struct {
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
+type OrgInbox struct {
+	ID          pgtype.UUID        `json:"id"`
+	OrgID       pgtype.UUID        `json:"org_id"`
+	Kind        string             `json:"kind"`
+	Title       string             `json:"title"`
+	Body        string             `json:"body"`
+	EntityType  *string            `json:"entity_type"`
+	EntityID    pgtype.UUID        `json:"entity_id"`
+	Link        *string            `json:"link"`
+	ActorUserID pgtype.UUID        `json:"actor_user_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type OrgInboxRead struct {
+	NotificationID pgtype.UUID        `json:"notification_id"`
+	UserID         pgtype.UUID        `json:"user_id"`
+	OrgID          pgtype.UUID        `json:"org_id"`
+	ReadAt         pgtype.Timestamptz `json:"read_at"`
+}
+
 type OrgMember struct {
 	ID        pgtype.UUID        `json:"id"`
 	OrgID     pgtype.UUID        `json:"org_id"`
@@ -283,25 +303,27 @@ type OrgTheme struct {
 }
 
 type Payment struct {
-	ID               pgtype.UUID        `json:"id"`
-	OrgID            pgtype.UUID        `json:"org_id"`
-	ContractID       pgtype.UUID        `json:"contract_id"`
-	ScheduleID       pgtype.UUID        `json:"schedule_id"`
-	Amount           int64              `json:"amount"`
-	Method           string             `json:"method"`
-	Reference        *string            `json:"reference"`
-	PaidAt           pgtype.Timestamptz `json:"paid_at"`
-	RecordedByUserID pgtype.UUID        `json:"recorded_by_user_id"`
-	Note             *string            `json:"note"`
-	Status           string             `json:"status"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
-	ReversedAt       pgtype.Timestamptz `json:"reversed_at"`
-	ReversalReason   *string            `json:"reversal_reason"`
-	ReversedByUserID pgtype.UUID        `json:"reversed_by_user_id"`
-	ImportBatchID    pgtype.UUID        `json:"import_batch_id"`
-	Source           string             `json:"source"`
+	ID                pgtype.UUID        `json:"id"`
+	OrgID             pgtype.UUID        `json:"org_id"`
+	ContractID        pgtype.UUID        `json:"contract_id"`
+	ScheduleID        pgtype.UUID        `json:"schedule_id"`
+	Amount            int64              `json:"amount"`
+	Method            string             `json:"method"`
+	Reference         *string            `json:"reference"`
+	PaidAt            pgtype.Timestamptz `json:"paid_at"`
+	RecordedByUserID  pgtype.UUID        `json:"recorded_by_user_id"`
+	Note              *string            `json:"note"`
+	Status            string             `json:"status"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
+	ReversedAt        pgtype.Timestamptz `json:"reversed_at"`
+	ReversalReason    *string            `json:"reversal_reason"`
+	ReversedByUserID  pgtype.UUID        `json:"reversed_by_user_id"`
+	ImportBatchID     pgtype.UUID        `json:"import_batch_id"`
+	Source            string             `json:"source"`
+	IdempotencyKey    *string            `json:"idempotency_key"`
+	CorrectsPaymentID pgtype.UUID        `json:"corrects_payment_id"`
 }
 
 type PaymentAllocation struct {

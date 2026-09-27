@@ -371,6 +371,7 @@ export function PaymentsTable({
   showRenter = true,
   showUnit = true,
   onReverse,
+  onCorrect,
 }: {
   items: Payment[] | null;
   loading?: boolean;
@@ -378,6 +379,8 @@ export function PaymentsTable({
   showRenter?: boolean;
   showUnit?: boolean;
   onReverse?: (p: Payment) => void;
+  /** Phase 24 — reverse and re-record in one step. Not offered on deposit money. */
+  onCorrect?: (p: Payment) => void;
 }) {
   const t = useT();
   const cols = 6 + (showRenter ? 1 : 0) + (showUnit ? 1 : 0);
@@ -454,18 +457,35 @@ export function PaymentsTable({
                         {p.reversal_reason}
                       </div>
                     ) : null}
+                    {p.corrects_payment_id ? (
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
+                        {t('payments.correct.corrects', { ref: p.corrects_payment_id.slice(0, 8) })}
+                      </div>
+                    ) : null}
                   </td>
                   <td>
-                    {onReverse && !reversed ? (
-                      <button
-                        type="button"
-                        className="btn btn-quiet"
-                        style={{ minHeight: 36 }}
-                        onClick={() => onReverse(p)}
-                      >
-                        {t('payments.reverse.action')}
-                      </button>
-                    ) : null}
+                    <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-1)', justifyContent: 'flex-end' }}>
+                      {onCorrect && !reversed && p.method !== 'deposit' ? (
+                        <button
+                          type="button"
+                          className="btn btn-quiet"
+                          style={{ minHeight: 36 }}
+                          onClick={() => onCorrect(p)}
+                        >
+                          {t('payments.correct.action')}
+                        </button>
+                      ) : null}
+                      {onReverse && !reversed ? (
+                        <button
+                          type="button"
+                          className="btn btn-quiet"
+                          style={{ minHeight: 36 }}
+                          onClick={() => onReverse(p)}
+                        >
+                          {t('payments.reverse.action')}
+                        </button>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               );

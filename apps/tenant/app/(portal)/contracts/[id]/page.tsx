@@ -34,6 +34,7 @@ import { DaysOverdue, PaymentsTable, ReverseSheet, SourceChip } from '../../../.
 import { ProofsFor } from '../../../../components/ProofBits';
 import { RecordPaymentSheet, type RecordPaymentTarget } from '../../../../components/RecordPaymentSheet';
 import { PageHead } from '../../../../components/PageHead';
+import { CorrectPaymentSheet } from '../../../../components/CorrectPaymentSheet';
 import { LoadMore } from '../../../../components/Paging';
 import { PolicyFacts } from '../../../../components/PolicyBits';
 import { DepositSection, SettlementSummary } from '../../../../components/SettleBits';
@@ -523,6 +524,7 @@ function ContractBody({ id }: { id: string }) {
 
   const [recordTarget, setRecordTarget] = useState<RecordPaymentTarget | null>(null);
   const [reversing, setReversing] = useState<Payment | null>(null);
+  const [correcting, setCorrecting] = useState<Payment | null>(null);
   const [reverseBusy, setReverseBusy] = useState(false);
   const [reverseError, setReverseError] = useState<ApiError | null>(null);
 
@@ -1385,6 +1387,7 @@ function ContractBody({ id }: { id: string }) {
               setReverseError(null);
               setReversing(p);
             }}
+            onCorrect={setCorrecting}
           />
           <LoadMore cursor={paymentsCursor} loading={paymentsMore} onLoad={() => void morePayments()} />
         </section>
@@ -1515,6 +1518,16 @@ function ContractBody({ id }: { id: string }) {
         target={{ contractId: id, label: contractLabel, schedules: schedules ?? undefined }}
         onClose={() => setBackfillOpen(false)}
         onDone={() => void load()}
+      />
+
+      <CorrectPaymentSheet
+        payment={correcting}
+        onClose={() => setCorrecting(null)}
+        onDone={() => {
+          setCorrecting(null);
+          setNote(t('payments.correct.done'));
+          void load();
+        }}
       />
 
       <ReverseSheet

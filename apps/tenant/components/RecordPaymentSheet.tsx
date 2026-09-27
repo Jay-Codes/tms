@@ -24,11 +24,14 @@ import {
   ApiError,
   PAYMENT_METHODS,
   contractsApi,
+  duplicateMatches,
   isUnsettled,
+  newIdempotencyKey,
   overpayPrompt,
   paymentsApi,
   remainingOn,
   toApiError,
+  type DuplicateMatch,
   type OverpayPrompt,
   type PaymentInput,
   type PaymentMethod,
@@ -43,6 +46,7 @@ import {
   rfc3339ToDatetimeLocal,
 } from '../lib/format';
 import { TableScroll, useT, type Translator } from '@tms/ui';
+import { methodText } from './PaymentBits';
 
 /**
  * Everything the sheet needs to know about *this* opening of it.
@@ -87,7 +91,7 @@ export interface RecordPaymentTarget {
    * at any endpoint that takes the payment body and answers with
    * `{payment, schedules}` — the proof accept route is the one that does.
    */
-  submit?: (body: PaymentInput) => Promise<PaymentResult>;
+  submit?: (body: PaymentInput, idempotencyKey?: string) => Promise<PaymentResult>;
 }
 
 /** Earliest unsettled row — the target when the landlord did not pick one. */
@@ -193,6 +197,15 @@ export function RecordPaymentSheet({
   const [error, setError] = useState<ApiError | null>(null);
   const [overpay, setOverpay] = useState<OverpayPrompt | null>(null);
   const [result, setResult] = useState<PaymentResult | null>(null);
+  /**
+   * Phase 24: one `Idempotency-Key` per opening of the sheet, reused by every
+   * retry of it — a double tap or a flaky network replays, never re-records.
+   */
+  const [idemKey, setIdemKey] = useState(newIdempotencyKey);
+  /** 409 `possible_duplicate`: the payments this one looks like. */
+  const [duplicates, setDuplicates] = useState<DuplicateMatch[] | null>(null);
+  /** The landlord said "record anyway"; it rides on every retry after that. */
+  const [confirmDuplicate, setConfirmDuplicate] = useState(false);
   /** The landlord edited the box; stop overwriting it when the target moves. */
   const [amountTouched, setAmountTouched] = useState(false);
 
@@ -214,6 +227,9 @@ export function RecordPaymentSheet({
     setError(null);
     setOverpay(null);
     setResult(null);
+    setDuplicates(null);
+    setConfirmDuplicate(false);
+    setIdemKey(newIdempotencyKey());
   }, [
     open,
     target?.contractId,
@@ -251,7 +267,7 @@ export function RecordPaymentSheet({
   const selected = (schedules ?? []).find((s) => s.id === scheduleId) ?? null;
 
   const send = useCallback(
-    async (allowOverpay: boolean) => {
+    async (allowOverpay: boolean, confirmDup = confirmDuplicate) => {
       setBusy(true);
       setError(null);
       try {
@@ -265,21 +281,26 @@ export function RecordPaymentSheet({
           note: note.trim() || undefined,
         };
         if (allowOverpay) body.allow_overpay_rollover = true;
-        const res = await (target?.submit ?? paymentsApi.record)(body);
+        if (confirmDup) body.confirm_duplicate = true;
+        // A 200 `replayed: true` is the same success as a 201.
+        const res = await (target?.submit ?? paymentsApi.record)(body, idemKey);
         setOverpay(null);
+        setDuplicates(null);
         setResult(res);
         onRecorded(res);
       } catch (e) {
         const err = toApiError(e);
         // Not a failure — a question. FLOWS 7 step 2.
         const prompt = overpayPrompt(err);
+        const dup = duplicateMatches(err);
         if (prompt) setOverpay(prompt);
+        else if (dup) setDuplicates(dup);
         else setError(err);
       } finally {
         setBusy(false);
       }
     },
-    [amount, contractId, method, note, onRecorded, paidAt, reference, scheduleId, target?.submit],
+    [amount, confirmDuplicate, contractId, idemKey, method, note, onRecorded, paidAt, reference, scheduleId, target?.submit],
   );
 
   const amountNum = Math.round(Number(amount));
@@ -300,6 +321,60 @@ export function RecordPaymentSheet({
           <div>
             <button type="button" className="btn btn-secondary" onClick={onClose}>
               {t('common.done')}
+            </button>
+          </div>
+        </div>
+      ) : duplicates ? (
+        /* ---------------------- Phase 24: possible duplicate ----------------- */
+        <div style={{ display: 'grid', gap: 'var(--sp-4)' }}>
+          <p
+            style={{
+              display: 'flex',
+              gap: 'var(--sp-3)',
+              padding: 'var(--sp-3) var(--sp-4)',
+              border: '1px solid var(--rule-strong)',
+              borderRadius: 'var(--radius-sm)',
+            }}
+          >
+            <Icon icon="solar:copy-linear" width={20} />
+            <span>{t('payments.duplicate.prompt')}</span>
+          </p>
+          <TableScroll label={t('payments.duplicate.table')}>
+            <table className="ledger">
+              <thead>
+                <tr>
+                  <th className="num">{t('common.amount')}</th>
+                  <th>{t('payments.duplicate.col.date')}</th>
+                  <th>{t('payments.duplicate.col.method')}</th>
+                  <th>{t('payments.duplicate.col.reference')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {duplicates.map((m) => (
+                  <tr key={m.id}>
+                    <td className="num">{fmtTZS(m.amount)}</td>
+                    <td>{fmtDate(m.paid_at)}</td>
+                    <td>{methodText(t, m.method)}</td>
+                    <td style={{ color: 'var(--ink-soft)' }}>{m.reference || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableScroll>
+          <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy}
+              onClick={() => {
+                setConfirmDuplicate(true);
+                void send(false, true);
+              }}
+            >
+              {busy ? t('payments.record.busy') : t('payments.duplicate.record_anyway')}
+            </button>
+            <button type="button" className="btn btn-quiet" onClick={() => setDuplicates(null)} disabled={busy}>
+              {t('common.cancel')}
             </button>
           </div>
         </div>

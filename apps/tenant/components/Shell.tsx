@@ -309,7 +309,34 @@ function Rail({ badges }: { badges: Badges }) {
   );
 }
 
-function TopBar() {
+/** Phase 24 — the landlord's notices, with the unread count on the bell. */
+function Bell({ count }: { count: number | null }) {
+  const t = useT();
+  const label = count ? t('inbox.bell_unread', { count }) : t('inbox.title');
+  return (
+    <Link
+      href="/inbox"
+      className="btn btn-quiet"
+      aria-label={label}
+      title={label}
+      style={{
+        position: 'relative',
+        minHeight: 'var(--touch-min)',
+        minWidth: 'var(--touch-min)',
+        justifyContent: 'center',
+      }}
+    >
+      <Icon icon="solar:bell-linear" width={22} />
+      {count ? (
+        <span style={{ position: 'absolute', top: 2, right: 0 }}>
+          <Badge count={count} label={label} />
+        </span>
+      ) : null}
+    </Link>
+  );
+}
+
+function TopBar({ badges }: { badges: Badges }) {
   const { user, logout } = useMe();
   const t = useT();
   return (
@@ -318,29 +345,35 @@ function TopBar() {
         {user?.full_name}
         {user?.email ? ` · ${user.email}` : ''}
       </span>
-      <button type="button" className="btn btn-quiet" onClick={() => void logout()} style={{ minHeight: 36 }}>
-        <Icon icon="solar:logout-2-linear" width={18} /> {t('common.sign_out')}
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+        <Bell count={badges.inbox} />
+        <button type="button" className="btn btn-quiet" onClick={() => void logout()} style={{ minHeight: 36 }}>
+          <Icon icon="solar:logout-2-linear" width={18} /> {t('common.sign_out')}
+        </button>
+      </div>
     </header>
   );
 }
 
 /** Mobile header: org identity plus the drawer trigger. Hidden from 768px up. */
-function MobileBar({ onOpen }: { onOpen: () => void }) {
+function MobileBar({ onOpen, badges }: { onOpen: () => void; badges: Badges }) {
   const t = useT();
   return (
     <header className="shell-mobilebar">
       <OrgMark />
-      <button
-        type="button"
-        className="btn btn-quiet"
-        aria-label={t('shell.open_menu')}
-        aria-haspopup="dialog"
-        onClick={onOpen}
-        style={{ minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)', justifyContent: 'center' }}
-      >
-        <Icon icon="solar:hamburger-menu-linear" width={24} />
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)' }}>
+        <Bell count={badges.inbox} />
+        <button
+          type="button"
+          className="btn btn-quiet"
+          aria-label={t('shell.open_menu')}
+          aria-haspopup="dialog"
+          onClick={onOpen}
+          style={{ minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)', justifyContent: 'center' }}
+        >
+          <Icon icon="solar:hamburger-menu-linear" width={24} />
+        </button>
+      </div>
     </header>
   );
 }
@@ -482,8 +515,8 @@ export function Shell({ children }: { children: ReactNode }) {
       <div className="shell-grid">
         <Rail badges={badges} />
         <div className="shell-main">
-          <MobileBar onOpen={() => setDrawer(true)} />
-          <TopBar />
+          <MobileBar onOpen={() => setDrawer(true)} badges={badges} />
+          <TopBar badges={badges} />
           <VerifyBanner />
           <div className="shell-body">{children}</div>
         </div>

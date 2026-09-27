@@ -23,7 +23,7 @@ VALUES (
     $8, $9, $10,
     COALESCE($11::text, 'manual')
 )
-RETURNING id, org_id, contract_id, schedule_id, amount, method, reference, paid_at, recorded_by_user_id, note, status, created_at, updated_at, deleted_at, reversed_at, reversal_reason, reversed_by_user_id, import_batch_id, source
+RETURNING id, org_id, contract_id, schedule_id, amount, method, reference, paid_at, recorded_by_user_id, note, status, created_at, updated_at, deleted_at, reversed_at, reversal_reason, reversed_by_user_id, import_batch_id, source, idempotency_key, corrects_payment_id
 `
 
 type CreatePaymentParams struct {
@@ -87,6 +87,8 @@ func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (P
 		&i.ReversedByUserID,
 		&i.ImportBatchID,
 		&i.Source,
+		&i.IdempotencyKey,
+		&i.CorrectsPaymentID,
 	)
 	return i, err
 }
@@ -125,7 +127,7 @@ func (q *Queries) CreatePaymentAllocation(ctx context.Context, arg CreatePayment
 }
 
 const getPayment = `-- name: GetPayment :one
-SELECT p.id, p.org_id, p.contract_id, p.schedule_id, p.amount, p.method, p.reference, p.paid_at, p.recorded_by_user_id, p.note, p.status, p.created_at, p.updated_at, p.deleted_at, p.reversed_at, p.reversal_reason, p.reversed_by_user_id, p.import_batch_id, p.source,
+SELECT p.id, p.org_id, p.contract_id, p.schedule_id, p.amount, p.method, p.reference, p.paid_at, p.recorded_by_user_id, p.note, p.status, p.created_at, p.updated_at, p.deleted_at, p.reversed_at, p.reversal_reason, p.reversed_by_user_id, p.import_batch_id, p.source, p.idempotency_key, p.corrects_payment_id,
        c.renter_user_id, c.unit_id,
        u.name AS unit_name, pr.name AS property_name,
        ru.full_name AS renter_name,
@@ -148,31 +150,33 @@ type GetPaymentParams struct {
 }
 
 type GetPaymentRow struct {
-	ID               pgtype.UUID        `json:"id"`
-	OrgID            pgtype.UUID        `json:"org_id"`
-	ContractID       pgtype.UUID        `json:"contract_id"`
-	ScheduleID       pgtype.UUID        `json:"schedule_id"`
-	Amount           int64              `json:"amount"`
-	Method           string             `json:"method"`
-	Reference        *string            `json:"reference"`
-	PaidAt           pgtype.Timestamptz `json:"paid_at"`
-	RecordedByUserID pgtype.UUID        `json:"recorded_by_user_id"`
-	Note             *string            `json:"note"`
-	Status           string             `json:"status"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
-	ReversedAt       pgtype.Timestamptz `json:"reversed_at"`
-	ReversalReason   *string            `json:"reversal_reason"`
-	ReversedByUserID pgtype.UUID        `json:"reversed_by_user_id"`
-	ImportBatchID    pgtype.UUID        `json:"import_batch_id"`
-	Source           string             `json:"source"`
-	RenterUserID     pgtype.UUID        `json:"renter_user_id"`
-	UnitID           pgtype.UUID        `json:"unit_id"`
-	UnitName         string             `json:"unit_name"`
-	PropertyName     string             `json:"property_name"`
-	RenterName       string             `json:"renter_name"`
-	RecordedByName   *string            `json:"recorded_by_name"`
+	ID                pgtype.UUID        `json:"id"`
+	OrgID             pgtype.UUID        `json:"org_id"`
+	ContractID        pgtype.UUID        `json:"contract_id"`
+	ScheduleID        pgtype.UUID        `json:"schedule_id"`
+	Amount            int64              `json:"amount"`
+	Method            string             `json:"method"`
+	Reference         *string            `json:"reference"`
+	PaidAt            pgtype.Timestamptz `json:"paid_at"`
+	RecordedByUserID  pgtype.UUID        `json:"recorded_by_user_id"`
+	Note              *string            `json:"note"`
+	Status            string             `json:"status"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
+	ReversedAt        pgtype.Timestamptz `json:"reversed_at"`
+	ReversalReason    *string            `json:"reversal_reason"`
+	ReversedByUserID  pgtype.UUID        `json:"reversed_by_user_id"`
+	ImportBatchID     pgtype.UUID        `json:"import_batch_id"`
+	Source            string             `json:"source"`
+	IdempotencyKey    *string            `json:"idempotency_key"`
+	CorrectsPaymentID pgtype.UUID        `json:"corrects_payment_id"`
+	RenterUserID      pgtype.UUID        `json:"renter_user_id"`
+	UnitID            pgtype.UUID        `json:"unit_id"`
+	UnitName          string             `json:"unit_name"`
+	PropertyName      string             `json:"property_name"`
+	RenterName        string             `json:"renter_name"`
+	RecordedByName    *string            `json:"recorded_by_name"`
 }
 
 // guard-exempt: dual-scoped — org_id for the landlord, renter_user_id for the renter's own payment; the handler always supplies one.
@@ -199,6 +203,8 @@ func (q *Queries) GetPayment(ctx context.Context, arg GetPaymentParams) (GetPaym
 		&i.ReversedByUserID,
 		&i.ImportBatchID,
 		&i.Source,
+		&i.IdempotencyKey,
+		&i.CorrectsPaymentID,
 		&i.RenterUserID,
 		&i.UnitID,
 		&i.UnitName,
@@ -303,7 +309,7 @@ func (q *Queries) ListAllocationsForPaymentsAnyOrg(ctx context.Context, paymentI
 }
 
 const listPayments = `-- name: ListPayments :many
-SELECT p.id, p.org_id, p.contract_id, p.schedule_id, p.amount, p.method, p.reference, p.paid_at, p.recorded_by_user_id, p.note, p.status, p.created_at, p.updated_at, p.deleted_at, p.reversed_at, p.reversal_reason, p.reversed_by_user_id, p.import_batch_id, p.source,
+SELECT p.id, p.org_id, p.contract_id, p.schedule_id, p.amount, p.method, p.reference, p.paid_at, p.recorded_by_user_id, p.note, p.status, p.created_at, p.updated_at, p.deleted_at, p.reversed_at, p.reversal_reason, p.reversed_by_user_id, p.import_batch_id, p.source, p.idempotency_key, p.corrects_payment_id,
        c.renter_user_id, c.unit_id,
        u.name AS unit_name, pr.name AS property_name,
        ru.full_name AS renter_name,
@@ -342,31 +348,33 @@ type ListPaymentsParams struct {
 }
 
 type ListPaymentsRow struct {
-	ID               pgtype.UUID        `json:"id"`
-	OrgID            pgtype.UUID        `json:"org_id"`
-	ContractID       pgtype.UUID        `json:"contract_id"`
-	ScheduleID       pgtype.UUID        `json:"schedule_id"`
-	Amount           int64              `json:"amount"`
-	Method           string             `json:"method"`
-	Reference        *string            `json:"reference"`
-	PaidAt           pgtype.Timestamptz `json:"paid_at"`
-	RecordedByUserID pgtype.UUID        `json:"recorded_by_user_id"`
-	Note             *string            `json:"note"`
-	Status           string             `json:"status"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
-	ReversedAt       pgtype.Timestamptz `json:"reversed_at"`
-	ReversalReason   *string            `json:"reversal_reason"`
-	ReversedByUserID pgtype.UUID        `json:"reversed_by_user_id"`
-	ImportBatchID    pgtype.UUID        `json:"import_batch_id"`
-	Source           string             `json:"source"`
-	RenterUserID     pgtype.UUID        `json:"renter_user_id"`
-	UnitID           pgtype.UUID        `json:"unit_id"`
-	UnitName         string             `json:"unit_name"`
-	PropertyName     string             `json:"property_name"`
-	RenterName       string             `json:"renter_name"`
-	RecordedByName   *string            `json:"recorded_by_name"`
+	ID                pgtype.UUID        `json:"id"`
+	OrgID             pgtype.UUID        `json:"org_id"`
+	ContractID        pgtype.UUID        `json:"contract_id"`
+	ScheduleID        pgtype.UUID        `json:"schedule_id"`
+	Amount            int64              `json:"amount"`
+	Method            string             `json:"method"`
+	Reference         *string            `json:"reference"`
+	PaidAt            pgtype.Timestamptz `json:"paid_at"`
+	RecordedByUserID  pgtype.UUID        `json:"recorded_by_user_id"`
+	Note              *string            `json:"note"`
+	Status            string             `json:"status"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
+	ReversedAt        pgtype.Timestamptz `json:"reversed_at"`
+	ReversalReason    *string            `json:"reversal_reason"`
+	ReversedByUserID  pgtype.UUID        `json:"reversed_by_user_id"`
+	ImportBatchID     pgtype.UUID        `json:"import_batch_id"`
+	Source            string             `json:"source"`
+	IdempotencyKey    *string            `json:"idempotency_key"`
+	CorrectsPaymentID pgtype.UUID        `json:"corrects_payment_id"`
+	RenterUserID      pgtype.UUID        `json:"renter_user_id"`
+	UnitID            pgtype.UUID        `json:"unit_id"`
+	UnitName          string             `json:"unit_name"`
+	PropertyName      string             `json:"property_name"`
+	RenterName        string             `json:"renter_name"`
+	RecordedByName    *string            `json:"recorded_by_name"`
 }
 
 // guard-exempt: dual-scoped — org_id for GET /payments, renter_user_id for GET /me/payments; the handler always supplies one.
@@ -410,6 +418,8 @@ func (q *Queries) ListPayments(ctx context.Context, arg ListPaymentsParams) ([]L
 			&i.ReversedByUserID,
 			&i.ImportBatchID,
 			&i.Source,
+			&i.IdempotencyKey,
+			&i.CorrectsPaymentID,
 			&i.RenterUserID,
 			&i.UnitID,
 			&i.UnitName,
@@ -434,7 +444,7 @@ SET status = 'reversed', reversed_at = now(),
     reversed_by_user_id = $2
 WHERE org_id = $3 AND id = $4
   AND status = 'recorded' AND deleted_at IS NULL
-RETURNING id, org_id, contract_id, schedule_id, amount, method, reference, paid_at, recorded_by_user_id, note, status, created_at, updated_at, deleted_at, reversed_at, reversal_reason, reversed_by_user_id, import_batch_id, source
+RETURNING id, org_id, contract_id, schedule_id, amount, method, reference, paid_at, recorded_by_user_id, note, status, created_at, updated_at, deleted_at, reversed_at, reversal_reason, reversed_by_user_id, import_batch_id, source, idempotency_key, corrects_payment_id
 `
 
 type ReversePaymentParams struct {
@@ -474,6 +484,8 @@ func (q *Queries) ReversePayment(ctx context.Context, arg ReversePaymentParams) 
 		&i.ReversedByUserID,
 		&i.ImportBatchID,
 		&i.Source,
+		&i.IdempotencyKey,
+		&i.CorrectsPaymentID,
 	)
 	return i, err
 }

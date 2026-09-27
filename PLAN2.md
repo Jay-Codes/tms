@@ -335,6 +335,11 @@ Why: every approved application was written on the org's single default template
 - [x] Backend: termination settlement by policy (pro-rata straddle, prepaid refund/forfeit/landlord choice, refund ledger, reports net of refunds), preview endpoint, deposit ledger incl. applying deposit to rent; migration 000027; tests. [ ] UI.
 - [x] Backend (migration 000028, tests): single-period waive/discount with undo; renter/landlord notice to leave checked against the contract's notice days; holdover list, moved-out confirmation and renewal of an ended tenancy; eviction cases demand → notice → withdrawn/vacated with SMS and SW/EN letters. [x] UI: ledger relief + undo, notice banner/record/withdraw (both apps), eviction section with stepper and SW/EN letter printing, holdover and open-eviction cards on the contracts list.
 
+## Phase 24 — Payment corrections and landlord notices (27 Sep 2026) — 🔨 branch `phase-24-payment-corrections`
+
+- [x] Backend (migration 000029, tests): duplicate guard on record payment and proof accept (`possible_duplicate`, `confirm_duplicate`), `Idempotency-Key` replay, `POST /payments/{id}/correct` (reverse + record in one transaction), renter SMS on reversal/correction, landlord in-app inbox (`/inbox`) fed by reversals, corrections, confirmed duplicates, proofs submitted and renters' notices.
+- [x] Tenant UI: duplicate confirm step on record/accept (Idempotency-Key per sheet), Correct sheet on payments, bell with unread count, /inbox page.
+
 ## Open questions (answer whenever; defaults applied if unanswered)
 
 1. **Credit unit**: 1 credit per 160-char GSM segment (default; 70 for UCS-2) vs 1 credit per message regardless of length. OTP/security messages exempt (default yes).
