@@ -1397,3 +1397,47 @@ Migration 000029: `payments.idempotency_key` (unique per org), `payments.correct
 | `GET /inbox?cursor=&limit=` | Org. The landlord's notices, newest first, each with `read` for the caller: `{id, kind, title, body, entity_type, entity_id, link, read, created_at}`. Kinds so far: `payment_reversed`, `payment_corrected`, `payment_duplicate_confirmed`, `proof_submitted`, `notice_given`. |
 | `GET /inbox/unread` | `{unread}` for the caller. |
 | `POST /inbox/read` | `{ids: [...]}` or `{all: true}` → `{unread}`. Read state is per user. |
+
+## Part 2 — Phase 28: projections, break-even and ROI
+
+Migration 000032: `properties.purchase_price` (BIGINT > 0), `purchase_date` (DATE), `current_value` (BIGINT > 0) — all nullable; `expense_categories.is_capital` (BOOLEAN, default false); table `projection_scenarios` (per org, unique name case-insensitively, at most 50).
+
+| Route | Contract |
+|---|---|
+| `PATCH /properties/{id}` | Also takes `purchase_price`, `purchase_date` (YYYY-MM-DD, 1900…today), `current_value` — each whole TZS 1 … 999,999,999,999 or `null` to clear; absent = unchanged. 400 field errors. Audited on `property.update`. `GET /properties`, `GET /properties/{id}` return the three fields (null when unset). |
+| `POST /org/expense-categories`, `PATCH /org/expense-categories/{id}` | Also take `is_capital` (bool); the category shape gains `is_capital`. Capital spend is **investment**, not a running cost. Audited on `expense_category.update`. |
+| `POST /reports/projection` | Org (any role). Body, all optional: `{property_id, horizon_months (1–120, default 24), rent_change_pct (−100…500, default 0), occupancy_pct (0–100 or null = trailing), collection_rate_pct (0–100 or null = trailing), expense_change_pct (−100…500, default 0)}`. Unknown fields / out-of-range / malformed `property_id` → 400 field errors; a property not in the org → 404. Writes nothing. → 200 below. |
+| `GET /reports/projection/scenarios` | Org. `{items: [scenario]}` sorted by name. `scenario = {id, name, horizon_months, rent_change_pct, occupancy_pct, collection_rate_pct, expense_change_pct, created_at}` (the two rates null = trailing). |
+| `POST /reports/projection/scenarios` | Org. `{name (1–60), …the projection parameters}` → 201 `{scenario}`. 409 `scenario_exists` (same name, any case); 422 `too_many_scenarios` past 50. Audit `projection_scenario.create`. |
+| `DELETE /reports/projection/scenarios/{id}` | Org. 204; 404 for another org's or a missing one. Audit `projection_scenario.delete`. |
+
+**Response** of `POST /reports/projection`:
+
+```
+{ scope: "property" | "portfolio", property: {id, name} | null, start_month: "YYYY-MM",
+  baseline: { history_from, history_to (exclusive), history_months, collected, expected,
+              collection_rate_pct | null, occupancy_pct | null, running_expenses, capital_expenses,
+              running_expenses_monthly, categories: [{id, name, monthly}], net,
+              units_total, units_let, units_open, market_rent_monthly },
+  applied:  { horizon_months, rent_change_pct, occupancy_pct, occupancy_source, collection_rate_pct,
+              collection_rate_source, expense_change_pct },          -- source: scenario | trailing | default
+  months:   [{ month: "YYYY-MM", income, running_expenses, net, cumulative }],
+  totals:   { income, running_expenses, net },
+  investment: { purchase_price | null, capital_spend, total | null, current_value | null, cash_to_date,
+                break_even_month | null, break_even_status, trailing_annual_net, projected_annual_net,
+                roi_trailing_pct | null, roi_projected_pct | null, yield_pct | null, payback_years | null,
+                incomplete, priced_properties, missing_price_property_ids },
+  properties: [{ id, name, has_purchase_price, projected_annual_net, roi_projected_pct, yield_pct,
+                 payback_years, break_even_month, break_even_status }] }
+```
+
+**The model** (all arithmetic in `internal/report/projection.go`; money is whole TZS, percentages to one decimal):
+
+- The forecast starts on the 1st of the current month (Dar es Salaam wall clock). The **trailing window** is the twelve whole months before it; a property younger than that is averaged over the months it has been in the book (`history_months`, from its creation or its first recorded activity).
+- **Cash** is the revenue report's: non-reversed payments by `paid_at` less rent refunds by `refunded_at`; **expected** is non-waived schedules by `due_date`; **expenses** are recorded (not voided) by `incurred_on`, split by the category's `is_capital`.
+- Trailing **collection rate** = collected ÷ expected, capped at 100%; trailing **occupancy** = occupied ÷ existing unit-months, each unit measured on the last day of each month (as `/reports/occupancy`). With no history either defaults to 100% (`source: default`).
+- A month's **income** = (rent scheduled that month on `active`/`expiring` tenancies + for each lettable unit (`vacant`/`occupied`) not covered by one, its market rent × (1 + `rent_change_pct`) × occupancy) × collection rate. Market rent = current price, else the latest tenancy's rent, normalised to 30 days; a unit whose tenancy ends mid-month is on the market from the month after. Signed contracts keep their rent.
+- A month's **running expenses** = trailing non-capital expenses ÷ `history_months` × (1 + `expense_change_pct`).
+- **Investment** = `purchase_price` + all capital spend recorded. **Cumulative** starts at `cash_to_date` (net of running costs since the purchase month, or all history without a `purchase_date`) and adds each month's net. **Break-even** is the first month (past or projected) the cumulative reaches the investment: `reached` (in the past), `projected`, `beyond_horizon` (still profitable), `not_profitable` (projected annual net ≤ 0), `no_purchase_price`.
+- **ROI** = annual net ÷ investment (`trailing` = trailing net annualised; `projected` = the first twelve projected months, annualised when the horizon is shorter). **Yield** = projected annual net ÷ `current_value`. **Payback** = investment ÷ projected annual net (null when ≤ 0).
+- **Portfolio**: months and totals are the sum of the properties; investment, ROI, payback and break-even cover only properties with a purchase price (`incomplete: true` and `missing_price_property_ids` when some lack one); yield covers properties with a current value.

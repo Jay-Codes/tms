@@ -369,14 +369,14 @@ Needs from the client: **bundle sizes and prices**, **Snippe API key + webhook s
 - [ ] UI: landlord Settings → Notifications "Buy credits" (bundles, phone, waiting-for-approval state, history); admin packages editor, orders list, stock page.
 - [ ] Tests with a fake Snippe (httptest), signature and replay cases.
 
-## Phase 28 — Projections, break-even and ROI (2 days) — ⏸ needs client confirmation of inputs
+## Phase 28 — Projections, break-even and ROI (2 days) — ✅ built 27 Sep 2026 with default inputs (client confirmation of the inputs still pending; DECISIONS 27 Sep)
 
 Why: client ask #6 (27 Sep): projections and simulations of profit and expenses, break-even, ROI.
 Needs from the client: confirm the inputs per property (purchase price, purchase date, current value) and whether renovations count as investment (a "capital" expense category).
-- [ ] Migration: `properties.purchase_price`, `purchase_date`, `current_value`; `expense_categories.is_capital`.
-- [ ] `POST /reports/projection {property_id?, horizon_months, rent_change_pct, occupancy_pct, collection_rate_pct, expense_change_pct}` (backend-computed, no business logic in the frontend): baseline = future schedules of running tenancies × trailing-12-month collection rate; vacant units at last rent × assumed occupancy; expenses = trailing-12-month average per category. Returns monthly projected net, cumulative cash vs investment, **break-even month**, ROI (annual net ÷ investment), yield (net ÷ current value), payback years — per property and for the portfolio.
-- [ ] Reports → "Projections" tab: scenario sliders re-querying the endpoint, chart of cumulative cash vs investment with the break-even point, saved named scenarios.
-- [ ] Tests: projection arithmetic against hand-computed fixtures.
+- [x] Migration: `properties.purchase_price`, `purchase_date`, `current_value`; `expense_categories.is_capital`.
+- [x] `POST /reports/projection {property_id?, horizon_months, rent_change_pct, occupancy_pct, collection_rate_pct, expense_change_pct}` (backend-computed, no business logic in the frontend): baseline = future schedules of running tenancies × trailing-12-month collection rate; vacant units at last rent × assumed occupancy; expenses = trailing-12-month average per category. Returns monthly projected net, cumulative cash vs investment, **break-even month**, ROI (annual net ÷ investment), yield (net ÷ current value), payback years — per property and for the portfolio.
+- [x] Reports → "Projections" tab: scenario sliders re-querying the endpoint, chart of cumulative cash vs investment with the break-even point, saved named scenarios.
+- [x] Tests: projection arithmetic against hand-computed fixtures.
 
 ## Operations (not phases)
 - [ ] **Deploy** the merged work: `make docker-publish` then `make docker-deploy TAG=…` on the server (client-side step; frontends on Vercel already build from `main` and call the new routes).
