@@ -1009,6 +1009,36 @@ items, §19, §20; FLOWS 3, 7 and 11.
       the plain "exceeds contract balance" error.
       *Evidence: the preview total, the two report windows, the single SMS.*
 
+## P22. Onboard in person (Phase 25, flow 2b)
+
+- [ ] **P22.1** Unit page (vacant, e.g. Kigamboni Shop A) → **Onboard in
+      person** → enter an unused phone → a 6-digit code shows large with a QR,
+      a 5-minute countdown and "Waiting for the renter…". `make api-log` shows
+      **no** SMS for that number.
+- [ ] **P22.2** Scan the QR on a phone (or open the copied link) → the unit
+      page says no SMS will come → **Register** → enter the phone → **Continue**
+      (no "Send code") → "Enter the code your landlord shows you", no resend →
+      type the code → PIN. The landlord screen flips to **Registered** within
+      5 s.
+- [ ] **P22.3** Renter completes KYC and applies → landlord screen shows
+      **Request received** and **Review & approve**, which opens the request;
+      approve → **Approved**.
+- [ ] **P22.4** **New code** replaces the code (the old one is refused) and
+      extends the session line; **Close session** → the renter's link reports
+      the session ended and falls back to the SMS path.
+- [ ] **P22.5** Start a second session for the same phone → the error offers
+      **Open that session**; reopening shows no code until **Show a new code**.
+      Renters → **Add renter in person** and renter page → **Help log in**
+      (an existing renter: the landlord's code is a *login* code, the renter's
+      unit page leads with Log in → **Use the code your landlord shows you**).
+- [ ] **P22.6** A contract awaiting the renter's signature → **Witness
+      signing** → the code shows; on the renter's phone Accept & sign → **My
+      landlord is showing me a code** → type it → signed; the contract's
+      signature reads "witnessed by" the landlord.
+- [ ] **P22.7** A staff member's phone → refused (`not_a_renter_phone`).
+      Swahili: every string above reads in Kiswahili in both apps.
+      *Evidence: landlord screen at each status, the renter's code step.*
+
 ---
 
 ## Recording the run
