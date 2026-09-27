@@ -380,7 +380,7 @@ Needs from the client: confirm the inputs per property (purchase price, purchase
 
 ## Operations (not phases)
 - [ ] **Deploy** the merged work: `make docker-publish` then `make docker-deploy TAG=…` on the server (client-side step; frontends on Vercel already build from `main` and call the new routes).
-- [ ] **Local MinIO image**: `minio/minio` no longer pulls from Docker Hub; pin a mirror or alternative so `make up` works again (4 storage tests fail locally without it).
+- [x] **MinIO image**: `minio/minio` and `minio/mc` no longer pull (Docker Hub or quay.io); both compose files now use `bitnamilegacy/minio:2025.4.22` (same release, ships `mc` and `curl`), run as root so existing volumes stay writable. Local `make up` works again and the 4 storage-dependent tests pass.
 - [ ] **Live Beem smoke test** once the sender ID is approved (PLAN.md).
 
 ## Open questions (answer whenever; defaults applied if unanswered)

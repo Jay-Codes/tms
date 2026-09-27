@@ -30,7 +30,13 @@ services:
       retries: 10
 
   minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    # MinIO stopped publishing images on Docker Hub and quay.io (2025/26), so
+    # `minio/minio` no longer pulls. Bitnami's frozen legacy build of the same
+    # release (2025-04-22) is used instead; it runs as root here so existing
+    # `miniodata` volumes created by the old image stay writable.
+    image: bitnamilegacy/minio:2025.4.22
+    user: "0"
+    entrypoint: ["minio"]
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-tms}
@@ -41,13 +47,15 @@ services:
     volumes:
       - miniodata:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
       interval: 5s
       timeout: 3s
       retries: 10
 
   minio-init:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    # Same image as the server: it ships `mc` (minio/mc no longer pulls either).
+    image: bitnamilegacy/minio:2025.4.22
+    user: "0"
     depends_on:
       minio:
         condition: service_healthy
