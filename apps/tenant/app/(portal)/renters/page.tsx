@@ -77,9 +77,14 @@ function DirectoryBody() {
         title={t('renters.title')}
         lead={t('renters.lead')}
         actions={
-          <Link href="/link-requests" className="btn btn-secondary">
-            {t('nav.link_requests')}
-          </Link>
+          <>
+            <Link href="/renters/assist" className="btn btn-secondary">
+              {t('assist.entry.add')}
+            </Link>
+            <Link href="/link-requests" className="btn btn-secondary">
+              {t('nav.link_requests')}
+            </Link>
+          </>
         }
       />
 
