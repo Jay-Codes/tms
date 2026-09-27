@@ -232,6 +232,9 @@ const (
 	// activates, the old contract handing over to it.
 	ActionContractAmend     = "contract.amend"
 	ActionContractSupersede = "contract.supersede"
+	// §22.5: the settlement a termination applied, and each deposit movement.
+	ActionContractSettle = "contract.settle"
+	ActionDepositRecord  = "deposit.record"
 )
 
 // Entity types.

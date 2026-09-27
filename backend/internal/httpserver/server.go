@@ -253,6 +253,10 @@ func (s *Server) routes() chi.Router {
 			r.Post("/contracts/{id}/reissue", s.handleReissueContract)
 			// §22.4: amend or renew a running contract (renter signs again).
 			r.Post("/contracts/{id}/amend", s.handleAmendContract)
+			// §22.5: settle-up preview and the deposit ledger.
+			r.Get("/contracts/{id}/settlement", s.handleSettlementPreview)
+			r.Get("/contracts/{id}/deposit", s.handleGetDeposit)
+			r.Post("/contracts/{id}/deposit", s.handlePostDeposit)
 			r.Post("/contract-templates/{id}/reissue-pending", s.handleReissueStale)
 
 			// --- Phase 4: contracts ---

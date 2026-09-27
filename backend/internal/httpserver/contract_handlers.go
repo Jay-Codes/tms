@@ -1275,6 +1275,11 @@ func (s *Server) handleTerminateContract(w http.ResponseWriter, r *http.Request)
 	var body struct {
 		Reason        string `json:"reason"`
 		EffectiveDate string `json:"effective_date"`
+		// §22.5 settle-up: the landlord's answer when the policy leaves
+		// prepaid rent to them, and how a refund is paid out.
+		PrepaidAction   string  `json:"prepaid_action"`
+		RefundMethod    string  `json:"refund_method"`
+		RefundReference *string `json:"refund_reference"`
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
@@ -1284,6 +1289,14 @@ func (s *Server) handleTerminateContract(w http.ResponseWriter, r *http.Request)
 	effective := time.Now().UTC().Truncate(24 * time.Hour)
 	if v := strings.TrimSpace(body.EffectiveDate); v != "" {
 		effective = requiredDate(f, "effective_date", v)
+	}
+	settleIn := settleInput{
+		Choice: strings.TrimSpace(body.PrepaidAction), Method: strings.TrimSpace(body.RefundMethod),
+		Reference: trimmedOpt(f, "refund_reference", body.RefundReference, paymentReferenceMax),
+		Reason:    reason, Actor: p.UserID,
+	}
+	if settleIn.Choice != "" {
+		f.OneOf("prepaid_action", settleIn.Choice, contract.PrepaidRefund, contract.PrepaidForfeit)
 	}
 	if !f.Empty() {
 		badRequest(w, f)
@@ -1314,6 +1327,13 @@ func (s *Server) handleTerminateContract(w http.ResponseWriter, r *http.Request)
 		})
 		if err != nil {
 			return err
+		}
+		// §22.5: settle the period it ends in and any prepaid rent first,
+		// by the contract's own policy.
+		if row.Status != contractPendingSignature {
+			if _, err := s.applySettlementTx(r.Context(), q, row, effective, parseSettings(org.Settings).GraceDays, settleIn); err != nil {
+				return err
+			}
 		}
 		// Periods the renter has already lived through stand, paid or not; only
 		// what starts after the effective date is waived (FLOWS 6.5).
@@ -1371,6 +1391,9 @@ func (s *Server) handleTerminateContract(w http.ResponseWriter, r *http.Request)
 		if isNoRows(err) {
 			conflictCode(w, "not_terminable", "contract not running",
 				"only a contract awaiting signature or running can be terminated")
+			return
+		}
+		if s.writeSettlementError(w, err) {
 			return
 		}
 		s.serverError(w, r, "contract.terminate.tx", err)

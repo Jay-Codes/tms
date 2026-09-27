@@ -332,7 +332,8 @@ Why: every approved application was written on the org's single default template
 - [x] Backend: `POST /contracts/{id}/amend` (amend + renew), period-boundary effective dates, one open amendment, activation waives/moves money/supersedes, lifecycle ends superseded contracts (migration 000026). Tests: rent rise with prepaid carry and reversal unwind, renewal, refusals. [x] UI: Amend/Renew sheet (valid effective dates, optional changes), amendment and replaced notes/chips, withdraw amendment; renter sees what an amendment changes before signing. — Amend / renew / reissue as drafted in Phase 17, including switching template as an amendment.
 
 ### 22.5 Settle-up on termination, deposits (reads 22.2 policy)
-- [ ] Termination settlement, deposit record and refund, single-period waive/discount, eviction stages with SW+EN letters, renter notice, holdover alert.
+- [x] Backend: termination settlement by policy (pro-rata straddle, prepaid refund/forfeit/landlord choice, refund ledger, reports net of refunds), preview endpoint, deposit ledger incl. applying deposit to rent; migration 000027; tests. [ ] UI.
+- [ ] Later in 22.5: single-period waive/discount, eviction stages with SW+EN letters, renter notice to leave, holdover alert.
 
 ## Open questions (answer whenever; defaults applied if unanswered)
 

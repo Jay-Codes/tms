@@ -147,7 +147,7 @@ func (s *Server) revenueWindowRows(
 	out := revenueRows{}
 	fromDate, toDate := dateParam(w.From), dateParam(w.To)
 
-	collected, err := s.q.RevenueCollectedDaily(ctx, sqlc.RevenueCollectedDailyParams{
+	collected, err := s.revenueCollectedDaily(ctx, sqlc.RevenueCollectedDailyParams{
 		OrgID: orgID, FromTs: db.TS(w.From), ToTs: db.TS(w.To), PropertyID: propertyID,
 	})
 	if err != nil {
@@ -314,7 +314,7 @@ func (s *Server) reportRevenueByProperty(w http.ResponseWriter, r *http.Request)
 		s.serverError(w, r, "report.revenue.properties", err)
 		return
 	}
-	collected, err := s.q.RevenueCollectedByProperty(ctx, sqlc.RevenueCollectedByPropertyParams{
+	collected, err := s.revenueCollectedByProperty(ctx, sqlc.RevenueCollectedByPropertyParams{
 		OrgID: p.OrgID, FromTs: db.TS(win.From), ToTs: db.TS(win.To), PropertyID: q.propertyID,
 	})
 	if err != nil {

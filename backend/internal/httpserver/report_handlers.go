@@ -113,7 +113,7 @@ func (s *Server) handleReportSummary(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "report.summary.schedules", err)
 		return
 	}
-	collected, err := s.q.ReportCollectedPeriod(r.Context(), sqlc.ReportCollectedPeriodParams{
+	collected, err := s.collectedPeriod(r.Context(), sqlc.ReportCollectedPeriodParams{
 		OrgID: p.OrgID, FromTs: db.TS(span.FromTime()), ToTs: db.TS(span.ToTime()),
 	})
 	if err != nil {
@@ -155,7 +155,7 @@ func (s *Server) handleReportSummary(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "report.summary.previous_schedules", err)
 		return
 	}
-	prevCollected, err := s.q.ReportCollectedPeriod(r.Context(), sqlc.ReportCollectedPeriodParams{
+	prevCollected, err := s.collectedPeriod(r.Context(), sqlc.ReportCollectedPeriodParams{
 		OrgID: p.OrgID, FromTs: db.TS(prev.From), ToTs: db.TS(prev.To),
 	})
 	if err != nil {
@@ -471,7 +471,7 @@ func (s *Server) handleReportCollections(w http.ResponseWriter, r *http.Request)
 		s.serverError(w, r, "report.collections.expected", err)
 		return
 	}
-	collected, err := s.q.ReportCollectionsCollected(r.Context(), sqlc.ReportCollectionsCollectedParams{
+	collected, err := s.collectionsCollected(r.Context(), sqlc.ReportCollectionsCollectedParams{
 		Bucket: group, OrgID: p.OrgID, FromTs: db.TS(span.FromTime()), ToTs: db.TS(span.ToTime()),
 	})
 	if err != nil {
@@ -486,7 +486,7 @@ func (s *Server) handleReportCollections(w http.ResponseWriter, r *http.Request)
 		s.serverError(w, r, "report.collections.previous_expected", err)
 		return
 	}
-	prevCollected, err := s.q.ReportCollectionsCollected(r.Context(), sqlc.ReportCollectionsCollectedParams{
+	prevCollected, err := s.collectionsCollected(r.Context(), sqlc.ReportCollectionsCollectedParams{
 		Bucket: group, OrgID: p.OrgID,
 		FromTs: db.TS(win.Previous.From), ToTs: db.TS(win.Previous.To),
 	})

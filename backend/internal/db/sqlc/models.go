@@ -71,6 +71,7 @@ type Contract struct {
 	AmendmentEffectiveDate   pgtype.Date        `json:"amendment_effective_date"`
 	AmendmentReason          *string            `json:"amendment_reason"`
 	SupersededByContractID   pgtype.UUID        `json:"superseded_by_contract_id"`
+	Settlement               []byte             `json:"settlement"`
 }
 
 type ContractSignature struct {
@@ -103,6 +104,21 @@ type ContractTemplate struct {
 	BodyHtmlSw       string             `json:"body_html_sw"`
 	Policy           []byte             `json:"policy"`
 	ContentUpdatedAt pgtype.Timestamptz `json:"content_updated_at"`
+}
+
+type DepositEntry struct {
+	ID               pgtype.UUID        `json:"id"`
+	OrgID            pgtype.UUID        `json:"org_id"`
+	ContractID       pgtype.UUID        `json:"contract_id"`
+	Kind             string             `json:"kind"`
+	Amount           int64              `json:"amount"`
+	Method           *string            `json:"method"`
+	Reference        *string            `json:"reference"`
+	Reason           *string            `json:"reason"`
+	PaymentID        pgtype.UUID        `json:"payment_id"`
+	OccurredAt       pgtype.Timestamptz `json:"occurred_at"`
+	RecordedByUserID pgtype.UUID        `json:"recorded_by_user_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
 type Expense struct {
@@ -377,6 +393,26 @@ type Property struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
 	ContractTemplateID pgtype.UUID        `json:"contract_template_id"`
+}
+
+type RentRefund struct {
+	ID               pgtype.UUID        `json:"id"`
+	OrgID            pgtype.UUID        `json:"org_id"`
+	ContractID       pgtype.UUID        `json:"contract_id"`
+	Amount           int64              `json:"amount"`
+	Method           string             `json:"method"`
+	Reference        *string            `json:"reference"`
+	Reason           string             `json:"reason"`
+	RefundedAt       pgtype.Timestamptz `json:"refunded_at"`
+	RecordedByUserID pgtype.UUID        `json:"recorded_by_user_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type RentRefundItem struct {
+	RefundID  pgtype.UUID `json:"refund_id"`
+	OrgID     pgtype.UUID `json:"org_id"`
+	PaymentID pgtype.UUID `json:"payment_id"`
+	Amount    int64       `json:"amount"`
 }
 
 type RenterProfile struct {

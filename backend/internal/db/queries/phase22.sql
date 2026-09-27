@@ -148,3 +148,126 @@ RETURNING id, status;
 -- name: ShrinkPaymentAllocation :exec
 UPDATE payment_allocations SET amount = sqlc.arg(amount)
 WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id);
+
+-- ------------------------------------------------ §22.5 rent refunds in reports --
+-- Cash reports subtract rent refunded in the period it was paid out. Each
+-- mirrors one collected-money query on the same axis; the handler subtracts.
+
+-- name: RefundedPeriod :one
+SELECT COALESCE(sum(amount), 0)::bigint AS refunded
+FROM rent_refunds
+WHERE org_id = sqlc.arg(org_id)
+  AND refunded_at >= sqlc.arg(from_ts) AND refunded_at < sqlc.arg(to_ts);
+
+-- name: RefundedBuckets :many
+SELECT date_trunc(sqlc.arg(bucket)::text, rf.refunded_at AT TIME ZONE 'Africa/Dar_es_Salaam')::date AS bucket_start,
+       COALESCE(sum(rf.amount), 0)::bigint AS refunded
+FROM rent_refunds rf
+WHERE rf.org_id = sqlc.arg(org_id)
+  AND rf.refunded_at >= sqlc.arg(from_ts) AND rf.refunded_at < sqlc.arg(to_ts)
+GROUP BY 1
+ORDER BY 1;
+
+-- name: RefundedDaily :many
+SELECT (rf.refunded_at AT TIME ZONE 'Africa/Dar_es_Salaam')::date AS day,
+       COALESCE(sum(rf.amount), 0)::bigint AS amount
+FROM rent_refunds rf
+WHERE rf.org_id = sqlc.arg(org_id)
+  AND rf.refunded_at >= sqlc.arg(from_ts) AND rf.refunded_at < sqlc.arg(to_ts)
+  AND (sqlc.narg(property_id)::uuid IS NULL OR EXISTS (
+        SELECT 1 FROM contracts c
+        JOIN units u ON u.id = c.unit_id AND u.org_id = c.org_id
+        WHERE c.id = rf.contract_id AND c.org_id = rf.org_id
+          AND u.property_id = sqlc.narg(property_id)::uuid))
+GROUP BY 1
+ORDER BY 1;
+
+-- name: RefundedByProperty :many
+SELECT u.property_id AS property_id,
+       COALESCE(sum(rf.amount), 0)::bigint AS amount
+FROM rent_refunds rf
+JOIN contracts c ON c.id = rf.contract_id AND c.org_id = rf.org_id
+JOIN units u     ON u.id = c.unit_id AND u.org_id = c.org_id
+WHERE rf.org_id = sqlc.arg(org_id)
+  AND rf.refunded_at >= sqlc.arg(from_ts) AND rf.refunded_at < sqlc.arg(to_ts)
+  AND (sqlc.narg(property_id)::uuid IS NULL OR u.property_id = sqlc.narg(property_id)::uuid)
+GROUP BY 1;
+
+-- ------------------------------------------------ §22.5 settle-up, deposits --
+
+-- SetScheduleAmount re-prices one period (pro-rata move-out) and recomputes
+-- its status from its own money and dates.
+-- name: SetScheduleAmount :one
+UPDATE payment_schedules
+SET amount = sqlc.arg(amount),
+    status = CASE
+        WHEN status IN ('waived', 'written_off') THEN status
+        WHEN paid_amount >= sqlc.arg(amount)::bigint THEN 'paid'
+        WHEN due_date + sqlc.arg(grace_days)::int < CURRENT_DATE THEN 'overdue'
+        WHEN paid_amount > 0 THEN 'partial'
+        ELSE 'pending'
+    END
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND deleted_at IS NULL
+RETURNING *;
+
+-- SetSchedulePaid lowers a period's paid amount after money was refunded off it.
+-- name: SetSchedulePaid :exec
+UPDATE payment_schedules SET paid_amount = sqlc.arg(paid_amount)
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND deleted_at IS NULL;
+
+-- ListLiveAllocationsForSchedule: newest first, so a refund takes back the
+-- most recent money first.
+-- name: ListLiveAllocationsForSchedule :many
+SELECT a.id, a.payment_id, a.amount
+FROM payment_allocations a
+JOIN payments p ON p.id = a.payment_id AND p.org_id = a.org_id
+WHERE a.org_id = sqlc.arg(org_id) AND a.schedule_id = sqlc.arg(schedule_id)
+  AND p.status <> 'reversed' AND p.deleted_at IS NULL
+ORDER BY a.created_at DESC, a.id DESC;
+
+-- name: CreateRentRefund :one
+INSERT INTO rent_refunds (org_id, contract_id, amount, method, reference, reason, refunded_at, recorded_by_user_id)
+VALUES (sqlc.arg(org_id), sqlc.arg(contract_id), sqlc.arg(amount), sqlc.arg(method),
+        sqlc.narg(reference), sqlc.arg(reason), sqlc.arg(refunded_at), sqlc.arg(recorded_by_user_id))
+RETURNING *;
+
+-- name: AddRentRefundItem :exec
+INSERT INTO rent_refund_items (refund_id, org_id, payment_id, amount)
+VALUES (sqlc.arg(refund_id), sqlc.arg(org_id), sqlc.arg(payment_id), sqlc.arg(amount))
+ON CONFLICT (refund_id, payment_id) DO UPDATE SET amount = rent_refund_items.amount + EXCLUDED.amount;
+
+-- PaymentRefunded: a payment part of which was refunded cannot be reversed.
+-- name: PaymentRefunded :one
+SELECT EXISTS (SELECT 1 FROM rent_refund_items
+               WHERE org_id = sqlc.arg(org_id) AND payment_id = sqlc.arg(payment_id)) AS refunded;
+
+-- name: ListRentRefunds :many
+SELECT * FROM rent_refunds
+WHERE org_id = sqlc.arg(org_id) AND contract_id = sqlc.arg(contract_id)
+ORDER BY refunded_at DESC;
+
+-- name: SetContractSettlement :exec
+UPDATE contracts SET settlement = sqlc.arg(settlement)
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id);
+
+-- name: ListDepositEntries :many
+SELECT * FROM deposit_entries
+WHERE org_id = sqlc.arg(org_id) AND contract_id = sqlc.arg(contract_id)
+ORDER BY occurred_at, created_at;
+
+-- DepositTotals is the deposit ledger summed by kind.
+-- name: DepositTotals :one
+SELECT COALESCE(sum(amount) FILTER (WHERE kind = 'received'), 0)::bigint        AS received,
+       COALESCE(sum(amount) FILTER (WHERE kind = 'deduction'), 0)::bigint       AS deducted,
+       COALESCE(sum(amount) FILTER (WHERE kind = 'refund'), 0)::bigint          AS refunded,
+       COALESCE(sum(amount) FILTER (WHERE kind = 'applied_to_rent'), 0)::bigint AS applied
+FROM deposit_entries
+WHERE org_id = sqlc.arg(org_id) AND contract_id = sqlc.arg(contract_id);
+
+-- name: CreateDepositEntry :one
+INSERT INTO deposit_entries (org_id, contract_id, kind, amount, method, reference, reason,
+                             payment_id, occurred_at, recorded_by_user_id)
+VALUES (sqlc.arg(org_id), sqlc.arg(contract_id), sqlc.arg(kind), sqlc.arg(amount), sqlc.narg(method),
+        sqlc.narg(reference), sqlc.narg(reason), sqlc.narg(payment_id), sqlc.arg(occurred_at),
+        sqlc.arg(recorded_by_user_id))
+RETURNING *;
