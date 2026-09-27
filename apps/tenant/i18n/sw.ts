@@ -2141,7 +2141,7 @@ const messages: Messages = {
   'expcat.capital.no': 'Gharama ya kawaida',
   'expcat.capital.label': 'Mtaji (uwekezaji)',
   'expcat.note.capital': 'Matumizi ya mtaji — ukarabati mkubwa, paa jipya — yanahesabiwa kwenye gharama za jengo katika Makadirio, si kama gharama ya kila mwezi.',
-  'proj.lead': 'Makadirio kuanzia {start} na kuendelea: kodi iliyokwisha pangwa kwenye mikataba iliyosainiwa, pamoja na vyumba unavyochagua kuhesabu kama vimepangishwa kwa bei yake, ukiondoa gharama za kawaida za miezi kumi na miwili iliyopita. Kipindi kilichochaguliwa juu hakitumiki hapa.',
+  'proj.lead': 'Makadirio kuanzia {start} na kuendelea: kodi iliyokwisha pangwa kwenye mikataba iliyosainiwa, pamoja na vyumba unavyochagua kuhesabu kama vimepangishwa kwa bei yake, ukiondoa gharama za kawaida za miezi kumi na miwili iliyopita (pamoja na mwezi huu hadi sasa). Kipindi kilichochaguliwa juu hakitumiki hapa.',
   'proj.scenario.title': 'Hali ya kukisia',
   'proj.scenario.horizon': 'Angalia mbele',
   'proj.scenario.horizon_months': 'Miezi {count}',

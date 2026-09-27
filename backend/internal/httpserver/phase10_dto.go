@@ -296,6 +296,12 @@ func resolveWindowStatus(
 	f validate.Fields, cadence, anchorRaw string, from, to pgtype.Date,
 ) (period.Window, int, bool) {
 	anchor := time.Now().In(tz.Zone())
+	// A named window sent as `from`/`to` without an `anchor` means the window
+	// holding `from`: falling back to today would answer every earlier month
+	// with the current one.
+	if strings.TrimSpace(anchorRaw) == "" && from.Valid && !strings.EqualFold(strings.TrimSpace(cadence), period.CadenceCustom) {
+		anchorRaw = from.Time.Format(dateLayout)
+	}
 	if v := strings.TrimSpace(anchorRaw); v != "" {
 		t, err := time.Parse(dateLayout, v)
 		if err != nil {

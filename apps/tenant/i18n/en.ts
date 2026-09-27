@@ -2143,7 +2143,7 @@ const messages: Messages = {
   'expcat.capital.no': 'Running cost',
   'expcat.capital.label': 'Capital (investment)',
   'expcat.note.capital': 'Capital spend — a major renovation, a new roof — counts toward what the property has cost in Projections, not as a monthly running cost.',
-  'proj.lead': 'A forecast from {start} onwards: the rent already scheduled on signed contracts, plus the units you choose to count as let at their own price, less running costs from the last twelve months. The period above does not apply here.',
+  'proj.lead': 'A forecast from {start} onwards: the rent already scheduled on signed contracts, plus the units you choose to count as let at their own price, less running costs from the last twelve months (this month so far included). The period above does not apply here.',
   'proj.scenario.title': 'Scenario',
   'proj.scenario.horizon': 'Look ahead',
   'proj.scenario.horizon_months': '{count} months',

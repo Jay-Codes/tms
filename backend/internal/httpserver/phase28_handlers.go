@@ -256,12 +256,14 @@ func (s *Server) handleReportProjection(w http.ResponseWriter, r *http.Request) 
 	WriteJSON(w, http.StatusOK, resp)
 }
 
-// projectionStart is the 1st of the current month on the Dar es Salaam wall
-// clock, as a UTC date like the engine's other month keys. The trailing window
-// is the twelve whole months before it; the forecast starts with it.
+// projectionStart is the 1st of next month on the Dar es Salaam wall clock,
+// as a UTC date like the engine's other month keys. The current month is
+// history, not forecast: what has been paid and spent in it so far counts in
+// the trailing window and in the to-date figures (a landlord who logs this
+// month's costs must see them), and the forecast starts after it.
 func projectionStart(now time.Time) time.Time {
 	local := now.In(tz.Zone())
-	return time.Date(local.Year(), local.Month(), 1, 0, 0, 0, 0, time.UTC)
+	return time.Date(local.Year(), local.Month()+1, 1, 0, 0, 0, 0, time.UTC)
 }
 
 // monthKey snaps a date to the 1st of its month (UTC).

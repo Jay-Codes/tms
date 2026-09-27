@@ -41,10 +41,18 @@ export function saveReportPeriod(value: PeriodValue): void {
 }
 
 /**
- * The window as the API takes it. `cadence` rides along so the response can
- * echo a named window ("Q3 2026") rather than a pair of dates, but `from`/`to`
- * are always sent: they are what was actually asked for.
+ * The window as the API takes it: `cadence` + `anchor` name the window, and
+ * `from`/`to` carry a custom range. The API's `to` is the last day *inside*
+ * the window, while a PeriodValue's `to` is the first day after it — so it
+ * is stepped back a day here, once, for every caller.
  */
-export function periodQuery(p: PeriodValue): { cadence: string; from: string; to: string } {
-  return { cadence: p.cadence, from: p.from, to: p.to };
+export function periodQuery(p: PeriodValue): { cadence: string; anchor: string; from: string; to: string } {
+  return { cadence: p.cadence, anchor: p.from, from: p.from, to: dayBefore(p.to) };
+}
+
+/** The calendar day before an ISO date (YYYY-MM-DD). */
+function dayBefore(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
 }
