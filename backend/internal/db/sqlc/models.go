@@ -72,6 +72,10 @@ type Contract struct {
 	AmendmentReason          *string            `json:"amendment_reason"`
 	SupersededByContractID   pgtype.UUID        `json:"superseded_by_contract_id"`
 	Settlement               []byte             `json:"settlement"`
+	NoticeGivenAt            pgtype.Timestamptz `json:"notice_given_at"`
+	NoticeLeaveOn            pgtype.Date        `json:"notice_leave_on"`
+	NoticeReason             *string            `json:"notice_reason"`
+	MovedOutConfirmedAt      pgtype.Timestamptz `json:"moved_out_confirmed_at"`
 }
 
 type ContractSignature struct {
@@ -119,6 +123,24 @@ type DepositEntry struct {
 	OccurredAt       pgtype.Timestamptz `json:"occurred_at"`
 	RecordedByUserID pgtype.UUID        `json:"recorded_by_user_id"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type EvictionCase struct {
+	ID             pgtype.UUID        `json:"id"`
+	OrgID          pgtype.UUID        `json:"org_id"`
+	ContractID     pgtype.UUID        `json:"contract_id"`
+	Stage          string             `json:"stage"`
+	ArrearsAtOpen  int64              `json:"arrears_at_open"`
+	NoticeDays     int32              `json:"notice_days"`
+	DemandIssuedAt pgtype.Timestamptz `json:"demand_issued_at"`
+	PayBy          pgtype.Date        `json:"pay_by"`
+	NoticeIssuedAt pgtype.Timestamptz `json:"notice_issued_at"`
+	VacateBy       pgtype.Date        `json:"vacate_by"`
+	ClosedAt       pgtype.Timestamptz `json:"closed_at"`
+	CloseReason    *string            `json:"close_reason"`
+	OpenedByUserID pgtype.UUID        `json:"opened_by_user_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Expense struct {
@@ -344,6 +366,11 @@ type PaymentSchedule struct {
 	WrittenOffAt       pgtype.Timestamptz `json:"written_off_at"`
 	WrittenOffByUserID pgtype.UUID        `json:"written_off_by_user_id"`
 	WriteOffReason     *string            `json:"write_off_reason"`
+	OriginalAmount     *int64             `json:"original_amount"`
+	AdjustmentKind     *string            `json:"adjustment_kind"`
+	AdjustmentReason   *string            `json:"adjustment_reason"`
+	AdjustedAt         pgtype.Timestamptz `json:"adjusted_at"`
+	AdjustedByUserID   pgtype.UUID        `json:"adjusted_by_user_id"`
 }
 
 type PlatformTemplate struct {

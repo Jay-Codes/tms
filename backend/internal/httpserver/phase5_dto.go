@@ -122,6 +122,10 @@ type scheduleItem struct {
 	Status      string            `json:"status"`
 	DaysOverdue int               `json:"days_overdue"`
 	Contract    *scheduleContract `json:"contract,omitempty"`
+	// §22.5: a waiver or discount on this period (renter and landlord views).
+	OriginalAmount   *int64  `json:"original_amount,omitempty"`
+	AdjustmentKind   *string `json:"adjustment_kind,omitempty"`
+	AdjustmentReason *string `json:"adjustment_reason,omitempty"`
 	// LastPaymentSource is the `source` of the newest live payment allocated to
 	// this instalment, or null when nothing has been. It is a join, not a stored
 	// column — the chip follows the money, so a reversal takes it away.
@@ -210,16 +214,19 @@ func toScheduleItem(r sqlc.ListSchedulesRow, today time.Time) scheduleItem {
 // identity block the landlord's views carry.
 func scheduleItemOf(s sqlc.PaymentSchedule, c *scheduleContract, today time.Time) scheduleItem {
 	return scheduleItem{
-		ID:          db.UUIDString(s.ID),
-		ContractID:  db.UUIDString(s.ContractID),
-		PeriodStart: s.PeriodStart.Time.Format(dateLayout),
-		PeriodEnd:   s.PeriodEnd.Time.Format(dateLayout),
-		DueDate:     s.DueDate.Time.Format(dateLayout),
-		Amount:      s.Amount,
-		PaidAmount:  s.PaidAmount,
-		Status:      s.Status,
-		DaysOverdue: daysOverdue(s.Status, s.DueDate.Time, today),
-		Contract:    c,
+		ID:               db.UUIDString(s.ID),
+		ContractID:       db.UUIDString(s.ContractID),
+		PeriodStart:      s.PeriodStart.Time.Format(dateLayout),
+		PeriodEnd:        s.PeriodEnd.Time.Format(dateLayout),
+		DueDate:          s.DueDate.Time.Format(dateLayout),
+		Amount:           s.Amount,
+		PaidAmount:       s.PaidAmount,
+		Status:           s.Status,
+		DaysOverdue:      daysOverdue(s.Status, s.DueDate.Time, today),
+		Contract:         c,
+		OriginalAmount:   s.OriginalAmount,
+		AdjustmentKind:   s.AdjustmentKind,
+		AdjustmentReason: s.AdjustmentReason,
 	}
 }
 
@@ -227,7 +234,7 @@ func scheduleItemOf(s sqlc.PaymentSchedule, c *scheduleContract, today time.Time
 // never late, and neither is one whose due date has not passed — so the number
 // is 0 rather than negative.
 func daysOverdue(status string, due, today time.Time) int {
-	if status == payment.StatusPaid || status == payment.StatusWaived {
+	if status == payment.StatusPaid || status == payment.StatusWaived || status == payment.StatusWrittenOff {
 		return 0
 	}
 	d := int(today.Truncate(24*time.Hour).Sub(due.UTC().Truncate(24*time.Hour)).Hours() / 24)

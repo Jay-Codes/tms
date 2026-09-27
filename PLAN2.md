@@ -333,7 +333,7 @@ Why: every approved application was written on the org's single default template
 
 ### 22.5 Settle-up on termination, deposits (reads 22.2 policy)
 - [x] Backend: termination settlement by policy (pro-rata straddle, prepaid refund/forfeit/landlord choice, refund ledger, reports net of refunds), preview endpoint, deposit ledger incl. applying deposit to rent; migration 000027; tests. [ ] UI.
-- [ ] Later in 22.5: single-period waive/discount, eviction stages with SW+EN letters, renter notice to leave, holdover alert.
+- [x] Backend (migration 000028, tests): single-period waive/discount with undo; renter/landlord notice to leave checked against the contract's notice days; holdover list, moved-out confirmation and renewal of an ended tenancy; eviction cases demand → notice → withdrawn/vacated with SMS and SW/EN letters. [x] UI: ledger relief + undo, notice banner/record/withdraw (both apps), eviction section with stepper and SW/EN letter printing, holdover and open-eviction cards on the contracts list.
 
 ## Open questions (answer whenever; defaults applied if unanswered)
 

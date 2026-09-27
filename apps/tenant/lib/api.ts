@@ -915,6 +915,79 @@ export interface Contract {
   termination_effective_date?: string | null;
   /** Phase 22.5 — what termination settled, stored with it. */
   settlement?: Settlement | null;
+  /** Phase 22.5 — the renter's notice to leave (given by them or recorded in person). */
+  notice_given_at?: string | null;
+  notice_leave_on?: string | null;
+  notice_reason?: string | null;
+  /** Phase 22.5 — the landlord confirmed a closed tenancy's unit is empty. */
+  moved_out_confirmed_at?: string | null;
+}
+
+/** `GET /holdovers` — tenancies that ran out and nobody said what happened. */
+export interface Holdover {
+  contract_id: string;
+  end_date: string;
+  renter: { id: string; full_name: string; phone: string | null };
+  unit_id: string;
+  unit_name: string;
+  property_name: string;
+}
+
+export type EvictionStage = 'demand' | 'notice' | 'withdrawn' | 'vacated';
+
+/**
+ * Phase 22.5 — one eviction case. `arrears_now` only on the open case of
+ * `GET /contracts/{id}/eviction`; the names only on `GET /evictions`.
+ */
+export interface EvictionCase {
+  id: string;
+  contract_id: string;
+  stage: EvictionStage;
+  arrears_at_open: number;
+  arrears_now?: number;
+  notice_days: number;
+  demand_issued_at: string;
+  pay_by: string;
+  notice_issued_at: string | null;
+  vacate_by: string | null;
+  closed_at: string | null;
+  close_reason: string | null;
+  renter_name?: string;
+  unit_name?: string;
+  property_name?: string;
+}
+
+export interface EvictionLetter {
+  html: string;
+  kind: 'demand' | 'notice';
+  lang: Locale;
+  total: number;
+}
+
+export const evictionsApi = {
+  /** The org's open cases. */
+  list: (signal?: AbortSignal) => api.get<{ items: EvictionCase[] }>('/evictions', { signal }),
+  forContract: (contractId: string, signal?: AbortSignal) =>
+    api.get<{ open: EvictionCase | null; history: EvictionCase[] }>(`/contracts/${contractId}/eviction`, {
+      signal,
+    }),
+  /** 409 `no_arrears` / `eviction_open` / `contract_not_active`. */
+  open: (contractId: string, payBy?: string) =>
+    api.post<{ eviction: EvictionCase }>(`/contracts/${contractId}/eviction`, payBy ? { pay_by: payBy } : {}),
+  /** 409 `not_at_demand`. */
+  notice: (id: string) => api.post<{ eviction: EvictionCase }>(`/evictions/${id}/notice`),
+  /** 409 `case_closed`. */
+  withdraw: (id: string, reason: string) =>
+    api.post<{ eviction: EvictionCase }>(`/evictions/${id}/withdraw`, { reason }),
+  /** 409 `no_notice_yet` for a notice letter before the notice. */
+  letter: (id: string, kind: 'demand' | 'notice', lang: Locale) =>
+    api.get<EvictionLetter>(`/evictions/${id}/letter`, { query: { kind, lang } }),
+};
+
+/** `earliest` from a 422 `notice_too_short`, else null. */
+export function noticeEarliest(err: unknown): string | null {
+  if (!(err instanceof ApiError) || err.code !== 'notice_too_short') return null;
+  return typeof err.body.earliest === 'string' ? err.body.earliest : null;
 }
 
 /** The period a tenancy ends inside (Phase 22.5). */
@@ -1070,6 +1143,13 @@ export interface ScheduleRow {
    * nothing has been allocated.
    */
   last_payment_source?: PaymentSource | null;
+  /**
+   * Phase 22.5 — period relief. Set only on an adjusted row: the amount
+   * before the discount (or waiver), which relief it was, and why.
+   */
+  original_amount?: number;
+  adjustment_kind?: 'waive' | 'discount';
+  adjustment_reason?: string;
   /** Phase 21 — why the landlord wrote the row off; only on `written_off` rows. */
   write_off_reason?: string | null;
 }
@@ -1252,6 +1332,14 @@ export const contractsApi = {
       refund_reference?: string;
     },
   ) => api.post<{ contract: Contract } | Contract>(`/contracts/${id}/terminate`, body),
+  /** Phase 22.5 — a notice to leave the renter gave in person. 422 `notice_too_short {earliest}` / `after_end_date`. */
+  giveNotice: (id: string, body: { leave_on: string; reason?: string }) =>
+    api.post<{ contract: Contract }>(`/contracts/${id}/notice`, body),
+  /** 409 `no_notice`. */
+  withdrawNotice: (id: string) => api.del<{ contract: Contract }>(`/contracts/${id}/notice`),
+  /** Phase 22.5 — confirm a closed tenancy's unit is empty. 409 `not_closed`. */
+  movedOut: (id: string) => api.post<{ contract: Contract }>(`/contracts/${id}/moved-out`),
+  holdovers: (signal?: AbortSignal) => api.get<{ items: Holdover[] }>('/holdovers', { signal }),
   /** Phase 22.5 — the settle-up a termination on `effective_date` would apply. */
   settlementPreview: (
     id: string,
@@ -1620,6 +1708,14 @@ export const schedulesApi = {
     signal?: AbortSignal,
   ) =>
     api.get<{ items: Schedule[]; next_cursor?: string | null }>('/schedules', { query, signal }),
+  /**
+   * Phase 22.5 — relief on one unsettled, unadjusted period: waive it, or
+   * lower it by `discount` (1 … amount − 1). 409 `not_adjustable`.
+   */
+  adjust: (id: string, body: { kind: 'waive' | 'discount'; discount?: number; reason: string }) =>
+    api.post<{ schedule: ScheduleRow }>(`/schedules/${id}/adjust`, body),
+  /** 409 `not_adjusted`. */
+  undoAdjust: (id: string) => api.post<{ schedule: ScheduleRow }>(`/schedules/${id}/adjust/undo`),
 };
 
 export const paymentsApi = {

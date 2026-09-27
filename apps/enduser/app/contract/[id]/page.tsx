@@ -28,6 +28,7 @@ import {
   type ContractDocument,
   type DocumentSignature,
   type MySchedule,
+  type PaymentSchedule,
   type Proof,
   type VerifyResponse,
 } from '../../../lib/api';
@@ -35,6 +36,7 @@ import { errorMessage, formatDate, money, phoneLast4 } from '../../../lib/format
 import { Protected } from '../../../components/Protected';
 import { ContractStamp } from '../../../components/ContractStatus';
 import { CountdownChip } from '../../../components/PaymentStatus';
+import { NoticeSheet } from '../../../components/NoticeSheet';
 import { RentValue } from '../../../components/RentValue';
 import { Notice, Screen } from '../../../components/Screen';
 import './document.css';
@@ -99,6 +101,11 @@ function DocumentContent() {
   const [contract, setContract] = useState<Contract | null>(null);
   const [schedules, setSchedules] = useState<MySchedule[]>([]);
   const [proofs, setProofs] = useState<Proof[]>([]);
+  // Phase 22.5: this contract's own rows carry the landlord's relief.
+  const [ledgerRows, setLedgerRows] = useState<PaymentSchedule[]>([]);
+  const [noticeOpen, setNoticeOpen] = useState(false);
+  const [noticeBusy, setNoticeBusy] = useState(false);
+  const [noticeError, setNoticeError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -117,17 +124,19 @@ function DocumentContent() {
         // The ledger and the renter's own proofs only decorate the document
         // (Phase 16: the countdown chip beside the rent, an "awaiting
         // confirmation" mark on an instalment), so neither may blank it.
-        const [d, c, s, pr] = await Promise.all([
+        const [d, c, s, pr, rows] = await Promise.all([
           contractApi.document(id, ac.signal),
           contractApi.get(id, ac.signal).catch(() => null),
           renterApi.schedules(ac.signal).catch(() => null),
           renterApi.proofs(ac.signal).catch(() => null),
+          contractApi.schedules(id, ac.signal).catch(() => null),
         ]);
         if (!live) return;
         setDoc(d);
         setContract(c?.contract ?? null);
         setSchedules((s?.items ?? []).filter((row) => row.contract?.id === id));
         setProofs(pr?.items ?? []);
+        setLedgerRows(rows?.items ?? []);
         setError(null);
       } catch (err) {
         if (!live || (err instanceof DOMException && err.name === 'AbortError')) return;
@@ -144,6 +153,18 @@ function DocumentContent() {
       live = false;
       ac.abort();
     };
+  }, [id, t]);
+
+  const withdrawNotice = useCallback(async () => {
+    setNoticeBusy(true);
+    setNoticeError(null);
+    try {
+      setContract((await contractApi.withdrawNotice(id)).contract);
+    } catch (err) {
+      setNoticeError(errorMessage(t, err));
+    } finally {
+      setNoticeBusy(false);
+    }
   }, [id, t]);
 
   const runVerify = useCallback(async () => {
@@ -191,6 +212,10 @@ function DocumentContent() {
     ledger.find((row) => row.status !== 'paid' && row.status !== 'waived' && row.status !== 'written_off') ??
     null;
   const scheduleByDue = new Map(ledger.map((row) => [row.due_date, row]));
+  const adjustedByDue = new Map(
+    ledgerRows.filter((row) => row.adjustment_kind).map((row) => [row.due_date, row]),
+  );
+  const running = contract?.status === 'active' || contract?.status === 'expiring';
   const proofBySchedule = new Map<string, Proof>();
   for (const p of proofs) {
     // `GET /me/proofs` is newest first: the first one seen still speaks.
@@ -241,6 +266,22 @@ function DocumentContent() {
       {needsSignature && (
         <Notice>{t('doc.readThenSign')}</Notice>
       )}
+      {/* Phase 22.5: notice to leave — the standing one, or a way to give it. */}
+      {running && contract?.notice_leave_on && (
+        <Notice>
+          {t('notice.given', { date: formatDate(locale, contract.notice_leave_on) })}{' '}
+          <button
+            type="button"
+            className="btn btn-quiet"
+            onClick={() => void withdrawNotice()}
+            disabled={noticeBusy}
+            style={{ width: 'auto', minHeight: 0, padding: 0, textDecoration: 'underline' }}
+          >
+            {t('notice.withdraw')}
+          </button>
+        </Notice>
+      )}
+      {noticeError && <Notice tone="error">{noticeError}</Notice>}
       {contract?.superseded_by_contract_id && (
         <Notice>
           {t('doc.replaced')}{' '}
@@ -401,7 +442,18 @@ function DocumentContent() {
                           {formatDate(locale, row.period_start)} –{' '}
                           {formatDate(locale, row.period_end)}
                         </td>
-                        <td className="num amount">{money(row.amount)}</td>
+                        <td className="num amount">
+                          {money(row.amount)}
+                          {adjustedByDue.get(row.due_date) && (
+                            <span className="sub pencil">
+                              {adjustedByDue.get(row.due_date)?.adjustment_kind === 'waive'
+                                ? t('doc.waivedByLandlord')
+                                : t('doc.discountedTo', {
+                                    amount: money(adjustedByDue.get(row.due_date)?.amount ?? 0),
+                                  })}
+                            </span>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -473,11 +525,27 @@ function DocumentContent() {
       </article>
 
       <div className="no-print" style={{ display: 'grid', gap: 'var(--sp-3)' }}>
+        {running && contract && !contract.notice_leave_on && (
+          <button type="button" className="btn btn-secondary" onClick={() => setNoticeOpen(true)}>
+            {t('notice.give')}
+          </button>
+        )}
         <button type="button" className="btn btn-secondary" onClick={() => window.print()}>
           <Icon icon="solar:printer-minimalistic-linear" width={20} aria-hidden />
           {t('doc.print')}
         </button>
       </div>
+
+      {noticeOpen && contract && (
+        <NoticeSheet
+          contract={contract}
+          onClose={() => setNoticeOpen(false)}
+          onDone={(c) => {
+            setContract(c);
+            setNoticeOpen(false);
+          }}
+        />
+      )}
 
       {needsSignature && (
         <div className="doc-cta">

@@ -32,7 +32,14 @@ const (
 	// raises (PLAN2 §20.3). A backfill closes N periods at once and must never
 	// send N texts about money the renter paid last year.
 	KindBackfillDone = "backfill_done"
-	KindCustom       = "custom"
+	// Phase 22 §22.5: the renter's notice to leave is acknowledged, and an
+	// eviction's stages each reach the renter in writing. `{{date}}` is the
+	// date each sentence exists to carry (leave on / pay by / vacate by).
+	KindNoticeReceived    = "notice_received"
+	KindEvictionDemand    = "eviction_demand"
+	KindEvictionNotice    = "eviction_notice"
+	KindEvictionWithdrawn = "eviction_withdrawn"
+	KindCustom            = "custom"
 	KindOTP          = "otp"
 )
 
@@ -250,6 +257,23 @@ var platformTemplates = map[string]Template{
 	KindBackfillDone: {
 		EN: "Your rent book for {{unit}} at {{org}} now shows history up to {{date}}. See it here: {{pay_link}}",
 		SW: "Daftari lako la kodi la {{unit}} katika {{org}} sasa linaonyesha historia hadi {{date}}. Iangalie hapa: {{pay_link}}",
+	},
+	// Phase 22 §22.5.
+	KindNoticeReceived: {
+		EN: "{{org}} has received your notice to leave {{unit}} on {{date}}.",
+		SW: "{{org}} imepokea taarifa yako ya kuondoka {{unit}} tarehe {{date}}.",
+	},
+	KindEvictionDemand: {
+		EN: "{{name}}, you owe {{amount}} in rent for {{unit}} at {{org}}. Please pay by {{date}} to avoid a notice to vacate. {{pay_link}}",
+		SW: "{{name}}, unadaiwa kodi ya {{amount}} kwa {{unit}} katika {{org}}. Tafadhali lipa kabla ya {{date}} ili kuepuka notisi ya kuhama. {{pay_link}}",
+	},
+	KindEvictionNotice: {
+		EN: "{{name}}, this is notice to vacate {{unit}} at {{org}} by {{date}} for unpaid rent of {{amount}}.",
+		SW: "{{name}}, hii ni notisi ya kuhama {{unit}} katika {{org}} ifikapo {{date}} kwa kodi isiyolipwa ya {{amount}}.",
+	},
+	KindEvictionWithdrawn: {
+		EN: "{{name}}, the notice about {{unit}} at {{org}} has been withdrawn. Thank you.",
+		SW: "{{name}}, notisi kuhusu {{unit}} katika {{org}} imeondolewa. Asante.",
 	},
 }
 

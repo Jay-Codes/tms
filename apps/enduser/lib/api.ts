@@ -35,6 +35,8 @@ export interface ProblemDetail {
    * instalment's outstanding balance.
    */
   expected?: number;
+  /** Phase 22.5: the earliest leave date a `422 notice_too_short` allows. */
+  earliest?: string;
 }
 
 /** Typed error thrown for any non-2xx response (and for network failures). */
@@ -46,6 +48,8 @@ export class ApiError extends Error {
   readonly retryAfterSeconds?: number;
   /** Phase 20.1: `expected` from a `422 amount_mismatch` problem document. */
   readonly expected?: number;
+  /** Phase 22.5: `earliest` from a `422 notice_too_short`. */
+  readonly earliest?: string;
   /** RFC-7807 `type`, verbatim. */
   readonly type: string;
   /**
@@ -68,6 +72,7 @@ export class ApiError extends Error {
     this.retryAfterSeconds =
       typeof problem.retry_after_seconds === 'number' ? problem.retry_after_seconds : undefined;
     this.expected = typeof problem.expected === 'number' ? problem.expected : undefined;
+    this.earliest = typeof problem.earliest === 'string' ? problem.earliest : undefined;
   }
 
   /**
@@ -596,6 +601,12 @@ export interface Contract {
   amendment_effective_date?: string | null;
   amendment_reason?: string | null;
   superseded_by_contract_id?: string | null;
+  /** Phase 22.2 — only the part the renter's screens read. */
+  policy?: { tenant_notice_days: number } | null;
+  /** Phase 22.5 — the renter's notice to leave, if one is standing. */
+  notice_given_at?: string | null;
+  notice_leave_on?: string | null;
+  notice_reason?: string | null;
 }
 
 /** One line of the payment schedule shown inside the document. */
@@ -666,6 +677,13 @@ export interface PaymentSchedule {
   last_payment_source?: PaymentSource | string | null;
   /** Phase 21 — the landlord's reason, only on `written_off` rows. */
   write_off_reason?: string | null;
+  /**
+   * Phase 22.5 — relief the landlord granted on this period (only on
+   * `GET /contracts/{id}/schedules`): the amount before, which kind, why.
+   */
+  original_amount?: number;
+  adjustment_kind?: 'waive' | 'discount';
+  adjustment_reason?: string;
 }
 
 /** `GET /me/schedules` rows carry the contract they belong to. */
@@ -735,6 +753,16 @@ export const contractApi = {
     api.get<{ items: PaymentSchedule[] }>(`/contracts/${encodeURIComponent(id)}/schedules`, {
       signal,
     }),
+
+  /**
+   * Phase 22.5 — give notice to leave before the end date. 422
+   * `notice_too_short` (with `earliest`) / `after_end_date`.
+   */
+  giveNotice: (id: string, body: { leave_on: string; reason?: string }) =>
+    api.post<{ contract: Contract }>(`/me/contracts/${encodeURIComponent(id)}/notice`, body),
+  /** 409 `no_notice`. */
+  withdrawNotice: (id: string) =>
+    api.del<{ contract: Contract }>(`/me/contracts/${encodeURIComponent(id)}/notice`),
 
   sendSignOtp: (id: string) =>
     api.post<{ resend_after_seconds: number }>(`/contracts/${encodeURIComponent(id)}/sign/otp`),

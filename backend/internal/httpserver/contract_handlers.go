@@ -114,8 +114,11 @@ type contractInput struct {
 	Amends          pgtype.UUID
 	AmendsEffective time.Time
 	AmendReason     string
-	RentAmount      int64
-	RentPeriodDays  int32
+	// AmendsClosed: renewing a tenancy that already ran out (holdover); the
+	// unit must not have been let to someone else since.
+	AmendsClosed   bool
+	RentAmount     int64
+	RentPeriodDays int32
 }
 
 // createContractTx writes one contract and its audit row through the supplied
@@ -159,7 +162,7 @@ func (s *Server) createContractTx(
 	if err != nil {
 		return zero, "", err
 	}
-	if live > 0 && !amendment {
+	if live > 0 && (!amendment || in.AmendsClosed) {
 		return zero, "", errContractExists
 	}
 
@@ -1326,6 +1329,12 @@ func (s *Server) handleTerminateContract(w http.ResponseWriter, r *http.Request)
 			TerminationEffectiveDate: pgtype.Date{Time: effective, Valid: true},
 		})
 		if err != nil {
+			return err
+		}
+		// §22.5: an open eviction case ends with the tenancy.
+		if err := q.CloseEvictionOnTermination(r.Context(), sqlc.CloseEvictionOnTerminationParams{
+			OrgID: row.OrgID, ContractID: row.ID,
+		}); err != nil {
 			return err
 		}
 		// §22.5: settle the period it ends in and any prepaid rent first,
