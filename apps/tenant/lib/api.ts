@@ -781,9 +781,34 @@ export const TEMPLATE_VARIABLES = [
   'org_name',
   'term_days',
   'due_day',
+  // Phase 22.2 — blank on a template without tenancy rules.
+  'deposit',
+  'tenant_notice_days',
+  'eviction_notice_days',
 ] as const;
 
 export type TemplateVariable = (typeof TEMPLATE_VARIABLES)[number];
+
+export type MoveOutProration = 'full_month' | 'pro_rata';
+export type EarlyExitPrepaid = 'refund' | 'forfeit' | 'landlord_decides';
+export type DepositMode = 'none' | 'fixed' | 'months';
+
+/**
+ * Phase 22.2 — the tenancy rules a template sets and each contract copies
+ * when it is written. On a template `deposit_amount` is the fixed amount and
+ * `deposit_months` the multiple; on a contract the deposit is always resolved
+ * to an amount. Fields the deposit mode does not use come back zeroed.
+ */
+export interface ContractPolicy {
+  move_out_proration: MoveOutProration;
+  early_exit_prepaid: EarlyExitPrepaid;
+  deposit_mode: DepositMode;
+  deposit_amount: number;
+  deposit_months: number;
+  deductions_may_exceed_deposit: boolean;
+  tenant_notice_days: number;
+  eviction_notice_days: number;
+}
 
 export interface ContractTemplateSummary {
   id: string;
@@ -793,6 +818,8 @@ export interface ContractTemplateSummary {
   created_at: string;
   /** Phase 22 — how many units and properties name this template. */
   usage?: { units: number; properties: number };
+  /** Phase 22.2 — null (or absent, before 22.2) when it sets no rules. */
+  policy?: ContractPolicy | null;
 }
 
 export interface ContractTemplate extends ContractTemplateSummary {
@@ -867,6 +894,8 @@ export interface Contract {
   terminated_at: string | null;
   termination_reason: string | null;
   schedules_summary: SchedulesSummary | null;
+  /** Phase 22.2 — the rules copied from the template; null before Phase 22. */
+  policy?: ContractPolicy | null;
 }
 
 export interface ContractDocument {
@@ -1023,6 +1052,7 @@ export const templatesApi = {
     body_html: string;
     body_html_sw?: string | null;
     is_default?: boolean;
+    policy?: ContractPolicy | null;
   }) => api.post<{ template: ContractTemplate } | ContractTemplate>('/contract-templates', body),
   update: (
     id: string,
@@ -1031,6 +1061,8 @@ export const templatesApi = {
       body_html?: string;
       body_html_sw?: string | null;
       is_default?: boolean;
+      /** Absent leaves the rules, null clears them (Phase 22.2). */
+      policy?: ContractPolicy | null;
     },
   ) => api.patch<{ template: ContractTemplate } | ContractTemplate>(`/contract-templates/${id}`, body),
   remove: (id: string) => api.del<void>(`/contract-templates/${id}`),

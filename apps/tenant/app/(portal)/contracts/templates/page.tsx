@@ -228,6 +228,11 @@ function TemplatesBody() {
                     <Link href={`/contracts/templates/${row.id}`} style={{ color: 'inherit' }}>
                       {row.name}
                     </Link>
+                    {row.policy ? (
+                      <span className="stamp" style={{ marginLeft: 'var(--sp-2)' }} title={t('policy.title')}>
+                        {t('policy.chip')}
+                      </span>
+                    ) : null}
                   </td>
                   <td>{row.is_default ? <span className="stamp stamp-paid">{t('tpl.default')}</span> : null}</td>
                   <td style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>

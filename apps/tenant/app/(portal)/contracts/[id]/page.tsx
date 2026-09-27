@@ -33,6 +33,7 @@ import { DaysOverdue, PaymentsTable, ReverseSheet, SourceChip } from '../../../.
 import { ProofsFor } from '../../../../components/ProofBits';
 import { RecordPaymentSheet, type RecordPaymentTarget } from '../../../../components/RecordPaymentSheet';
 import { PageHead } from '../../../../components/PageHead';
+import { PolicyFacts } from '../../../../components/PolicyBits';
 import { Sheet } from '../../../../components/Sheet';
 import {
   ApiError,
@@ -620,6 +621,17 @@ function ContractBody({ id }: { id: string }) {
             />
           </div>
         </section>
+
+        {/* Phase 22.2: the rules copied from the template when this was written. */}
+        {contract.policy ? (
+          <section style={{ marginTop: 'var(--sp-6)' }}>
+            <hr className="rule rule-strong" />
+            <h2 style={{ fontSize: 'var(--text-lg)', margin: 'var(--sp-4) 0' }}>{t('policy.title')}</h2>
+            <div style={{ maxWidth: 640 }}>
+              <PolicyFacts policy={contract.policy} />
+            </div>
+          </section>
+        ) : null}
 
         {/* ------------------------------ schedules ----------------------------- */}
         <section style={{ marginTop: 'var(--sp-6)' }}>
