@@ -16,7 +16,7 @@ UPDATE contracts
 SET status = 'active', activated_at = now()
 WHERE org_id = $1 AND id = $2
   AND status = 'pending_signature' AND deleted_at IS NULL
-RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language, policy, supersedes_contract_id, amendment_effective_date, amendment_reason, superseded_by_contract_id, settlement, notice_given_at, notice_leave_on, notice_reason, moved_out_confirmed_at, payment_period_months
+RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language, policy, supersedes_contract_id, amendment_effective_date, amendment_reason, superseded_by_contract_id, settlement, notice_given_at, notice_leave_on, notice_reason, moved_out_confirmed_at, is_offline, payment_period_months
 `
 
 type ActivateContractParams struct {
@@ -63,6 +63,7 @@ func (q *Queries) ActivateContract(ctx context.Context, arg ActivateContractPara
 		&i.NoticeLeaveOn,
 		&i.NoticeReason,
 		&i.MovedOutConfirmedAt,
+		&i.IsOffline,
 		&i.PaymentPeriodMonths,
 	)
 	return i, err
@@ -116,7 +117,7 @@ INSERT INTO contracts (
     org_id, unit_id, renter_user_id, template_id, terms_snapshot_html,
     rent_amount, rent_period_days, payment_period_id, payment_period_days, payment_period_months,
     term_days, start_date, end_date, due_day, status, snapshot_hash, link_request_id,
-    language, supersedes_contract_id, amendment_effective_date, amendment_reason
+    language, supersedes_contract_id, amendment_effective_date, amendment_reason, is_offline
 )
 VALUES (
     $1, $2, $3, $4,
@@ -128,9 +129,10 @@ VALUES (
     COALESCE($18::text, 'en'),
     -- §22.4: an amendment is marked at insert, so the per-unit index sees it.
     $19, $20,
-    $21
+    $21,
+    COALESCE($22::boolean, false)
 )
-RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language, policy, supersedes_contract_id, amendment_effective_date, amendment_reason, superseded_by_contract_id, settlement, notice_given_at, notice_leave_on, notice_reason, moved_out_confirmed_at, payment_period_months
+RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language, policy, supersedes_contract_id, amendment_effective_date, amendment_reason, superseded_by_contract_id, settlement, notice_given_at, notice_leave_on, notice_reason, moved_out_confirmed_at, is_offline, payment_period_months
 `
 
 type CreateContractParams struct {
@@ -155,6 +157,7 @@ type CreateContractParams struct {
 	SupersedesContractID   pgtype.UUID `json:"supersedes_contract_id"`
 	AmendmentEffectiveDate pgtype.Date `json:"amendment_effective_date"`
 	AmendmentReason        *string     `json:"amendment_reason"`
+	IsOffline              *bool       `json:"is_offline"`
 }
 
 // A contract is the agreement between an org and a renter over one unit. Like
@@ -187,6 +190,7 @@ func (q *Queries) CreateContract(ctx context.Context, arg CreateContractParams) 
 		arg.SupersedesContractID,
 		arg.AmendmentEffectiveDate,
 		arg.AmendmentReason,
+		arg.IsOffline,
 	)
 	var i Contract
 	err := row.Scan(
@@ -225,13 +229,14 @@ func (q *Queries) CreateContract(ctx context.Context, arg CreateContractParams) 
 		&i.NoticeLeaveOn,
 		&i.NoticeReason,
 		&i.MovedOutConfirmedAt,
+		&i.IsOffline,
 		&i.PaymentPeriodMonths,
 	)
 	return i, err
 }
 
 const getContract = `-- name: GetContract :one
-SELECT c.id, c.org_id, c.unit_id, c.renter_user_id, c.template_id, c.terms_snapshot_html, c.rent_amount, c.rent_period_days, c.payment_period_id, c.payment_period_days, c.term_days, c.start_date, c.end_date, c.due_day, c.status, c.snapshot_hash, c.created_at, c.updated_at, c.deleted_at, c.activated_at, c.terminated_at, c.termination_reason, c.termination_effective_date, c.link_request_id, c.language, c.policy, c.supersedes_contract_id, c.amendment_effective_date, c.amendment_reason, c.superseded_by_contract_id, c.settlement, c.notice_given_at, c.notice_leave_on, c.notice_reason, c.moved_out_confirmed_at, c.payment_period_months,
+SELECT c.id, c.org_id, c.unit_id, c.renter_user_id, c.template_id, c.terms_snapshot_html, c.rent_amount, c.rent_period_days, c.payment_period_id, c.payment_period_days, c.term_days, c.start_date, c.end_date, c.due_day, c.status, c.snapshot_hash, c.created_at, c.updated_at, c.deleted_at, c.activated_at, c.terminated_at, c.termination_reason, c.termination_effective_date, c.link_request_id, c.language, c.policy, c.supersedes_contract_id, c.amendment_effective_date, c.amendment_reason, c.superseded_by_contract_id, c.settlement, c.notice_given_at, c.notice_leave_on, c.notice_reason, c.moved_out_confirmed_at, c.is_offline, c.payment_period_months,
        u.name AS unit_name, u.unit_code, u.status AS unit_status,
        p.name AS property_name, p.location_text AS property_location_text,
        o.name AS org_name, o.slug AS org_slug,
@@ -309,6 +314,7 @@ type GetContractRow struct {
 	NoticeLeaveOn            pgtype.Date        `json:"notice_leave_on"`
 	NoticeReason             *string            `json:"notice_reason"`
 	MovedOutConfirmedAt      pgtype.Timestamptz `json:"moved_out_confirmed_at"`
+	IsOffline                bool               `json:"is_offline"`
 	PaymentPeriodMonths      *int32             `json:"payment_period_months"`
 	UnitName                 string             `json:"unit_name"`
 	UnitCode                 string             `json:"unit_code"`
@@ -369,6 +375,7 @@ func (q *Queries) GetContract(ctx context.Context, arg GetContractParams) (GetCo
 		&i.NoticeLeaveOn,
 		&i.NoticeReason,
 		&i.MovedOutConfirmedAt,
+		&i.IsOffline,
 		&i.PaymentPeriodMonths,
 		&i.UnitName,
 		&i.UnitCode,
@@ -413,7 +420,7 @@ func (q *Queries) GetContractForLinkRequest(ctx context.Context, arg GetContract
 }
 
 const listContracts = `-- name: ListContracts :many
-SELECT c.id, c.org_id, c.unit_id, c.renter_user_id, c.template_id, c.terms_snapshot_html, c.rent_amount, c.rent_period_days, c.payment_period_id, c.payment_period_days, c.term_days, c.start_date, c.end_date, c.due_day, c.status, c.snapshot_hash, c.created_at, c.updated_at, c.deleted_at, c.activated_at, c.terminated_at, c.termination_reason, c.termination_effective_date, c.link_request_id, c.language, c.policy, c.supersedes_contract_id, c.amendment_effective_date, c.amendment_reason, c.superseded_by_contract_id, c.settlement, c.notice_given_at, c.notice_leave_on, c.notice_reason, c.moved_out_confirmed_at, c.payment_period_months,
+SELECT c.id, c.org_id, c.unit_id, c.renter_user_id, c.template_id, c.terms_snapshot_html, c.rent_amount, c.rent_period_days, c.payment_period_id, c.payment_period_days, c.term_days, c.start_date, c.end_date, c.due_day, c.status, c.snapshot_hash, c.created_at, c.updated_at, c.deleted_at, c.activated_at, c.terminated_at, c.termination_reason, c.termination_effective_date, c.link_request_id, c.language, c.policy, c.supersedes_contract_id, c.amendment_effective_date, c.amendment_reason, c.superseded_by_contract_id, c.settlement, c.notice_given_at, c.notice_leave_on, c.notice_reason, c.moved_out_confirmed_at, c.is_offline, c.payment_period_months,
        u.name AS unit_name, u.unit_code, u.status AS unit_status,
        p.name AS property_name, p.location_text AS property_location_text,
        o.name AS org_name, o.slug AS org_slug,
@@ -501,6 +508,7 @@ type ListContractsRow struct {
 	NoticeLeaveOn            pgtype.Date        `json:"notice_leave_on"`
 	NoticeReason             *string            `json:"notice_reason"`
 	MovedOutConfirmedAt      pgtype.Timestamptz `json:"moved_out_confirmed_at"`
+	IsOffline                bool               `json:"is_offline"`
 	PaymentPeriodMonths      *int32             `json:"payment_period_months"`
 	UnitName                 string             `json:"unit_name"`
 	UnitCode                 string             `json:"unit_code"`
@@ -575,6 +583,7 @@ func (q *Queries) ListContracts(ctx context.Context, arg ListContractsParams) ([
 			&i.NoticeLeaveOn,
 			&i.NoticeReason,
 			&i.MovedOutConfirmedAt,
+			&i.IsOffline,
 			&i.PaymentPeriodMonths,
 			&i.UnitName,
 			&i.UnitCode,
@@ -638,7 +647,7 @@ SET status = 'terminated', terminated_at = now(),
     termination_effective_date = $2
 WHERE org_id = $3 AND id = $4
   AND status IN ('pending_signature', 'active', 'expiring') AND deleted_at IS NULL
-RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language, policy, supersedes_contract_id, amendment_effective_date, amendment_reason, superseded_by_contract_id, settlement, notice_given_at, notice_leave_on, notice_reason, moved_out_confirmed_at, payment_period_months
+RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language, policy, supersedes_contract_id, amendment_effective_date, amendment_reason, superseded_by_contract_id, settlement, notice_given_at, notice_leave_on, notice_reason, moved_out_confirmed_at, is_offline, payment_period_months
 `
 
 type TerminateContractParams struct {
@@ -692,6 +701,7 @@ func (q *Queries) TerminateContract(ctx context.Context, arg TerminateContractPa
 		&i.NoticeLeaveOn,
 		&i.NoticeReason,
 		&i.MovedOutConfirmedAt,
+		&i.IsOffline,
 		&i.PaymentPeriodMonths,
 	)
 	return i, err

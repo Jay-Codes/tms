@@ -285,3 +285,7 @@ assist UI (tenant `renters/assist`, enduser `?assist=`) is still open in a paral
 
 Backfill takes `from` (real move-in) + `period_amount` (rent then) + `dry_run`; creates the missing periods up to the contract start, owned by the batch (migration 000033), settles up to `until`, leaves the rest overdue; undo removes them; CSV columns `from`/`period_amount`; contract document excludes them. Tenant Backfill sheet has a "began before" section with a server dry-run preview. `phase29_test.go` (5 tests); full Go suite and workspace tests green; walked through in the browser on the dev stack (create → list → undo).
 
+
+## Phase 30 — Offline contracts for backfill (30 Sep 2026) — branch `phase-30-offline-contracts`
+
+`from` on a backfill (button or CSV) records an ended, never-signed **offline contract** for the real renter instead of history periods on the running contract (migration 000036); CSV works with no running contract; undo removes contract, periods and money; sign/renew/amend/terminate/pay refused on it; vacancy, holdovers, occupancy and projection baselines ignore it while revenue counts its money; labelled "Offline contract" in the tenant and renter apps (SW/EN); duplicate CSV headers are a file error. `phase30_test.go` (7 tests) plus the Phase 29 tests rewritten; full Go suite green except `TestRevenueTrendSlopeRises`, which also fails on `main` (date-dependent fixture, unrelated).

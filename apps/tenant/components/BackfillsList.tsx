@@ -11,6 +11,7 @@
  */
 
 import { Icon } from '@iconify/react';
+import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { TableScroll, useT } from '@tms/ui';
 import { Field, ProblemNote } from './FormBits';
@@ -78,7 +79,11 @@ export function BackfillsList({
       setUndoing(null);
       setDone(
         t('backfills.undo.done', { reversed: res.payments_reversed, reopened: res.periods_reopened }) +
-          (res.periods_removed ? ` ${t('backfills.undo.done_removed', { n: res.periods_removed })}` : ''),
+          (res.contract_removed
+            ? ` ${t('backfills.undo.done_contract')}`
+            : res.periods_removed
+              ? ` ${t('backfills.undo.done_removed', { n: res.periods_removed })}`
+              : ''),
       );
       await load();
       onChanged();
@@ -135,7 +140,17 @@ export function BackfillsList({
                 <td>{t(`backfill.mode.${b.mode}`)}</td>
                 <td>
                   {fmtDate(b.until)}
-                  {b.from ? (
+                  {b.created_contract_id && b.from ? (
+                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
+                      <Link href={`/contracts/${b.created_contract_id}`} style={{ color: 'inherit' }}>
+                        {t('backfills.offline', {
+                          from: fmtDate(b.from),
+                          to: fmtDate(b.offline_end ?? b.until),
+                          n: b.created_periods ?? 0,
+                        })}
+                      </Link>
+                    </div>
+                  ) : b.from ? (
                     <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
                       {t('backfills.from', { date: fmtDate(b.from), n: b.created_periods ?? 0 })}
                     </div>
@@ -194,9 +209,11 @@ export function BackfillsList({
                 {undoing.mode === 'paid'
                   ? t('backfills.undo.warning_paid', { count: undoing.periods, amount: fmtTZS(undoing.amount) })
                   : t('backfills.undo.warning_waived', { count: undoing.periods })}
-                {undoing.created_periods
-                  ? ` ${t('backfills.undo.warning_created', { n: undoing.created_periods })}`
-                  : ''}
+                {undoing.created_contract_id
+                  ? ` ${t('backfills.undo.warning_contract', { n: undoing.created_periods ?? 0 })}`
+                  : undoing.created_periods
+                    ? ` ${t('backfills.undo.warning_created', { n: undoing.created_periods })}`
+                    : ''}
               </span>
             </p>
             <Field

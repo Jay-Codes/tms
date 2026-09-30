@@ -50,5 +50,16 @@ export function ContractStamp({
 
 /** Convenience wrapper for a whole contract. */
 export function ContractStatusMark({ contract }: { contract: Contract }) {
-  return <ContractStamp status={contract.status} renterSigned={hasRenterSignature(contract)} />;
+  const t = useT();
+  return (
+    <>
+      <ContractStamp status={contract.status} renterSigned={hasRenterSignature(contract)} />
+      {/* Phase 30: recorded by the landlord from paper records. */}
+      {contract.is_offline ? (
+        <span className="stamp" style={{ marginLeft: 'var(--sp-2)' }}>
+          {t('contract.offline.chip')}
+        </span>
+      ) : null}
+    </>
+  );
 }

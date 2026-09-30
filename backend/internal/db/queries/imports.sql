@@ -124,7 +124,7 @@ LIMIT 2;
 SELECT * FROM contracts
 WHERE org_id = sqlc.arg(org_id) AND unit_id = sqlc.arg(unit_id)
   AND renter_user_id = sqlc.arg(renter_user_id) AND deleted_at IS NULL
-  AND status IN ('active', 'expiring', 'ended', 'terminated')
+  AND status IN ('active', 'expiring', 'ended', 'terminated') AND NOT is_offline
 ORDER BY start_date DESC, created_at DESC
 LIMIT 1;
 

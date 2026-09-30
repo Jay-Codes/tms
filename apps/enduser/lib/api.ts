@@ -575,6 +575,11 @@ export interface Contract {
   renter: { user_id: string; full_name: string; phone: string };
   template_id?: string | null;
   status: ContractStatus;
+  /**
+   * Phase 30 — a past tenancy the landlord recorded from paper records: never
+   * signed or issued in TMS, and it has no document.
+   */
+  is_offline?: boolean;
   /** The unit price basis: `rent_amount` per `rent_period_days`. */
   rent_amount: number;
   rent_period_days: number;
@@ -647,6 +652,8 @@ export interface ContractDocument {
     renter: { name: string; phone_masked?: string | null };
   };
   terms_html: string;
+  /** Phase 30 — an offline contract: `terms_html` is the notice, nothing to sign. */
+  offline?: boolean;
   schedule: DocumentScheduleRow[];
   signatures: DocumentSignature[];
   snapshot_hash: string;

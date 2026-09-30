@@ -715,6 +715,13 @@ func (s *Server) handleContractDocument(w http.ResponseWriter, r *http.Request) 
 		signatures = append(signatures, item)
 	}
 
+	// Phase 30: an offline contract has no document — its "terms" are the
+	// fixed notice and there is no schedule anyone agreed to.
+	schedule := []map[string]any{}
+	if !row.IsOffline {
+		schedule = s.documentSchedule(r, row)
+	}
+
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"contract_id": db.UUIDString(row.ID),
 		"status":      row.Status,
@@ -730,7 +737,8 @@ func (s *Server) handleContractDocument(w http.ResponseWriter, r *http.Request) 
 			},
 		},
 		"terms_html":    row.TermsSnapshotHtml,
-		"schedule":      s.documentSchedule(r, row),
+		"schedule":      schedule,
+		"offline":       row.IsOffline,
 		"signatures":    signatures,
 		"snapshot_hash": db.StrVal(row.SnapshotHash),
 		"generated_at":  time.Now().UTC(),
@@ -782,7 +790,7 @@ func (s *Server) handleContractSignOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := auth.MustFromContext(r.Context())
-	row, ok := s.loadContract(w, r)
+	row, ok := s.loadActionableContract(w, r)
 	if !ok {
 		return
 	}
@@ -865,7 +873,7 @@ func (s *Server) handleSignatureUpload(w http.ResponseWriter, r *http.Request) {
 	if s.dbUnavailable(w) {
 		return
 	}
-	row, ok := s.loadContract(w, r)
+	row, ok := s.loadActionableContract(w, r)
 	if !ok {
 		return
 	}
@@ -920,7 +928,7 @@ func (s *Server) handleSignContract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := auth.MustFromContext(r.Context())
-	row, ok := s.loadContract(w, r)
+	row, ok := s.loadActionableContract(w, r)
 	if !ok {
 		return
 	}
@@ -1096,7 +1104,7 @@ func (s *Server) handleActivateContract(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	p := auth.MustFromContext(r.Context())
-	row, ok := s.loadContract(w, r)
+	row, ok := s.loadActionableContract(w, r)
 	if !ok {
 		return
 	}
@@ -1279,7 +1287,7 @@ func (s *Server) handleTerminateContract(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	p := auth.MustFromContext(r.Context())
-	row, ok := s.loadContract(w, r)
+	row, ok := s.loadActionableContract(w, r)
 	if !ok {
 		return
 	}

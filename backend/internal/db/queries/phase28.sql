@@ -28,6 +28,7 @@ FROM payments p
 JOIN contracts c ON c.id = p.contract_id AND c.org_id = p.org_id
 JOIN units u     ON u.id = c.unit_id AND u.org_id = c.org_id
 WHERE p.org_id = sqlc.arg(org_id) AND p.deleted_at IS NULL AND p.status <> 'reversed'
+  AND NOT c.is_offline
   AND p.paid_at < sqlc.arg(to_ts)
   AND (sqlc.narg(property_id)::uuid IS NULL OR u.property_id = sqlc.narg(property_id)::uuid)
 GROUP BY 1, 2;
@@ -39,7 +40,7 @@ SELECT u.property_id AS property_id,
 FROM rent_refunds rf
 JOIN contracts c ON c.id = rf.contract_id AND c.org_id = rf.org_id
 JOIN units u     ON u.id = c.unit_id AND u.org_id = c.org_id
-WHERE rf.org_id = sqlc.arg(org_id)
+WHERE rf.org_id = sqlc.arg(org_id) AND NOT c.is_offline
   AND rf.refunded_at < sqlc.arg(to_ts)
   AND (sqlc.narg(property_id)::uuid IS NULL OR u.property_id = sqlc.narg(property_id)::uuid)
 GROUP BY 1, 2;
@@ -54,6 +55,7 @@ FROM payment_schedules s
 JOIN contracts c ON c.id = s.contract_id AND c.org_id = s.org_id
 JOIN units u     ON u.id = c.unit_id AND u.org_id = c.org_id
 WHERE s.org_id = sqlc.arg(org_id) AND s.deleted_at IS NULL AND s.status <> 'waived'
+  AND NOT c.is_offline
   AND s.due_date >= sqlc.arg(from_date) AND s.due_date < sqlc.arg(to_date)
   AND (sqlc.narg(property_id)::uuid IS NULL OR u.property_id = sqlc.narg(property_id)::uuid)
 GROUP BY 1, 2;
@@ -113,7 +115,7 @@ LEFT JOIN LATERAL (
     SELECT c.rent_amount, c.rent_period_days
     FROM contracts c
     WHERE c.unit_id = u.id AND c.org_id = u.org_id AND c.deleted_at IS NULL
-      AND c.status IN ('active', 'expiring', 'ended', 'terminated')
+      AND c.status IN ('active', 'expiring', 'ended', 'terminated') AND NOT c.is_offline
     ORDER BY c.start_date DESC, c.created_at DESC
     LIMIT 1
 ) lc ON true

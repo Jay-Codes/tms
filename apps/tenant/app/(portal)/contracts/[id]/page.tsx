@@ -701,21 +701,32 @@ function ContractBody({ id }: { id: string }) {
 
   const signedByRenter = renterSignature(contract);
   const signedByLandlord = landlordSignature(contract);
-  const canActivate = contract.status === 'pending_signature' && signedByRenter !== null;
-  const canTerminate = ['pending_signature', 'active', 'expiring'].includes(contract.status);
+  /** Phase 30 — an offline contract cannot be signed, renewed, amended or ended. */
+  const offline = Boolean(contract.is_offline);
+  const canActivate = !offline && contract.status === 'pending_signature' && signedByRenter !== null;
+  const canTerminate = !offline && ['pending_signature', 'active', 'expiring'].includes(contract.status);
   /** Phase 22.3 — only a contract nobody has signed can be written again. */
   const canReissue =
-    contract.status === 'pending_signature' && !signedByRenter && !signedByLandlord && !contract.amendment_effective_date;
+    !offline &&
+    contract.status === 'pending_signature' &&
+    !signedByRenter &&
+    !signedByLandlord &&
+    !contract.amendment_effective_date;
   /** Phase 22.4 — an amendment (or renewal) of another contract. */
   const isAmendment = Boolean(contract.amendment_effective_date && contract.supersedes_contract_id);
   const canAmend =
-    (contract.status === 'active' || contract.status === 'expiring') && !contract.superseded_by_contract_id;
+    !offline &&
+    (contract.status === 'active' || contract.status === 'expiring') &&
+    !contract.superseded_by_contract_id;
   /**
    * Phase 22.5 — a tenancy that ran out with nobody saying what happened
    * (a holdover): renew it on its end date, or confirm the unit is empty.
    */
   const holdover =
-    contract.status === 'ended' && !contract.superseded_by_contract_id && !contract.moved_out_confirmed_at;
+    !offline &&
+    contract.status === 'ended' &&
+    !contract.superseded_by_contract_id &&
+    !contract.moved_out_confirmed_at;
   const rows = schedules ?? [];
   const org = doc?.org;
   const summary = contract.schedules_summary;
@@ -725,7 +736,7 @@ function ContractBody({ id }: { id: string }) {
    * through, so money can land on it after move-out too.
    */
   const closed = contract.status === 'ended' || contract.status === 'terminated';
-  const canRecord = running || closed;
+  const canRecord = !offline && (running || closed);
   const owing = rows.filter(isUnsettled);
   const owingTotal = owing.reduce((sum, s) => sum + remainingOn(s), 0);
   const writtenOff = rows.filter((s) => s.status === 'written_off');
@@ -754,15 +765,18 @@ function ContractBody({ id }: { id: string }) {
               <Link href="/contracts" className="btn btn-quiet">
                 <Icon icon="solar:arrow-left-linear" width={20} /> {t('nav.contracts')}
               </Link>
-              <button type="button" className="btn btn-secondary" onClick={() => window.print()}>
-                <Icon icon="solar:printer-linear" width={20} /> {t('contracts.detail.print')}
-              </button>
+              {offline ? null : (
+                <button type="button" className="btn btn-secondary" onClick={() => window.print()}>
+                  <Icon icon="solar:printer-linear" width={20} /> {t('contracts.detail.print')}
+                </button>
+              )}
             </>
           }
         />
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
           <ContractStatusStamp status={contract.status} />
+          {offline ? <span className="stamp">{t('contracts.offline.chip')}</span> : null}
           {contract.superseded_by_contract_id ? (
             <span className="stamp">{t('contracts.amend.chip_replaced')}</span>
           ) : isAmendment ? (
@@ -898,6 +912,23 @@ function ContractBody({ id }: { id: string }) {
               {t('contracts.reissue.open_new')}
             </button>
           </p>
+        ) : null}
+
+        {/* Phase 30: recorded by a backfill; nothing here was ever issued. */}
+        {offline ? (
+          <div
+            role="status"
+            style={{
+              marginTop: 'var(--sp-4)',
+              padding: 'var(--sp-3) var(--sp-4)',
+              border: '1px solid var(--rule)',
+              borderLeft: '3px solid var(--primary)',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: 'var(--text-sm)',
+            }}
+          >
+            {t('contracts.offline.banner')}
+          </div>
         ) : null}
 
         {contract.termination_reason ? (
@@ -1167,9 +1198,10 @@ function ContractBody({ id }: { id: string }) {
             </div>
             <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
               {/* Phase 20.3 — offered on any running contract: history past
-                  its due date may be open, and since Phase 29
-                  the tenancy may also have begun before this contract. */}
-              {running ? (
+                  its due date may be open, and since Phase 30
+                  the tenancy may also have begun before this contract, which
+                  records an offline contract. */}
+              {running && !offline ? (
                 <button type="button" className="btn btn-quiet" onClick={() => setBackfillOpen(true)}>
                   <Icon icon="solar:history-linear" width={20} /> {t('backfill.open')}
                 </button>

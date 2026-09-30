@@ -150,6 +150,10 @@ export function ContractsTable({
                 ) : c.amendment_effective_date ? (
                   <span className="stamp" style={{ marginLeft: 'var(--sp-2)' }}>{t('contracts.amend.chip')}</span>
                 ) : null}
+                {/* Phase 30 — recorded from paper records, never signed in TMS. */}
+                {c.is_offline ? (
+                  <span className="stamp" style={{ marginLeft: 'var(--sp-2)' }}>{t('contracts.offline.chip')}</span>
+                ) : null}
                 {isReadyToCountersign(c) ? (
                   <div style={{ fontSize: 'var(--text-xs)', color: 'var(--primary)' }}>ready to countersign</div>
                 ) : null}

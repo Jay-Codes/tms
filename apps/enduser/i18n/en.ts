@@ -211,6 +211,8 @@ const messages: Messages = {
   'contract.status.active': 'Active',
   'contract.status.expiring': 'Ending soon',
   'contract.status.ended': 'Ended',
+  'contract.offline.chip': 'Offline contract',
+  'contract.offline.banner': 'Offline contract - recorded by your landlord from paper records, not signed in TMS; no document.',
   'contract.status.terminated': 'Terminated',
   'contract.status.draft': 'Draft',
 

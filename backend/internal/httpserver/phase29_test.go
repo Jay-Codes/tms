@@ -9,12 +9,14 @@ import (
 	"tms/backend/internal/contract"
 )
 
-// Phase 29 — a backfill that reaches back before the contract's start date.
+// Phase 29 introduced `from`; Phase 30 changed what it does: instead of
+// inventing periods before the running contract's start, it records an
+// OFFLINE CONTRACT for the same renter and unit. These tests keep the Phase 29
+// scenarios (they are still the right ones) with the Phase 30 expectations;
+// phase30_test.go covers the rest of the offline contract.
 //
 // The fixture is a fresh contract (starting about today), the shape a landlord
-// onboarding a long-standing renter actually has. `from` puts the real move-in
-// on it; the assertions are about the periods that appear, which of them are
-// settled, and that an undo leaves the book exactly as it was.
+// onboarding a long-standing renter actually has.
 
 // history29 is what the tests need to know about the fixture's contract.
 type history29 struct {
@@ -53,8 +55,8 @@ func (h *harness) scheduleCount29(t *testing.T, contractID string) int {
 const date29 = "2006-01-02"
 
 // TestPhase29BackfillFromCreatesAndSettlesHistory is the main path: 90 days of
-// history at an older rent, settled up to a date inside it, the rest overdue,
-// and the undo removes the lot.
+// history at an older rent become an offline contract, every period paid, the
+// running contract untouched, and the undo removes the lot.
 func TestPhase29BackfillFromCreatesAndSettlesHistory(t *testing.T) {
 	h := newHarness(t)
 	fix := h.newPaymentFixture(t, "History", "0729000100", "+255729000101")
@@ -62,16 +64,12 @@ func TestPhase29BackfillFromCreatesAndSettlesHistory(t *testing.T) {
 	before := h.scheduleCount29(t, fix.contractID)
 
 	from := c.start.AddDate(0, 0, -90)
-	until := from.AddDate(0, 0, c.cadence) // the first two periods
+	until := c.start.AddDate(0, 0, -1)
 	const oldRent = 60_000
 	want := contract.Generate(oldRent, c.cadence, 90, c.cadence, from, c.dueDay)
-	var wantSettled int
 	var wantTotal int64
 	for _, r := range want {
-		if !r.DueDate.After(until) {
-			wantSettled++
-			wantTotal += r.Amount
-		}
+		wantTotal += r.Amount
 	}
 
 	body := map[string]any{
@@ -85,11 +83,11 @@ func TestPhase29BackfillFromCreatesAndSettlesHistory(t *testing.T) {
 	if got := int(mustFloat(t, dry.Body, "created")); got != len(want) {
 		t.Errorf("dry run created = %d, want %d", got, len(want))
 	}
-	if got := int(mustFloat(t, dry.Body, "settled")); got != wantSettled {
-		t.Errorf("dry run settled = %d, want %d", got, wantSettled)
+	if got := int(mustFloat(t, dry.Body, "settled")); got != len(want) {
+		t.Errorf("dry run settled = %d, want %d", got, len(want))
 	}
-	if got := h.scheduleCount29(t, fix.contractID); got != before {
-		t.Fatalf("schedules after a dry run = %d, want %d (nothing written)", got, before)
+	if got := len(h.offlineContracts30(t, fix.unitIDs[0])); got != 0 {
+		t.Fatalf("offline contracts after a dry run = %d, want 0 (nothing written)", got)
 	}
 	if got := len(backfillList29(t, fix)); got != 0 {
 		t.Fatalf("backfills after a dry run = %d, want 0", got)
@@ -100,50 +98,59 @@ func TestPhase29BackfillFromCreatesAndSettlesHistory(t *testing.T) {
 	if got := int(mustFloat(t, done.Body, "created")); got != len(want) {
 		t.Errorf("created = %d, want %d", got, len(want))
 	}
-	if got := int(mustFloat(t, done.Body, "settled")); got != wantSettled {
-		t.Errorf("settled = %d, want %d", got, wantSettled)
+	if got := int(mustFloat(t, done.Body, "settled")); got != len(want) {
+		t.Errorf("settled = %d, want %d", got, len(want))
 	}
 	if got := int64(mustFloat(t, done.Body, "total")); got != wantTotal {
 		t.Errorf("total = %d, want %d at the old rent", got, wantTotal)
 	}
-	if got := h.scheduleCount29(t, fix.contractID); got != before+len(want) {
-		t.Errorf("schedules = %d, want %d", got, before+len(want))
+	// The running contract's own book is exactly what it was.
+	if got := h.scheduleCount29(t, fix.contractID); got != before {
+		t.Errorf("running contract schedules = %d, want %d (untouched)", got, before)
 	}
 
-	// The created periods sit first in the book: settled up to `until`, the
-	// rest overdue — the truth until someone says otherwise.
-	rows := listOf(t, fix.owner.do(http.MethodGet, "/contracts/"+fix.contractID+"/schedules", nil).
-		mustStatus(t, http.StatusOK, "schedules"))
+	offs := h.offlineContracts30(t, fix.unitIDs[0])
+	if len(offs) != 1 {
+		t.Fatalf("offline contracts = %d, want 1", len(offs))
+	}
+	off := offs[0]
+	if off.id != done.str(t, "offline_contract_id") {
+		t.Errorf("offline_contract_id = %s, want %s", done.str(t, "offline_contract_id"), off.id)
+	}
+
+	// Its periods, first to last: from `from`, every one paid.
+	rows := listOf(t, fix.owner.do(http.MethodGet, "/contracts/"+off.id+"/schedules", nil).
+		mustStatus(t, http.StatusOK, "offline schedules"))
+	if len(rows) != len(want) {
+		t.Fatalf("offline periods = %d, want %d", len(rows), len(want))
+	}
 	for i, r := range want {
 		got := rows[i]
 		if got["period_start"] != r.PeriodStart.Format(date29) {
 			t.Errorf("row %d period_start = %v, want %s", i, got["period_start"], r.PeriodStart.Format(date29))
 		}
-		wantStatus := "overdue"
-		if !r.DueDate.After(until) {
-			wantStatus = "paid"
-		}
-		if got["status"] != wantStatus {
-			t.Errorf("row %d status = %v, want %s", i, got["status"], wantStatus)
+		if got["status"] != "paid" {
+			t.Errorf("row %d status = %v, want paid", i, got["status"])
 		}
 	}
 
-	// The contract document lists the signed terms, not the history.
+	// The running contract's document lists its own terms only.
 	doc := fix.owner.do(http.MethodGet, "/contracts/"+fix.contractID+"/document", nil).
 		mustStatus(t, http.StatusOK, "document")
 	if sched, _ := doc.Body["schedule"].([]any); len(sched) != before {
-		t.Errorf("document schedule rows = %d, want %d (no created history)", len(sched), before)
+		t.Errorf("document schedule rows = %d, want %d", len(sched), before)
 	}
 
 	item := backfillList29(t, fix)[0]
-	if item["from"] != from.Format(date29) || int(mustFloat(t, item, "created_periods")) != len(want) {
-		t.Errorf("list item = %v, want from and created_periods", item)
+	if item["from"] != from.Format(date29) || int(mustFloat(t, item, "created_periods")) != len(want) ||
+		item["created_contract_id"] != off.id || item["offline_end"] != until.Format(date29) {
+		t.Errorf("list item = %v, want from, created_periods, created_contract_id, offline_end", item)
 	}
 
-	// A second `from` would overlap the first.
+	// The same stretch again would overlap the contract just recorded.
 	again := fix.owner.do(http.MethodPost, "/contracts/"+fix.contractID+"/backfill", body)
-	if again.Code != http.StatusConflict || again.Body["type"] != "history_exists" {
-		t.Errorf("second from = %d %v, want 409 history_exists", again.Code, again.Body["type"])
+	if again.Code != http.StatusConflict || again.Body["type"] != "offline_overlap" {
+		t.Errorf("second from = %d %v, want 409 offline_overlap", again.Code, again.Body["type"])
 	}
 
 	undone := fix.owner.do(http.MethodPost, "/backfills/"+done.str(t, "backfill_id")+"/undo",
@@ -151,42 +158,63 @@ func TestPhase29BackfillFromCreatesAndSettlesHistory(t *testing.T) {
 	if got := int(mustFloat(t, undone.Body, "periods_removed")); got != len(want) {
 		t.Errorf("periods_removed = %d, want %d", got, len(want))
 	}
+	if undone.Body["contract_removed"] != true {
+		t.Errorf("contract_removed = %v, want true", undone.Body["contract_removed"])
+	}
+	if got := len(h.offlineContracts30(t, fix.unitIDs[0])); got != 0 {
+		t.Errorf("offline contracts after the undo = %d, want 0", got)
+	}
 	if got := h.scheduleCount29(t, fix.contractID); got != before {
 		t.Errorf("schedules after the undo = %d, want %d", got, before)
 	}
-	// With the history gone, `from` is allowed again.
+	// With the contract gone, the same `from` is allowed again.
 	fix.owner.do(http.MethodPost, "/contracts/"+fix.contractID+"/backfill", body).
 		mustStatus(t, http.StatusOK, "backfill from again after the undo")
 }
 
-// TestPhase29UntilAloneSettlesCreatedHistory: once history exists, a later
-// call without `from` can settle more of it, and may name a date before the
-// contract's start.
-func TestPhase29UntilAloneSettlesCreatedHistory(t *testing.T) {
+// TestPhase29UntilAloneStillSettlesTheRunningContract: a call without `from`
+// is the Phase 20 settlement, and stretches that touch each other are fine.
+func TestPhase29UntilAloneStillSettlesTheRunningContract(t *testing.T) {
 	h := newHarness(t)
 	fix := h.newPaymentFixture(t, "HistoryLater", "0729000200", "+255729000201")
 	c := h.contractHistory29(t, fix.contractID)
 	from := c.start.AddDate(0, 0, -90)
 
+	// Two stretches that meet: the first ends where the second begins.
 	fix.owner.do(http.MethodPost, "/contracts/"+fix.contractID+"/backfill", map[string]any{
-		"until": from.Format(date29), "mode": "paid", "from": from.Format(date29),
-	}).mustStatus(t, http.StatusOK, "first period only")
-
-	later := fix.owner.do(http.MethodPost, "/contracts/"+fix.contractID+"/backfill", map[string]any{
-		"until": c.start.AddDate(0, 0, -1).Format(date29), "mode": "waived", "note": "landlord forgave",
-	}).mustStatus(t, http.StatusOK, "waive the rest of the history")
-	if got := int(mustFloat(t, later.Body, "settled")); got < 1 {
-		t.Errorf("settled = %d, want the remaining history periods", got)
+		"until": from.AddDate(0, 0, 29).Format(date29), "mode": "paid", "from": from.Format(date29),
+		"period_amount": 50_000,
+	}).mustStatus(t, http.StatusOK, "first stretch")
+	fix.owner.do(http.MethodPost, "/contracts/"+fix.contractID+"/backfill", map[string]any{
+		"until": c.start.AddDate(0, 0, -1).Format(date29), "mode": "paid",
+		"from": from.AddDate(0, 0, 30).Format(date29), "period_amount": 50_000,
+	}).mustStatus(t, http.StatusOK, "second stretch, adjacent")
+	if got := len(h.offlineContracts30(t, fix.unitIDs[0])); got != 2 {
+		t.Errorf("offline contracts = %d, want 2", got)
 	}
-	if got := int(mustFloat(t, later.Body, "created")); got != 0 {
-		t.Errorf("created = %d, want 0 without from", got)
+
+	// A stretch that overlaps one of them is a 409 naming it.
+	clash := fix.owner.do(http.MethodPost, "/contracts/"+fix.contractID+"/backfill", map[string]any{
+		"until": from.AddDate(0, 0, 40).Format(date29), "mode": "paid",
+		"from": from.AddDate(0, 0, 20).Format(date29), "period_amount": 50_000,
+	})
+	if clash.Code != http.StatusConflict || clash.Body["type"] != "offline_overlap" {
+		t.Errorf("overlapping from = %d %v, want 409 offline_overlap", clash.Code, clash.Body["type"])
+	}
+
+	// No `from`: the running contract's periods, as ever.
+	got := fix.owner.do(http.MethodPost, "/contracts/"+fix.contractID+"/backfill", map[string]any{
+		"until": c.start.Format(date29), "mode": "paid",
+	}).mustStatus(t, http.StatusOK, "until alone")
+	if int(mustFloat(t, got.Body, "created")) != 0 || got.Body["offline_contract_id"] != nil {
+		t.Errorf("until alone created something: %v", got.Body)
 	}
 
 	early := fix.owner.do(http.MethodPost, "/contracts/"+fix.contractID+"/backfill", map[string]any{
 		"until": from.AddDate(0, 0, -1).Format(date29), "mode": "paid",
 	})
 	if early.Code != http.StatusUnprocessableEntity {
-		t.Errorf("until before the first period = %d, want 422", early.Code)
+		t.Errorf("until before the contract's start, no from = %d, want 422", early.Code)
 	}
 }
 
@@ -234,46 +262,45 @@ func TestPhase29BackfillFromValidation(t *testing.T) {
 	if got := h.scheduleCount29(t, fix.contractID); got != len(fix.scheduleIDs) {
 		t.Errorf("schedules after refusals = %d, want %d", got, len(fix.scheduleIDs))
 	}
+	if got := len(h.offlineContracts30(t, fix.unitIDs[0])); got != 0 {
+		t.Errorf("offline contracts after refusals = %d, want 0", got)
+	}
 }
 
-// TestPhase29UndoRefusedWhenCreatedPeriodTouched: real money later recorded on
-// a created period that the backfill left overdue blocks the undo — removing
-// the period would orphan that money.
-func TestPhase29UndoRefusedWhenCreatedPeriodTouched(t *testing.T) {
+// TestPhase29UndoRefusedWhenTheOfflineContractIsTouched: an edit to the
+// offline contract's periods made after the backfill blocks the undo — taking
+// the contract away would discard that edit.
+func TestPhase29UndoRefusedWhenTheOfflineContractIsTouched(t *testing.T) {
 	h := newHarness(t)
 	fix := h.newPaymentFixture(t, "HistoryTouched", "0729000400", "+255729000401")
 	c := h.contractHistory29(t, fix.contractID)
 	from := c.start.AddDate(0, 0, -90)
 
 	done := fix.owner.do(http.MethodPost, "/contracts/"+fix.contractID+"/backfill", map[string]any{
-		"until": from.Format(date29), "mode": "paid", "from": from.Format(date29),
-	}).mustStatus(t, http.StatusOK, "backfill the first period")
+		"until": c.start.AddDate(0, 0, -1).Format(date29), "mode": "paid", "from": from.Format(date29),
+		"period_amount": 45_000,
+	}).mustStatus(t, http.StatusOK, "backfill the stretch")
+	off := h.offlineContracts30(t, fix.unitIDs[0])[0]
 
-	var overdue map[string]any
-	for _, r := range listOf(t, fix.owner.do(http.MethodGet, "/contracts/"+fix.contractID+"/schedules", nil).
-		mustStatus(t, http.StatusOK, "schedules")) {
-		if r["status"] == "overdue" {
-			overdue = r
-			break
-		}
+	if _, err := h.pool.Exec(context.Background(),
+		`UPDATE payment_schedules SET amount = amount + 1
+		 WHERE id = (SELECT id FROM payment_schedules WHERE contract_id = $1 ORDER BY period_start LIMIT 1)`,
+		off.id); err != nil {
+		t.Fatalf("edit an offline period: %v", err)
 	}
-	if overdue == nil {
-		t.Fatal("no overdue created period to pay")
-	}
-	fix.owner.recordPayment(map[string]any{
-		"contract_id": fix.contractID, "schedule_id": overdue["id"],
-		"amount": int64(mustFloat(t, overdue, "amount")), "method": "cash",
-	}).mustStatus(t, http.StatusCreated, "real money on a created period")
 
 	refused := fix.owner.do(http.MethodPost, "/backfills/"+done.str(t, "backfill_id")+"/undo",
 		map[string]any{"reason": "try"})
 	if refused.Code != http.StatusConflict || refused.Body["type"] != "touched_since" {
 		t.Fatalf("undo = %d %v, want 409 touched_since", refused.Code, refused.Body["type"])
 	}
+	if item := backfillList29(t, fix)[0]; item["touched"] != true || item["can_undo"] != false {
+		t.Errorf("list item = %v, want touched and not undoable", item)
+	}
 }
 
 // TestPhase29BackfillImportFrom: the CSV's `from` and `period_amount` columns
-// preview the created periods and commit them.
+// preview the offline contract's periods and commit them.
 func TestPhase29BackfillImportFrom(t *testing.T) {
 	h := newHarness(t)
 	fix := h.newPaymentFixture(t, "HistoryCSV", "0729000500", "+255729000501")
@@ -302,8 +329,15 @@ func TestPhase29BackfillImportFrom(t *testing.T) {
 
 	fix.owner.do(http.MethodPost, "/imports/"+preview.str(t, "batch", "id")+"/commit", nil).
 		mustStatus(t, http.StatusOK, "commit")
-	if got := h.scheduleCount29(t, fix.contractID); got != len(fix.scheduleIDs)+len(want) {
-		t.Errorf("schedules = %d, want %d", got, len(fix.scheduleIDs)+len(want))
+	offs := h.offlineContracts30(t, fix.unitIDs[0])
+	if len(offs) != 1 {
+		t.Fatalf("offline contracts = %d, want 1", len(offs))
+	}
+	if got := h.scheduleCount29(t, fix.contractID); got != len(fix.scheduleIDs) {
+		t.Errorf("running contract schedules = %d, want %d", got, len(fix.scheduleIDs))
+	}
+	if got := h.scheduleCount29(t, offs[0].id); got != len(want) {
+		t.Errorf("offline schedules = %d, want %d", got, len(want))
 	}
 
 	// `period_amount` alone is a row error.

@@ -444,7 +444,7 @@ SELECT u.id AS unit_id, u.name AS unit_name, pr.name AS property_name,
        GREATEST(CURRENT_DATE - COALESCE(
            (SELECT max(c.end_date) FROM contracts c
             WHERE c.org_id = u.org_id AND c.unit_id = u.id AND c.deleted_at IS NULL
-              AND c.status IN ('ended', 'terminated')),
+              AND c.status IN ('ended', 'terminated') AND NOT c.is_offline),
            u.created_at::date), 0)::int AS days_vacant
 FROM units u
 JOIN properties pr ON pr.id = u.property_id AND pr.org_id = u.org_id
