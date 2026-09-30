@@ -266,6 +266,8 @@ function DocumentContent() {
       {needsSignature && (
         <Notice>{t('doc.readThenSign')}</Notice>
       )}
+      {/* Phase 30: the landlord recorded this from paper records. */}
+      {(doc.offline || contract?.is_offline) && <Notice>{t('contract.offline.banner')}</Notice>}
       {/* Phase 22.5: notice to leave — the standing one, or a way to give it. */}
       {running && contract?.notice_leave_on && (
         <Notice>

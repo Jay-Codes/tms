@@ -15,11 +15,12 @@
  * one owes and what the total is are the server's answer, and the result panel
  * prints its numbers, not these.
  *
- * Phase 29: when the tenancy began before this contract (the landlord signed a
- * fresh one on joining TMS and keeps the paper original), "Began earlier" takes
- * the real move-in date and the rent back then. The server creates those
- * periods; the preview then comes from a dry run, because the rows do not
- * exist on this page yet.
+ * Phase 30: when the tenancy began before this contract (the landlord signed a
+ * fresh one on joining TMS and keeps the paper original), "Record an offline
+ * contract" takes the real move-in date and the rent back then. The server
+ * records an ended, never-signed offline contract for the same renter and
+ * settles its periods; the preview then comes from a dry run, because that
+ * contract does not exist yet.
  */
 
 import { Icon } from '@iconify/react';
@@ -280,7 +281,9 @@ export function BackfillSheet({
                 <input type="checkbox" checked={fromOn} onChange={(e) => setFromOn(e.target.checked)} />
                 {t('backfill.from.toggle', { date: fmtDate(startDate) })}
               </label>
-              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>{t('backfill.from.lead')}</span>
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>
+                {t('backfill.from.lead', { date: fmtDate(startDate) })}
+              </span>
             </div>
           ) : null}
 
