@@ -129,6 +129,7 @@ FROM contracts c
 JOIN units u ON u.id = c.unit_id AND u.org_id = c.org_id
 WHERE c.org_id = sqlc.arg(org_id) AND c.deleted_at IS NULL
   AND c.status IN ('active', 'expiring', 'ended', 'terminated')
+  AND NOT c.is_offline
   AND c.start_date < sqlc.arg(to_date)
   AND (sqlc.narg(property_id)::uuid IS NULL OR u.property_id = sqlc.narg(property_id)::uuid);
 

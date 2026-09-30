@@ -115,7 +115,7 @@ var columns = map[string][]Column{
 	// Phase 26: one line per tenancy, each settled exactly as the contract
 	// page's Backfill button would settle it.
 	KindBackfill: {
-		{Name: "renter_phone", Required: true, Example: "0712000001", Help: "the renter of the running contract"},
+		{Name: "renter_phone", Required: true, Example: "0712000001", Help: "the renter, already in TMS"},
 		{Name: "unit_code", Required: true, Example: "7K3M9QX2PA", Help: "the code on the unit's QR sticker"},
 		{Name: "until", Required: true, Example: "2026-08-31",
 			Help: "settle every period due on or before this date (YYYY-MM-DD)"},
@@ -127,12 +127,13 @@ var columns = map[string][]Column{
 		{Name: "reference", Required: false, Example: "OLD-BOOK", Help: "receipt or book reference"},
 		{Name: "note", Required: false, Example: "from the paper rent book",
 			Help: "free text; required when mode is waived"},
-		// Phase 29: reach back before the contract's start date.
+		// Phase 30: an offline contract, recorded from the paper records.
 		{Name: "from", Required: false, Example: "",
-			Help: "real move-in date (YYYY-MM-DD) when the tenancy began before the contract's start; " +
-				"the missing periods are created from it"},
+			Help: "move-in date (YYYY-MM-DD) from the paper contract; records an offline contract from it " +
+				"to until (or the day before the running contract starts). Needed when the renter has no running contract"},
 		{Name: "period_amount", Required: false, Example: "",
-			Help: "rent per payment period back then, whole shillings (default: the contract's); only with from"},
+			Help: "rent per payment period on the paper contract, whole shillings; only with from " +
+				"(default: the renter's running contract's; required without one)"},
 	},
 }
 
@@ -192,6 +193,9 @@ type Row struct {
 type HeaderError struct {
 	Missing []string
 	Unknown []string
+	// Duplicate names a column that appears twice: silently keeping the first
+	// would drop the later column's data without a word.
+	Duplicate []string
 }
 
 func (e *HeaderError) Error() string {
@@ -201,6 +205,9 @@ func (e *HeaderError) Error() string {
 	}
 	if len(e.Unknown) > 0 {
 		parts = append(parts, "unknown: "+strings.Join(e.Unknown, ", "))
+	}
+	if len(e.Duplicate) > 0 {
+		parts = append(parts, "duplicate: "+strings.Join(e.Duplicate, ", "))
 	}
 	return "csv header does not match the template (" + strings.Join(parts, "; ") + ")"
 }
@@ -379,14 +386,15 @@ func blank(rec []string) bool {
 }
 
 // matchHeader maps each known column to its position, case-insensitively and
-// ignoring surrounding space. A duplicate header keeps the first occurrence.
+// ignoring surrounding space. A column named twice is a file error (Phase 30):
+// keeping the first would silently drop the later column's data.
 func matchHeader(cols []Column, header []string) (map[string]int, *HeaderError) {
 	known := make(map[string]bool, len(cols))
 	for _, c := range cols {
 		known[c.Name] = true
 	}
 	index := map[string]int{}
-	var unknown []string
+	var unknown, duplicate []string
 	for i, h := range header {
 		name := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(h, string(bom))))
 		switch {
@@ -394,8 +402,10 @@ func matchHeader(cols []Column, header []string) (map[string]int, *HeaderError) 
 			if name != "" {
 				unknown = append(unknown, strings.TrimSpace(h))
 			}
-		case index[name] == 0 && !hasIndex(index, name):
+		case !hasIndex(index, name):
 			index[name] = i
+		default:
+			duplicate = append(duplicate, name)
 		}
 	}
 	var missing []string
@@ -407,8 +417,8 @@ func matchHeader(cols []Column, header []string) (map[string]int, *HeaderError) 
 			missing = append(missing, c.Name)
 		}
 	}
-	if len(missing) > 0 || len(unknown) > 0 {
-		return nil, &HeaderError{Missing: missing, Unknown: unknown}
+	if len(missing) > 0 || len(unknown) > 0 || len(duplicate) > 0 {
+		return nil, &HeaderError{Missing: missing, Unknown: unknown, Duplicate: duplicate}
 	}
 	return index, nil
 }
@@ -614,8 +624,8 @@ type BackfillRow struct {
 	Method    string
 	Reference string
 	Note      string
-	// From is zero unless the line reaches back before the contract's start
-	// (Phase 29); PeriodAmount is zero for "the contract's own rent".
+	// From is zero unless the line records an offline contract (Phase 30);
+	// PeriodAmount is zero for "the running contract's own rent".
 	From         time.Time
 	PeriodAmount int64
 }
@@ -682,7 +692,7 @@ func ParseBackfillRow(raw map[string]string) (BackfillRow, RowErrors) {
 	}
 	out.PeriodAmount = money(errs, "period_amount", raw["period_amount"], false)
 	if out.PeriodAmount > 0 && strings.TrimSpace(raw["from"]) == "" {
-		errs.Add("period_amount", "only with from: it is the rent for the periods from creates")
+		errs.Add("period_amount", "only with from: it is the rent per period of the offline contract")
 	}
 	return out, errs
 }

@@ -224,7 +224,7 @@ func (s *Server) handleGiveNotice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := auth.MustFromContext(r.Context())
-	row, ok := s.loadContract(w, r)
+	row, ok := s.loadActionableContract(w, r)
 	if !ok {
 		return
 	}
@@ -305,7 +305,7 @@ func (s *Server) handleWithdrawNotice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := auth.MustFromContext(r.Context())
-	row, ok := s.loadContract(w, r)
+	row, ok := s.loadActionableContract(w, r)
 	if !ok {
 		return
 	}
@@ -369,7 +369,7 @@ func (s *Server) handleConfirmMovedOut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := auth.MustFromContext(r.Context())
-	row, ok := s.loadContract(w, r)
+	row, ok := s.loadActionableContract(w, r)
 	if !ok {
 		return
 	}
@@ -438,7 +438,7 @@ func (s *Server) handleOpenEviction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := auth.MustFromContext(r.Context())
-	row, ok := s.loadContract(w, r)
+	row, ok := s.loadActionableContract(w, r)
 	if !ok {
 		return
 	}

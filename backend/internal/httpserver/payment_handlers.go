@@ -112,6 +112,11 @@ func (s *Server) handleRecordPayment(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "payment.record.contract", err)
 		return
 	}
+	// Phase 30: an offline contract's book is closed; corrections go through
+	// the backfill's undo, not a new payment.
+	if refuseOffline(w, contract.IsOffline) {
+		return
+	}
 	dups, err := s.possibleDuplicates(r.Context(), p.OrgID, contractID, body.Amount, paidAt, reference, pgtype.UUID{})
 	if err != nil {
 		s.serverError(w, r, "payment.record.duplicates", err)

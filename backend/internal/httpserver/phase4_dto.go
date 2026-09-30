@@ -108,13 +108,16 @@ type schedulesSummary struct {
 
 // contractResponse is the `contract` shape from API.md.
 type contractResponse struct {
-	ID             string         `json:"id"`
-	Unit           contractUnit   `json:"unit"`
-	Renter         contractRenter `json:"renter"`
-	TemplateID     *string        `json:"template_id"`
-	Status         string         `json:"status"`
-	RentAmount     int64          `json:"rent_amount"`
-	RentPeriodDays int32          `json:"rent_period_days"`
+	ID         string         `json:"id"`
+	Unit       contractUnit   `json:"unit"`
+	Renter     contractRenter `json:"renter"`
+	TemplateID *string        `json:"template_id"`
+	Status     string         `json:"status"`
+	// IsOffline (Phase 30): recorded by a backfill from the landlord's paper
+	// records; never signed or issued in TMS and has no document to sign.
+	IsOffline      bool  `json:"is_offline"`
+	RentAmount     int64 `json:"rent_amount"`
+	RentPeriodDays int32 `json:"rent_period_days"`
 	// RentPerPeriod is rent_amount scaled from rent_period_days to the payment
 	// period, with the schedule's rounding: the figure the document states and
 	// the amount a full schedule row carries. Derived, never stored — the
@@ -231,6 +234,7 @@ func toContract(r contractRow, signatures []signatureBlock) contractResponse {
 		Unit:           contractUnit{ID: db.UUIDString(r.UnitID), Name: r.UnitName, PropertyName: r.PropertyName},
 		Renter:         contractRenter{UserID: db.UUIDString(r.RenterUserID), FullName: r.RenterName, Phone: r.RenterPhone},
 		Status:         r.Status,
+		IsOffline:      r.IsOffline,
 		RentAmount:     r.RentAmount,
 		RentPeriodDays: r.RentPeriodDays,
 		RentPerPeriod: contract.RentPerPeriod(

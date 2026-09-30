@@ -227,12 +227,13 @@ func writeImportParseError(w http.ResponseWriter, err error) bool {
 		w.Header().Set("Content-Type", httpx.ProblemContentType)
 		w.WriteHeader(http.StatusBadRequest)
 		WriteRawJSON(w, map[string]any{
-			"type":    "csv_header_mismatch",
-			"title":   "the header row does not match the template",
-			"status":  http.StatusBadRequest,
-			"detail":  he.Error(),
-			"missing": stringsOrEmpty(he.Missing),
-			"unknown": stringsOrEmpty(he.Unknown),
+			"type":      "csv_header_mismatch",
+			"title":     "the header row does not match the template",
+			"status":    http.StatusBadRequest,
+			"detail":    he.Error(),
+			"missing":   stringsOrEmpty(he.Missing),
+			"unknown":   stringsOrEmpty(he.Unknown),
+			"duplicate": stringsOrEmpty(he.Duplicate),
 		})
 		return false
 	}
@@ -586,6 +587,7 @@ type importRow struct {
 	unitID         pgtype.UUID
 	unitName       string
 	renterUserID   pgtype.UUID
+	renterPhone    string // Phase 30: the account's number, for the backfill_done text
 	createRenter   bool
 	locale         string
 	contractID     pgtype.UUID

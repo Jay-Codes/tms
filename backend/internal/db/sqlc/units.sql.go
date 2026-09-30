@@ -115,7 +115,7 @@ LEFT JOIN LATERAL (
     SELECT max(c.end_date) AS last_end
     FROM contracts c
     WHERE c.unit_id = u.id AND c.org_id = u.org_id AND c.deleted_at IS NULL
-      AND c.status IN ('ended', 'terminated')
+      AND c.status IN ('ended', 'terminated') AND NOT c.is_offline
 ) lc ON true
 WHERE u.org_id = $1 AND u.id = $2 AND u.deleted_at IS NULL
 `
@@ -261,7 +261,7 @@ LEFT JOIN LATERAL (
     SELECT max(c.end_date) AS last_end
     FROM contracts c
     WHERE c.unit_id = u.id AND c.org_id = u.org_id AND c.deleted_at IS NULL
-      AND c.status IN ('ended', 'terminated')
+      AND c.status IN ('ended', 'terminated') AND NOT c.is_offline
 ) lc ON true
 WHERE u.org_id = $1 AND u.deleted_at IS NULL
   AND ($2::text IS NULL OR u.status = $2::text)

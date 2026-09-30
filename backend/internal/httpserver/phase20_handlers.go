@@ -129,7 +129,7 @@ func (s *Server) handleContractBackfill(w http.ResponseWriter, r *http.Request) 
 		periodAmount = *body.PeriodAmount
 		switch {
 		case from.IsZero() && strings.TrimSpace(body.From) == "":
-			f.Add("period_amount", "only with from: it is the rent for the periods from creates")
+			f.Add("period_amount", "only with from: it is the rent per period of the offline contract")
 		case periodAmount <= 0 || periodAmount >= backfillHistoryPeriodAmountMax:
 			f.Add("period_amount", "must be a positive whole-shilling amount")
 		}
@@ -146,19 +146,18 @@ func (s *Server) handleContractBackfill(w http.ResponseWriter, r *http.Request) 
 	}
 	// 422, not 400: the request parsed and its fields are well formed — it is
 	// the combination with the contract that cannot be honoured (API.md).
-	problems, err := backfillWindow(r.Context(), s.q, contract, until, from)
-	switch {
-	case errors.Is(err, errBackfillHistoryExists):
-		conflictCode(w, "history_exists", "periods before the start already exist",
-			"this contract already has periods before its start date; settle them with until alone, "+
-				"or undo the backfill that created them first")
-		return
-	case err != nil:
-		s.serverError(w, r, "contract.backfill.window", err)
-		return
-	case !problems.Empty():
-		unprocessable(w, problems)
-		return
+	// With `from` the whole check is the offline plan's, run in the
+	// transaction below.
+	if from.IsZero() {
+		problems, err := backfillWindow(r.Context(), s.q, contract, until)
+		switch {
+		case err != nil:
+			s.serverError(w, r, "contract.backfill.window", err)
+			return
+		case !problems.Empty():
+			unprocessable(w, problems)
+			return
+		}
 	}
 
 	org, err := s.q.GetOrg(r.Context(), contract.OrgID)
@@ -170,7 +169,8 @@ func (s *Server) handleContractBackfill(w http.ResponseWriter, r *http.Request) 
 	brand := s.brandingAssets(r.Context(), contract.OrgID, org.Name)
 
 	req := backfillRequest{
-		OrgID: contract.OrgID, ActorUserID: p.UserID, Contract: contract,
+		OrgID: contract.OrgID, ActorUserID: p.UserID, Contract: &contract, UnitRunning: &contract,
+		Party: partyOfContract(contract),
 		Until: until, Mode: mode, Method: method, Reference: reference, Note: note,
 		PerRowPaidAt: perRowPaidAt, PaidAt: flatPaidAt,
 		OrgName: brand.DisplayName, Settings: settings,
@@ -186,7 +186,12 @@ func (s *Server) handleContractBackfill(w http.ResponseWriter, r *http.Request) 
 		}
 		return err
 	})
-	if err != nil && !errors.Is(err, errBackfillDryRun) {
+	var pe *planError
+	switch {
+	case errors.As(err, &pe):
+		writePlanError(w, pe)
+		return
+	case err != nil && !errors.Is(err, errBackfillDryRun):
 		s.serverError(w, r, "contract.backfill.tx", err)
 		return
 	}
@@ -194,6 +199,7 @@ func (s *Server) handleContractBackfill(w http.ResponseWriter, r *http.Request) 
 		WriteJSON(w, http.StatusOK, map[string]any{
 			"dry_run": true, "settled": out.Settled, "skipped": out.Skipped, "total": out.Total,
 			"created": out.Created, "schedules": out.Schedules, "backfill_id": nil,
+			"offline_contract_id": nil,
 		})
 		return
 	}
@@ -202,14 +208,50 @@ func (s *Server) handleContractBackfill(w http.ResponseWriter, r *http.Request) 
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"settled": out.Settled, "skipped": out.Skipped, "total": out.Total,
 		"created": out.Created, "schedules": out.Schedules, "backfill_id": optUUIDString(out.BatchID),
+		"offline_contract_id": optUUIDString(out.OfflineContractID),
 	})
+}
+
+// writePlanError answers a refused offline plan: 422 for fields, 409
+// `offline_overlap` for a clash with another contract of the unit.
+func writePlanError(w http.ResponseWriter, pe *planError) {
+	if pe.Conflict != nil {
+		conflictCode(w, "offline_overlap", "overlaps another contract", pe.Conflict.message())
+		return
+	}
+	unprocessable(w, pe.Fields)
+}
+
+// backfillParty is who and what a backfill is about: the real renter and the
+// unit, whether or not a contract is running between them.
+type backfillParty struct {
+	UnitID       pgtype.UUID
+	RenterUserID pgtype.UUID
+	RenterName   string
+	RenterPhone  string
+	UnitName     string
+	PropertyName string
+}
+
+func partyOfContract(c sqlc.GetContractRow) backfillParty {
+	return backfillParty{
+		UnitID: c.UnitID, RenterUserID: c.RenterUserID, RenterName: c.RenterName,
+		RenterPhone: db.StrVal(c.RenterPhone), UnitName: c.UnitName, PropertyName: c.PropertyName,
+	}
 }
 
 // backfillRequest is one settlement of everything due up to a date.
 type backfillRequest struct {
-	OrgID        pgtype.UUID
-	ActorUserID  pgtype.UUID
-	Contract     sqlc.GetContractRow
+	OrgID       pgtype.UUID
+	ActorUserID pgtype.UUID
+	// Contract is the running contract whose periods are settled up to
+	// `until`, nil when there is none (a sheet line for a renter with no
+	// running contract, which only an offline `From` can serve).
+	Contract *sqlc.GetContractRow
+	// UnitRunning is the contract running on the unit whoever the renter, nil
+	// when none: an offline stretch stops the day before it starts.
+	UnitRunning  *sqlc.GetContractRow
+	Party        backfillParty
 	Until        time.Time
 	Mode         string
 	Method       string
@@ -222,9 +264,9 @@ type backfillRequest struct {
 	// ImportBatchID names the CSV import a line of a `backfill` sheet arrived
 	// on (Phase 26); zero for the manual call.
 	ImportBatchID pgtype.UUID
-	// From, when set, is the real move-in: the periods from it up to the
-	// contract's start are created first (Phase 29). PeriodAmount is their
-	// rent per payment period, zero for the contract's own.
+	// From, when set, is the real move-in: an offline contract from it to the
+	// last covered day is recorded first (Phase 30). PeriodAmount is its rent
+	// per payment period, zero for the renter's running contract's own.
 	From         time.Time
 	PeriodAmount int64
 }
@@ -234,16 +276,27 @@ type backfillOutcome struct {
 	Settled int   `json:"settled"`
 	Skipped int   `json:"skipped"`
 	Total   int64 `json:"total"`
-	// Created counts the periods `from` wrote before the contract's start.
+	// Created counts the periods of the offline contract the call wrote
+	// (Phase 30), zero when it wrote none.
 	Created   int    `json:"created"`
 	NotifyID  string `json:"-"`
 	Schedules []scheduleResponse
 	// BatchID is the Phase 26 backfill batch the call wrote — zero when it
 	// settled nothing, because then there is nothing to undo.
 	BatchID pgtype.UUID
+	// OfflineContractID is the offline contract the call recorded, if any.
+	OfflineContractID pgtype.UUID
 }
 
-// runBackfill closes every unsettled row due on or before `until`.
+// backfillSettle carries the running totals of one call across the contracts
+// it settles (the offline one and, past its stop date, the running one).
+type backfillSettle struct {
+	out         *backfillOutcome
+	batchAmount int64
+}
+
+// runBackfill records the offline contract `From` asks for (Phase 30) and
+// closes every unsettled row due on or before `until`.
 //
 // It does not go through allocatePayment, and the reason is worth stating: the
 // allocator's job is to decide *where* a sum of money lands, rolling an
@@ -253,44 +306,171 @@ type backfillOutcome struct {
 // amount. Going through the allocator would also queue one `thank_you` per
 // period, which is the N texts about last year's rent this endpoint exists to
 // avoid.
+//
+// A refused offline plan comes back as a *planError before anything is
+// written.
 func (s *Server) runBackfill(
 	ctx context.Context, q *sqlc.Queries, req backfillRequest,
 ) (backfillOutcome, error) {
 	var out backfillOutcome
+
+	var plan *offlinePlan
+	if !req.From.IsZero() {
+		var err error
+		plan, err = s.planOffline(ctx, q, offlinePlanInput{
+			OrgID: req.OrgID, UnitID: req.Party.UnitID, RenterUserID: req.Party.RenterUserID,
+			Settings: req.Settings, UnitRunning: req.UnitRunning,
+			From: req.From, Until: req.Until, PeriodAmount: req.PeriodAmount,
+		})
+		if err != nil {
+			return out, err
+		}
+	}
+	// The running contract is settled unless the offline stretch stops before
+	// it even starts.
+	settleRunning := req.Contract != nil &&
+		(plan == nil || !req.Until.Before(req.Contract.StartDate.Time))
+
+	var offline sqlc.Contract
+	if plan != nil {
+		var err error
+		if offline, err = s.createOfflineContract(ctx, q, req, plan); err != nil {
+			return out, err
+		}
+		if err = s.auditOfflineContract(ctx, q, req, offline, plan); err != nil {
+			return out, err
+		}
+		out.OfflineContractID = offline.ID
+	}
 
 	// Phase 26: the decision is a row of its own, so it can be listed and
 	// undone as one. It is opened first so every payment, waived row and
 	// created period can name it, and dropped again at the end if the call
 	// did nothing.
 	var fromDate pgtype.Date
-	if !req.From.IsZero() {
-		fromDate = pgtype.Date{Time: req.From, Valid: true}
+	if plan != nil {
+		fromDate = pgtype.Date{Time: plan.From, Valid: true}
+	}
+	// The batch belongs to the contract the landlord acted on, so it is listed
+	// there; the offline contract lists it too (created_contract_id).
+	batchContract := offline.ID
+	if req.Contract != nil {
+		batchContract = req.Contract.ID
 	}
 	batch, err := q.CreateBackfillBatch(ctx, sqlc.CreateBackfillBatchParams{
-		OrgID: req.OrgID, ContractID: req.Contract.ID, Mode: req.Mode,
+		OrgID: req.OrgID, ContractID: batchContract, Mode: req.Mode,
 		Until: pgtype.Date{Time: req.Until, Valid: true}, ImportBatchID: req.ImportBatchID,
-		CreatedByUserID: req.ActorUserID, FromDate: fromDate,
+		CreatedByUserID: req.ActorUserID, FromDate: fromDate, CreatedContractID: out.OfflineContractID,
 	})
 	if err != nil {
 		return out, err
 	}
-	// Phase 29: the periods before the contract's start exist first, so the
-	// settlement below treats them like any other row.
-	if !req.From.IsZero() {
-		if out.Created, err = s.createBackfillHistory(ctx, q, req, batch.ID); err != nil {
+	acc := &backfillSettle{out: &out}
+
+	if plan != nil {
+		if err := s.createOfflineSchedules(ctx, q, req, plan, offline.ID, batch.ID); err != nil {
+			return out, err
+		}
+		out.Created = len(plan.Rows)
+		// Every period of the stretch is history: settle all of them, however
+		// far a due day pushed a due date.
+		rows, err := q.LockBackfillSchedules(ctx, sqlc.LockBackfillSchedulesParams{
+			OrgID: req.OrgID, ContractID: offline.ID,
+			Until: pgtype.Date{Time: plan.End.AddDate(0, 0, 62), Valid: true},
+		})
+		if err != nil {
+			return out, err
+		}
+		if err := s.settleBackfillRows(ctx, q, req, batch.ID, offline.ID, rows, acc); err != nil {
 			return out, err
 		}
 	}
+	if settleRunning {
+		rows, err := q.LockBackfillSchedules(ctx, sqlc.LockBackfillSchedulesParams{
+			OrgID: req.OrgID, ContractID: req.Contract.ID,
+			Until: pgtype.Date{Time: req.Until, Valid: true},
+		})
+		if err != nil {
+			return out, err
+		}
+		if err := s.settleBackfillRows(ctx, q, req, batch.ID, req.Contract.ID, rows, acc); err != nil {
+			return out, err
+		}
+	}
+	if out.Schedules == nil {
+		out.Schedules = []scheduleResponse{}
+	}
+	if out.Settled == 0 && out.Created == 0 {
+		if err := q.DeleteEmptyBackfillBatch(ctx, sqlc.DeleteEmptyBackfillBatchParams{
+			OrgID: req.OrgID, ID: batch.ID,
+		}); err != nil {
+			return out, err
+		}
+	} else {
+		if _, err := q.FinishBackfillBatch(ctx, sqlc.FinishBackfillBatchParams{
+			Periods: int32(out.Settled), Amount: acc.batchAmount, CreatedPeriods: int32(out.Created),
+			OrgID: req.OrgID, ID: batch.ID,
+		}); err != nil {
+			return out, err
+		}
+		out.BatchID = batch.ID
+	}
 
-	rows, err := q.LockBackfillSchedules(ctx, sqlc.LockBackfillSchedulesParams{
-		OrgID: req.OrgID, ContractID: req.Contract.ID,
-		Until: pgtype.Date{Time: req.Until, Valid: true},
-	})
-	if err != nil {
+	// One row for the decision, carrying the counts, beside the per-payment
+	// rows: "who decided a year of this tenancy was settled?" is one question
+	// with one answer however many periods it closed.
+	entity := offline.ID
+	if req.Contract != nil {
+		entity = req.Contract.ID
+	}
+	if err := audit.Record(ctx, q, audit.Entry{
+		OrgID:       db.UUIDString(req.OrgID),
+		ActorUserID: db.UUIDString(req.ActorUserID),
+		Action:      audit.ActionContractBackfill,
+		EntityType:  audit.EntityContract,
+		EntityID:    db.UUIDString(entity),
+		After: map[string]any{
+			"until": req.Until.Format(dateLayout), "mode": req.Mode,
+			"settled": out.Settled, "skipped": out.Skipped, "total": out.Total,
+			"backfill_id": optUUIDString(out.BatchID),
+			"from":        optDateString(fromDate), "created": out.Created,
+			"offline_contract_id": optUUIDString(out.OfflineContractID),
+		},
+	}); err != nil {
 		return out, err
 	}
-	var batchAmount int64
 
+	// Exactly one message, and only when something moved. A backfill that
+	// settled nothing is a landlord checking, not news.
+	if out.Settled > 0 {
+		msgContract := offline.ID
+		if req.Contract != nil {
+			msgContract = req.Contract.ID
+		}
+		out.NotifyID, err = s.queueBackfillDone(ctx, q, backfillMessage{
+			OrgID: db.UUIDString(req.OrgID), UserID: db.UUIDString(req.Party.RenterUserID),
+			ContractID: db.UUIDString(msgContract),
+			Phone:      req.Party.RenterPhone,
+			Name:       req.Party.RenterName, Unit: req.Party.UnitName,
+			Property: req.Party.PropertyName, OrgName: req.OrgName,
+			Date: req.Until.Format(dateLayout), Lang: req.Settings.SMSLanguage,
+			Overrides: req.Settings.notifyOverrides(),
+			Enabled:   notificationSettingsOf(req.Settings).Kinds.BackfillDoneEnabled(),
+		})
+		if err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
+// settleBackfillRows settles (or waives) the locked rows of one contract for
+// the batch, adding to the call's totals.
+func (s *Server) settleBackfillRows(
+	ctx context.Context, q *sqlc.Queries, req backfillRequest, batchID, contractID pgtype.UUID,
+	rows []sqlc.PaymentSchedule, acc *backfillSettle,
+) error {
+	out := acc.out
 	for _, row := range rows {
 		outstanding := row.Amount - row.PaidAmount
 		// `paid` and `waived` rows are the ones already answered. A `partial`
@@ -304,7 +484,7 @@ func (s *Server) runBackfill(
 
 		if req.Mode == backfillModeWaived {
 			updated, err := q.WaiveBackfillSchedule(ctx, sqlc.WaiveBackfillScheduleParams{
-				BackfillBatchID: batch.ID, OrgID: req.OrgID, ID: row.ID,
+				BackfillBatchID: batchID, OrgID: req.OrgID, ID: row.ID,
 			})
 			if err != nil {
 				if isNoRows(err) {
@@ -314,42 +494,48 @@ func (s *Server) runBackfill(
 					out.Skipped++
 					continue
 				}
-				return out, err
+				return err
 			}
 			out.Settled++
-			batchAmount += outstanding
+			acc.batchAmount += outstanding
 			out.Schedules = append(out.Schedules, toSchedule(updated))
 			continue
 		}
 
 		paidAt := req.PaidAt
 		if req.PerRowPaidAt {
+			// The due date, but never later than `until`: a due day can push
+			// a date past the last covered day, and money cannot be dated in
+			// the future.
 			paidAt = row.DueDate.Time
+			if paidAt.After(req.Until) {
+				paidAt = req.Until
+			}
 		}
 		pay, err := q.CreatePayment(ctx, sqlc.CreatePaymentParams{
-			OrgID: req.OrgID, ContractID: req.Contract.ID, ScheduleID: row.ID,
+			OrgID: req.OrgID, ContractID: contractID, ScheduleID: row.ID,
 			Amount: outstanding, Method: req.Method, Reference: req.Reference,
 			PaidAt: db.TS(paidAt), RecordedByUserID: req.ActorUserID, Note: req.Note,
 			Source: strPtr(sourceBackfill),
 		})
 		if err != nil {
-			return out, err
+			return err
 		}
 		if err := q.StampPaymentBackfillBatch(ctx, sqlc.StampPaymentBackfillBatchParams{
-			BackfillBatchID: batch.ID, OrgID: req.OrgID, ID: pay.ID,
+			BackfillBatchID: batchID, OrgID: req.OrgID, ID: pay.ID,
 		}); err != nil {
-			return out, err
+			return err
 		}
 		if _, err := q.CreatePaymentAllocation(ctx, sqlc.CreatePaymentAllocationParams{
 			OrgID: req.OrgID, PaymentID: pay.ID, ScheduleID: row.ID, Amount: outstanding,
 		}); err != nil {
-			return out, err
+			return err
 		}
 		updated, err := q.ApplyPaymentToSchedule(ctx, sqlc.ApplyPaymentToScheduleParams{
 			PaidAmount: row.Amount, OrgID: req.OrgID, ID: row.ID,
 		})
 		if err != nil {
-			return out, err
+			return err
 		}
 		// One `payment.record` row per payment, as for any other money: the
 		// ledger's grain is the payment, and a reversal later has to find the
@@ -361,75 +547,20 @@ func (s *Server) runBackfill(
 			EntityType:  audit.EntityPayment,
 			EntityID:    db.UUIDString(pay.ID),
 			After: map[string]any{
-				"contract_id": db.UUIDString(req.Contract.ID), "amount": outstanding,
+				"contract_id": db.UUIDString(contractID), "amount": outstanding,
 				"method": req.Method, "paid_at": paidAt.Format(time.RFC3339),
 				"schedule_id": db.UUIDString(row.ID), "source": sourceBackfill,
-				"backfill_id": db.UUIDString(batch.ID),
+				"backfill_id": db.UUIDString(batchID),
 			},
 		}); err != nil {
-			return out, err
+			return err
 		}
 		out.Settled++
 		out.Total += outstanding
-		batchAmount += outstanding
+		acc.batchAmount += outstanding
 		out.Schedules = append(out.Schedules, toSchedule(updated))
 	}
-	if out.Schedules == nil {
-		out.Schedules = []scheduleResponse{}
-	}
-	if out.Settled == 0 && out.Created == 0 {
-		if err := q.DeleteEmptyBackfillBatch(ctx, sqlc.DeleteEmptyBackfillBatchParams{
-			OrgID: req.OrgID, ID: batch.ID,
-		}); err != nil {
-			return out, err
-		}
-	} else {
-		if _, err := q.FinishBackfillBatch(ctx, sqlc.FinishBackfillBatchParams{
-			Periods: int32(out.Settled), Amount: batchAmount, CreatedPeriods: int32(out.Created),
-			OrgID: req.OrgID, ID: batch.ID,
-		}); err != nil {
-			return out, err
-		}
-		out.BatchID = batch.ID
-	}
-
-	// One row for the decision, carrying the counts, beside the per-payment
-	// rows above: "who decided a year of this tenancy was settled?" is one
-	// question with one answer however many periods it closed.
-	if err := audit.Record(ctx, q, audit.Entry{
-		OrgID:       db.UUIDString(req.OrgID),
-		ActorUserID: db.UUIDString(req.ActorUserID),
-		Action:      audit.ActionContractBackfill,
-		EntityType:  audit.EntityContract,
-		EntityID:    db.UUIDString(req.Contract.ID),
-		After: map[string]any{
-			"until": req.Until.Format(dateLayout), "mode": req.Mode,
-			"settled": out.Settled, "skipped": out.Skipped, "total": out.Total,
-			"backfill_id": optUUIDString(out.BatchID),
-			"from":        optDateString(fromDate), "created": out.Created,
-		},
-	}); err != nil {
-		return out, err
-	}
-
-	// Exactly one message, and only when something moved. A backfill that
-	// settled nothing is a landlord checking, not news.
-	if out.Settled > 0 {
-		out.NotifyID, err = s.queueBackfillDone(ctx, q, backfillMessage{
-			OrgID: db.UUIDString(req.OrgID), UserID: db.UUIDString(req.Contract.RenterUserID),
-			ContractID: db.UUIDString(req.Contract.ID),
-			Phone:      db.StrVal(req.Contract.RenterPhone),
-			Name:       req.Contract.RenterName, Unit: req.Contract.UnitName,
-			Property: req.Contract.PropertyName, OrgName: req.OrgName,
-			Date: req.Until.Format(dateLayout), Lang: req.Settings.SMSLanguage,
-			Overrides: req.Settings.notifyOverrides(),
-			Enabled:   notificationSettingsOf(req.Settings).Kinds.BackfillDoneEnabled(),
-		})
-		if err != nil {
-			return out, err
-		}
-	}
-	return out, nil
+	return nil
 }
 
 // backfillMessage carries what the one `backfill_done` SMS needs across the

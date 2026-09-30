@@ -65,7 +65,7 @@ JOIN units u      ON u.id = c.unit_id AND u.org_id = c.org_id
 JOIN properties p ON p.id = u.property_id AND p.org_id = c.org_id
 JOIN users ru     ON ru.id = c.renter_user_id
 WHERE c.org_id = sqlc.arg(org_id) AND c.deleted_at IS NULL
-  AND c.status = 'ended' AND c.superseded_by_contract_id IS NULL
+  AND c.status = 'ended' AND c.superseded_by_contract_id IS NULL AND NOT c.is_offline
   AND c.moved_out_confirmed_at IS NULL
   AND c.end_date >= CURRENT_DATE - 90
   AND NOT EXISTS (

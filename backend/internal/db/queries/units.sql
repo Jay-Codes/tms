@@ -49,7 +49,7 @@ LEFT JOIN LATERAL (
     SELECT max(c.end_date) AS last_end
     FROM contracts c
     WHERE c.unit_id = u.id AND c.org_id = u.org_id AND c.deleted_at IS NULL
-      AND c.status IN ('ended', 'terminated')
+      AND c.status IN ('ended', 'terminated') AND NOT c.is_offline
 ) lc ON true
 WHERE u.org_id = sqlc.arg(org_id) AND u.deleted_at IS NULL
   AND (sqlc.narg(status)::text IS NULL OR u.status = sqlc.narg(status)::text)
@@ -89,7 +89,7 @@ LEFT JOIN LATERAL (
     SELECT max(c.end_date) AS last_end
     FROM contracts c
     WHERE c.unit_id = u.id AND c.org_id = u.org_id AND c.deleted_at IS NULL
-      AND c.status IN ('ended', 'terminated')
+      AND c.status IN ('ended', 'terminated') AND NOT c.is_offline
 ) lc ON true
 WHERE u.org_id = sqlc.arg(org_id) AND u.id = sqlc.arg(id) AND u.deleted_at IS NULL;
 

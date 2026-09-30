@@ -254,10 +254,10 @@ func (q *Queries) CreateImportRow(ctx context.Context, arg CreateImportRowParams
 }
 
 const findContractForUnitAndRenter = `-- name: FindContractForUnitAndRenter :many
-SELECT id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language, policy, supersedes_contract_id, amendment_effective_date, amendment_reason, superseded_by_contract_id, settlement, notice_given_at, notice_leave_on, notice_reason, moved_out_confirmed_at FROM contracts
+SELECT id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language, policy, supersedes_contract_id, amendment_effective_date, amendment_reason, superseded_by_contract_id, settlement, notice_given_at, notice_leave_on, notice_reason, moved_out_confirmed_at, is_offline FROM contracts
 WHERE org_id = $1 AND unit_id = $2
   AND renter_user_id = $3 AND deleted_at IS NULL
-  AND status IN ('active', 'expiring', 'ended', 'terminated')
+  AND status IN ('active', 'expiring', 'ended', 'terminated') AND NOT is_offline
 ORDER BY start_date DESC, created_at DESC
 LIMIT 1
 `
@@ -317,6 +317,7 @@ func (q *Queries) FindContractForUnitAndRenter(ctx context.Context, arg FindCont
 			&i.NoticeLeaveOn,
 			&i.NoticeReason,
 			&i.MovedOutConfirmedAt,
+			&i.IsOffline,
 		); err != nil {
 			return nil, err
 		}
@@ -886,7 +887,7 @@ const withdrawImportedContract = `-- name: WithdrawImportedContract :one
 UPDATE contracts SET deleted_at = now()
 WHERE org_id = $1 AND id = $2
   AND status = 'pending_signature' AND deleted_at IS NULL
-RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language, policy, supersedes_contract_id, amendment_effective_date, amendment_reason, superseded_by_contract_id, settlement, notice_given_at, notice_leave_on, notice_reason, moved_out_confirmed_at
+RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language, policy, supersedes_contract_id, amendment_effective_date, amendment_reason, superseded_by_contract_id, settlement, notice_given_at, notice_leave_on, notice_reason, moved_out_confirmed_at, is_offline
 `
 
 type WithdrawImportedContractParams struct {
@@ -936,6 +937,7 @@ func (q *Queries) WithdrawImportedContract(ctx context.Context, arg WithdrawImpo
 		&i.NoticeLeaveOn,
 		&i.NoticeReason,
 		&i.MovedOutConfirmedAt,
+		&i.IsOffline,
 	)
 	return i, err
 }
