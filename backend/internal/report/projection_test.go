@@ -23,7 +23,7 @@ import (
 //	  months 0–2: 100,000 × 0.90 = 90,000; net 60,000
 //	  months 3–5: nothing let;           net −30,000
 //	  horizon:    income 270,000, running 180,000, net 90,000
-//	  annual:     net 180,000 on expenses 360,000 → ROI 50%
+//	  annual:     net 180,000 on 430,000 spent so far → ROI 41.9%
 //	best case (a after its contract, b from now; c is not lettable):
 //	  every month: (100,000 + 120,000) × 0.90 = 198,000; net 168,000
 //
@@ -139,9 +139,9 @@ func TestProjectionSignedContractsOnly(t *testing.T) {
 	if inv.ProjectedAnnualNet != 180_000 || inv.ProjectedAnnualExpenses != 360_000 || inv.TrailingAnnualNet != 720_000 {
 		t.Errorf("annual = %+v", inv)
 	}
-	wantF(t, "roi projected", inv.ROIProjectedPct, 50)  // 180,000 / 360,000
-	wantF(t, "roi trailing", inv.ROITrailingPct, 42.1)  // (1,080,000 − 760,000) / 760,000
-	wantF(t, "payback once ahead", inv.PaybackYears, 0) // already 500,000 ahead
+	wantF(t, "roi projected", inv.ROIProjectedPct, 41.9) // 180,000 / 430,000 spent so far
+	wantF(t, "roi trailing", inv.ROITrailingPct, 167.4)  // 720,000 / 430,000
+	wantF(t, "payback once ahead", inv.PaybackYears, 0)  // already 500,000 ahead
 	wantNilF(t, "yield without a current value", inv.YieldPct)
 	if inv.BreakEvenStatus != report.BreakEvenReached || inv.BreakEvenMonth == nil || *inv.BreakEvenMonth != "2025-06" {
 		t.Errorf("break-even = %v %s, want reached 2025-06", inv.BreakEvenMonth, inv.BreakEvenStatus)
@@ -378,10 +378,61 @@ func TestProjectionPortfolio(t *testing.T) {
 	if inv.ProjectedAnnualNet != 2_616_000 || inv.ProjectedAnnualExpenses != 360_000 {
 		t.Errorf("portfolio annual = %+v", inv)
 	}
-	wantF(t, "portfolio roi projected", inv.ROIProjectedPct, 726.7) // 2,616,000 / 360,000
+	wantF(t, "portfolio roi projected", inv.ROIProjectedPct, 182.9) // 2,616,000 / 1,430,000 spent
 	wantF(t, "portfolio yield", inv.YieldPct, 28)                   // only the valued property: 2,016,000 / 7,200,000
 	wantF(t, "portfolio collection", got.Baseline.CollectionRatePct, 90)
 	if got.Baseline.UnitsTotal != 4 || got.Baseline.UnitsAssumed != 3 || got.Baseline.AssumedRentMonthly != 270_000 {
 		t.Errorf("portfolio baseline = %+v", got.Baseline)
+	}
+}
+
+func TestProjectionMonthlyExpenseEstimate(t *testing.T) {
+	est := int64(50_000)
+	sc := sixMonths()
+	sc.MonthlyExpenses = &est
+	sc.ExpenseChangePct = 100 // ignored once an estimate is given
+	got := report.ProjectProperty(projStart, sc, baseProperty())
+	for i, m := range got.Months {
+		if m.RunningExpenses != 50_000 {
+			t.Errorf("month %d running = %d, want the 50,000 estimate", i, m.RunningExpenses)
+		}
+	}
+	if a := got.Applied; a.MonthlyExpenses != 50_000 || a.MonthlyExpensesSource != report.SourceScenario {
+		t.Errorf("applied = %+v", a)
+	}
+	// Months 0–2: 90,000 − 50,000; months 3–5: −50,000 → −30,000 over six
+	// months, −60,000 a year, on 430,000 spent.
+	if inv := got.Investment; inv.ProjectedAnnualNet != -60_000 {
+		t.Errorf("annual net = %d, want -60000", inv.ProjectedAnnualNet)
+	}
+	wantF(t, "roi on the estimate", got.Investment.ROIProjectedPct, -14)
+
+	// Without an estimate: the trailing average, labelled as such.
+	if a := report.ProjectProperty(projStart, sixMonths(), baseProperty()).Applied; a.MonthlyExpenses != 30_000 || a.MonthlyExpensesSource != report.SourceTrailing {
+		t.Errorf("default applied = %+v", a)
+	}
+
+	// Across a portfolio the estimate is shared by trailing running costs
+	// (the shop has none, so the block carries it all) and adds back up.
+	shop := report.ProjectionProperty{ID: "q", HistoryMonths: 12, Units: []report.ProjectionUnit{{ID: "q1", MonthlyRent: 50_000, Lettable: true}}}
+	total := int64(100_000)
+	psc := sixMonths()
+	psc.MonthlyExpenses = &total
+	all, parts := report.ProjectPortfolio(projStart, psc, []report.ProjectionProperty{baseProperty(), shop})
+	if all.Months[0].RunningExpenses != 100_000 || parts[0].Months[0].RunningExpenses != 100_000 || parts[1].Months[0].RunningExpenses != 0 {
+		t.Errorf("shares = %d + %d, portfolio %d",
+			parts[0].Months[0].RunningExpenses, parts[1].Months[0].RunningExpenses, all.Months[0].RunningExpenses)
+	}
+	if all.Applied.MonthlyExpenses != 100_000 || all.Applied.MonthlyExpensesSource != report.SourceScenario {
+		t.Errorf("portfolio applied = %+v", all.Applied)
+	}
+	// No running history anywhere: shared by units (1 : 3 here), exactly.
+	young := baseProperty()
+	young.TrailingRunning = nil
+	odd := int64(100_001)
+	psc.MonthlyExpenses = &odd
+	_, parts = report.ProjectPortfolio(projStart, psc, []report.ProjectionProperty{shop, young})
+	if a, b := parts[0].Months[0].RunningExpenses, parts[1].Months[0].RunningExpenses; a != 25_000 || a+b != 100_001 {
+		t.Errorf("unit shares = %d + %d, want 25,000 + 75,001", a, b)
 	}
 }

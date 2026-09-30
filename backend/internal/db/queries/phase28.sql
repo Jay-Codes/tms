@@ -140,12 +140,12 @@ SELECT count(*) FROM projection_scenarios WHERE org_id = sqlc.arg(org_id);
 -- name: CreateProjectionScenario :one
 INSERT INTO projection_scenarios (
     org_id, name, horizon_months, basis, unit_ids, rent_change_pct,
-    collection_rate_pct, expense_change_pct, created_by_user_id
+    collection_rate_pct, expense_change_pct, monthly_expenses, created_by_user_id
 ) VALUES (
     sqlc.arg(org_id), sqlc.arg(name), sqlc.arg(horizon_months), sqlc.arg(basis),
     sqlc.arg(unit_ids)::uuid[], sqlc.arg(rent_change_pct),
     sqlc.narg(collection_rate_pct), sqlc.arg(expense_change_pct),
-    sqlc.arg(created_by_user_id)
+    sqlc.narg(monthly_expenses), sqlc.arg(created_by_user_id)
 )
 RETURNING *;
 

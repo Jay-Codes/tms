@@ -144,18 +144,79 @@ function Slider({
   );
 }
 
+/**
+ * A whole-shilling amount typed with or without separators, empty meaning
+ * "not mine — use the last twelve months". The typed text is kept as typed;
+ * it is only rewritten when the value changes from outside (a saved scenario
+ * loaded, or the reset).
+ */
+function MonthlyEstimate({
+  id,
+  label,
+  value,
+  placeholder,
+  hint,
+  onChange,
+  onReset,
+  resetLabel,
+}: {
+  id: string;
+  label: string;
+  value: number | null;
+  placeholder: string;
+  hint?: string;
+  onChange: (v: number | null) => void;
+  onReset?: () => void;
+  resetLabel: string;
+}) {
+  const [raw, setRaw] = useState(value === null ? '' : value.toLocaleString('en-US'));
+  useEffect(() => {
+    setRaw((cur) => (parseShillings(cur) === value ? cur : value === null ? '' : value.toLocaleString('en-US')));
+  }, [value]);
+  return (
+    <div style={{ display: 'grid', gap: 'var(--sp-1)', minWidth: 0 }}>
+      <label htmlFor={id} style={{ fontSize: 'var(--text-sm)' }}>
+        {label}
+      </label>
+      <input
+        id={id}
+        className="input"
+        inputMode="numeric"
+        value={raw}
+        placeholder={placeholder}
+        onChange={(e) => {
+          const next = e.target.value.replace(/[^\d,\s]/g, '');
+          setRaw(next);
+          onChange(parseShillings(next));
+        }}
+      />
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--sp-2)', minHeight: 24 }}>
+        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-soft)' }}>{hint}</span>
+        {onReset ? (
+          <button type="button" className="btn btn-quiet" onClick={onReset} style={{ minHeight: 24, padding: '0 var(--sp-2)', fontSize: 'var(--text-xs)' }}>
+            {resetLabel}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 interface ScenarioState {
   horizon: number;
   basis: ProjectionBasis;
   /** The picked units; sent only with the `selected` basis. */
   unitIds: string[];
   rent: number;
+  /** Kept for saved scenarios; applies to the trailing average only. */
   expense: number;
   /** null = the trailing twelve months. */
   collection: number | null;
+  /** The landlord's running costs a month; null = the last twelve months' average. */
+  monthly: number | null;
 }
 
-const BASE_SCENARIO: ScenarioState = { horizon: 24, basis: 'contracts', unitIds: [], rent: 0, expense: 0, collection: null };
+const BASE_SCENARIO: ScenarioState = { horizon: 24, basis: 'contracts', unitIds: [], rent: 0, expense: 0, collection: null, monthly: null };
 
 const BASES: ProjectionBasis[] = ['contracts', 'selected', 'best_case'];
 
@@ -166,6 +227,7 @@ const toParams = (s: ScenarioState): ProjectionParams => ({
   rent_change_pct: s.rent,
   expense_change_pct: s.expense,
   collection_rate_pct: s.collection,
+  monthly_expenses: s.monthly,
 });
 
 const fromSaved = (s: ProjectionScenario): ScenarioState => ({
@@ -175,6 +237,7 @@ const fromSaved = (s: ProjectionScenario): ScenarioState => ({
   rent: s.rent_change_pct,
   expense: s.expense_change_pct,
   collection: s.collection_rate_pct,
+  monthly: s.monthly_expenses ?? null,
 });
 
 /* --------------------------------------------------------- saved scenarios -- */
@@ -487,17 +550,21 @@ export function ProjectionsTab({ propertyId }: { propertyId: string }) {
             onReset={sc.collection !== null ? () => set({ collection: null }) : undefined}
             resetLabel={t('proj.scenario.use_trailing')}
           />
-          <Slider
-            id="proj_exp"
-            label={t('proj.scenario.expenses')}
-            hint={t('proj.scenario.expenses_hint')}
-            value={sc.expense}
-            min={-50}
-            max={100}
-            signed
-            onChange={(v) => set({ expense: v })}
-            onReset={sc.expense !== 0 ? () => set({ expense: 0 }) : undefined}
-            resetLabel={t('proj.scenario.reset')}
+          <MonthlyEstimate
+            id="proj_monthly"
+            label={t('proj.scenario.monthly')}
+            value={sc.monthly}
+            placeholder={applied && applied.monthly_expenses_source === 'trailing' ? applied.monthly_expenses.toLocaleString('en-US') : '0'}
+            hint={
+              sc.monthly === null
+                ? applied
+                  ? t('proj.scenario.monthly_hint_trailing', { amount: fmtTZS(applied.monthly_expenses) })
+                  : undefined
+                : t('proj.scenario.monthly_hint_own')
+            }
+            onChange={(v) => set({ monthly: v })}
+            onReset={sc.monthly !== null ? () => set({ monthly: null }) : undefined}
+            resetLabel={t('proj.scenario.use_trailing')}
           />
         </div>
         <details open={sc.basis === 'selected' || undefined} style={{ display: 'grid', gap: 'var(--sp-3)' }}>
@@ -546,7 +613,7 @@ export function ProjectionsTab({ propertyId }: { propertyId: string }) {
               inv
                 ? inv.roi_projected_pct === null
                   ? t('proj.tile.roi_none')
-                  : t('proj.tile.roi_sub', { expenses: fmtTZS(inv.projected_annual_expenses), trailing: pct(inv.roi_trailing_pct) })
+                  : t('proj.tile.roi_sub', { spent: fmtTZS(inv.spent_to_date), trailing: pct(inv.roi_trailing_pct) })
                 : undefined
             }
           />

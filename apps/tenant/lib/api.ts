@@ -3216,8 +3216,10 @@ export interface ProjectionParams {
   rent_change_pct?: number;
   /** 0–100, or null/omitted for the trailing twelve months. */
   collection_rate_pct?: number | null;
-  /** −100…500, on running costs. */
+  /** −100…500, on the trailing average; ignored when `monthly_expenses` is set. */
   expense_change_pct?: number;
+  /** The landlord's estimate of running costs a month (TZS); null = the last twelve months' average. */
+  monthly_expenses?: number | null;
 }
 
 export type RateSource = 'scenario' | 'trailing' | 'default';
@@ -3269,6 +3271,9 @@ export interface ProjectionApplied {
   collection_rate_pct: number;
   collection_rate_source: RateSource;
   expense_change_pct: number;
+  /** Running costs a month the forecast used. */
+  monthly_expenses: number;
+  monthly_expenses_source: 'scenario' | 'trailing';
 }
 
 /** Returns are measured against what has been spent (expenses, plus the purchase price when entered). */
@@ -3287,7 +3292,7 @@ export interface ProjectionInvestment {
   trailing_annual_spend: number;
   projected_annual_net: number;
   projected_annual_expenses: number;
-  /** Net ÷ expenses. */
+  /** Annual net ÷ everything spent so far (`spent_to_date`). */
   roi_trailing_pct: number | null;
   roi_projected_pct: number | null;
   yield_pct: number | null;
@@ -3346,6 +3351,7 @@ export interface ProjectionScenario {
   rent_change_pct: number;
   collection_rate_pct: number | null;
   expense_change_pct: number;
+  monthly_expenses: number | null;
   created_at: string;
 }
 

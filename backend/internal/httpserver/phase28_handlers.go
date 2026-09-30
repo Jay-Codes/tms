@@ -102,6 +102,9 @@ type projectionParams struct {
 	RentChangePct     *float64 `json:"rent_change_pct"`
 	CollectionRatePct *float64 `json:"collection_rate_pct"`
 	ExpenseChangePct  *float64 `json:"expense_change_pct"`
+	// MonthlyExpenses is the landlord's estimate of running costs a month;
+	// null or absent means the trailing average.
+	MonthlyExpenses *int64 `json:"monthly_expenses"`
 }
 
 // scenario validates the parameters and applies the defaults.
@@ -131,6 +134,12 @@ func (in projectionParams) scenario(f validate.Fields) report.ProjectionScenario
 	out.RentChangePct = change("rent_change_pct", in.RentChangePct)
 	out.ExpenseChangePct = change("expense_change_pct", in.ExpenseChangePct)
 	out.CollectionRatePct = rate("collection_rate_pct", in.CollectionRatePct)
+	if in.MonthlyExpenses != nil {
+		if *in.MonthlyExpenses < 0 || *in.MonthlyExpenses >= amountMax {
+			f.Add("monthly_expenses", "must be a whole number of shillings from 0 to 999,999,999,999, or null for the last twelve months")
+		}
+		out.MonthlyExpenses = in.MonthlyExpenses
+	}
 	out.Basis = report.BasisContracts
 	if in.Basis != nil {
 		if !report.ValidBasis(*in.Basis) {
@@ -502,6 +511,7 @@ type projectionScenarioResponse struct {
 	RentChangePct     float64   `json:"rent_change_pct"`
 	CollectionRatePct *float64  `json:"collection_rate_pct"`
 	ExpenseChangePct  float64   `json:"expense_change_pct"`
+	MonthlyExpenses   *int64    `json:"monthly_expenses"`
 	CreatedAt         time.Time `json:"created_at"`
 }
 
@@ -514,7 +524,7 @@ func toProjectionScenario(r sqlc.ProjectionScenario) projectionScenarioResponse 
 		ID: db.UUIDString(r.ID), Name: r.Name, HorizonMonths: int(r.HorizonMonths),
 		Basis: r.Basis, UnitIDs: ids, RentChangePct: r.RentChangePct,
 		CollectionRatePct: r.CollectionRatePct, ExpenseChangePct: r.ExpenseChangePct,
-		CreatedAt: r.CreatedAt.Time,
+		MonthlyExpenses: r.MonthlyExpenses, CreatedAt: r.CreatedAt.Time,
 	}
 }
 
@@ -572,7 +582,7 @@ func (s *Server) handleCreateProjectionScenario(w http.ResponseWriter, r *http.R
 			OrgID: p.OrgID, Name: name, HorizonMonths: int32(sc.HorizonMonths), //nolint:gosec // bounded 1–120
 			Basis: sc.Basis, UnitIds: unitUUIDs(sc.UnitIDs), RentChangePct: sc.RentChangePct,
 			CollectionRatePct: sc.CollectionRatePct, ExpenseChangePct: sc.ExpenseChangePct,
-			CreatedByUserID: p.UserID,
+			MonthlyExpenses: sc.MonthlyExpenses, CreatedByUserID: p.UserID,
 		})
 		if err != nil {
 			return err

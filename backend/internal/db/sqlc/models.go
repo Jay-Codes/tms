@@ -475,6 +475,7 @@ type ProjectionScenario struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	Basis             string             `json:"basis"`
 	UnitIds           []pgtype.UUID      `json:"unit_ids"`
+	MonthlyExpenses   *int64             `json:"monthly_expenses"`
 }
 
 type Property struct {

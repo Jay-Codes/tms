@@ -57,6 +57,37 @@ func TestProjectionCountsCurrentMonth(t *testing.T) {
 	if s := r.str(t, "investment", "break_even_status"); s == "no_costs" {
 		t.Errorf("break-even status = %q with 60,000,000 spent", s)
 	}
+	// Logged as a running cost with one month of history, the 60,000,000
+	// would be projected every month; the landlord's own estimate replaces it.
+	if v := num(t, r, "applied", "monthly_expenses"); v != 60_000_000 {
+		t.Errorf("trailing monthly = %v, want 60,000,000 over one month", v)
+	}
+	est := owner.projection(map[string]any{"property_id": propertyID, "horizon_months": 3, "monthly_expenses": 150_000}).
+		mustStatus(t, http.StatusOK, "projection with an estimate")
+	if s := est.str(t, "applied", "monthly_expenses_source"); s != "scenario" {
+		t.Errorf("monthly source = %q", s)
+	}
+	for _, m := range arrayOf(t, est, "months") {
+		if m["running_expenses"] != float64(150_000) {
+			t.Errorf("month %v running = %v, want the estimate", m["month"], m["running_expenses"])
+		}
+	}
+	if v := num(t, est, "investment", "spent_to_date"); v != 60_000_000 {
+		t.Errorf("spent to date with an estimate = %v", v)
+	}
+	// No income: −1,800,000 a year on 60,000,000 spent = −3%.
+	if v := num(t, est, "investment", "roi_projected_pct"); v != -3 {
+		t.Errorf("roi = %v, want -3 (annual net ÷ everything spent)", v)
+	}
+	if r := owner.projection(map[string]any{"monthly_expenses": -1}); r.Code != http.StatusBadRequest {
+		t.Errorf("negative estimate: status %d, want 400", r.Code)
+	}
+	saved := owner.do(http.MethodPost, "/reports/projection/scenarios", map[string]any{"name": "Lean", "monthly_expenses": 150_000}).
+		mustStatus(t, http.StatusCreated, "save with an estimate")
+	if v := num(t, saved, "scenario", "monthly_expenses"); v != 150_000 {
+		t.Errorf("saved estimate = %v", v)
+	}
+
 	next := time.Now().In(tz.Zone()).AddDate(0, 0, -time.Now().In(tz.Zone()).Day()+1).AddDate(0, 1, 0).Format("2006-01")
 	if s := r.str(t, "start_month"); s != next {
 		t.Errorf("start month = %s, want next month %s", s, next)
