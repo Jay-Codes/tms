@@ -127,7 +127,7 @@ All tables: `id UUID PK`, `created_at`, `updated_at`. Org-scoped tables include 
 
 ```
 orgs                 name, slug, status, settings JSONB (auto_approve_links, due_day, grace_days, reminder offsets)
-payment_periods      org_id, label ("Monthly", "3 weeks"), days INT >0, is_recommended, sort_order, active
+payment_periods      org_id, label ("Monthly", "3 weeks"), days INT >0, months INT NULL (1–12: calendar period), is_recommended, sort_order, active
                      -- landlord-managed list; seeded with presets 30/90/180/365 days,
                      -- landlord adds any custom value (7, 21, 45 days...) — no upper/lower cap beyond >0
                      -- partial unique index: at most ONE recommended period per org
@@ -224,6 +224,7 @@ Key rules:
 - **Offline contracts (Phase 30).** A backfill with `from` records a contract for the real renter and unit that ran outside TMS: `status ended`, `is_offline`, start `from`, ending on the last covered day (or the day before the unit's running contract), one rent, its periods settled by the same call. It has no template, hash, signatures or SMS, is never signed or issued, and cannot be signed, renewed, amended, terminated or paid into; it is labelled "Offline contract" everywhere. It is history, not a tenancy: vacancy, holdovers, occupancy and projection baselines ignore it, while its money counts as revenue. (Phase 29's history periods on the running contract — `created_by_backfill_id` — are no longer created; existing ones still read and undo.)
 - Schedule amount = `rent_amount × schedule_days / rent_period_days`, rounded to whole TZS (proration from the unit's price basis). Snapshotted at activation like terms.
 - `due_day` is optional: if set, due dates snap to that day-of-month (monthly-style periods); if NULL, due date = period start (default for custom day-counts).
+- **Calendar periods** (`months` set) avoid the drift of day-counted cadences (12 × 30 = 360 days). Rows run from one billing day (`due_day`, else the 1st) to the day before the next, `months` apart, each charged the full rent per period regardless of month length; a start or end between billing days is prorated over that cycle's actual days; due date = row start. Contracts snapshot `payment_period_months`.
 - A payment recorded against a schedule flips it `paid` (or `partial` if under amount). Nightly + on-demand job flips past-due `pending` → `overdue`.
 - Unit `status` derives from contracts where possible but is stored for explicit landlord overrides (`unlisted`, `maintenance`).
 

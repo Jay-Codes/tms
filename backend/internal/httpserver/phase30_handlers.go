@@ -117,10 +117,12 @@ type offlinePlanInput struct {
 
 // offlinePlan is a validated offline contract, not yet written.
 type offlinePlan struct {
-	From, End       time.Time // both inclusive: End is the last covered day
-	TermDays        int
-	PeriodAmount    int64
-	CadenceDays     int
+	From, End    time.Time // both inclusive: End is the last covered day
+	TermDays     int
+	PeriodAmount int64
+	CadenceDays  int
+	// CadenceMonths is set when the cadence is a calendar period.
+	CadenceMonths   *int32
 	PaymentPeriodID pgtype.UUID
 	DueDay          *int32
 	Language        string
@@ -173,6 +175,7 @@ func (s *Server) planOffline(ctx context.Context, q *sqlc.Queries, in offlinePla
 	}
 	if run := in.UnitRunning; run != nil {
 		plan.CadenceDays = int(run.PaymentPeriodDays)
+		plan.CadenceMonths = run.PaymentPeriodMonths
 		plan.PaymentPeriodID = run.PaymentPeriodID
 		plan.DueDay = run.DueDay
 		if run.Language == "en" || run.Language == "sw" {
@@ -191,11 +194,13 @@ func (s *Server) planOffline(ctx context.Context, q *sqlc.Queries, in offlinePla
 		}
 		if err == nil {
 			plan.PaymentPeriodID = per.ID
+			plan.CadenceMonths = per.Months
 		}
 	}
 	plan.TermDays = int(end.Sub(in.From).Hours()/24) + 1
-	plan.Rows = contract.Generate(int(amount), plan.CadenceDays, plan.TermDays, plan.CadenceDays,
-		in.From, intPtr(plan.DueDay))
+	// amount is one period's rent, so the cadence is its own basis.
+	plan.Rows = contract.GenerateCadence(int(amount), plan.CadenceDays, plan.TermDays,
+		cadenceOf(int32(plan.CadenceDays), plan.CadenceMonths), in.From, intPtr(plan.DueDay))
 
 	// A clash with anything else on the unit: 409, naming it.
 	clash, err := q.FindOverlappingContract(ctx, sqlc.FindOverlappingContractParams{
@@ -225,10 +230,11 @@ func (s *Server) createOfflineContract(
 		TermsSnapshotHtml: offlineNotice(plan.Language),
 		RentAmount:        plan.PeriodAmount, RentPeriodDays: int32(plan.CadenceDays),
 		PaymentPeriodID: plan.PaymentPeriodID, PaymentPeriodDays: int32(plan.CadenceDays),
-		TermDays:  int32(plan.TermDays),
-		StartDate: pgtype.Date{Time: plan.From, Valid: true},
-		EndDate:   pgtype.Date{Time: contract.EndDate(plan.From, plan.TermDays), Valid: true},
-		DueDay:    plan.DueDay, Status: contractEnded, Language: &lang, IsOffline: &yes,
+		PaymentPeriodMonths: plan.CadenceMonths,
+		TermDays:            int32(plan.TermDays),
+		StartDate:           pgtype.Date{Time: plan.From, Valid: true},
+		EndDate:             pgtype.Date{Time: contract.EndDate(plan.From, plan.TermDays), Valid: true},
+		DueDay:              plan.DueDay, Status: contractEnded, Language: &lang, IsOffline: &yes,
 	})
 }
 

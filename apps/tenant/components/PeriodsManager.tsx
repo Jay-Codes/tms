@@ -18,6 +18,7 @@ import {
   toApiError,
   type PaymentPeriod,
 } from '../lib/api';
+import { fmtPeriodLength } from '../lib/format';
 import { Field, Note, ProblemNote } from './FormBits';
 import { TableScroll } from '@tms/ui';
 
@@ -41,6 +42,71 @@ function Recommended() {
   );
 }
 
+/**
+ * A period's kind and length as the editor holds it: every N days, or every N
+ * calendar months (billed on the contract's due day, else the 1st).
+ */
+type Kind = 'days' | 'months';
+
+function LengthFields({
+  id,
+  kind,
+  setKind,
+  count,
+  setCount,
+  error,
+}: {
+  id: string;
+  kind: Kind;
+  setKind: (k: Kind) => void;
+  count: string;
+  setCount: (v: string) => void;
+  error?: string;
+}) {
+  const t = useT();
+  return (
+    <>
+      <Field id={`${id}-kind`} label={t('periods.col.billing')}>
+        <select
+          id={`${id}-kind`}
+          className="input"
+          value={kind}
+          onChange={(e) => setKind(e.target.value as Kind)}
+          style={{ width: 200 }}
+        >
+          <option value="days">{t('periods.kind.days')}</option>
+          <option value="months">{t('periods.kind.months')}</option>
+        </select>
+      </Field>
+      <Field
+        id={`${id}-count`}
+        label={kind === 'months' ? t('periods.col.months') : t('periods.col.days')}
+        error={error}
+      >
+        <input
+          id={`${id}-count`}
+          className="input num"
+          type="number"
+          min={1}
+          max={kind === 'months' ? 12 : undefined}
+          value={count}
+          onChange={(e) => setCount(e.target.value)}
+          placeholder={kind === 'months' ? '1' : '7'}
+          style={{ width: 110 }}
+        />
+      </Field>
+    </>
+  );
+}
+
+/** The request body for a kind and count. */
+function lengthBody(kind: Kind, count: string, editing: boolean) {
+  const n = Number(count);
+  if (kind === 'months') return { months: n };
+  // Editing a calendar period back to days has to say so explicitly.
+  return editing ? { days: n, months: 0 } : { days: n };
+}
+
 function Row({
   period,
   first,
@@ -57,7 +123,10 @@ function Row({
   const t = useT();
   const [editing, setEditing] = useState(false);
   const [label, setLabel] = useState(period.label);
-  const [days, setDays] = useState(String(period.days));
+  const initialKind: Kind = period.months ? 'months' : 'days';
+  const initialCount = String(period.months || period.days);
+  const [kind, setKind] = useState<Kind>(initialKind);
+  const [count, setCount] = useState(initialCount);
   const [busy, setBusy] = useState(false);
 
   const run = async (fn: () => Promise<unknown>) => {
@@ -82,7 +151,7 @@ function Row({
             onSubmit={(e) => {
               e.preventDefault();
               void run(() =>
-                periodsApi.update(period.id, { label: label.trim(), days: Number(days) }),
+                periodsApi.update(period.id, { label: label.trim(), ...lengthBody(kind, count, true) }),
               );
             }}
             style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}
@@ -97,17 +166,13 @@ function Row({
                 style={{ width: 220 }}
               />
             </Field>
-            <Field id={`days-${period.id}`} label={t('periods.col.days')}>
-              <input
-                id={`days-${period.id}`}
-                className="input num"
-                type="number"
-                min={1}
-                value={days}
-                onChange={(e) => setDays(e.target.value)}
-                style={{ width: 110 }}
-              />
-            </Field>
+            <LengthFields
+              id={`len-${period.id}`}
+              kind={kind}
+              setKind={setKind}
+              count={count}
+              setCount={setCount}
+            />
             <button type="submit" className="btn btn-primary" disabled={busy} style={{ minHeight: 40 }}>
               {busy ? t('common.saving') : t('common.save')}
             </button>
@@ -117,7 +182,8 @@ function Row({
               onClick={() => {
                 setEditing(false);
                 setLabel(period.label);
-                setDays(String(period.days));
+                setKind(initialKind);
+                setCount(initialCount);
               }}
               style={{ minHeight: 40 }}
             >
@@ -138,7 +204,7 @@ function Row({
           {period.active ? null : <span className="pencil">{t('periods.inactive')}</span>}
         </span>
       </td>
-      <td className="num">{period.days}</td>
+      <td className="num">{fmtPeriodLength(period)}</td>
       <td className="num" style={{ whiteSpace: 'nowrap' }}>
         {period.active ? (
           <>
@@ -221,7 +287,8 @@ export function PeriodsManager({ heading }: { heading?: string }) {
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [label, setLabel] = useState('');
-  const [days, setDays] = useState('');
+  const [kind, setKind] = useState<Kind>('days');
+  const [count, setCount] = useState('');
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -252,9 +319,9 @@ export function PeriodsManager({ heading }: { heading?: string }) {
     setActionError(null);
     setNote(null);
     try {
-      await periodsApi.create({ label: label.trim(), days: Number(days) });
+      await periodsApi.create({ label: label.trim(), ...lengthBody(kind, count, false) });
       setLabel('');
-      setDays('');
+      setCount('');
       setNote(t('periods.added'));
       await reload();
     } catch (err) {
@@ -293,7 +360,7 @@ export function PeriodsManager({ heading }: { heading?: string }) {
         <thead>
           <tr>
             <th>{t('periods.col.period')}</th>
-            <th className="num">{t('periods.col.days')}</th>
+            <th className="num">{t('periods.col.length')}</th>
             <th className="num">{t('periods.col.order')}</th>
             <th className="num" />
           </tr>
@@ -331,6 +398,8 @@ export function PeriodsManager({ heading }: { heading?: string }) {
 
       <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{t('periods.note.future_only')}</p>
 
+      <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{t('periods.note.calendar')}</p>
+
       <form onSubmit={add} style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'flex-end', flexWrap: 'wrap' }} noValidate>
         <Field
           id="p_label"
@@ -348,22 +417,18 @@ export function PeriodsManager({ heading }: { heading?: string }) {
             style={{ width: 240 }}
           />
         </Field>
-        <Field id="p_days" label={t('periods.col.days')} error={actionError?.errors.days}>
-          <input
-            id="p_days"
-            className="input num"
-            type="number"
-            min={1}
-            value={days}
-            onChange={(e) => setDays(e.target.value)}
-            placeholder="7"
-            style={{ width: 110 }}
-          />
-        </Field>
+        <LengthFields
+          id="p_len"
+          kind={kind}
+          setKind={setKind}
+          count={count}
+          setCount={setCount}
+          error={actionError?.errors.days ?? actionError?.errors.months}
+        />
         <button
           type="submit"
           className="btn btn-primary"
-          disabled={busy || !label.trim() || !days}
+          disabled={busy || !label.trim() || !count}
           style={{ minHeight: 40 }}
         >
           <Icon icon="solar:add-circle-linear" width={20} /> {t('periods.add')}

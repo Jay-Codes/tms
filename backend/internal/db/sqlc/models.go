@@ -96,6 +96,7 @@ type Contract struct {
 	NoticeReason             *string            `json:"notice_reason"`
 	MovedOutConfirmedAt      pgtype.Timestamptz `json:"moved_out_confirmed_at"`
 	IsOffline                bool               `json:"is_offline"`
+	PaymentPeriodMonths      *int32             `json:"payment_period_months"`
 }
 
 type ContractSignature struct {
@@ -369,6 +370,7 @@ type PaymentPeriod struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt     pgtype.Timestamptz `json:"deleted_at"`
+	Months        *int32             `json:"months"`
 }
 
 type PaymentProof struct {

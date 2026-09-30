@@ -44,21 +44,23 @@ func (q *Queries) CountActivePaymentPeriods(ctx context.Context, orgID pgtype.UU
 }
 
 const createPaymentPeriod = `-- name: CreatePaymentPeriod :one
-INSERT INTO payment_periods (org_id, label, days, is_recommended, sort_order)
+INSERT INTO payment_periods (org_id, label, days, months, is_recommended, sort_order)
 VALUES (
     $1,
     $2,
     $3,
     $4,
-    $5
+    $5,
+    $6
 )
-RETURNING id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at
+RETURNING id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at, months
 `
 
 type CreatePaymentPeriodParams struct {
 	OrgID         pgtype.UUID `json:"org_id"`
 	Label         string      `json:"label"`
 	Days          int32       `json:"days"`
+	Months        *int32      `json:"months"`
 	IsRecommended bool        `json:"is_recommended"`
 	SortOrder     int32       `json:"sort_order"`
 }
@@ -68,6 +70,7 @@ func (q *Queries) CreatePaymentPeriod(ctx context.Context, arg CreatePaymentPeri
 		arg.OrgID,
 		arg.Label,
 		arg.Days,
+		arg.Months,
 		arg.IsRecommended,
 		arg.SortOrder,
 	)
@@ -83,12 +86,13 @@ func (q *Queries) CreatePaymentPeriod(ctx context.Context, arg CreatePaymentPeri
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Months,
 	)
 	return i, err
 }
 
 const getPaymentPeriod = `-- name: GetPaymentPeriod :one
-SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at FROM payment_periods
+SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at, months FROM payment_periods
 WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
 `
 
@@ -111,12 +115,13 @@ func (q *Queries) GetPaymentPeriod(ctx context.Context, arg GetPaymentPeriodPara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Months,
 	)
 	return i, err
 }
 
 const getRecommendedPaymentPeriod = `-- name: GetRecommendedPaymentPeriod :one
-SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at FROM payment_periods
+SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at, months FROM payment_periods
 WHERE org_id = $1 AND is_recommended AND deleted_at IS NULL
 LIMIT 1
 `
@@ -135,12 +140,13 @@ func (q *Queries) GetRecommendedPaymentPeriod(ctx context.Context, orgID pgtype.
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Months,
 	)
 	return i, err
 }
 
 const getRecommendedPaymentPeriodByDays = `-- name: GetRecommendedPaymentPeriodByDays :one
-SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at FROM payment_periods
+SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at, months FROM payment_periods
 WHERE org_id = $1 AND days = $2
   AND is_recommended AND deleted_at IS NULL
 LIMIT 1
@@ -165,12 +171,13 @@ func (q *Queries) GetRecommendedPaymentPeriodByDays(ctx context.Context, arg Get
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Months,
 	)
 	return i, err
 }
 
 const listActivePaymentPeriods = `-- name: ListActivePaymentPeriods :many
-SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at FROM payment_periods
+SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at, months FROM payment_periods
 WHERE org_id = $1 AND deleted_at IS NULL AND active
 ORDER BY is_recommended DESC, sort_order ASC, days ASC
 `
@@ -195,6 +202,7 @@ func (q *Queries) ListActivePaymentPeriods(ctx context.Context, orgID pgtype.UUI
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.Months,
 		); err != nil {
 			return nil, err
 		}
@@ -207,7 +215,7 @@ func (q *Queries) ListActivePaymentPeriods(ctx context.Context, orgID pgtype.UUI
 }
 
 const listPaymentPeriods = `-- name: ListPaymentPeriods :many
-SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at FROM payment_periods
+SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at, months FROM payment_periods
 WHERE org_id = $1 AND deleted_at IS NULL
   AND ($2::boolean OR active)
 ORDER BY is_recommended DESC, sort_order ASC, days ASC
@@ -241,6 +249,7 @@ func (q *Queries) ListPaymentPeriods(ctx context.Context, arg ListPaymentPeriods
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.Months,
 		); err != nil {
 			return nil, err
 		}
@@ -253,7 +262,7 @@ func (q *Queries) ListPaymentPeriods(ctx context.Context, arg ListPaymentPeriods
 }
 
 const listPaymentPeriodsByIDs = `-- name: ListPaymentPeriodsByIDs :many
-SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at FROM payment_periods
+SELECT id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at, months FROM payment_periods
 WHERE org_id = $1 AND id = ANY ($2::uuid[]) AND deleted_at IS NULL
 `
 
@@ -282,6 +291,7 @@ func (q *Queries) ListPaymentPeriodsByIDs(ctx context.Context, arg ListPaymentPe
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.Months,
 		); err != nil {
 			return nil, err
 		}
@@ -309,7 +319,7 @@ const reactivatePaymentPeriod = `-- name: ReactivatePaymentPeriod :one
 UPDATE payment_periods
 SET active = true, label = $1, sort_order = $2
 WHERE org_id = $3 AND id = $4 AND deleted_at IS NULL
-RETURNING id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at
+RETURNING id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at, months
 `
 
 type ReactivatePaymentPeriodParams struct {
@@ -338,6 +348,7 @@ func (q *Queries) ReactivatePaymentPeriod(ctx context.Context, arg ReactivatePay
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Months,
 	)
 	return i, err
 }
@@ -346,7 +357,7 @@ const setRecommendedPaymentPeriod = `-- name: SetRecommendedPaymentPeriod :one
 UPDATE payment_periods
 SET is_recommended = true
 WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at
+RETURNING id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at, months
 `
 
 type SetRecommendedPaymentPeriodParams struct {
@@ -368,6 +379,7 @@ func (q *Queries) SetRecommendedPaymentPeriod(ctx context.Context, arg SetRecomm
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Months,
 	)
 	return i, err
 }
@@ -376,15 +388,19 @@ const updatePaymentPeriod = `-- name: UpdatePaymentPeriod :one
 UPDATE payment_periods
 SET label      = COALESCE($1, label),
     days       = COALESCE($2, days),
-    sort_order = COALESCE($3, sort_order),
-    active     = COALESCE($4, active)
-WHERE org_id = $5 AND id = $6 AND deleted_at IS NULL
-RETURNING id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at
+    -- set_months switches the period's kind: months NULL = counted in days.
+    months     = CASE WHEN $3::boolean THEN $4::int ELSE months END,
+    sort_order = COALESCE($5, sort_order),
+    active     = COALESCE($6, active)
+WHERE org_id = $7 AND id = $8 AND deleted_at IS NULL
+RETURNING id, org_id, label, days, is_recommended, sort_order, active, created_at, updated_at, deleted_at, months
 `
 
 type UpdatePaymentPeriodParams struct {
 	Label     *string     `json:"label"`
 	Days      *int32      `json:"days"`
+	SetMonths bool        `json:"set_months"`
+	Months    *int32      `json:"months"`
 	SortOrder *int32      `json:"sort_order"`
 	Active    *bool       `json:"active"`
 	OrgID     pgtype.UUID `json:"org_id"`
@@ -395,6 +411,8 @@ func (q *Queries) UpdatePaymentPeriod(ctx context.Context, arg UpdatePaymentPeri
 	row := q.db.QueryRow(ctx, updatePaymentPeriod,
 		arg.Label,
 		arg.Days,
+		arg.SetMonths,
+		arg.Months,
 		arg.SortOrder,
 		arg.Active,
 		arg.OrgID,
@@ -412,6 +430,7 @@ func (q *Queries) UpdatePaymentPeriod(ctx context.Context, arg UpdatePaymentPeri
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Months,
 	)
 	return i, err
 }

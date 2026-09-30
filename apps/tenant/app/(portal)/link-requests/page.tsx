@@ -17,7 +17,7 @@ import {
   type LinkRequest,
   type LinkRequestStatus,
 } from '../../../lib/api';
-import { Amount, fmtDate } from '../../../lib/format';
+import { Amount, fmtDate, fmtPeriodLength } from '../../../lib/format';
 import { TableScroll, useT } from '@tms/ui';
 
 /** Tab values with the key of their label — the words are picked at render. */
@@ -108,7 +108,7 @@ function InboxBody() {
                   <td>
                     {r.payment_period?.label ?? '—'}
                     <div style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-soft)' }}>
-                      {r.payment_period?.days ? t.n('common.day', r.payment_period.days) : ''}
+                      {r.payment_period?.days ? fmtPeriodLength(r.payment_period) : ''}
                     </div>
                   </td>
                   <td className="num">

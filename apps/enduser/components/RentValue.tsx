@@ -15,7 +15,7 @@
  */
 
 import { useT } from '@tms/ui';
-import { days, money, priceLine } from '../lib/format';
+import { money, periodLength, priceLine } from '../lib/format';
 import type { Contract } from '../lib/api';
 
 export function RentValue({ contract }: { contract: Contract }) {
@@ -25,7 +25,7 @@ export function RentValue({ contract }: { contract: Contract }) {
   const period = contract.payment_period;
 
   const sameAsBasis =
-    perPeriod === contract.rent_amount && period?.days === contract.rent_period_days;
+    perPeriod === contract.rent_amount && period?.days === contract.rent_period_days && !period?.months;
 
   if (typeof perPeriod !== 'number' || !period || sameAsBasis) {
     return <span className="nowrap">{basis}</span>;
@@ -35,7 +35,7 @@ export function RentValue({ contract }: { contract: Contract }) {
     <>
       <span className="nowrap">{money(perPeriod)}</span>{' '}
       <span className="nowrap">
-        / {period.label ? `${period.label} (${days(t, period.days)})` : days(t, period.days)}
+        / {period.label ? `${period.label} (${periodLength(t, period)})` : periodLength(t, period)}
       </span>
       <span className="sub">{basis}</span>
     </>

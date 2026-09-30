@@ -64,7 +64,7 @@ import {
   type SettlementPreview,
 } from '../../../../lib/api';
 import { useMe } from '../../../../lib/auth';
-import { Amount, fmtDate, fmtTZS, todayISO } from '../../../../lib/format';
+import { Amount, fmtDate, fmtPeriodLength, fmtTZS, todayISO } from '../../../../lib/format';
 import { LOCALE_LABELS, TableScroll, isLocale, useT } from '@tms/ui';
 
 /** `YYYY-MM-DD` plus one day — the day a superseded contract hands over. */
@@ -1111,10 +1111,7 @@ function ContractBody({ id }: { id: string }) {
                 [
                   t('contracts.fact.payment_period'),
                   contract.payment_period
-                    ? t('contracts.fact.period_days', {
-                        label: contract.payment_period.label,
-                        days: contract.payment_period.days,
-                      })
+                    ? `${contract.payment_period.label} · ${fmtPeriodLength(contract.payment_period)}`
                     : '—',
                 ],
                 [

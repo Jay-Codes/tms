@@ -56,9 +56,11 @@ Exceeding a limit → `429` with `Retry-After`.
 All org routes: audience org (`tms_o`), roles owner+manager unless noted. Cross-org id → 404. Every mutation audited.
 
 ### Payment periods (`/org/payment-periods`)
-| `GET /org/payment-periods?include_inactive=true` | → `{items:[{id,label,days,is_recommended,sort_order,active,created_at}]}` sorted by sort_order, recommended first by default seed. |
-| `POST /org/payment-periods` | `{label(1–40), days(int>0)}` → `201 {period}`; custom periods have `is_recommended:false`. Dup (label or days among active) → 409. |
-| `PATCH /org/payment-periods/{id}` | `{label?, days?, sort_order?, active?}` → `200 {period}`. Changing `days` affects future contracts only. |
+| `GET /org/payment-periods?include_inactive=true` | → `{items:[{id,label,days,months,is_recommended,sort_order,active,created_at}]}` (`months` null = counted in days; 1–12 = calendar period) sorted by sort_order, recommended first by default seed. |
+| `POST /org/payment-periods` | `{label(1–40), days(int>0)}` or `{label, months(1–12)}` (calendar period; `days` becomes the nominal 30 × months) → `201 {period}`; custom periods have `is_recommended:false`. Dup (label, or same days *and* same kind among active — a calendar Monthly may sit beside the 30-day one) → 409. |
+| `PATCH /org/payment-periods/{id}` | `{label?, days?, months?, sort_order?, active?}` → `200 {period}`. `months` 1–12 makes it a calendar period (days forced to 30 × months), `0` makes it a day period again. Changes affect future contracts only. |
+
+**Calendar periods (migration 37).** A contract on a calendar period snapshots `payment_period_months` beside `payment_period_days`; `payment_period` objects on contracts, link requests and `GET /public/units/{code}` carry `months`. Schedules bill on the contract's `due_day` (the 1st when null), one row per `months` calendar months, each the full rent per period (`rent × 30·months / rent_period_days`) whatever the month's length; a start or end between billing days is prorated over that cycle's days; every row falls due on its start. `snapshot_hash` appends `|months=N` only for calendar contracts, so existing hashes still verify. `{{payment_period}}` renders "Monthly (every calendar month)" / "(kila mwezi wa kalenda)".
 | `DELETE /org/payment-periods/{id}` | → `204` (soft: sets `active=false`). Cannot deactivate last active period → 409. |
 | `POST /org/payment-periods/restore-recommended` | recreates any missing/deactivated recommended presets (30/90/180/365) → `200 {items}`. |
 

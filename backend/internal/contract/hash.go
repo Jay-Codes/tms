@@ -25,6 +25,10 @@ type Snapshot struct {
 	// for a contract without one. It is appended only when present, so every
 	// hash computed before Phase 22 still verifies.
 	Policy string
+	// PaymentPeriodMonths is the calendar cadence (0 for a period counted in
+	// days). Like Policy it is appended only when set, so every contract on a
+	// day cadence keeps the hash it was issued with.
+	PaymentPeriodMonths int
 }
 
 // Hash is the `snapshot_hash` stored on the contract and recomputed by
@@ -50,6 +54,9 @@ func (s Snapshot) Hash() string {
 	}, "|")
 	if s.Policy != "" {
 		payload += "|" + s.Policy
+	}
+	if s.PaymentPeriodMonths > 0 {
+		payload += "|months=" + strconv.Itoa(s.PaymentPeriodMonths)
 	}
 	sum := sha256.Sum256([]byte(payload))
 	return hex.EncodeToString(sum[:])

@@ -122,6 +122,7 @@ type publicPeriod struct {
 	ID            string `json:"id"`
 	Label         string `json:"label"`
 	Days          int32  `json:"days"`
+	Months        *int32 `json:"months"`
 	IsRecommended bool   `json:"is_recommended"`
 	Amount        *int64 `json:"amount"`
 }
@@ -177,6 +178,7 @@ func (s *Server) handlePublicUnit(w http.ResponseWriter, r *http.Request) {
 			ID:            db.UUIDString(period.ID),
 			Label:         period.Label,
 			Days:          period.Days,
+			Months:        period.Months,
 			IsRecommended: period.IsRecommended,
 		}
 		if unit.PriceID.Valid && unit.PricePeriodDays > 0 {

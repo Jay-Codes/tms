@@ -320,7 +320,13 @@ export interface PublicBranding {
 export interface OfferedPeriod {
   id: string;
   label: string;
+  /** Length in days; for a calendar period its nominal 30 × months. */
   days: number;
+  /**
+   * Set on a calendar period: rent falls due on the same day every month
+   * (the 1st unless the landlord sets another) and this many months apart.
+   */
+  months?: number | null;
   is_recommended: boolean;
   amount: number | null;
 }
@@ -409,7 +415,7 @@ export interface LinkRequest {
   unit: { id: string; name: string; property_name: string };
   org: { name: string; slug: string };
   status: LinkRequestStatus;
-  payment_period: { id: string; label: string; days: number; amount: number };
+  payment_period: { id: string; label: string; days: number; months?: number | null; amount: number };
   term_days: number;
   start_date: string;
   end_date: string;
@@ -583,7 +589,7 @@ export interface Contract {
    * an older API omits it, and then the unit price is all we can show.
    */
   rent_per_period?: number;
-  payment_period: { id: string; label: string; days: number };
+  payment_period: { id: string; label: string; days: number; months?: number | null };
   term_days: number;
   start_date: string;
   end_date: string;

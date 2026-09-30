@@ -33,9 +33,11 @@ import {
   errorMessage,
   formatDate,
   money,
+  periodEvery,
+  periodLength,
   todayIso,
 } from '../../../../lib/format';
-import { buildPreview, deriveEndDate, termQuickPicks } from '../../../../lib/schedule';
+import { buildPreview, deriveEndDate, minTermDays, termQuickPicks } from '../../../../lib/schedule';
 import { forgetScannedUnit, rememberScannedUnit } from '../../../../lib/scan';
 import { forgetAssist } from '../../../../lib/assist';
 import { Protected } from '../../../../components/Protected';
@@ -118,7 +120,7 @@ function ConnectContent() {
         const first = sortPeriods(unitRes.periods)[0];
         if (first) {
           setPeriodId(first.id);
-          setTermDays(first.days);
+          setTermDays(termQuickPicks(first, todayIso())[0].days);
         }
         setLoadError(null);
       } catch (err) {
@@ -138,7 +140,7 @@ function ConnectContent() {
     (p: OfferedPeriod) => {
       setPeriodId(p.id);
       // A term shorter than one period is not payable — pull it up.
-      setTermDays((t) => (t < p.days ? p.days : t));
+      setTermDays((t) => Math.max(t, minTermDays(p)));
     },
     [],
   );
@@ -165,8 +167,8 @@ function ConnectContent() {
       setError(t('connect.error.period'));
       return;
     }
-    if (termDays < period.days) {
-      setError(t('connect.error.term', { days: dayLabel(t, period.days) }));
+    if (termDays < minTermDays(period)) {
+      setError(t('connect.error.term', { days: periodLength(t, period) }));
       return;
     }
     if (!accepted) {
@@ -350,7 +352,7 @@ function ConnectContent() {
                     )}
                     <br />
                     <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-                      {t('unit.everyDays', { days: p.days })}
+                      {periodEvery(t, p)}
                     </span>
                   </span>
                   <span className="num">
@@ -367,15 +369,15 @@ function ConnectContent() {
             </legend>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
               {period &&
-                termQuickPicks(period.days).map((d) => (
+                termQuickPicks(period, startDate).map((pick) => (
                   <button
-                    key={d}
+                    key={pick.days}
                     type="button"
-                    className={termDays === d ? 'btn btn-secondary' : 'btn btn-quiet'}
+                    className={termDays === pick.days ? 'btn btn-secondary' : 'btn btn-quiet'}
                     style={{ width: 'auto', flex: '1 1 42%' }}
-                    onClick={() => setTermDays(d)}
+                    onClick={() => setTermDays(pick.days)}
                   >
-                    {dayLabel(t, d)}
+                    {pick.months ? t.n('common.months', pick.months, { count: pick.months }) : dayLabel(t, pick.days)}
                   </button>
                 ))}
             </div>
@@ -386,14 +388,14 @@ function ConnectContent() {
                 className="input"
                 type="number"
                 inputMode="numeric"
-                min={period?.days ?? 1}
+                min={period ? minTermDays(period) : 1}
                 step={1}
                 value={termDays || ''}
                 onChange={(e) => setTermDays(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
               />
               {period && (
                 <span className="hint">
-                  {t('connect.termHint', { days: dayLabel(t, period.days) })}
+                  {t('connect.termHint', { days: periodLength(t, period) })}
                 </span>
               )}
             </div>

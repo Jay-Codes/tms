@@ -115,6 +115,28 @@ func DueDayPhraseFor(lang string, dueDay *int) string {
 	return "siku ya " + strconv.Itoa(*dueDay)
 }
 
+// PaymentPeriodPhraseFor renders `{{payment_period}}`: the period's label and
+// how long it is — "Monthly (30 days)", or for a calendar period "Monthly
+// (every calendar month)" / "Quarterly (every 3 calendar months)".
+func PaymentPeriodPhraseFor(lang, label string, days, months int) string {
+	if lang == LangSwahili {
+		switch {
+		case months == 1:
+			return label + " (kila mwezi wa kalenda)"
+		case months > 1:
+			return label + " (kila miezi " + strconv.Itoa(months) + " ya kalenda)"
+		}
+		return label + " (siku " + strconv.Itoa(days) + ")"
+	}
+	switch {
+	case months == 1:
+		return label + " (every calendar month)"
+	case months > 1:
+		return label + " (every " + strconv.Itoa(months) + " calendar months)"
+	}
+	return label + " (" + strconv.Itoa(days) + " days)"
+}
+
 // RentBasisPhrase renders `{{rent_basis}}`: the unit's own price and the span
 // it covers, as "TZS 100,000 / 30 days".
 //

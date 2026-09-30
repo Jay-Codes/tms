@@ -21,7 +21,7 @@ import { Icon } from '@iconify/react';
 import { useT } from '@tms/ui';
 import { ApiError, publicApi, type PublicUnit } from '../../../lib/api';
 import { useMe } from '../../../lib/auth';
-import { errorMessage, money, priceLine } from '../../../lib/format';
+import { errorMessage, money, periodEvery, priceLine } from '../../../lib/format';
 import { rememberScannedUnit } from '../../../lib/scan';
 import { useAssist } from '../../../lib/assist';
 import { OrgHeader, useOrgTheme } from '../../../components/OrgHeader';
@@ -186,7 +186,7 @@ export default function UnitLandingPage() {
                       )}
                       <br />
                       <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
-                        {t('unit.everyDays', { days: p.days })}
+                        {periodEvery(t, p)}
                       </span>
                     </td>
                     <td className="num">
