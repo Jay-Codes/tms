@@ -464,17 +464,20 @@ type PricePlan struct {
 }
 
 type ProjectionScenario struct {
-	ID                pgtype.UUID        `json:"id"`
-	OrgID             pgtype.UUID        `json:"org_id"`
-	Name              string             `json:"name"`
-	HorizonMonths     int32              `json:"horizon_months"`
-	RentChangePct     float64            `json:"rent_change_pct"`
-	CollectionRatePct *float64           `json:"collection_rate_pct"`
-	ExpenseChangePct  float64            `json:"expense_change_pct"`
-	CreatedByUserID   pgtype.UUID        `json:"created_by_user_id"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	Basis             string             `json:"basis"`
-	UnitIds           []pgtype.UUID      `json:"unit_ids"`
+	ID                    pgtype.UUID        `json:"id"`
+	OrgID                 pgtype.UUID        `json:"org_id"`
+	Name                  string             `json:"name"`
+	HorizonMonths         int32              `json:"horizon_months"`
+	RentChangePct         float64            `json:"rent_change_pct"`
+	CollectionRatePct     *float64           `json:"collection_rate_pct"`
+	ExpenseChangePct      float64            `json:"expense_change_pct"`
+	CreatedByUserID       pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	Basis                 string             `json:"basis"`
+	UnitIds               []pgtype.UUID      `json:"unit_ids"`
+	MonthlyExpenses       *int64             `json:"monthly_expenses"`
+	FromPurchase          bool               `json:"from_purchase"`
+	IncludeFutureExpenses bool               `json:"include_future_expenses"`
 }
 
 type Property struct {

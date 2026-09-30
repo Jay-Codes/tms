@@ -37,6 +37,7 @@ import {
 } from '../../../lib/api';
 import { PeriodPicker, useT, type PeriodValue } from '@tms/ui';
 import { loadExpensePeriod, saveExpensePeriod } from '../../../lib/expensePeriod';
+import { periodQuery } from '../../../lib/reportPeriod';
 
 type StatusFilter = 'recorded' | 'voided' | 'all';
 
@@ -99,15 +100,14 @@ function ExpensesBody() {
 
   const query = useMemo<ExpenseListQuery>(
     () => ({
-      from: period.from,
-      to: period.to,
+      ...periodQuery(period),
       property_id: propertyId || undefined,
       category_id: categoryId || undefined,
       status,
       q: search || undefined,
       limit: 50,
     }),
-    [period.from, period.to, propertyId, categoryId, status, search],
+    [period.cadence, period.from, period.to, propertyId, categoryId, status, search],
   );
 
   const load = useCallback(
@@ -141,13 +141,13 @@ function ExpensesBody() {
     setSummary(null);
     expensesApi
       .summary(
-        { from: period.from, to: period.to, group_by: groupBy, property_id: propertyId || undefined },
+        { ...periodQuery(period), group_by: groupBy, property_id: propertyId || undefined },
         ac.signal,
       )
       .then(setSummary)
       .catch(() => setSummary(null));
     return () => ac.abort();
-  }, [period.from, period.to, groupBy, propertyId, version]);
+  }, [period.cadence, period.from, period.to, groupBy, propertyId, version]);
 
   const loadMore = async () => {
     if (!cursor) return;

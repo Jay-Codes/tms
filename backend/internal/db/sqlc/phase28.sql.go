@@ -25,26 +25,31 @@ func (q *Queries) CountProjectionScenarios(ctx context.Context, orgID pgtype.UUI
 const createProjectionScenario = `-- name: CreateProjectionScenario :one
 INSERT INTO projection_scenarios (
     org_id, name, horizon_months, basis, unit_ids, rent_change_pct,
-    collection_rate_pct, expense_change_pct, created_by_user_id
+    collection_rate_pct, expense_change_pct, monthly_expenses,
+    from_purchase, include_future_expenses, created_by_user_id
 ) VALUES (
     $1, $2, $3, $4,
     $5::uuid[], $6,
     $7, $8,
-    $9
+    $9, $10, $11,
+    $12
 )
-RETURNING id, org_id, name, horizon_months, rent_change_pct, collection_rate_pct, expense_change_pct, created_by_user_id, created_at, basis, unit_ids
+RETURNING id, org_id, name, horizon_months, rent_change_pct, collection_rate_pct, expense_change_pct, created_by_user_id, created_at, basis, unit_ids, monthly_expenses, from_purchase, include_future_expenses
 `
 
 type CreateProjectionScenarioParams struct {
-	OrgID             pgtype.UUID   `json:"org_id"`
-	Name              string        `json:"name"`
-	HorizonMonths     int32         `json:"horizon_months"`
-	Basis             string        `json:"basis"`
-	UnitIds           []pgtype.UUID `json:"unit_ids"`
-	RentChangePct     float64       `json:"rent_change_pct"`
-	CollectionRatePct *float64      `json:"collection_rate_pct"`
-	ExpenseChangePct  float64       `json:"expense_change_pct"`
-	CreatedByUserID   pgtype.UUID   `json:"created_by_user_id"`
+	OrgID                 pgtype.UUID   `json:"org_id"`
+	Name                  string        `json:"name"`
+	HorizonMonths         int32         `json:"horizon_months"`
+	Basis                 string        `json:"basis"`
+	UnitIds               []pgtype.UUID `json:"unit_ids"`
+	RentChangePct         float64       `json:"rent_change_pct"`
+	CollectionRatePct     *float64      `json:"collection_rate_pct"`
+	ExpenseChangePct      float64       `json:"expense_change_pct"`
+	MonthlyExpenses       *int64        `json:"monthly_expenses"`
+	FromPurchase          bool          `json:"from_purchase"`
+	IncludeFutureExpenses bool          `json:"include_future_expenses"`
+	CreatedByUserID       pgtype.UUID   `json:"created_by_user_id"`
 }
 
 func (q *Queries) CreateProjectionScenario(ctx context.Context, arg CreateProjectionScenarioParams) (ProjectionScenario, error) {
@@ -57,6 +62,9 @@ func (q *Queries) CreateProjectionScenario(ctx context.Context, arg CreateProjec
 		arg.RentChangePct,
 		arg.CollectionRatePct,
 		arg.ExpenseChangePct,
+		arg.MonthlyExpenses,
+		arg.FromPurchase,
+		arg.IncludeFutureExpenses,
 		arg.CreatedByUserID,
 	)
 	var i ProjectionScenario
@@ -72,6 +80,9 @@ func (q *Queries) CreateProjectionScenario(ctx context.Context, arg CreateProjec
 		&i.CreatedAt,
 		&i.Basis,
 		&i.UnitIds,
+		&i.MonthlyExpenses,
+		&i.FromPurchase,
+		&i.IncludeFutureExpenses,
 	)
 	return i, err
 }
@@ -79,7 +90,7 @@ func (q *Queries) CreateProjectionScenario(ctx context.Context, arg CreateProjec
 const deleteProjectionScenario = `-- name: DeleteProjectionScenario :one
 DELETE FROM projection_scenarios
 WHERE org_id = $1 AND id = $2
-RETURNING id, org_id, name, horizon_months, rent_change_pct, collection_rate_pct, expense_change_pct, created_by_user_id, created_at, basis, unit_ids
+RETURNING id, org_id, name, horizon_months, rent_change_pct, collection_rate_pct, expense_change_pct, created_by_user_id, created_at, basis, unit_ids, monthly_expenses, from_purchase, include_future_expenses
 `
 
 type DeleteProjectionScenarioParams struct {
@@ -102,13 +113,16 @@ func (q *Queries) DeleteProjectionScenario(ctx context.Context, arg DeleteProjec
 		&i.CreatedAt,
 		&i.Basis,
 		&i.UnitIds,
+		&i.MonthlyExpenses,
+		&i.FromPurchase,
+		&i.IncludeFutureExpenses,
 	)
 	return i, err
 }
 
 const listProjectionScenarios = `-- name: ListProjectionScenarios :many
 
-SELECT id, org_id, name, horizon_months, rent_change_pct, collection_rate_pct, expense_change_pct, created_by_user_id, created_at, basis, unit_ids FROM projection_scenarios
+SELECT id, org_id, name, horizon_months, rent_change_pct, collection_rate_pct, expense_change_pct, created_by_user_id, created_at, basis, unit_ids, monthly_expenses, from_purchase, include_future_expenses FROM projection_scenarios
 WHERE org_id = $1
 ORDER BY lower(name), id
 `
@@ -135,6 +149,9 @@ func (q *Queries) ListProjectionScenarios(ctx context.Context, orgID pgtype.UUID
 			&i.CreatedAt,
 			&i.Basis,
 			&i.UnitIds,
+			&i.MonthlyExpenses,
+			&i.FromPurchase,
+			&i.IncludeFutureExpenses,
 		); err != nil {
 			return nil, err
 		}

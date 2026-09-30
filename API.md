@@ -1455,14 +1455,15 @@ Migration 000033: `payment_schedules.created_by_backfill_id` (periods a backfill
 ## Part 2 — Phase 28: projections, break-even and ROI
 
 Migration 000032: `properties.purchase_price` (BIGINT > 0), `purchase_date` (DATE), `current_value` (BIGINT > 0) — all nullable; `expense_categories.is_capital` (BOOLEAN, default false); table `projection_scenarios` (per org, unique name case-insensitively, at most 50).
+Migration 000035 (30 Sep 2026): `projection_scenarios.monthly_expenses` (BIGINT ≥ 0, nullable), `from_purchase`, `include_future_expenses` (BOOLEAN, default false).
 Migration 000034 (rework, 27 Sep 2026): `projection_scenarios.basis` (`contracts` | `selected` | `best_case`, default `contracts`) and `unit_ids` (UUID[]); `occupancy_pct` dropped (saved scenarios that set it became `best_case`).
 
 | Route | Contract |
 |---|---|
 | `PATCH /properties/{id}` | Also takes `purchase_price`, `purchase_date` (YYYY-MM-DD, 1900…today), `current_value` — each whole TZS 1 … 999,999,999,999 or `null` to clear; absent = unchanged. 400 field errors. Audited on `property.update`. `GET /properties`, `GET /properties/{id}` return the three fields (null when unset). |
 | `POST /org/expense-categories`, `PATCH /org/expense-categories/{id}` | Also take `is_capital` (bool); the category shape gains `is_capital`. Capital spend counts toward what a property has cost, not as a monthly running cost. Audited on `expense_category.update`. |
-| `POST /reports/projection` | Org (any role). Body, all optional: `{property_id, horizon_months (1–120, default 24), basis ("contracts" default \| "selected" \| "best_case"), unit_ids ([uuid], ≤1000, used only by "selected"), rent_change_pct (−100…500, default 0), collection_rate_pct (0–100 or null = trailing), expense_change_pct (−100…500, default 0)}`. Unknown fields (incl. the old `occupancy_pct`) / out-of-range / unknown basis / malformed ids → 400 field errors; a property not in the org → 404. Unit ids outside the org or the property are ignored. Writes nothing. → 200 below. |
-| `GET /reports/projection/scenarios` | Org. `{items: [scenario]}` sorted by name. `scenario = {id, name, horizon_months, basis, unit_ids, rent_change_pct, collection_rate_pct, expense_change_pct, created_at}` (collection null = trailing). |
+| `POST /reports/projection` | Org (any role). Body, all optional: `{property_id, horizon_months (1–120, default 24), basis ("contracts" default \| "selected" \| "best_case"), unit_ids ([uuid], ≤1000, used only by "selected"), rent_change_pct (−100…500, default 0), collection_rate_pct (0–100 or null = trailing), expense_change_pct (−100…500, default 0; on the trailing average only), monthly_expenses (whole TZS ≥ 0, or null = the trailing average), from_purchase (bool, default false), include_future_expenses (bool, default false)}`. Unknown fields (incl. the old `occupancy_pct`) / out-of-range / unknown basis / malformed ids → 400 field errors; a property not in the org → 404. Unit ids outside the org or the property are ignored. Writes nothing. → 200 below. |
+| `GET /reports/projection/scenarios` | Org. `{items: [scenario]}` sorted by name. `scenario = {id, name, horizon_months, basis, unit_ids, rent_change_pct, collection_rate_pct, expense_change_pct, monthly_expenses, from_purchase, include_future_expenses, created_at}` (collection null = trailing). |
 | `POST /reports/projection/scenarios` | Org. `{name (1–60), …the projection parameters}` → 201 `{scenario}`. 409 `scenario_exists` (same name, any case); 422 `too_many_scenarios` past 50. Audit `projection_scenario.create`. |
 | `DELETE /reports/projection/scenarios/{id}` | Org. 204; 404 for another org's or a missing one. Audit `projection_scenario.delete`. |
 
@@ -1475,14 +1476,15 @@ Migration 000034 (rework, 27 Sep 2026): `projection_scenarios.basis` (`contracts
               running_expenses_monthly, categories: [{id, name, monthly}], net,
               units_total, units_let, units_open, units_assumed, assumed_rent_monthly },
   applied:  { horizon_months, basis, unit_ids, rent_change_pct, collection_rate_pct,
-              collection_rate_source, expense_change_pct },          -- source: scenario | trailing | default
+              collection_rate_source, expense_change_pct,
+              monthly_expenses, monthly_expenses_source, from_purchase, include_future_expenses },      -- source: scenario | trailing | default
   months:   [{ month: "YYYY-MM", income, running_expenses, net,
                cumulative_income, cumulative_spent, cumulative }],
   totals:   { income, running_expenses, net },
   investment: { purchase_price | null, capital_spend, running_spend, spent_to_date, income_to_date,
                 cash_to_date, current_value | null, break_even_month | null, break_even_status,
                 trailing_annual_net, trailing_annual_spend, projected_annual_net, projected_annual_expenses,
-                roi_trailing_pct | null, roi_projected_pct | null, yield_pct | null, payback_years | null },
+                roi_spend, roi_trailing_pct | null, roi_projected_pct | null, yield_pct | null, payback_years | null },
   units:    [{ id, name, property_id, property_name, status, monthly_rent, let_until | null,
                lettable, assumed }],
   properties: [{ id, name, has_purchase_price, projected_annual_net, projected_annual_expenses,
@@ -1500,10 +1502,12 @@ Migration 000034 (rework, 27 Sep 2026): `projection_scenarios.basis` (`contracts
   - `selected`: the same, plus each unit in `unit_ids` let at its own price from the month no contract covers it (any status — a landlord may pick a unit under maintenance).
   - `best_case`: every lettable unit (`vacant`/`occupied`) let at its own price whenever no contract covers it — contracts assumed renewed.
 - A month's **income** = (rent scheduled that month + for each unit the basis counts as let and no contract covers, its price × (1 + `rent_change_pct`)) × collection rate. A unit's price = its current price plan, else the latest tenancy's rent, normalised to 30 days; a unit whose tenancy ends mid-month is free from the month after. Signed contracts keep their rent.
-- A month's **running expenses** = trailing non-capital expenses ÷ `history_months` × (1 + `expense_change_pct`).
+- A month's **running expenses** = `monthly_expenses` when given (the landlord's estimate, used as is); otherwise trailing non-capital expenses ÷ `history_months` × (1 + `expense_change_pct`). For the portfolio an estimate is shared across properties by their trailing running costs (else unit counts, else equally), so the parts still add up.
+- The forecast starts **next month**: the current month so far is history, counted in the trailing window and the to-date figures.
 - **Returns are measured against spend** — what the rent book records. **Spend** = every running and capital expense since the purchase month (all history without a `purchase_date`) + `purchase_price` when entered. `cash_to_date` = income to date − spend to date. `cumulative_income` / `cumulative_spent` carry both forward month by month; `cumulative` is their difference.
 - **Break-even** is the month cumulative income covers cumulative spend: `reached` (already, at the month it last came back above zero), `projected`, `beyond_horizon` (still profitable), `not_profitable` (projected annual net ≤ 0), `no_costs` (income covers every cost from the start — nothing to break even on).
-- **ROI** = net ÷ expenses. `projected` = the first twelve projected months' net ÷ their running expenses (annualised when the horizon is shorter); `trailing` = (collected − running − capital) ÷ (running + capital) over the window. Null without expenses. **Yield** = projected annual net ÷ `current_value`. **Payback** = years at the projected annual net until income covers the spend to date: `0` once it has, null when nothing was spent or the net is ≤ 0.
+- **Total expenditure**: by default every expense ever logged counts (and all income); `from_purchase: true` drops recorded months before each property's purchase date. `roi_spend` = `spent_to_date`, plus the first projected year's expenses when `include_future_expenses: true`.
+- **ROI** = a year's net ÷ `roi_spend`. `projected` = the first twelve projected months' net (annualised when the horizon is shorter); `trailing` = the trailing net annualised. Null when nothing has been spent. **Yield** = projected annual net ÷ `current_value`. **Payback** = years at the projected annual net until income covers the spend to date: `0` once it has, null when nothing was spent or the net is ≤ 0.
 - **Portfolio**: months, totals and units are the sum of the properties; the return figures are computed on the sums (a purchase price, where entered, adds to spend); yield covers properties with a current value.
 ## Part 2 — Phase 27: SMS credits bought with mobile money (Snippe), platform SMS stock
 

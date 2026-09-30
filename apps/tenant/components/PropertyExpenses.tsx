@@ -24,6 +24,7 @@ import {
 } from '../lib/api';
 import { fmtTZS } from '../lib/format';
 import { loadExpensePeriod, saveExpensePeriod } from '../lib/expensePeriod';
+import { periodQuery } from '../lib/reportPeriod';
 import { PeriodPicker, periodLabel, useT, type PeriodValue } from '@tms/ui';
 
 export function PropertyExpenses({
@@ -54,7 +55,7 @@ export function PropertyExpenses({
       setError(null);
       try {
         const res = await expensesApi.list(
-          { property_id: propertyId, from: period.from, to: period.to, status: 'recorded', limit: 50 },
+          { property_id: propertyId, ...periodQuery(period), status: 'recorded', limit: 50 },
           signal,
         );
         setItems(res.items ?? []);
@@ -66,7 +67,7 @@ export function PropertyExpenses({
         setItems([]);
       }
     },
-    [propertyId, period.from, period.to],
+    [propertyId, period.cadence, period.from, period.to],
   );
 
   useEffect(() => {
@@ -79,11 +80,11 @@ export function PropertyExpenses({
     const ac = new AbortController();
     setSummary(null);
     expensesApi
-      .summary({ property_id: propertyId, from: period.from, to: period.to, group_by: 'category' }, ac.signal)
+      .summary({ property_id: propertyId, ...periodQuery(period), group_by: 'category' }, ac.signal)
       .then(setSummary)
       .catch(() => setSummary(null));
     return () => ac.abort();
-  }, [propertyId, period.from, period.to, version]);
+  }, [propertyId, period.cadence, period.from, period.to, version]);
 
   const loadMore = async () => {
     if (!cursor) return;
@@ -91,8 +92,7 @@ export function PropertyExpenses({
     try {
       const res = await expensesApi.list({
         property_id: propertyId,
-        from: period.from,
-        to: period.to,
+        ...periodQuery(period),
         status: 'recorded',
         limit: 50,
         cursor,
