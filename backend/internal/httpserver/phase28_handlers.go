@@ -105,6 +105,12 @@ type projectionParams struct {
 	// MonthlyExpenses is the landlord's estimate of running costs a month;
 	// null or absent means the trailing average.
 	MonthlyExpenses *int64 `json:"monthly_expenses"`
+	// FromPurchase counts only money from each property's purchase date on;
+	// off, every expense ever logged counts.
+	FromPurchase *bool `json:"from_purchase"`
+	// IncludeFutureExpenses adds the coming year's projected expenses to the
+	// total ROI is measured against.
+	IncludeFutureExpenses *bool `json:"include_future_expenses"`
 }
 
 // scenario validates the parameters and applies the defaults.
@@ -140,6 +146,8 @@ func (in projectionParams) scenario(f validate.Fields) report.ProjectionScenario
 		}
 		out.MonthlyExpenses = in.MonthlyExpenses
 	}
+	out.FromPurchase = in.FromPurchase != nil && *in.FromPurchase
+	out.IncludeFutureExpenses = in.IncludeFutureExpenses != nil && *in.IncludeFutureExpenses
 	out.Basis = report.BasisContracts
 	if in.Basis != nil {
 		if !report.ValidBasis(*in.Basis) {
@@ -503,16 +511,18 @@ func projectionUnit(start time.Time, u sqlc.ProjectionUnitsRow) report.Projectio
 // ------------------------------------------------ saved scenarios --
 
 type projectionScenarioResponse struct {
-	ID                string    `json:"id"`
-	Name              string    `json:"name"`
-	HorizonMonths     int       `json:"horizon_months"`
-	Basis             string    `json:"basis"`
-	UnitIDs           []string  `json:"unit_ids"`
-	RentChangePct     float64   `json:"rent_change_pct"`
-	CollectionRatePct *float64  `json:"collection_rate_pct"`
-	ExpenseChangePct  float64   `json:"expense_change_pct"`
-	MonthlyExpenses   *int64    `json:"monthly_expenses"`
-	CreatedAt         time.Time `json:"created_at"`
+	ID                    string    `json:"id"`
+	Name                  string    `json:"name"`
+	HorizonMonths         int       `json:"horizon_months"`
+	Basis                 string    `json:"basis"`
+	UnitIDs               []string  `json:"unit_ids"`
+	RentChangePct         float64   `json:"rent_change_pct"`
+	CollectionRatePct     *float64  `json:"collection_rate_pct"`
+	ExpenseChangePct      float64   `json:"expense_change_pct"`
+	MonthlyExpenses       *int64    `json:"monthly_expenses"`
+	FromPurchase          bool      `json:"from_purchase"`
+	IncludeFutureExpenses bool      `json:"include_future_expenses"`
+	CreatedAt             time.Time `json:"created_at"`
 }
 
 func toProjectionScenario(r sqlc.ProjectionScenario) projectionScenarioResponse {
@@ -524,7 +534,8 @@ func toProjectionScenario(r sqlc.ProjectionScenario) projectionScenarioResponse 
 		ID: db.UUIDString(r.ID), Name: r.Name, HorizonMonths: int(r.HorizonMonths),
 		Basis: r.Basis, UnitIDs: ids, RentChangePct: r.RentChangePct,
 		CollectionRatePct: r.CollectionRatePct, ExpenseChangePct: r.ExpenseChangePct,
-		MonthlyExpenses: r.MonthlyExpenses, CreatedAt: r.CreatedAt.Time,
+		MonthlyExpenses: r.MonthlyExpenses, FromPurchase: r.FromPurchase,
+		IncludeFutureExpenses: r.IncludeFutureExpenses, CreatedAt: r.CreatedAt.Time,
 	}
 }
 
@@ -582,7 +593,8 @@ func (s *Server) handleCreateProjectionScenario(w http.ResponseWriter, r *http.R
 			OrgID: p.OrgID, Name: name, HorizonMonths: int32(sc.HorizonMonths), //nolint:gosec // bounded 1–120
 			Basis: sc.Basis, UnitIds: unitUUIDs(sc.UnitIDs), RentChangePct: sc.RentChangePct,
 			CollectionRatePct: sc.CollectionRatePct, ExpenseChangePct: sc.ExpenseChangePct,
-			MonthlyExpenses: sc.MonthlyExpenses, CreatedByUserID: p.UserID,
+			MonthlyExpenses: sc.MonthlyExpenses, FromPurchase: sc.FromPurchase,
+			IncludeFutureExpenses: sc.IncludeFutureExpenses, CreatedByUserID: p.UserID,
 		})
 		if err != nil {
 			return err

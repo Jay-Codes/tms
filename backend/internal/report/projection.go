@@ -83,6 +83,13 @@ type ProjectionScenario struct {
 	// month. Nil means the trailing monthly average × (1 + ExpenseChangePct);
 	// set, it is used as it is and ExpenseChangePct does not apply.
 	MonthlyExpenses *int64
+	// FromPurchase drops every recorded month before a property's purchase
+	// date — income and expenses alike. Off (the default), everything ever
+	// logged counts: the return is measured against total expenditure.
+	FromPurchase bool
+	// IncludeFutureExpenses adds the coming year's projected running costs to
+	// the spend ROI is measured against.
+	IncludeFutureExpenses bool
 }
 
 // CategoryAmount is one expense category's total over the trailing window.
@@ -215,6 +222,8 @@ type ProjectionApplied struct {
 	// MonthlyExpensesSource where it came from: scenario | trailing.
 	MonthlyExpenses       int64  `json:"monthly_expenses"`
 	MonthlyExpensesSource string `json:"monthly_expenses_source"`
+	FromPurchase          bool   `json:"from_purchase"`
+	IncludeFutureExpenses bool   `json:"include_future_expenses"`
 }
 
 // ProjectionUnitRow is one unit in the picker: what it rents for, whether a
@@ -238,8 +247,9 @@ type ProjectionInvestment struct {
 	PurchasePrice *int64 `json:"purchase_price"`
 	CapitalSpend  int64  `json:"capital_spend"`
 	RunningSpend  int64  `json:"running_spend"`
-	// SpentToDate is running + capital + purchase price, since purchase (or
-	// the start of the book), up to the start of the projection.
+	// SpentToDate is running + capital + purchase price up to the start of
+	// the projection: every expense ever logged, or only those from the
+	// purchase month on when the scenario sets FromPurchase.
 	SpentToDate  int64  `json:"spent_to_date"`
 	IncomeToDate int64  `json:"income_to_date"`
 	CashToDate   int64  `json:"cash_to_date"` // income − spent
@@ -256,6 +266,9 @@ type ProjectionInvestment struct {
 	// ROI is annual net ÷ SpentToDate — the sum of every expense logged (and
 	// the purchase price when entered): what a year brings back on what the
 	// property has cost so far.
+	// ROISpend is the total ROI divides by: SpentToDate, plus the coming
+	// year's projected expenses when the scenario includes them.
+	ROISpend        int64    `json:"roi_spend"`
 	ROITrailingPct  *float64 `json:"roi_trailing_pct"`
 	ROIProjectedPct *float64 `json:"roi_projected_pct"`
 	YieldPct        *float64 `json:"yield_pct"`
@@ -312,7 +325,7 @@ func ProjectProperty(start time.Time, sc ProjectionScenario, p ProjectionPropert
 		})
 	}
 
-	past := sincePurchase(p.Past, p.PurchaseDate)
+	past := sc.recorded(p)
 	inv := ProjectionInvestment{PurchasePrice: p.PurchasePrice, CurrentValue: p.CurrentValue}
 	for _, m := range past {
 		inv.IncomeToDate += m.Income
@@ -358,8 +371,9 @@ func ProjectProperty(start time.Time, sc ProjectionScenario, p ProjectionPropert
 	inv.TrailingAnnualSpend = annualise(trailingSpend, months)
 	inv.ProjectedAnnualNet = projectedAnnual(nets)
 	inv.ProjectedAnnualExpenses = projectedAnnual(expenses)
-	inv.ROITrailingPct = pctRatio(inv.TrailingAnnualNet, inv.SpentToDate)
-	inv.ROIProjectedPct = pctRatio(inv.ProjectedAnnualNet, inv.SpentToDate)
+	inv.ROISpend = roiSpend(sc, inv)
+	inv.ROITrailingPct = pctRatio(inv.TrailingAnnualNet, inv.ROISpend)
+	inv.ROIProjectedPct = pctRatio(inv.ProjectedAnnualNet, inv.ROISpend)
 	inv.BreakEvenMonth, inv.BreakEvenStatus = breakEven(start, purchaseOf(p), past, nets, inv.ProjectedAnnualNet)
 	inv.PaybackYears = payback(inv.CashToDate, inv.SpentToDate, inv.ProjectedAnnualNet)
 	if p.CurrentValue != nil {
@@ -462,7 +476,7 @@ func ProjectPortfolio(
 			priced = true
 			purchase += *p.PurchasePrice
 		}
-		for _, pm := range sincePurchase(p.Past, p.PurchaseDate) {
+		for _, pm := range sc.recorded(p) {
 			cur := pastByMonth[pm.Month]
 			if cur == nil {
 				cur = &PastMonth{Month: pm.Month}
@@ -508,8 +522,9 @@ func ProjectPortfolio(
 	sort.Slice(past, func(i, j int) bool { return past[i].Month.Before(past[j].Month) })
 	inv.ProjectedAnnualNet = projectedAnnual(nets)
 	inv.ProjectedAnnualExpenses = projectedAnnual(expenses)
-	inv.ROITrailingPct = pctRatio(inv.TrailingAnnualNet, inv.SpentToDate)
-	inv.ROIProjectedPct = pctRatio(inv.ProjectedAnnualNet, inv.SpentToDate)
+	inv.ROISpend = roiSpend(sc, inv)
+	inv.ROITrailingPct = pctRatio(inv.TrailingAnnualNet, inv.ROISpend)
+	inv.ROIProjectedPct = pctRatio(inv.ProjectedAnnualNet, inv.ROISpend)
 	inv.BreakEvenMonth, inv.BreakEvenStatus = breakEven(start, purchase, past, nets, inv.ProjectedAnnualNet)
 	inv.PaybackYears = payback(inv.CashToDate, inv.SpentToDate, inv.ProjectedAnnualNet)
 	if valueTotal > 0 {
@@ -551,6 +566,7 @@ func applied(sc ProjectionScenario, coll float64, collSrc string, monthly int64,
 		CollectionRatePct: coll, CollectionRateSource: collSrc,
 		ExpenseChangePct: sc.ExpenseChangePct,
 		MonthlyExpenses:  monthly, MonthlyExpensesSource: expSrc,
+		FromPurchase: sc.FromPurchase, IncludeFutureExpenses: sc.IncludeFutureExpenses,
 	}
 }
 
@@ -699,6 +715,24 @@ func clampPct(v float64) float64 {
 // monthStart is the 1st of d's month, in UTC like every other month key here.
 func monthStart(d time.Time) time.Time {
 	return time.Date(d.Year(), d.Month(), 1, 0, 0, 0, 0, time.UTC)
+}
+
+// recorded is the property's recorded months the scenario counts: all of
+// them, or only those from the purchase month on when FromPurchase is set.
+func (sc ProjectionScenario) recorded(p ProjectionProperty) []PastMonth {
+	if !sc.FromPurchase {
+		return p.Past
+	}
+	return sincePurchase(p.Past, p.PurchaseDate)
+}
+
+// roiSpend is what ROI is measured against: everything spent to date, plus
+// the coming year's projected running costs when the scenario asks for them.
+func roiSpend(sc ProjectionScenario, inv ProjectionInvestment) int64 {
+	if sc.IncludeFutureExpenses {
+		return inv.SpentToDate + inv.ProjectedAnnualExpenses
+	}
+	return inv.SpentToDate
 }
 
 // sincePurchase keeps the months from the purchase month on; every month

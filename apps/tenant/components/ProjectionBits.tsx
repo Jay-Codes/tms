@@ -214,9 +214,11 @@ interface ScenarioState {
   collection: number | null;
   /** The landlord's running costs a month; null = the last twelve months' average. */
   monthly: number | null;
+  fromPurchase: boolean;
+  includeFuture: boolean;
 }
 
-const BASE_SCENARIO: ScenarioState = { horizon: 24, basis: 'contracts', unitIds: [], rent: 0, expense: 0, collection: null, monthly: null };
+const BASE_SCENARIO: ScenarioState = { horizon: 24, basis: 'contracts', unitIds: [], rent: 0, expense: 0, collection: null, monthly: null, fromPurchase: false, includeFuture: false };
 
 const BASES: ProjectionBasis[] = ['contracts', 'selected', 'best_case'];
 
@@ -228,6 +230,8 @@ const toParams = (s: ScenarioState): ProjectionParams => ({
   expense_change_pct: s.expense,
   collection_rate_pct: s.collection,
   monthly_expenses: s.monthly,
+  from_purchase: s.fromPurchase,
+  include_future_expenses: s.includeFuture,
 });
 
 const fromSaved = (s: ProjectionScenario): ScenarioState => ({
@@ -238,6 +242,8 @@ const fromSaved = (s: ProjectionScenario): ScenarioState => ({
   expense: s.expense_change_pct,
   collection: s.collection_rate_pct,
   monthly: s.monthly_expenses ?? null,
+  fromPurchase: s.from_purchase ?? false,
+  includeFuture: s.include_future_expenses ?? false,
 });
 
 /* --------------------------------------------------------- saved scenarios -- */
@@ -567,6 +573,17 @@ export function ProjectionsTab({ propertyId }: { propertyId: string }) {
             resetLabel={t('proj.scenario.use_trailing')}
           />
         </div>
+        <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 'var(--sp-2)' }}>
+          <legend style={{ fontSize: 'var(--text-sm)', fontWeight: 600, marginBottom: 'var(--sp-2)' }}>{t('proj.total.title')}</legend>
+          <label style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'flex-start', fontSize: 'var(--text-sm)' }}>
+            <input type="checkbox" checked={sc.includeFuture} onChange={(e) => set({ includeFuture: e.target.checked })} />
+            <span>{t('proj.total.include_future')}</span>
+          </label>
+          <label style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'flex-start', fontSize: 'var(--text-sm)' }}>
+            <input type="checkbox" checked={sc.fromPurchase} onChange={(e) => set({ fromPurchase: e.target.checked })} />
+            <span>{t('proj.total.from_purchase')}</span>
+          </label>
+        </fieldset>
         <details open={sc.basis === 'selected' || undefined} style={{ display: 'grid', gap: 'var(--sp-3)' }}>
           <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
             {t('proj.units.title')}
@@ -613,7 +630,7 @@ export function ProjectionsTab({ propertyId }: { propertyId: string }) {
               inv
                 ? inv.roi_projected_pct === null
                   ? t('proj.tile.roi_none')
-                  : t('proj.tile.roi_sub', { spent: fmtTZS(inv.spent_to_date), trailing: pct(inv.roi_trailing_pct) })
+                  : t(sc.includeFuture ? 'proj.tile.roi_sub_future' : 'proj.tile.roi_sub', { spent: fmtTZS(inv.roi_spend), trailing: pct(inv.roi_trailing_pct) })
                 : undefined
             }
           />

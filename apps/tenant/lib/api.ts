@@ -3220,6 +3220,10 @@ export interface ProjectionParams {
   expense_change_pct?: number;
   /** The landlord's estimate of running costs a month (TZS); null = the last twelve months' average. */
   monthly_expenses?: number | null;
+  /** Count only money from each property's purchase date on (default: everything ever logged). */
+  from_purchase?: boolean;
+  /** Add the coming year's projected expenses to the total ROI is measured against. */
+  include_future_expenses?: boolean;
 }
 
 export type RateSource = 'scenario' | 'trailing' | 'default';
@@ -3274,6 +3278,8 @@ export interface ProjectionApplied {
   /** Running costs a month the forecast used. */
   monthly_expenses: number;
   monthly_expenses_source: 'scenario' | 'trailing';
+  from_purchase: boolean;
+  include_future_expenses: boolean;
 }
 
 /** Returns are measured against what has been spent (expenses, plus the purchase price when entered). */
@@ -3292,7 +3298,9 @@ export interface ProjectionInvestment {
   trailing_annual_spend: number;
   projected_annual_net: number;
   projected_annual_expenses: number;
-  /** Annual net ÷ everything spent so far (`spent_to_date`). */
+  /** What ROI divides by: `spent_to_date`, plus the coming year's expenses when included. */
+  roi_spend: number;
+  /** Annual net ÷ `roi_spend`. */
   roi_trailing_pct: number | null;
   roi_projected_pct: number | null;
   yield_pct: number | null;
@@ -3352,6 +3360,8 @@ export interface ProjectionScenario {
   collection_rate_pct: number | null;
   expense_change_pct: number;
   monthly_expenses: number | null;
+  from_purchase: boolean;
+  include_future_expenses: boolean;
   created_at: string;
 }
 

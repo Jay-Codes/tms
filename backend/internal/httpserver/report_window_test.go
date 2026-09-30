@@ -79,13 +79,27 @@ func TestProjectionCountsCurrentMonth(t *testing.T) {
 	if v := num(t, est, "investment", "roi_projected_pct"); v != -3 {
 		t.Errorf("roi = %v, want -3 (annual net ÷ everything spent)", v)
 	}
+	// With the coming year's expenses in the total: 60,000,000 + 1,800,000.
+	fut := owner.projection(map[string]any{"property_id": propertyID, "horizon_months": 12,
+		"monthly_expenses": 150_000, "include_future_expenses": true}).
+		mustStatus(t, http.StatusOK, "projection with future expenses")
+	if v := num(t, fut, "investment", "roi_spend"); v != 61_800_000 {
+		t.Errorf("roi spend = %v, want 61,800,000", v)
+	}
+	if v := num(t, fut, "investment", "roi_projected_pct"); v != -2.9 {
+		t.Errorf("roi with future expenses = %v, want -2.9", v)
+	}
 	if r := owner.projection(map[string]any{"monthly_expenses": -1}); r.Code != http.StatusBadRequest {
 		t.Errorf("negative estimate: status %d, want 400", r.Code)
 	}
-	saved := owner.do(http.MethodPost, "/reports/projection/scenarios", map[string]any{"name": "Lean", "monthly_expenses": 150_000}).
+	saved := owner.do(http.MethodPost, "/reports/projection/scenarios", map[string]any{
+		"name": "Lean", "monthly_expenses": 150_000, "from_purchase": true, "include_future_expenses": true}).
 		mustStatus(t, http.StatusCreated, "save with an estimate")
 	if v := num(t, saved, "scenario", "monthly_expenses"); v != 150_000 {
 		t.Errorf("saved estimate = %v", v)
+	}
+	if sc, _ := saved.Body["scenario"].(map[string]any); sc["from_purchase"] != true || sc["include_future_expenses"] != true {
+		t.Errorf("saved flags = %v", sc)
 	}
 
 	next := time.Now().In(tz.Zone()).AddDate(0, 0, -time.Now().In(tz.Zone()).Day()+1).AddDate(0, 1, 0).Format("2006-01")

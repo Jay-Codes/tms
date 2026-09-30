@@ -67,7 +67,11 @@ func baseProperty() report.ProjectionProperty {
 	}
 }
 
-func sixMonths() report.ProjectionScenario { return report.ProjectionScenario{HorizonMonths: 6} }
+// sixMonths counts from the purchase date, as the hand-worked figures above
+// do; TestProjectionTotalExpenditure covers the default of counting everything.
+func sixMonths() report.ProjectionScenario {
+	return report.ProjectionScenario{HorizonMonths: 6, FromPurchase: true}
+}
 
 func wantF(t *testing.T, what string, got *float64, want float64) {
 	t.Helper()
@@ -87,7 +91,7 @@ func wantNilF(t *testing.T, what string, got *float64) {
 }
 
 func withBasis(basis string, units ...string) report.ProjectionScenario {
-	return report.ProjectionScenario{HorizonMonths: 6, Basis: basis, UnitIDs: units}
+	return report.ProjectionScenario{HorizonMonths: 6, Basis: basis, UnitIDs: units, FromPurchase: true}
 }
 
 func TestProjectionSignedContractsOnly(t *testing.T) {
@@ -232,7 +236,7 @@ func TestProjectionBreakEven(t *testing.T) {
 		// −1,500,000 behind at +180,000 a year.
 		{name: "beyond the horizon", price: 2_000_000, sc: sixMonths(), wantStatus: report.BreakEvenBeyondHorizon, wantPayback: f64(8.3)},
 		// Running costs × 11 (330,000 a month) exceed every month's income.
-		{name: "never, at a loss", price: 5_000_000, sc: report.ProjectionScenario{HorizonMonths: 6, ExpenseChangePct: 1000},
+		{name: "never, at a loss", price: 5_000_000, sc: report.ProjectionScenario{HorizonMonths: 6, ExpenseChangePct: 1000, FromPurchase: true},
 			wantStatus: report.BreakEvenNotProfitable},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -434,5 +438,47 @@ func TestProjectionMonthlyExpenseEstimate(t *testing.T) {
 	_, parts = report.ProjectPortfolio(projStart, psc, []report.ProjectionProperty{shop, young})
 	if a, b := parts[0].Months[0].RunningExpenses, parts[1].Months[0].RunningExpenses; a != 25_000 || a+b != 100_001 {
 		t.Errorf("unit shares = %d + %d, want 25,000 + 75,001", a, b)
+	}
+}
+
+func TestProjectionTotalExpenditure(t *testing.T) {
+	// The default counts every recorded month, the December 2024 one before
+	// the purchase included: 1,930,000 in, 430,000 out.
+	all := report.ProjectionScenario{HorizonMonths: 6}
+	inv := report.ProjectProperty(projStart, all, baseProperty()).Investment
+	if inv.IncomeToDate != 1_930_000 || inv.SpentToDate != 430_000 || inv.ROISpend != 430_000 {
+		t.Errorf("everything counted = %+v", inv)
+	}
+	// Old expenses are never dropped by default: a 50,000 repair before the
+	// purchase is still spend.
+	p := baseProperty()
+	p.Past[0].Running = 50_000
+	if got := report.ProjectProperty(projStart, all, p).Investment.SpentToDate; got != 480_000 {
+		t.Errorf("spent with a pre-purchase repair = %d, want 480000", got)
+	}
+	// …unless the landlord asks to count from the purchase.
+	from := all
+	from.FromPurchase = true
+	if got := report.ProjectProperty(projStart, from, p).Investment; got.SpentToDate != 430_000 || got.IncomeToDate != 930_000 {
+		t.Errorf("from purchase = %+v", got)
+	}
+	if a := report.ProjectProperty(projStart, from, p).Applied; !a.FromPurchase || a.IncludeFutureExpenses {
+		t.Errorf("applied flags = %+v", a)
+	}
+
+	// Including the coming year's expenses: 430,000 + 360,000 = 790,000.
+	fut := all
+	fut.IncludeFutureExpenses = true
+	got := report.ProjectProperty(projStart, fut, baseProperty()).Investment
+	if got.ROISpend != 790_000 {
+		t.Errorf("roi spend = %d, want 790000", got.ROISpend)
+	}
+	wantF(t, "roi with future expenses", got.ROIProjectedPct, 22.8) // 180,000 / 790,000
+	if got.SpentToDate != 430_000 {
+		t.Errorf("spent to date moved to %d; only ROI's total should", got.SpentToDate)
+	}
+	port, _ := report.ProjectPortfolio(projStart, fut, []report.ProjectionProperty{baseProperty()})
+	if port.Investment.ROISpend != 790_000 {
+		t.Errorf("portfolio roi spend = %d", port.Investment.ROISpend)
 	}
 }
