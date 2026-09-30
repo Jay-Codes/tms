@@ -28,7 +28,8 @@ import {
 } from '../../../../components/ContractBits';
 import { DocumentPaper, PrintStyles } from '../../../../components/DocumentPaper';
 import { Field, Note, ProblemNote } from '../../../../components/FormBits';
-import { AmendForm, type AmendMode } from '../../../../components/AmendForm';
+import { AmendDraftForm, AmendForm, type AmendMode } from '../../../../components/AmendForm';
+import { AmendmentPanel, AmendmentStageChip } from '../../../../components/AmendmentBits';
 import { BackfillSheet } from '../../../../components/BackfillSheet';
 import { BackfillsList } from '../../../../components/BackfillsList';
 import { DaysOverdue, PaymentsTable, ReverseSheet, SourceChip } from '../../../../components/PaymentBits';
@@ -550,6 +551,8 @@ function ContractBody({ id }: { id: string }) {
   const [terminateDate, setTerminateDate] = useState<string | undefined>(undefined);
   // Phase 22.4: an unsigned amendment of this contract, if one is open.
   const [openAmendment, setOpenAmendment] = useState<Contract | null>(null);
+  // Phase 31: editing this page's own amendment draft.
+  const [editDraft, setEditDraft] = useState(false);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -605,11 +608,18 @@ function ContractBody({ id }: { id: string }) {
       return;
     }
     const ac = new AbortController();
+    // Phase 31: an open change is a draft in review or an approved one
+    // awaiting signature.
     contractsApi
-      .list({ unit_id: unitId, status: 'pending_signature', limit: 50 }, ac.signal)
+      .list({ unit_id: unitId, limit: 50 }, ac.signal)
       .then((r) =>
         setOpenAmendment(
-          (r.items ?? []).find((c) => c.supersedes_contract_id === id && c.amendment_effective_date) ?? null,
+          (r.items ?? []).find(
+            (c) =>
+              c.supersedes_contract_id === id &&
+              c.amendment_effective_date &&
+              (c.status === 'draft' || c.status === 'pending_signature'),
+          ) ?? null,
         ),
       )
       .catch(() => setOpenAmendment(null));
@@ -775,12 +785,16 @@ function ContractBody({ id }: { id: string }) {
         />
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
-          <ContractStatusStamp status={contract.status} />
+          <ContractStatusStamp status={contract.status} amendmentStage={contract.amendment?.stage} />
           {offline ? <span className="stamp">{t('contracts.offline.chip')}</span> : null}
           {contract.superseded_by_contract_id ? (
             <span className="stamp">{t('contracts.amend.chip_replaced')}</span>
           ) : isAmendment ? (
-            <span className="stamp">{t('contracts.amend.chip')}</span>
+            <>
+              <span className="stamp">{t('contracts.amend.chip')}</span>
+              {/* Other stages already read in the status mark beside it. */}
+              {contract.amendment?.stage === 'approved' ? <AmendmentStageChip contract={contract} /> : null}
+            </>
           ) : null}
           <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
             {t('contracts.meta.written', { date: fmtDate(contract.created_at) })}
@@ -877,9 +891,20 @@ function ContractBody({ id }: { id: string }) {
         {openAmendment && !contract.superseded_by_contract_id ? (
           <p style={{ marginTop: 'var(--sp-3)', fontSize: 'var(--text-sm)' }}>
             <Link href={`/contracts/${openAmendment.id}`} style={{ color: 'inherit' }}>
-              {t('contracts.amend.open_pending', { date: fmtDate(openAmendment.amendment_effective_date) })}
+              {openAmendment.status === 'draft'
+                ? t('contracts.amend.open_review', { date: fmtDate(openAmendment.amendment_effective_date) })
+                : t('contracts.amend.open_pending', { date: fmtDate(openAmendment.amendment_effective_date) })}
             </Link>
           </p>
+        ) : null}
+
+        {isAmendment && contract.amendment ? (
+          <AmendmentPanel
+            contract={contract}
+            isOwner={isOwner}
+            onEdit={() => setEditDraft(true)}
+            onChanged={() => void load()}
+          />
         ) : null}
 
         {contract.supersedes_contract_id && !isAmendment ? (
@@ -1643,6 +1668,19 @@ function ContractBody({ id }: { id: string }) {
             onDone={(created) => {
               setAmendMode(null);
               router.push(`/contracts/${created.id}`);
+            }}
+          />
+        ) : null}
+      </Sheet>
+
+      <Sheet open={editDraft} title={t('amendment.edit')} onClose={() => setEditDraft(false)} width={640}>
+        {editDraft ? (
+          <AmendDraftForm
+            draft={contract}
+            onCancel={() => setEditDraft(false)}
+            onDone={() => {
+              setEditDraft(false);
+              void load();
             }}
           />
         ) : null}

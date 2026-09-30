@@ -146,6 +146,9 @@ type contractResponse struct {
 	AmendmentReason          *string `json:"amendment_reason"`
 	SupersededByContractID   *string `json:"superseded_by_contract_id"`
 	TerminationEffectiveDate *string `json:"termination_effective_date"`
+	// Amendment is the review of a Phase 31 change (maker-checker), null on
+	// a contract that amends nothing.
+	Amendment *amendmentInfo `json:"amendment"`
 	// TemplateChanged: unsigned, and its template's wording or policy changed
 	// after it was written — offer a reissue. Set on the single read only.
 	TemplateChanged bool `json:"template_changed"`
@@ -163,6 +166,34 @@ type contractResponse struct {
 	TerminatedAt        *time.Time       `json:"terminated_at"`
 	TerminationReason   *string          `json:"termination_reason"`
 	SchedulesSummary    schedulesSummary `json:"schedules_summary"`
+}
+
+// amendmentInfo is where a contract change is in its review (Phase 31). The
+// renter's reads carry the stage, both notes and their own decline; the
+// wording source, the reviewers and the owner's reason are the org's.
+type amendmentInfo struct {
+	Stage          string     `json:"stage"`
+	NoteSW         string     `json:"note_sw"`
+	NoteEN         string     `json:"note_en"`
+	BodyHTML       *string    `json:"body_html,omitempty"`
+	DraftedBy      *string    `json:"drafted_by,omitempty"`
+	DraftedByName  *string    `json:"drafted_by_name,omitempty"`
+	SubmittedAt    *time.Time `json:"submitted_at,omitempty"`
+	ReviewedBy     *string    `json:"reviewed_by,omitempty"`
+	ReviewedByName *string    `json:"reviewed_by_name,omitempty"`
+	ReviewedAt     *time.Time `json:"reviewed_at,omitempty"`
+	ReviewNote     *string    `json:"review_note,omitempty"`
+	DeclinedAt     *time.Time `json:"declined_at,omitempty"`
+	DeclineReason  *string    `json:"decline_reason,omitempty"`
+}
+
+// forRenter drops what only the org may read.
+func (c *contractResponse) forRenter() {
+	if a := c.Amendment; a != nil {
+		a.BodyHTML, a.DraftedBy, a.DraftedByName = nil, nil, nil
+		a.ReviewedBy, a.ReviewedByName, a.ReviewNote = nil, nil, nil
+		a.SubmittedAt = nil
+	}
 }
 
 // scheduleResponse is one payment_schedules row.
@@ -287,6 +318,22 @@ func toContract(r contractRow, signatures []signatureBlock) contractResponse {
 	if r.LinkRequestID.Valid {
 		id := db.UUIDString(r.LinkRequestID)
 		out.LinkRequestID = &id
+	}
+	if r.AmendmentStage != nil {
+		out.Amendment = &amendmentInfo{
+			Stage:  *r.AmendmentStage,
+			NoteSW: db.StrVal(r.AmendmentNoteSw), NoteEN: db.StrVal(r.AmendmentNoteEn),
+			BodyHTML:       r.AmendmentBodyHtml,
+			DraftedBy:      optUUIDString(r.AmendmentDraftedBy),
+			DraftedByName:  r.AmendmentDraftedByName,
+			SubmittedAt:    optTime(r.AmendmentSubmittedAt),
+			ReviewedBy:     optUUIDString(r.AmendmentReviewedBy),
+			ReviewedByName: r.AmendmentReviewedByName,
+			ReviewedAt:     optTime(r.AmendmentReviewedAt),
+			ReviewNote:     r.AmendmentReviewNote,
+			DeclinedAt:     optTime(r.AmendmentDeclinedAt),
+			DeclineReason:  r.AmendmentDeclineReason,
+		}
 	}
 	if r.PaymentPeriodID.Valid {
 		out.PaymentPeriod = &contractPeriod{

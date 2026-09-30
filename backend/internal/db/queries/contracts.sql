@@ -11,7 +11,8 @@ INSERT INTO contracts (
     org_id, unit_id, renter_user_id, template_id, terms_snapshot_html,
     rent_amount, rent_period_days, payment_period_id, payment_period_days, payment_period_months,
     term_days, start_date, end_date, due_day, status, snapshot_hash, link_request_id,
-    language, supersedes_contract_id, amendment_effective_date, amendment_reason, is_offline
+    language, supersedes_contract_id, amendment_effective_date, amendment_reason, is_offline,
+    amendment_stage, amendment_note_sw, amendment_note_en, amendment_body_html, amendment_drafted_by
 )
 VALUES (
     sqlc.arg(org_id), sqlc.arg(unit_id), sqlc.arg(renter_user_id), sqlc.narg(template_id),
@@ -24,7 +25,10 @@ VALUES (
     -- §22.4: an amendment is marked at insert, so the per-unit index sees it.
     sqlc.narg(supersedes_contract_id), sqlc.narg(amendment_effective_date),
     sqlc.narg(amendment_reason),
-    COALESCE(sqlc.narg(is_offline)::boolean, false)
+    COALESCE(sqlc.narg(is_offline)::boolean, false),
+    -- Phase 31: an amendment is written as a draft for an owner to approve.
+    sqlc.narg(amendment_stage), sqlc.narg(amendment_note_sw), sqlc.narg(amendment_note_en),
+    sqlc.narg(amendment_body_html), sqlc.narg(amendment_drafted_by)
 )
 RETURNING *;
 
@@ -41,12 +45,16 @@ SELECT c.*,
        COALESCE(sm.paid_count, 0)::bigint    AS schedule_paid_count,
        COALESCE(sm.overdue_count, 0)::bigint AS schedule_overdue_count,
        nd.due_date AS next_due_date,
-       COALESCE(nd.amount, 0)::bigint AS next_due_amount
+       COALESCE(nd.amount, 0)::bigint AS next_due_amount,
+       ad.full_name AS amendment_drafted_by_name,
+       ar.full_name AS amendment_reviewed_by_name
 FROM contracts c
 JOIN units u      ON u.id = c.unit_id AND u.org_id = c.org_id
 JOIN properties p ON p.id = u.property_id AND p.org_id = c.org_id
 JOIN orgs o       ON o.id = c.org_id
 JOIN users ru     ON ru.id = c.renter_user_id
+LEFT JOIN users ad ON ad.id = c.amendment_drafted_by
+LEFT JOIN users ar ON ar.id = c.amendment_reviewed_by
 LEFT JOIN payment_periods pp ON pp.id = c.payment_period_id AND pp.org_id = c.org_id
 LEFT JOIN LATERAL (
     SELECT count(*) AS cnt, sum(s.amount) AS total,
@@ -63,7 +71,10 @@ LEFT JOIN LATERAL (
 ) nd ON true
 WHERE c.id = sqlc.arg(id) AND c.deleted_at IS NULL
   AND c.org_id = COALESCE(sqlc.narg(org_id)::uuid, c.org_id)
-  AND c.renter_user_id = COALESCE(sqlc.narg(renter_user_id)::uuid, c.renter_user_id);
+  AND c.renter_user_id = COALESCE(sqlc.narg(renter_user_id)::uuid, c.renter_user_id)
+  -- Phase 31: the renter never sees an amendment an owner has not approved.
+  AND (sqlc.narg(org_id)::uuid IS NOT NULL OR c.amendment_stage IS NULL
+       OR c.amendment_stage IN ('approved', 'declined'));
 
 -- guard-exempt: dual-scoped — org_id for the landlord's list, renter_user_id for GET /me/contracts; the handler always supplies one.
 -- name: ListContracts :many
@@ -78,12 +89,16 @@ SELECT c.*,
        COALESCE(sm.paid_count, 0)::bigint    AS schedule_paid_count,
        COALESCE(sm.overdue_count, 0)::bigint AS schedule_overdue_count,
        nd.due_date AS next_due_date,
-       COALESCE(nd.amount, 0)::bigint AS next_due_amount
+       COALESCE(nd.amount, 0)::bigint AS next_due_amount,
+       ad.full_name AS amendment_drafted_by_name,
+       ar.full_name AS amendment_reviewed_by_name
 FROM contracts c
 JOIN units u      ON u.id = c.unit_id AND u.org_id = c.org_id
 JOIN properties p ON p.id = u.property_id AND p.org_id = c.org_id
 JOIN orgs o       ON o.id = c.org_id
 JOIN users ru     ON ru.id = c.renter_user_id
+LEFT JOIN users ad ON ad.id = c.amendment_drafted_by
+LEFT JOIN users ar ON ar.id = c.amendment_reviewed_by
 LEFT JOIN payment_periods pp ON pp.id = c.payment_period_id AND pp.org_id = c.org_id
 LEFT JOIN LATERAL (
     SELECT count(*) AS cnt, sum(s.amount) AS total,
@@ -103,6 +118,10 @@ WHERE c.deleted_at IS NULL
   AND (sqlc.narg(renter_user_id)::uuid IS NULL OR c.renter_user_id = sqlc.narg(renter_user_id)::uuid)
   AND (sqlc.narg(unit_id)::uuid IS NULL OR c.unit_id = sqlc.narg(unit_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR c.status = sqlc.narg(status)::text)
+  AND (sqlc.narg(amendment_stage)::text IS NULL OR c.amendment_stage = sqlc.narg(amendment_stage)::text)
+  -- Phase 31: the renter's own list never shows an unapproved amendment.
+  AND (sqlc.narg(org_id)::uuid IS NOT NULL OR c.amendment_stage IS NULL
+       OR c.amendment_stage IN ('approved', 'declined'))
   AND (sqlc.narg(cursor_at)::timestamptz IS NULL
        OR (c.created_at, c.id) < (sqlc.narg(cursor_at)::timestamptz, sqlc.narg(cursor_id)::uuid))
 ORDER BY c.created_at DESC, c.id DESC

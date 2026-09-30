@@ -59,7 +59,7 @@ const VARIABLE_KEYS: Record<string, string> = {
   eviction_notice_days: 'tpl.var.eviction_notice_days',
 };
 
-const EDITOR_STYLE = `
+export const EDITOR_STYLE = `
   /* Phone: the toolbar keeps 44px targets and the variable picker takes a
      row of its own instead of being pushed off the right edge by
      \`margin-left: auto\`. */
@@ -122,7 +122,7 @@ function ToolButton({
   );
 }
 
-function Toolbar({ editor }: { editor: Editor }) {
+export function Toolbar({ editor }: { editor: Editor }) {
   const t = useT();
   return (
     <div

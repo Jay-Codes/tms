@@ -97,6 +97,18 @@ type Contract struct {
 	MovedOutConfirmedAt      pgtype.Timestamptz `json:"moved_out_confirmed_at"`
 	IsOffline                bool               `json:"is_offline"`
 	PaymentPeriodMonths      *int32             `json:"payment_period_months"`
+	AmendmentStage           *string            `json:"amendment_stage"`
+	AmendmentNoteSw          *string            `json:"amendment_note_sw"`
+	AmendmentNoteEn          *string            `json:"amendment_note_en"`
+	AmendmentBodyHtml        *string            `json:"amendment_body_html"`
+	AmendmentDraftedBy       pgtype.UUID        `json:"amendment_drafted_by"`
+	AmendmentSubmittedBy     pgtype.UUID        `json:"amendment_submitted_by"`
+	AmendmentSubmittedAt     pgtype.Timestamptz `json:"amendment_submitted_at"`
+	AmendmentReviewedBy      pgtype.UUID        `json:"amendment_reviewed_by"`
+	AmendmentReviewedAt      pgtype.Timestamptz `json:"amendment_reviewed_at"`
+	AmendmentReviewNote      *string            `json:"amendment_review_note"`
+	AmendmentDeclinedAt      pgtype.Timestamptz `json:"amendment_declined_at"`
+	AmendmentDeclineReason   *string            `json:"amendment_decline_reason"`
 }
 
 type ContractSignature struct {

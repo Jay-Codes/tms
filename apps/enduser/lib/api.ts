@@ -611,6 +611,17 @@ export interface Contract {
   supersedes_contract_id?: string | null;
   amendment_effective_date?: string | null;
   amendment_reason?: string | null;
+  /**
+   * Phase 31 — a contract change the landlord's owner approved: the note in
+   * both languages (show the renter's own), and the renter's decline.
+   */
+  amendment?: {
+    stage: 'approved' | 'declined';
+    note_sw: string;
+    note_en: string;
+    declined_at?: string | null;
+    decline_reason?: string | null;
+  } | null;
   superseded_by_contract_id?: string | null;
   /** Phase 22.2 — only the part the renter's screens read. */
   policy?: { tenant_notice_days: number } | null;
@@ -776,6 +787,10 @@ export const contractApi = {
   /** 409 `no_notice`. */
   withdrawNotice: (id: string) =>
     api.del<{ contract: Contract }>(`/me/contracts/${encodeURIComponent(id)}/notice`),
+
+  /** Phase 31 — decline a change before signing it. 409 `not_declinable` / `not_an_amendment`. */
+  declineAmendment: (id: string, reason: string) =>
+    api.post<{ contract: Contract }>(`/me/contracts/${encodeURIComponent(id)}/decline`, { reason }),
 
   sendSignOtp: (id: string) =>
     api.post<{ resend_after_seconds: number }>(`/contracts/${encodeURIComponent(id)}/sign/otp`),

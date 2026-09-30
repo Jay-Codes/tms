@@ -209,6 +209,7 @@ const messages: Messages = {
   'contract.offline.chip': 'Mkataba wa nje ya mfumo',
   'contract.offline.banner': 'Mkataba wa nje ya mfumo - umerekodiwa na mwenye nyumba kutoka kumbukumbu za karatasi, haukusainiwa kwenye TMS; hauna hati.',
   'contract.status.terminated': 'Umesitishwa',
+  'contract.status.declined': 'Badiliko limekataliwa',
   'contract.status.draft': 'Rasimu',
 
   /* ----------------------------------------------------------- document */
@@ -237,6 +238,13 @@ const messages: Messages = {
   'doc.discountedTo': 'Imepunguzwa hadi {amount}',
   'doc.amendment': 'Mkataba huu unabadilisha mkataba wako wa sasa kuanzia {date}: {reason}',
   'doc.amendmentNoReason': 'Mkataba huu unabadilisha mkataba wako wa sasa kuanzia {date}.',
+  'decline.open': 'Kataa badiliko hili',
+  'decline.title': 'Kataa badiliko',
+  'decline.lead': 'Mkataba wako wa sasa unabaki kama ulivyo. Mwenye nyumba ataona sababu yako.',
+  'decline.reason': 'Kwa nini unakataa?',
+  'decline.submit': 'Kataa',
+  'decline.sending': 'Inatuma…',
+  'decline.done': 'Umekataa badiliko hili ({reason}). Mkataba wako wa sasa unaendelea.',
   'doc.replaced': 'Umebadilishwa na mkataba mpya zaidi',
   'doc.openNewer': 'Fungua mkataba mpya',
   'doc.parties': 'Wahusika',

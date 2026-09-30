@@ -36,11 +36,15 @@ export function contractStatusLabel(
 export function ContractStamp({
   status,
   renterSigned,
+  declined = false,
 }: {
   status: ContractStatus;
   renterSigned: boolean;
+  /** Phase 31: a change the renter turned down is not a terminated tenancy. */
+  declined?: boolean;
 }) {
   const t = useT();
+  if (declined) return <span className="pencil">{t('contract.status.declined')}</span>;
   const mark = contractStatusLabel(t, status, renterSigned);
   if (!mark.stamped) return <span className="pencil">{mark.text}</span>;
   const cls =
@@ -53,7 +57,11 @@ export function ContractStatusMark({ contract }: { contract: Contract }) {
   const t = useT();
   return (
     <>
-      <ContractStamp status={contract.status} renterSigned={hasRenterSignature(contract)} />
+      <ContractStamp
+        status={contract.status}
+        renterSigned={hasRenterSignature(contract)}
+        declined={contract.amendment?.stage === 'declined'}
+      />
       {/* Phase 30: recorded by the landlord from paper records. */}
       {contract.is_offline ? (
         <span className="stamp" style={{ marginLeft: 'var(--sp-2)' }}>

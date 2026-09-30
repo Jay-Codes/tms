@@ -316,6 +316,22 @@ var isoRoutes = []isoCase{
 		method: "POST", pattern: "/contracts/{id}/amend", aud: isoOrg, path: "/contracts/{contractA}/amend",
 		body: map[string]any{"effective_date": "{today}", "reason": "hijack"},
 	},
+	// Phase 31: the review of an amendment draft.
+	{
+		method: "PATCH", pattern: "/contracts/{id}/amendment", aud: isoOrg, path: "/contracts/{contractA}/amendment",
+		body: map[string]any{"note_en": "hijack"},
+	},
+	{method: "POST", pattern: "/contracts/{id}/amendment/submit", aud: isoOrg, path: "/contracts/{contractA}/amendment/submit"},
+	{method: "POST", pattern: "/contracts/{id}/amendment/approve", aud: isoOrg, path: "/contracts/{contractA}/amendment/approve"},
+	{
+		method: "POST", pattern: "/contracts/{id}/amendment/return", aud: isoOrg, path: "/contracts/{contractA}/amendment/return",
+		body: map[string]any{"reason": "hijack"},
+	},
+	{
+		method: "POST", pattern: "/contracts/{id}/amendment/reject", aud: isoOrg, path: "/contracts/{contractA}/amendment/reject",
+		body: map[string]any{"reason": "hijack"},
+	},
+	{method: "POST", pattern: "/contracts/{id}/amendment/withdraw", aud: isoOrg, path: "/contracts/{contractA}/amendment/withdraw"},
 	{
 		method: "POST", pattern: "/contract-templates/{id}/reissue-pending", aud: isoOrg,
 		path: "/contract-templates/{templateA}/reissue-pending",
@@ -651,6 +667,10 @@ var isoRoutes = []isoCase{
 		path: "/me/contracts/{contractA}/notice", body: map[string]any{"leave_on": "{today}"},
 	},
 	{method: "DELETE", pattern: "/me/contracts/{id}/notice", aud: isoRenter, path: "/me/contracts/{contractA}/notice"},
+	{
+		method: "POST", pattern: "/me/contracts/{id}/decline", aud: isoRenter,
+		path: "/me/contracts/{contractA}/decline", body: map[string]any{"reason": "hijack"},
+	},
 
 	// ------------------------------------------- proofs of payment (16.1) --
 	//

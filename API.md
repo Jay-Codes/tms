@@ -1557,3 +1557,21 @@ Migration 000036: `contracts.is_offline` (default false), `backfill_batches.crea
 | CSV import (all kinds) | A header naming a column twice → 400 `csv_header_mismatch` with `duplicate:[…]` (previously the later column was silently dropped). |
 
 Excluded from the live book (`is_offline`): vacancy (`vacant_since`, `days_vacant`), holdovers, the historical occupancy series, projection history and last-rent baselines, the payments-import contract match. Included: revenue, collections, payments lists, exports, the renter directory (`RenterKnownToOrg`).
+
+## Part 2 — Phase 31: contract changes with owner approval (maker-checker)
+
+Migration 000038: `contracts.amendment_stage` (`draft|submitted|approved|rejected|declined|withdrawn`, NULL on a contract that amends nothing; existing amendments backfilled `approved`), `amendment_note_sw` / `amendment_note_en` (≤200), `amendment_body_html`, `amendment_drafted_by`, `amendment_submitted_by` / `_at`, `amendment_reviewed_by` / `_at`, `amendment_review_note` (≤200), `amendment_declined_at`, `amendment_decline_reason` (≤200); `contracts_one_open_amendment` now covers `draft` too; notification kind `contract_amendment`.
+
+| Call | Contract |
+|------|----------|
+| `POST /contracts/{id}/amend` | **Changed.** Writes a **draft** (status `draft`, `amendment.stage = draft`) the renter cannot see; no SMS. New body: `note_sw`, `note_en` (both required, ≤200), `body_html` (optional: this contract's own wording in template form, sanitized, `{{variables}}` resolved on render). `reason` is now optional (defaults to the note in the document's language). Everything else as 22.4. 409 `amendment_pending` while a draft or unsigned amendment is open. |
+| `PATCH /contracts/{id}/amendment` | Org. Same fields as amend, all optional (omitted keep the draft's). Any member while `draft`; owner only while `submitted` (409 `amendment_submitted` for a manager). Re-renders terms and hash. `body_html: ""` goes back to the template. Audit `contract.amend_update` (before/after). |
+| `POST /contracts/{id}/amendment/submit` | Org. `draft` → `submitted`; bell `amendment_submitted`. Audit `contract.amend_submit`. |
+| `POST /contracts/{id}/amendment/approve` | **Owner** (403 `owner_required`). From `submitted`, or from `draft` when the caller drafted it (else 409 `amendment_not_submitted`). Rechecks the effective date (422 `effective_not_period_start`) and that the amended contract still runs (409 `amendment_stale`). No re-render. → status `pending_signature`, stage `approved`; SMS `contract_amendment` to the renter in their locale with `{{reason}}` = the note in that language, `{{date}}` = effective date, `{{link}}`. Audit `contract.amend_approve` (`drafted_by`, `self_approved`). |
+| `POST /contracts/{id}/amendment/return` | Owner. `{reason}` required ≤200. `submitted` → `draft` with `review_note`; bell `amendment_returned`. Audit `contract.amend_return`. |
+| `POST /contracts/{id}/amendment/reject` | Owner. `{reason}` required. `draft`/`submitted` → status `terminated`, stage `rejected`; bell `amendment_rejected`; no SMS. Audit `contract.amend_reject`. |
+| `POST /contracts/{id}/amendment/withdraw` | Org. `{reason?}`. `draft`/`submitted` → `terminated`, stage `withdrawn`. An approved, unsigned amendment is still withdrawn with `terminate`. Audit `contract.amend_withdraw`. |
+| `POST /me/contracts/{id}/decline` | Renter. `{reason}` required ≤200. Only an `approved` amendment they have not signed (409 `not_declinable`; 409 `not_an_amendment` on a first contract; 404 on a draft). → `terminated`, stage `declined`; the running contract untouched; bell `amendment_declined`. Audit `contract.amend_decline`. |
+| `GET /contracts?amendment_stage=` | Org filter (`submitted` = approval queue). |
+
+Every stage-changing call answers 409 `amendment_stage` when the draft has moved on. Contract responses gain `amendment: {stage, note_sw, note_en, body_html?, drafted_by?, drafted_by_name?, submitted_at?, reviewed_by?, reviewed_by_name?, reviewed_at?, review_note?, declined_at?, decline_reason?}` (null otherwise); the renter's reads omit `body_html`, the reviewers and `review_note`, and never return a `draft`/`submitted`/`rejected`/`withdrawn` amendment.

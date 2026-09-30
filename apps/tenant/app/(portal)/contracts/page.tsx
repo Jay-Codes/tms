@@ -23,13 +23,15 @@ import { EvictionsCard, HoldoversCard } from '../../../components/UnhappyBits';
 import { contractsApi, type Contract, type ContractStatus } from '../../../lib/api';
 import { useT } from '@tms/ui';
 
-type TabValue = '' | ContractStatus | 'ready';
+/** `review` (Phase 31) is the owner's queue: changes submitted for approval. */
+type TabValue = '' | ContractStatus | 'ready' | 'review';
 
 /** Tab value → the dictionary keys for its label and its empty state. */
 const TABS: { value: TabValue; label: string; empty: string }[] = [
   { value: '', label: 'common.all', empty: 'contracts.empty.all' },
   { value: 'pending_signature', label: 'contracts.tab.pending', empty: 'contracts.empty.pending' },
   { value: 'ready', label: 'contracts.tab.ready', empty: 'contracts.empty.ready' },
+  { value: 'review', label: 'contracts.tab.review', empty: 'contracts.empty.review' },
   { value: 'active', label: 'contracts.tab.active', empty: 'contracts.empty.active' },
   { value: 'expiring', label: 'contracts.tab.expiring', empty: 'contracts.empty.expiring' },
   { value: 'ended', label: 'contracts.tab.ended', empty: 'contracts.empty.ended' },
@@ -46,8 +48,10 @@ function ContractsBody() {
   // keep the ones the renter has already signed, page by page.
   const fetchPage = useCallback(
     async (cursor: string | undefined, signal?: AbortSignal) => {
-      const status = tab === 'ready' ? 'pending_signature' : tab;
-      const res = await contractsApi.list({ status, limit: 200, cursor }, signal);
+      const res =
+        tab === 'review'
+          ? await contractsApi.list({ amendment_stage: 'submitted', limit: 200, cursor }, signal)
+          : await contractsApi.list({ status: tab === 'ready' ? 'pending_signature' : tab, limit: 200, cursor }, signal);
       const rows = res.items ?? [];
       return { items: tab === 'ready' ? rows.filter(isReadyToCountersign) : rows, next_cursor: res.next_cursor };
     },

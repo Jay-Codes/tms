@@ -160,6 +160,9 @@ contracts            org_id, unit_id, renter_user_id, template_id, terms_snapsho
                      term_days, start_date, end_date,         -- span; end_date = start + term_days
                      due_day NULLABLE, status (draft|pending_signature|active|expiring|ended|terminated),
                      snapshot_hash                            -- sha256 over terms_snapshot_html + key fields
+                     -- Phase 31 amendments: amendment_stage (draft|submitted|approved|rejected|declined|withdrawn),
+                     -- amendment_note_sw / _en (mandatory, ≤200), amendment_body_html (own wording),
+                     -- drafted/submitted/reviewed by+at, amendment_review_note, amendment_declined_at + _reason
 contract_signatures  org_id, contract_id, party (renter|landlord), user_id, method (otp_accept|drawn),
                      otp_ref NULLABLE, signature_object_key NULLABLE, snapshot_hash, ip, user_agent, signed_at,
                      witnessed_by_user_id NULLABLE  -- org user who showed the signing code in person (FLOWS 2b.6)
@@ -317,6 +320,8 @@ GET  /contracts/{id}/document     app-native document: {letterhead_url, logo_url
                                   print stylesheet. No server-side PDF in MVP.
 GET  /contracts/{id}/verify       recompute hash; returns valid/tampered + signature summary
 ```
+
+**Contract changes (Phase 31, maker-checker).** An amendment or renewal (`POST /contracts/{id}/amend`) is written as a **draft** the renter cannot see. A manager or owner drafts it — changed terms, effective date, optionally the contract's own wording (`body_html`, template form with variables) — and must give a note in **both** Swahili and English. An **owner** approves it (an owner may approve their own draft; a manager never approves), returns it with a reason, or rejects it. Approval freezes the reviewed document (no re-render), moves it to `pending_signature` and texts the renter (`contract_amendment`) with the note in the renter's own language and the link. The renter reads the new document with the note, then signs — or **declines** with a reason, which ends the amendment and leaves the running contract untouched; the org is told in the bell. Endpoints: `PATCH /contracts/{id}/amendment`, `POST /contracts/{id}/amendment/{submit|approve|return|reject|withdraw}`, `POST /me/contracts/{id}/decline`.
 
 **Rent in the document (Part 2 rule).** `{{rent}}` is the amount **per payment period**, not the unit's price basis:
 
@@ -595,6 +600,7 @@ Part 2 (post-MVP iteration, plan in [PLAN2.md](PLAN2.md)):
 | 14 | Platform admin: prepaid SMS credits per org and DB-backed platform templates with per-kind locking | ✅ 6 Sep 2026 |
 | 15 | Mobile landlord pass, performance and isolation hardening, seed v2, UAT 2 | ✅ 6 Sep 2026 |
 | 16 | Proof of payment (renter upload → landlord accept/reject), CSV import of units/renters/payments, next-due visibility on both apps, pinned payment instructions | ✅ 20 Sep 2026 |
-| 17 | Contracts: amend/renew by supersession, withdraw, reissue for re-signing | 📝 draft |
+| 17 | Contracts: amend/renew by supersession, withdraw, reissue for re-signing | ✅ as 22.3/22.4 |
+| 31 | Contract changes: owner approval (maker-checker), SW+EN note, SMS `contract_amendment`, renter decline | ✅ 30 Sep 2026 (browser pass pending) |
 
 The shipped contract for 9–14 is [API.md](API.md) § "Part 2 — shipped contract", which carries the deviations from the plan; the phase log is [PROGRESS.md](PROGRESS.md).

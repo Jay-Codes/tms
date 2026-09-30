@@ -163,6 +163,11 @@
   width: 100%;
 }
 
+/* Phase 31: "Decline this change" sits under the sign button. */
+.doc-cta > * + * {
+  margin-top: var(--sp-2);
+}
+
 /* ============================ PRINT ======================== */
 
 @media print {
