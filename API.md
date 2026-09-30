@@ -1541,7 +1541,7 @@ The org ledger (`GET /admin/orgs/{id}/sms`) shows purchases with reason `purchas
 
 ## Part 2 — Phase 30: offline contracts
 
-Migration 000035: `contracts.is_offline` (default false), `backfill_batches.created_contract_id`.
+Migration 000036: `contracts.is_offline` (default false), `backfill_batches.created_contract_id`.
 
 | Route | Change |
 |-------|--------|
