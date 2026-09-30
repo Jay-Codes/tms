@@ -214,6 +214,7 @@ const messages: Messages = {
   'contract.offline.chip': 'Offline contract',
   'contract.offline.banner': 'Offline contract - recorded by your landlord from paper records, not signed in TMS; no document.',
   'contract.status.terminated': 'Terminated',
+  'contract.status.declined': 'Change declined',
   'contract.status.draft': 'Draft',
 
   /* ----------------------------------------------------------- document */
@@ -248,7 +249,7 @@ const messages: Messages = {
   'decline.reason': 'Why are you declining?',
   'decline.submit': 'Decline',
   'decline.sending': 'Sending…',
-  'decline.done': 'You declined this change: {reason}. Your current contract continues.',
+  'decline.done': 'You declined this change ({reason}). Your current contract continues.',
   'doc.replaced': 'Replaced by a newer contract',
   'doc.openNewer': 'Open the new contract',
   'doc.parties': 'Parties',

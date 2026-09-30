@@ -125,6 +125,10 @@ export function AmendForm({
   const { org: me } = useMe();
   // Phase 31: an owner approves (their own draft too); a manager submits.
   const isOwner = me?.role === 'org_owner';
+  const { user } = useMe();
+  // An owner may approve a new draft or their own; someone else's draft goes
+  // through submit (the backend answers 409 otherwise).
+  const canApprove = isOwner && (!draft || draft.amendment?.stage === 'submitted' || draft.amendment?.drafted_by === user?.id);
   const templates = useTemplateList();
   const [periods, setPeriods] = useState<PaymentPeriod[]>([]);
   const today = todayISO();
@@ -359,7 +363,7 @@ export function AmendForm({
       ) : null}
 
       <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-        {isOwner ? (
+        {canApprove ? (
           <button
             type="button"
             className="btn btn-primary"

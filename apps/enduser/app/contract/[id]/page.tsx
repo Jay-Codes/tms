@@ -235,7 +235,13 @@ function DocumentContent() {
   };
 
   return (
-    <Screen bottomBar style={needsSignature ? { paddingBottom: 176 } : undefined}>
+    <Screen
+      bottomBar
+      // Always the long-hand property, so the style never flips between the
+      // shorthand and paddingBottom on a re-render (e.g. after a decline).
+      // Phase 31: a change carries a second CTA button (Decline).
+      style={{ paddingBottom: needsSignature ? (contract?.amendment?.stage === 'approved' ? 236 : 176) : 96 }}
+    >
       <header className="no-print" style={{ display: 'grid', gap: 'var(--sp-2)' }}>
         <Link
           href="/contract"
@@ -249,7 +255,11 @@ function DocumentContent() {
           <h1 style={{ fontSize: 'var(--text-xl)' }}>
             {contract ? `${contract.unit.name} · ${contract.unit.property_name}` : t('doc.title')}
           </h1>
-          <ContractStamp status={doc.status} renterSigned={renterSigned} />
+          <ContractStamp
+            status={doc.status}
+            renterSigned={renterSigned}
+            declined={contract?.amendment?.stage === 'declined'}
+          />
         </div>
       </header>
 

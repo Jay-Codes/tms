@@ -13,12 +13,27 @@ import {
   type ContractSignature,
   type ContractStatus,
   type ScheduleRow,
+  type AmendmentStage,
 } from '../lib/api';
 import { Amount, fmtDate } from '../lib/format';
 import { TableScroll, useT } from '@tms/ui';
 
-export function ContractStatusStamp({ status }: { status: ContractStatus | string | null | undefined }) {
+export function ContractStatusStamp({
+  status,
+  amendmentStage,
+}: {
+  status: ContractStatus | string | null | undefined;
+  /**
+   * Phase 31: a change still in review, or one that never took effect
+   * (rejected, withdrawn, declined), reads as its stage — never as a
+   * terminated tenancy.
+   */
+  amendmentStage?: AmendmentStage | null;
+}) {
   const t = useT();
+  if (amendmentStage && amendmentStage !== 'approved') {
+    return <span className="pencil">{t(`amendment.stage.${amendmentStage}`)}</span>;
+  }
   if (status === 'active') return <span className="stamp stamp-paid">{t('contracts.status.active')}</span>;
   if (status === 'terminated') return <span className="stamp stamp-overdue">{t('contracts.status.terminated')}</span>;
   if (status === 'expiring') return <span className="pencil">{t('contracts.status.expiring')}</span>;
@@ -143,7 +158,7 @@ export function ContractsTable({
               </td>
               {showRenter ? <td>{c.renter?.full_name ?? '—'}</td> : null}
               <td>
-                <ContractStatusStamp status={c.status} />
+                <ContractStatusStamp status={c.status} amendmentStage={c.amendment?.stage} />
                 {/* Phase 22.4 — an amendment awaiting signature, or a contract one replaced. */}
                 {c.superseded_by_contract_id ? (
                   <span className="stamp" style={{ marginLeft: 'var(--sp-2)' }}>{t('contracts.amend.chip_replaced')}</span>

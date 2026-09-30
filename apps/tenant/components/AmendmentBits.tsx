@@ -22,6 +22,7 @@ import {
   type AmendmentStage,
   type Contract,
 } from '../lib/api';
+import { useMe } from '../lib/auth';
 import { fmtDate, fmtTZS } from '../lib/format';
 
 const STAGE_KEYS: Record<AmendmentStage, string> = {
@@ -175,6 +176,9 @@ export function AmendmentPanel({
   onChanged: (c: Contract) => void;
 }) {
   const t = useT();
+  const { user } = useMe();
+  // An owner approves a submitted change, or a draft they wrote themselves.
+  const meId = user?.id ?? null;
   const a = contract.amendment;
   const [before, setBefore] = useState<Contract | null>(null);
   const [oldTerms, setOldTerms] = useState<string | null>(null);
@@ -325,7 +329,7 @@ export function AmendmentPanel({
 
       {open ? (
         <div className="wrap-sm" style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-          {isOwner && (a.stage === 'submitted' || a.stage === 'draft') ? (
+          {isOwner && (a.stage === 'submitted' || (a.stage === 'draft' && a.drafted_by === meId)) ? (
             <button
               type="button"
               className="btn btn-primary"
@@ -373,7 +377,7 @@ export function AmendmentPanel({
       {open && !isOwner && a.stage === 'submitted' ? (
         <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{t('amendment.waiting_owner')}</p>
       ) : null}
-      {open && isOwner && a.stage === 'draft' && !a.review_note ? (
+      {open && isOwner && a.stage === 'draft' && a.drafted_by === meId && !a.review_note ? (
         <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>{t('amendment.owner_hint')}</p>
       ) : null}
 

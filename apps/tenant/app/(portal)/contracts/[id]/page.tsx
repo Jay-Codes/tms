@@ -785,14 +785,15 @@ function ContractBody({ id }: { id: string }) {
         />
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
-          <ContractStatusStamp status={contract.status} />
+          <ContractStatusStamp status={contract.status} amendmentStage={contract.amendment?.stage} />
           {offline ? <span className="stamp">{t('contracts.offline.chip')}</span> : null}
           {contract.superseded_by_contract_id ? (
             <span className="stamp">{t('contracts.amend.chip_replaced')}</span>
           ) : isAmendment ? (
             <>
               <span className="stamp">{t('contracts.amend.chip')}</span>
-              <AmendmentStageChip contract={contract} />
+              {/* Other stages already read in the status mark beside it. */}
+              {contract.amendment?.stage === 'approved' ? <AmendmentStageChip contract={contract} /> : null}
             </>
           ) : null}
           <span style={{ color: 'var(--ink-soft)', fontSize: 'var(--text-sm)' }}>
