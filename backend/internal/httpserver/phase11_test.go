@@ -231,13 +231,18 @@ func TestRevenueTrendSlopeRises(t *testing.T) {
 	h := newHarness(t)
 	fix := h.newRevenueFixture(t, "Trend", "0716000500", "+255716000501", "+255716000502")
 
+	// The fixture's anchor is "45 days ago", which can land on the exact
+	// midpoint of the month's day buckets (e.g. 16 Aug seen from 30 Sep), where
+	// a lone spike has slope 0. Move the payment to the month's last day so the
+	// money arrives clearly late in the window, whatever day the suite runs.
+	lastDay := time.Date(fix.anchor.Year(), fix.anchor.Month()+1, 0, 0, 0, 0, 0, time.UTC)
+	h.backdatePayment(t, fix.paidLink, lastDay)
+
 	got := fix.owner.do(http.MethodGet, "/reports/revenue?"+fix.monthQuery(), nil).
 		mustStatus(t, http.StatusOK, "revenue")
 	slope := num(t, got, "trend", "slope_collected_per_bucket")
-	// The single payment lands on the 15th-ish of the month; a lone spike after
-	// the midpoint slopes up, before it slopes down. Either way it is not flat.
-	if slope == 0 {
-		t.Errorf("a series with one payment in it has slope 0 — body: %s", got.Raw)
+	if slope <= 0 {
+		t.Errorf("money arriving on the last day slopes %v, want > 0 — body: %s", slope, got.Raw)
 	}
 }
 
