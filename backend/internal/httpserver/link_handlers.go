@@ -298,8 +298,10 @@ func previewFor(r linkRow) *schedulePreview {
 	if err != nil {
 		return nil
 	}
-	rows := contract.Generate(int(r.PriceAmount), int(r.PricePeriodDays),
-		int(*r.TermDays), int(r.PeriodDays), start, nil)
+	// The contract takes the org's default due day at approval; a calendar
+	// preview assumes the 1st, which is the default when none is set.
+	rows := contract.GenerateCadence(int(r.PriceAmount), int(r.PricePeriodDays),
+		int(*r.TermDays), cadenceOf(r.PeriodDays, r.PeriodMonths), start, nil)
 	if len(rows) == 0 {
 		return nil
 	}

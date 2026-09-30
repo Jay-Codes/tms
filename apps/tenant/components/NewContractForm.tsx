@@ -31,7 +31,10 @@ import {
   type RenterSummary,
   type Unit,
 } from '../lib/api';
-import { fmtPrice, todayISO } from '../lib/format';
+import { calendarTermDays, fmtPeriodLength, fmtPrice, todayISO } from '../lib/format';
+
+/** Term quick picks, in months, offered on a calendar period. */
+const CALENDAR_TERM_MONTHS = [3, 6, 12, 24] as const;
 
 /** How many matches a picker shows before asking for a narrower search. */
 const PICKER_LIMIT = 50;
@@ -142,6 +145,9 @@ export function NewContractForm({ onCreated }: { onCreated: (c: Contract) => voi
   const offered = unit?.allowed_period_ids?.length
     ? periods.filter((p) => unit.allowed_period_ids!.includes(p.id))
     : periods;
+  // A calendar period bills on the due day every month, so the term is
+  // easiest picked in whole months and the due day reads as the billing day.
+  const calendar = Boolean(offered.find((p) => p.id === periodId)?.months);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -297,7 +303,7 @@ export function NewContractForm({ onCreated }: { onCreated: (c: Contract) => voi
             <option value="">{t('tpl.choose')}</option>
             {offered.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.label} ({t.n('common.day', p.days)})
+                {p.label} ({fmtPeriodLength(p)})
               </option>
             ))}
           </select>
@@ -318,6 +324,25 @@ export function NewContractForm({ onCreated }: { onCreated: (c: Contract) => voi
             value={termDays}
             onChange={(e) => setTermDays(e.target.value)}
           />
+          {calendar && startDate ? (
+            <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', marginTop: 'var(--sp-2)' }}>
+              {CALENDAR_TERM_MONTHS.map((m) => {
+                const d = calendarTermDays(startDate, m);
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    className="btn btn-quiet"
+                    aria-pressed={Number(termDays) === d}
+                    onClick={() => setTermDays(String(d))}
+                    style={{ minHeight: 32 }}
+                  >
+                    {t.n('contracts.new.term_months', m)}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
         </Field>
 
         {/* Phase 20.3 — a landlord-created contract may start in the past (up
@@ -342,7 +367,7 @@ export function NewContractForm({ onCreated }: { onCreated: (c: Contract) => voi
         <Field
           id="c_due_day"
           label={t('contracts.new.due_day')}
-          hint={t('contracts.new.due_day_hint')}
+          hint={t(calendar ? 'contracts.new.due_day_hint_calendar' : 'contracts.new.due_day_hint')}
           error={error?.errors.due_day}
         >
           <input

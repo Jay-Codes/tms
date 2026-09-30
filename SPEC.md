@@ -127,7 +127,7 @@ All tables: `id UUID PK`, `created_at`, `updated_at`. Org-scoped tables include 
 
 ```
 orgs                 name, slug, status, settings JSONB (auto_approve_links, due_day, grace_days, reminder offsets)
-payment_periods      org_id, label ("Monthly", "3 weeks"), days INT >0, is_recommended, sort_order, active
+payment_periods      org_id, label ("Monthly", "3 weeks"), days INT >0, months INT NULL (1–12: calendar period), is_recommended, sort_order, active
                      -- landlord-managed list; seeded with presets 30/90/180/365 days,
                      -- landlord adds any custom value (7, 21, 45 days...) — no upper/lower cap beyond >0
                      -- partial unique index: at most ONE recommended period per org
@@ -224,6 +224,7 @@ Key rules:
 - **History before the contract (Phase 29).** A backfill with `from` may add rows *before* `start_date` — same cadence and due day, at a landlord-given rent — stamped `created_by_backfill_id` so undoing that backfill removes them. They are rent book history, not terms: the contract document omits them.
 - Schedule amount = `rent_amount × schedule_days / rent_period_days`, rounded to whole TZS (proration from the unit's price basis). Snapshotted at activation like terms.
 - `due_day` is optional: if set, due dates snap to that day-of-month (monthly-style periods); if NULL, due date = period start (default for custom day-counts).
+- **Calendar periods** (`months` set) avoid the drift of day-counted cadences (12 × 30 = 360 days). Rows run from one billing day (`due_day`, else the 1st) to the day before the next, `months` apart, each charged the full rent per period regardless of month length; a start or end between billing days is prorated over that cycle's actual days; due date = row start. Contracts snapshot `payment_period_months`.
 - A payment recorded against a schedule flips it `paid` (or `partial` if under amount). Nightly + on-demand job flips past-due `pending` → `overdue`.
 - Unit `status` derives from contracts where possible but is stored for explicit landlord overrides (`unlisted`, `maintenance`).
 

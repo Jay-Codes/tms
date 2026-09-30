@@ -29,7 +29,7 @@ import {
   type RenterProfile,
   type ResolvedTemplate,
 } from '../../../../lib/api';
-import { Amount, fmtDate, fmtTZS } from '../../../../lib/format';
+import { Amount, fmtDate, fmtPeriodLength, fmtTZS } from '../../../../lib/format';
 import { useT } from '@tms/ui';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -376,7 +376,7 @@ function RequestBody({ id }: { id: string }) {
               [
                 t('linkreq.field.period'),
                 `${request.payment_period?.label ?? '—'}${
-                  request.payment_period?.days ? ` · ${t.n('common.day', request.payment_period.days)}` : ''
+                  request.payment_period?.days ? ` · ${fmtPeriodLength(request.payment_period)}` : ''
                 }`,
               ],
               [

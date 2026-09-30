@@ -7,6 +7,7 @@
 
 import { useT } from '@tms/ui';
 import type { PaymentPeriod } from '../lib/api';
+import { fmtPeriodLength } from '../lib/format';
 
 export function PeriodPicker({
   periods,
@@ -62,7 +63,9 @@ export function PeriodPicker({
                 onChange={() => toggle(p.id)}
                 style={{ width: 16, height: 16 }}
               />
-              {p.label} <span className="num">{t('period.days_short', { count: p.days })}</span>
+              {p.label} <span className="num">
+                {p.months ? `(${fmtPeriodLength(p)})` : t('period.days_short', { count: p.days })}
+              </span>
             </label>
           ))
         )}

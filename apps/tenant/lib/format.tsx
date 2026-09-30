@@ -41,6 +41,16 @@ export function fmtAmount(n: number | null | undefined): string {
   return Math.round(Number(n)).toLocaleString('en-US');
 }
 
+/**
+ * How long a payment period is: `30 days`, or for a calendar period
+ * `calendar month` / `3 calendar months`.
+ */
+export function fmtPeriodLength(p: { days: number; months?: number | null }): string {
+  if (p.months && p.months > 1) return activeT('period.calendar.months', { count: p.months });
+  if (p.months === 1) return activeT('period.calendar.month');
+  return activeT.n('common.day', p.days);
+}
+
 /** `{amount: 250000, period_days: 30}` → `TZS 250,000 / 30 days`. */
 export function fmtPrice(price: Price | null | undefined): string {
   if (!price) return '—';
@@ -80,6 +90,19 @@ export function todayISO(): string {
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/**
+ * Days from `start` (YYYY-MM-DD) to the same day `months` later — the term
+ * that makes a calendar tenancy end on a billing day: 1 Jan + 12 months is
+ * 365 days. A day past the target month's end clamps to its last day.
+ */
+export function calendarTermDays(start: string, months: number): number {
+  const [y, m, d] = start.split('-').map(Number);
+  if (!y || !m || !d) return 0;
+  const last = new Date(Date.UTC(y, m - 1 + months + 1, 0)).getUTCDate();
+  const end = Date.UTC(y, m - 1 + months, Math.min(d, last));
+  return Math.round((end - Date.UTC(y, m - 1, d)) / 86_400_000);
 }
 
 /** Whole days between `since` and now; null when the unit was never vacant. */

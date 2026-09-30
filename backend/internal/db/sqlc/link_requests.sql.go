@@ -197,7 +197,7 @@ SELECT lr.id, lr.org_id, lr.unit_id, lr.renter_user_id, lr.status,
        p.name AS property_name,
        o.name AS org_name, o.slug AS org_slug,
        ru.phone AS renter_phone, ru.email AS renter_email, ru.full_name AS renter_name,
-       pp.label AS period_label, COALESCE(pp.days, 0)::int AS period_days,
+       pp.label AS period_label, COALESCE(pp.days, 0)::int AS period_days, pp.months AS period_months,
        COALESCE(pl.amount, 0)::bigint AS price_amount, COALESCE(pl.period_days, 0)::int AS price_period_days,
        (pl.amount IS NOT NULL)::boolean AS has_price,
        COALESCE(rp.kyc_status, 'incomplete')::text AS kyc_status,
@@ -253,6 +253,7 @@ type GetLinkRequestRow struct {
 	RenterName      string             `json:"renter_name"`
 	PeriodLabel     *string            `json:"period_label"`
 	PeriodDays      int32              `json:"period_days"`
+	PeriodMonths    *int32             `json:"period_months"`
 	PriceAmount     int64              `json:"price_amount"`
 	PricePeriodDays int32              `json:"price_period_days"`
 	HasPrice        bool               `json:"has_price"`
@@ -290,6 +291,7 @@ func (q *Queries) GetLinkRequest(ctx context.Context, arg GetLinkRequestParams) 
 		&i.RenterName,
 		&i.PeriodLabel,
 		&i.PeriodDays,
+		&i.PeriodMonths,
 		&i.PriceAmount,
 		&i.PricePeriodDays,
 		&i.HasPrice,
@@ -308,7 +310,7 @@ SELECT lr.id, lr.org_id, lr.unit_id, lr.renter_user_id, lr.status,
        p.name AS property_name,
        o.name AS org_name, o.slug AS org_slug,
        ru.phone AS renter_phone, ru.email AS renter_email, ru.full_name AS renter_name,
-       pp.label AS period_label, COALESCE(pp.days, 0)::int AS period_days,
+       pp.label AS period_label, COALESCE(pp.days, 0)::int AS period_days, pp.months AS period_months,
        COALESCE(pl.amount, 0)::bigint AS price_amount, COALESCE(pl.period_days, 0)::int AS price_period_days,
        (pl.amount IS NOT NULL)::boolean AS has_price,
        COALESCE(rp.kyc_status, 'incomplete')::text AS kyc_status,
@@ -374,6 +376,7 @@ type ListLinkRequestsRow struct {
 	RenterName      string             `json:"renter_name"`
 	PeriodLabel     *string            `json:"period_label"`
 	PeriodDays      int32              `json:"period_days"`
+	PeriodMonths    *int32             `json:"period_months"`
 	PriceAmount     int64              `json:"price_amount"`
 	PricePeriodDays int32              `json:"price_period_days"`
 	HasPrice        bool               `json:"has_price"`
@@ -430,6 +433,7 @@ func (q *Queries) ListLinkRequests(ctx context.Context, arg ListLinkRequestsPara
 			&i.RenterName,
 			&i.PeriodLabel,
 			&i.PeriodDays,
+			&i.PeriodMonths,
 			&i.PriceAmount,
 			&i.PricePeriodDays,
 			&i.HasPrice,

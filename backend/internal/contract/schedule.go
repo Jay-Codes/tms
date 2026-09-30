@@ -61,6 +61,95 @@ func Generate(rent, rentPeriodDays, termDays, cadenceDays int, start time.Time, 
 	return rows
 }
 
+// Cadence is how often rent falls due. A period counted in days leaves Months
+// at 0 and steps every Days days. A calendar period sets Months: it steps by
+// that many calendar months, and Days is only its nominal length (30 ×
+// Months), the basis rent is scaled to.
+type Cadence struct {
+	Days   int
+	Months int
+}
+
+// CalendarAnchor is the day of the month a calendar cadence bills on: the
+// contract's due day, or the 1st when it has none.
+func CalendarAnchor(dueDay *int) int {
+	if dueDay == nil || *dueDay < 1 || *dueDay > 31 {
+		return 1
+	}
+	return *dueDay
+}
+
+// GenerateCadence is Generate for either kind of period. A day cadence is
+// Generate unchanged.
+//
+// A calendar cadence bills on a fixed day of the month (CalendarAnchor), so
+// "rent on the 1st" stays on the 1st however long the months are. Each row
+// runs from one billing day to the day before the next, `Months` months on,
+// and is charged the full rent for one payment period — rent scaled to the
+// nominal 30 × Months days — whether the months have 28 days or 31. A tenancy
+// that starts between billing days opens with a partial row up to the next
+// one, and one that ends between them closes with a partial row; both are
+// prorated over the days of the cycle they fall in. Every row falls due on
+// the day it starts.
+//
+// Billing days past a month's end clamp to its last day (the 31st falls on
+// 30 April), and each one is computed from the first cycle rather than from
+// the previous row, so a clamp in February does not pull March to the 28th.
+func GenerateCadence(rent, rentPeriodDays, termDays int, c Cadence, start time.Time, dueDay *int) []Row {
+	if c.Months <= 0 {
+		return Generate(rent, rentPeriodDays, termDays, c.Days, start, dueDay)
+	}
+	if termDays <= 0 || rentPeriodDays <= 0 {
+		return nil
+	}
+	start = dateOnly(start)
+	end := start.AddDate(0, 0, termDays)
+	anchor := CalendarAnchor(dueDay)
+	perPeriod := RentPerPeriod(int64(rent), rentPeriodDays, 30*c.Months)
+
+	// The billing day on or before the start opens the first cycle.
+	baseYear, baseMonth := start.Year(), start.Month()
+	if clampToMonth(baseYear, baseMonth, anchor, start.Location()).After(start) {
+		prev := time.Date(baseYear, baseMonth-1, 1, 0, 0, 0, 0, start.Location())
+		baseYear, baseMonth = prev.Year(), prev.Month()
+	}
+	boundary := func(k int) time.Time {
+		m := time.Date(baseYear, baseMonth+time.Month(k*c.Months), 1, 0, 0, 0, 0, start.Location())
+		return clampToMonth(m.Year(), m.Month(), anchor, start.Location())
+	}
+
+	var rows []Row
+	cursor := start
+	for k := 0; cursor.Before(end); k++ {
+		cycleStart, cycleEnd := boundary(k), boundary(k+1)
+		if !cycleEnd.After(cursor) {
+			continue
+		}
+		rowEnd := cycleEnd
+		if end.Before(rowEnd) {
+			rowEnd = end
+		}
+		days := daysBetween(cursor, rowEnd)
+		amount := perPeriod
+		if cycleDays := daysBetween(cycleStart, cycleEnd); days != cycleDays {
+			amount = Prorate(perPeriod, days, cycleDays)
+		}
+		rows = append(rows, Row{
+			PeriodStart: cursor,
+			PeriodEnd:   rowEnd.AddDate(0, 0, -1),
+			DueDate:     cursor,
+			Days:        days,
+			Amount:      amount,
+		})
+		cursor = rowEnd
+	}
+	return rows
+}
+
+func daysBetween(a, b time.Time) int {
+	return int(b.Sub(a).Hours()/24 + 0.5)
+}
+
 // EndDate is the exclusive end of a term: SPEC §4's `end_date = start +
 // term_days`. It is the day after the last row's PeriodEnd.
 func EndDate(start time.Time, termDays int) time.Time {

@@ -275,7 +275,7 @@ func (s *Server) createContractTx(
 		"rent_basis":     contract.RentBasisPhraseFor(lang, formatTZS(unit.PriceAmount), int(unit.PricePeriodDays)),
 		"start_date":     start.Format(dateLayout),
 		"end_date":       end.Format(dateLayout),
-		"payment_period": fmt.Sprintf("%s (%d days)", period.Label, period.Days),
+		"payment_period": contract.PaymentPeriodPhraseFor(lang, period.Label, int(period.Days), monthsOf(period.Months)),
 		"org_name":       displayName,
 		"term_days":      strconv.Itoa(int(in.TermDays)),
 		"due_day":        contract.DueDayPhraseFor(lang, intPtr(dueDay)),
@@ -301,6 +301,8 @@ func (s *Server) createContractTx(
 		EndDate:           end.Format(dateLayout),
 		DueDay:            intPtr(dueDay),
 		Policy:            policyCanonical,
+
+		PaymentPeriodMonths: monthsOf(period.Months),
 	}.Hash()
 
 	createParams := sqlc.CreateContractParams{
@@ -308,10 +310,11 @@ func (s *Server) createContractTx(
 		TemplateID: tpl.ID, TermsSnapshotHtml: terms,
 		RentAmount: unit.PriceAmount, RentPeriodDays: unit.PricePeriodDays,
 		PaymentPeriodID: period.ID, PaymentPeriodDays: period.Days,
-		TermDays:  in.TermDays,
-		StartDate: pgtype.Date{Time: start, Valid: true},
-		EndDate:   pgtype.Date{Time: end, Valid: true},
-		DueDay:    dueDay, Status: contractPendingSignature,
+		PaymentPeriodMonths: period.Months,
+		TermDays:            in.TermDays,
+		StartDate:           pgtype.Date{Time: start, Valid: true},
+		EndDate:             pgtype.Date{Time: end, Valid: true},
+		DueDay:              dueDay, Status: contractPendingSignature,
 		SnapshotHash: &hash, LinkRequestID: in.LinkRequestID,
 		Language: &lang,
 	}
@@ -758,8 +761,8 @@ func (s *Server) documentSchedule(r *http.Request, row sqlc.GetContractRow) []ma
 		}
 		return out
 	}
-	rows := contract.Generate(int(row.RentAmount), int(row.RentPeriodDays),
-		int(row.TermDays), int(row.PaymentPeriodDays), row.StartDate.Time, intPtr(row.DueDay))
+	rows := contract.GenerateCadence(int(row.RentAmount), int(row.RentPeriodDays),
+		int(row.TermDays), cadenceOf(row.PaymentPeriodDays, row.PaymentPeriodMonths), row.StartDate.Time, intPtr(row.DueDay))
 	out := make([]map[string]any, 0, len(rows))
 	for _, gen := range rows {
 		out = append(out, map[string]any{
@@ -1155,8 +1158,8 @@ func (s *Server) handleActivateContract(w http.ResponseWriter, r *http.Request) 
 	settings := parseSettings(org.Settings)
 	brand := s.brandingAssets(r.Context(), row.OrgID, org.Name)
 
-	rows := contract.Generate(int(row.RentAmount), int(row.RentPeriodDays),
-		int(row.TermDays), int(row.PaymentPeriodDays), row.StartDate.Time, intPtr(row.DueDay))
+	rows := contract.GenerateCadence(int(row.RentAmount), int(row.RentPeriodDays),
+		int(row.TermDays), cadenceOf(row.PaymentPeriodDays, row.PaymentPeriodMonths), row.StartDate.Time, intPtr(row.DueDay))
 	if len(rows) == 0 {
 		s.serverError(w, r, "contract.activate.schedule", errors.New("generator produced no rows"))
 		return
@@ -1655,6 +1658,19 @@ func (s *Server) queueContractSMS(ctx context.Context, q *sqlc.Queries, m contra
 	return id, err
 }
 
+// monthsOf is a period's calendar months, 0 for one counted in days.
+func monthsOf(months *int32) int {
+	if months == nil {
+		return 0
+	}
+	return int(*months)
+}
+
+// cadenceOf is the schedule cadence of a period or a contract's snapshot.
+func cadenceOf(days int32, months *int32) contract.Cadence {
+	return contract.Cadence{Days: int(days), Months: monthsOf(months)}
+}
+
 // hashOf recomputes a stored contract's snapshot hash from the row itself —
 // the whole point of GET /verify is that it reads the same columns a tamperer
 // would have had to change.
@@ -1671,6 +1687,8 @@ func hashOf(row sqlc.GetContractRow) string {
 		EndDate:           row.EndDate.Time.Format(dateLayout),
 		DueDay:            intPtr(row.DueDay),
 		Policy:            storedPolicyCanonical(row.Policy),
+
+		PaymentPeriodMonths: monthsOf(row.PaymentPeriodMonths),
 	}.Hash()
 }
 

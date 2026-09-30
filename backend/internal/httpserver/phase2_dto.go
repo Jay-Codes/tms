@@ -117,6 +117,7 @@ type periodResponse struct {
 	ID            string    `json:"id"`
 	Label         string    `json:"label"`
 	Days          int32     `json:"days"`
+	Months        *int32    `json:"months"`
 	IsRecommended bool      `json:"is_recommended"`
 	SortOrder     int32     `json:"sort_order"`
 	Active        bool      `json:"active"`
@@ -128,6 +129,7 @@ func toPeriod(p sqlc.PaymentPeriod) periodResponse {
 		ID:            db.UUIDString(p.ID),
 		Label:         p.Label,
 		Days:          p.Days,
+		Months:        p.Months,
 		IsRecommended: p.IsRecommended,
 		SortOrder:     p.SortOrder,
 		Active:        p.Active,

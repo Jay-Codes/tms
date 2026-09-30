@@ -16,6 +16,26 @@ import (
 
 const periodLabelMax = 40
 
+// periodMonthsMax bounds a calendar period: a year at most (migration 000036).
+const periodMonthsMax = 12
+
+// calendarDays is a calendar period's nominal length, the basis rent is scaled
+// to and reports average over: 30 days a month.
+func calendarDays(months int32) int32 { return 30 * months }
+
+func checkPeriodMonths(f validate.Fields, months int32, allowZero bool) {
+	if (months == 0 && allowZero) || (months >= 1 && months <= periodMonthsMax) {
+		return
+	}
+	f.Add("months", "must be between 1 and 12")
+}
+
+// samePeriodLength reports whether two periods would bill identically: the
+// same day count, both counted in days or both in the same calendar months.
+func samePeriodLength(days int32, months *int32, otherDays int32, otherMonths *int32) bool {
+	return days == otherDays && monthsOf(months) == monthsOf(otherMonths)
+}
+
 func notFoundPeriod(w http.ResponseWriter) {
 	httpx.WriteProblem(w, http.StatusNotFound, "not found", "no such payment period")
 }
@@ -47,16 +67,24 @@ func (s *Server) handleCreatePaymentPeriod(w http.ResponseWriter, r *http.Reques
 	}
 	p := auth.MustFromContext(r.Context())
 
+	// `months` makes a calendar period (billed on the same day every month);
+	// `days` is then its nominal 30 × months and need not be sent.
 	var body struct {
-		Label string `json:"label"`
-		Days  int32  `json:"days"`
+		Label  string `json:"label"`
+		Days   int32  `json:"days"`
+		Months *int32 `json:"months"`
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
 	}
 	f := validate.Fields{}
 	label := f.MaxLen("label", f.Required("label", body.Label), periodLabelMax)
-	checkPeriodDays(f, "days", body.Days)
+	if body.Months != nil {
+		checkPeriodMonths(f, *body.Months, false)
+		body.Days = calendarDays(*body.Months)
+	} else {
+		checkPeriodDays(f, "days", body.Days)
+	}
 	if !f.Empty() {
 		badRequest(w, f)
 		return
@@ -68,7 +96,7 @@ func (s *Server) handleCreatePaymentPeriod(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	for _, existing := range active {
-		if existing.Days == body.Days || strings.EqualFold(existing.Label, label) {
+		if samePeriodLength(existing.Days, existing.Months, body.Days, body.Months) || strings.EqualFold(existing.Label, label) {
 			httpx.WriteProblem(w, http.StatusConflict, "duplicate payment period",
 				"this organisation already offers a period with that label or day count")
 			return
@@ -84,7 +112,7 @@ func (s *Server) handleCreatePaymentPeriod(w http.ResponseWriter, r *http.Reques
 	err = s.inTx(r.Context(), func(q *sqlc.Queries) error {
 		var err error
 		created, err = q.CreatePaymentPeriod(r.Context(), sqlc.CreatePaymentPeriodParams{
-			OrgID: p.OrgID, Label: label, Days: body.Days,
+			OrgID: p.OrgID, Label: label, Days: body.Days, Months: body.Months,
 			IsRecommended: false, SortOrder: sortOrder + 1,
 		})
 		if err != nil {
@@ -129,10 +157,13 @@ func (s *Server) handlePatchPaymentPeriod(w http.ResponseWriter, r *http.Request
 	// client that sends it here is told so with a 400 rather than silently
 	// having it ignored.
 	var body struct {
-		Label     *string `json:"label"`
-		Days      *int32  `json:"days"`
-		SortOrder *int32  `json:"sort_order"`
-		Active    *bool   `json:"active"`
+		Label *string `json:"label"`
+		Days  *int32  `json:"days"`
+		// Months switches the kind: 1–12 makes it a calendar period, 0 makes
+		// it a period counted in days again. Absent leaves it as it is.
+		Months    *int32 `json:"months"`
+		SortOrder *int32 `json:"sort_order"`
+		Active    *bool  `json:"active"`
 	}
 	if !DecodeJSON(w, r, &body) {
 		return
@@ -143,7 +174,22 @@ func (s *Server) handlePatchPaymentPeriod(w http.ResponseWriter, r *http.Request
 		label := f.MaxLen("label", f.Required("label", *body.Label), periodLabelMax)
 		params.Label = &label
 	}
-	if body.Days != nil {
+	months := current.Months
+	if body.Months != nil {
+		checkPeriodMonths(f, *body.Months, true)
+		params.SetMonths = true
+		months = nil
+		if *body.Months > 0 {
+			months = body.Months
+		}
+		params.Months = months
+	}
+	switch {
+	case months != nil:
+		// A calendar period's day count is always its nominal length.
+		days := calendarDays(*months)
+		params.Days = &days
+	case body.Days != nil:
 		checkPeriodDays(f, "days", *body.Days)
 		params.Days = body.Days
 	}
@@ -364,7 +410,8 @@ func (s *Server) handleRestoreRecommendedPeriods(w http.ResponseWriter, r *http.
 			labelTaken := false
 			for idx := range existing {
 				row := existing[idx]
-				if row.Days == preset.days {
+				// Presets count days; a calendar "Monthly" is not the 30-day one.
+				if row.Days == preset.days && row.Months == nil {
 					match = &existing[idx]
 				}
 				if row.Active && strings.EqualFold(row.Label, preset.label) {

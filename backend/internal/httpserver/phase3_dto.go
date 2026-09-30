@@ -107,6 +107,7 @@ type linkPeriod struct {
 	ID     string `json:"id"`
 	Label  string `json:"label"`
 	Days   int32  `json:"days"`
+	Months *int32 `json:"months"`
 	Amount *int64 `json:"amount"`
 }
 
@@ -209,6 +210,7 @@ type linkRow struct {
 	RenterPhone     *string
 	PeriodLabel     string
 	PeriodDays      int32
+	PeriodMonths    *int32
 	PriceAmount     int64
 	PricePeriodDays int32
 	HasPrice        bool
@@ -228,7 +230,8 @@ func linkRowOfGet(r sqlc.GetLinkRequestRow) linkRow {
 		OrgName: r.OrgName, OrgSlug: r.OrgSlug,
 		RenterName: r.RenterName, RenterPhone: r.RenterPhone,
 		PeriodLabel: db.StrVal(r.PeriodLabel), PeriodDays: r.PeriodDays,
-		PriceAmount: r.PriceAmount, PricePeriodDays: r.PricePeriodDays, HasPrice: r.HasPrice,
+		PeriodMonths: r.PeriodMonths,
+		PriceAmount:  r.PriceAmount, PricePeriodDays: r.PricePeriodDays, HasPrice: r.HasPrice,
 		KycStatus: r.KycStatus, KycDocUploaded: r.KycDocUploaded,
 	}
 }
@@ -253,7 +256,7 @@ func toLinkRequest(r linkRow, withRenter bool) linkRequestResponse {
 		DecidedAt:       r.DecidedAt,
 	}
 	if r.PaymentPeriodID != "" {
-		period := linkPeriod{ID: r.PaymentPeriodID, Label: r.PeriodLabel, Days: r.PeriodDays}
+		period := linkPeriod{ID: r.PaymentPeriodID, Label: r.PeriodLabel, Days: r.PeriodDays, Months: r.PeriodMonths}
 		if r.HasPrice && r.PricePeriodDays > 0 {
 			amount := prorate(r.PriceAmount, r.PeriodDays, r.PricePeriodDays)
 			period.Amount = &amount

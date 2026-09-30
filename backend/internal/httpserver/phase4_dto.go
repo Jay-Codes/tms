@@ -63,6 +63,9 @@ type contractPeriod struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
 	Days  int32  `json:"days"`
+	// Months is set on a calendar period (it steps by that many calendar
+	// months); null on a period counted in days.
+	Months *int32 `json:"months"`
 }
 
 // signatureBlock is one row of contract_signatures as the API shows it. The
@@ -285,7 +288,7 @@ func toContract(r contractRow, signatures []signatureBlock) contractResponse {
 		out.PaymentPeriod = &contractPeriod{
 			ID:    db.UUIDString(r.PaymentPeriodID),
 			Label: db.StrVal(r.PeriodLabel),
-			Days:  r.PaymentPeriodDays,
+			Days:  r.PaymentPeriodDays, Months: r.PaymentPeriodMonths,
 		}
 	}
 	return out

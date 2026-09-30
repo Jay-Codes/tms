@@ -124,6 +124,18 @@ export function days(t: Translator, n: number): string {
   return t.n('common.days', n, { count: formatAmount(n) });
 }
 
+/** A period's length: `30 days`, or `calendar month` / `3 calendar months`. */
+export function periodLength(t: Translator, p: { days: number; months?: number | null }): string {
+  if (p.months && p.months > 0) return t.n('common.calendarMonths', p.months, { count: p.months });
+  return days(t, p.days);
+}
+
+/** How often a period falls due: `every 30 days`, `on the same day every month`. */
+export function periodEvery(t: Translator, p: { days: number; months?: number | null }): string {
+  if (p.months && p.months > 0) return t.n('unit.everyMonths', p.months, { count: p.months });
+  return t('unit.everyDays', { days: p.days });
+}
+
 /** The unit's headline price: `TZS 250,000 / 30 days`. */
 export function priceLine(
   t: Translator,
@@ -151,6 +163,27 @@ function parseDate(iso: string): Date | null {
 
 function toIso(d: Date): string {
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * `n` calendar months after `iso`, a day past the target month's end clamped
+ * to its last day (31 Jan + 1 month is 28 Feb).
+ */
+export function addMonths(iso: string, n: number): string {
+  const d = parseDate(iso);
+  if (!d) return iso;
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth() + n;
+  const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  return toIso(new Date(Date.UTC(y, m, Math.min(d.getUTCDate(), last))));
+}
+
+/** Whole days from `a` to `b`, both `YYYY-MM-DD`. */
+export function daysBetween(a: string, b: string): number {
+  const x = parseDate(a);
+  const y = parseDate(b);
+  if (!x || !y) return 0;
+  return Math.round((y.getTime() - x.getTime()) / 86_400_000);
 }
 
 /** Today in the renter's own timezone, as `YYYY-MM-DD`. */

@@ -50,8 +50,9 @@ func backfillHistoryRows(c sqlc.GetContractRow, from time.Time, periodAmount int
 	if periodAmount <= 0 {
 		periodAmount = backfillDefaultPeriodAmount(c)
 	}
-	cadence := int(c.PaymentPeriodDays)
-	return contract.Generate(int(periodAmount), cadence, days, cadence, from, intPtr(c.DueDay))
+	// periodAmount is already one period's rent, so it is its own basis.
+	cadence := cadenceOf(c.PaymentPeriodDays, c.PaymentPeriodMonths)
+	return contract.GenerateCadence(int(periodAmount), cadence.Days, days, cadence, from, intPtr(c.DueDay))
 }
 
 // backfillDefaultPeriodAmount is the contract's rent for one payment period.

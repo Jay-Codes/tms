@@ -1,9 +1,10 @@
 -- name: CreatePaymentPeriod :one
-INSERT INTO payment_periods (org_id, label, days, is_recommended, sort_order)
+INSERT INTO payment_periods (org_id, label, days, months, is_recommended, sort_order)
 VALUES (
     sqlc.arg(org_id),
     sqlc.arg(label),
     sqlc.arg(days),
+    sqlc.narg(months),
     sqlc.arg(is_recommended),
     sqlc.arg(sort_order)
 )
@@ -31,6 +32,8 @@ WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND deleted_at IS NULL;
 UPDATE payment_periods
 SET label      = COALESCE(sqlc.narg(label), label),
     days       = COALESCE(sqlc.narg(days), days),
+    -- set_months switches the period's kind: months NULL = counted in days.
+    months     = CASE WHEN sqlc.arg(set_months)::boolean THEN sqlc.narg(months)::int ELSE months END,
     sort_order = COALESCE(sqlc.narg(sort_order), sort_order),
     active     = COALESCE(sqlc.narg(active), active)
 WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND deleted_at IS NULL

@@ -331,7 +331,14 @@ export type UnitStatusOverride = Exclude<UnitStatus, 'occupied'>;
 export interface PaymentPeriod {
   id: string;
   label: string;
+  /** Length in days; for a calendar period its nominal 30 × months. */
   days: number;
+  /**
+   * Set on a calendar period, which bills on the same day every month (the
+   * contract's due day, else the 1st) and steps by this many months. Null on
+   * a period counted in days.
+   */
+  months?: number | null;
   is_recommended: boolean;
   sort_order: number;
   active: boolean;
@@ -448,11 +455,12 @@ export const periodsApi = {
       query: includeInactive ? { include_inactive: 'true' } : undefined,
       signal,
     }),
-  create: (body: { label: string; days: number }) =>
+  create: (body: { label: string; days?: number; months?: number }) =>
     api.post<{ period: PaymentPeriod } | PaymentPeriod>('/org/payment-periods', body),
   update: (
     id: string,
-    body: { label?: string; days?: number; sort_order?: number; active?: boolean },
+    /** `months: 0` turns a calendar period back into one counted in days. */
+    body: { label?: string; days?: number; months?: number; sort_order?: number; active?: boolean },
   ) => api.patch<{ period: PaymentPeriod } | PaymentPeriod>(`/org/payment-periods/${id}`, body),
   deactivate: (id: string) => api.del<void>(`/org/payment-periods/${id}`),
   /**
@@ -609,6 +617,7 @@ export interface LinkRequestPeriod {
   id?: string;
   label: string;
   days: number;
+  months?: number | null;
   /** Prorated amount for this period, integer TZS. */
   amount: number | null;
 }
@@ -893,7 +902,7 @@ export interface Contract {
   status: ContractStatus;
   rent_amount: number;
   rent_period_days: number;
-  payment_period: { id: string; label: string; days: number } | null;
+  payment_period: { id: string; label: string; days: number; months?: number | null } | null;
   term_days: number;
   start_date: string;
   end_date: string;

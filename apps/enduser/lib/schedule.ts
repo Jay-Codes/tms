@@ -13,7 +13,7 @@
  * request body carries only the renter's three choices (period, term, start).
  */
 
-import { addDays } from './format';
+import { addDays, addMonths, daysBetween } from './format';
 import type { OfferedPeriod, UnitPrice } from './api';
 
 export interface PreviewRow {
@@ -57,11 +57,12 @@ export function deriveEndDate(startDate: string, termDays: number): string {
  */
 export function buildPreview(
   price: UnitPrice | null,
-  period: Pick<OfferedPeriod, 'days'>,
+  period: Pick<OfferedPeriod, 'days' | 'months'>,
   termDays: number,
   startDate: string,
 ): Preview | null {
   if (!price || period.days <= 0 || termDays <= 0) return null;
+  if (period.months) return buildCalendarPreview(price, period.months, termDays, startDate);
 
   const count = Math.ceil(termDays / period.days);
   const rows: PreviewRow[] = [];
@@ -83,9 +84,67 @@ export function buildPreview(
   return { rows, count, total, endDate: deriveEndDate(startDate, termDays) };
 }
 
+/**
+ * A calendar period (the server's GenerateCadence): rent falls due on the 1st
+ * — the preview assumes the default billing day — each row running to the
+ * day before the next billing day and charged a full period's rent whatever
+ * the month's length. A start or an end between billing days is prorated
+ * over the days of the cycle it falls in.
+ */
+function buildCalendarPreview(
+  price: UnitPrice,
+  months: number,
+  termDays: number,
+  startDate: string,
+): Preview | null {
+  const endDate = deriveEndDate(startDate, termDays);
+  const perPeriod = prorate(price, 30 * months);
+  const base = `${startDate.slice(0, 8)}01`;
+  const rows: PreviewRow[] = [];
+  let total = 0;
+  let cursor = startDate;
+  for (let k = 0; cursor < endDate; k += 1) {
+    const cycleStart = addMonths(base, k * months);
+    const cycleEnd = addMonths(base, (k + 1) * months);
+    if (cycleEnd <= cursor) continue;
+    const rowEnd = cycleEnd < endDate ? cycleEnd : endDate;
+    const covered = daysBetween(cursor, rowEnd);
+    const cycleDays = daysBetween(cycleStart, cycleEnd);
+    const amount = covered === cycleDays ? perPeriod : Math.round((perPeriod * covered) / cycleDays);
+    total += amount;
+    rows.push({ n: rows.length + 1, due: cursor, amount, partial: covered !== cycleDays, daysCovered: covered });
+    cursor = rowEnd;
+  }
+  return { rows, count: rows.length, total, endDate };
+}
+
 /** Quick picks for tenancy length: the chosen period ×1, ×3, ×6, ×12. */
 export const TERM_MULTIPLIERS = [1, 3, 6, 12] as const;
 
-export function termQuickPicks(periodDays: number): number[] {
-  return TERM_MULTIPLIERS.map((m) => periodDays * m);
+export interface TermPick {
+  days: number;
+  /** Set when the pick is a whole number of calendar months. */
+  months?: number;
+}
+
+/**
+ * The quick picks for a period. A calendar period's are whole months from the
+ * start date, so the tenancy ends on a billing day.
+ */
+export function termQuickPicks(
+  period: Pick<OfferedPeriod, 'days' | 'months'>,
+  startDate: string,
+): TermPick[] {
+  if (period.months) {
+    return TERM_MULTIPLIERS.map((m) => {
+      const months = m * period.months!;
+      return { days: daysBetween(startDate, addMonths(startDate, months)), months };
+    });
+  }
+  return TERM_MULTIPLIERS.map((m) => ({ days: period.days * m }));
+}
+
+/** The shortest term a period accepts: one period (28 days for a calendar month). */
+export function minTermDays(period: Pick<OfferedPeriod, 'days' | 'months'>): number {
+  return period.months ? 28 * period.months : period.days;
 }
