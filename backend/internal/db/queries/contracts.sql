@@ -11,7 +11,7 @@ INSERT INTO contracts (
     org_id, unit_id, renter_user_id, template_id, terms_snapshot_html,
     rent_amount, rent_period_days, payment_period_id, payment_period_days,
     term_days, start_date, end_date, due_day, status, snapshot_hash, link_request_id,
-    language, supersedes_contract_id, amendment_effective_date, amendment_reason
+    language, supersedes_contract_id, amendment_effective_date, amendment_reason, is_offline
 )
 VALUES (
     sqlc.arg(org_id), sqlc.arg(unit_id), sqlc.arg(renter_user_id), sqlc.narg(template_id),
@@ -22,7 +22,8 @@ VALUES (
     COALESCE(sqlc.narg(language)::text, 'en'),
     -- §22.4: an amendment is marked at insert, so the per-unit index sees it.
     sqlc.narg(supersedes_contract_id), sqlc.narg(amendment_effective_date),
-    sqlc.narg(amendment_reason)
+    sqlc.narg(amendment_reason),
+    COALESCE(sqlc.narg(is_offline)::boolean, false)
 )
 RETURNING *;
 

@@ -22,6 +22,7 @@ FROM contracts c
 JOIN units u ON u.id = c.unit_id AND u.org_id = c.org_id
 WHERE c.org_id = $1 AND c.deleted_at IS NULL
   AND c.status IN ('active', 'expiring', 'ended', 'terminated')
+  AND NOT c.is_offline
   AND c.start_date < $2
   AND ($3::uuid IS NULL OR u.property_id = $3::uuid)
 `

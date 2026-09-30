@@ -41,21 +41,22 @@ type AuditLog struct {
 }
 
 type BackfillBatch struct {
-	ID              pgtype.UUID        `json:"id"`
-	OrgID           pgtype.UUID        `json:"org_id"`
-	ContractID      pgtype.UUID        `json:"contract_id"`
-	Mode            string             `json:"mode"`
-	Until           pgtype.Date        `json:"until"`
-	Periods         int32              `json:"periods"`
-	Amount          int64              `json:"amount"`
-	ImportBatchID   pgtype.UUID        `json:"import_batch_id"`
-	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UndoneAt        pgtype.Timestamptz `json:"undone_at"`
-	UndoneByUserID  pgtype.UUID        `json:"undone_by_user_id"`
-	UndoReason      *string            `json:"undo_reason"`
-	FromDate        pgtype.Date        `json:"from_date"`
-	CreatedPeriods  int32              `json:"created_periods"`
+	ID                pgtype.UUID        `json:"id"`
+	OrgID             pgtype.UUID        `json:"org_id"`
+	ContractID        pgtype.UUID        `json:"contract_id"`
+	Mode              string             `json:"mode"`
+	Until             pgtype.Date        `json:"until"`
+	Periods           int32              `json:"periods"`
+	Amount            int64              `json:"amount"`
+	ImportBatchID     pgtype.UUID        `json:"import_batch_id"`
+	CreatedByUserID   pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UndoneAt          pgtype.Timestamptz `json:"undone_at"`
+	UndoneByUserID    pgtype.UUID        `json:"undone_by_user_id"`
+	UndoReason        *string            `json:"undo_reason"`
+	FromDate          pgtype.Date        `json:"from_date"`
+	CreatedPeriods    int32              `json:"created_periods"`
+	CreatedContractID pgtype.UUID        `json:"created_contract_id"`
 }
 
 type Contract struct {
@@ -94,6 +95,7 @@ type Contract struct {
 	NoticeLeaveOn            pgtype.Date        `json:"notice_leave_on"`
 	NoticeReason             *string            `json:"notice_reason"`
 	MovedOutConfirmedAt      pgtype.Timestamptz `json:"moved_out_confirmed_at"`
+	IsOffline                bool               `json:"is_offline"`
 }
 
 type ContractSignature struct {

@@ -5,10 +5,12 @@
 -- rows a `waived` batch closed. The undo walks both.
 
 -- name: CreateBackfillBatch :one
-INSERT INTO backfill_batches (org_id, contract_id, mode, until, import_batch_id, created_by_user_id, from_date)
+INSERT INTO backfill_batches (org_id, contract_id, mode, until, import_batch_id, created_by_user_id, from_date,
+                              created_contract_id)
 VALUES (
     sqlc.arg(org_id), sqlc.arg(contract_id), sqlc.arg(mode), sqlc.arg(until),
-    sqlc.narg(import_batch_id), sqlc.narg(created_by_user_id), sqlc.narg(from_date)
+    sqlc.narg(import_batch_id), sqlc.narg(created_by_user_id), sqlc.narg(from_date),
+    sqlc.narg(created_contract_id)
 )
 RETURNING *;
 
@@ -48,7 +50,8 @@ RETURNING *;
 SELECT b.*,
        cu.full_name AS created_by_name,
        uu.full_name AS undone_by_name,
-       EXISTS (
+       oc.start_date AS offline_start, oc.end_date AS offline_end,
+       COALESCE(EXISTS (
            SELECT 1
            FROM payment_allocations a2
            JOIN payments pm2 ON pm2.id = a2.payment_id
@@ -67,20 +70,34 @@ SELECT b.*,
                  SELECT s.id FROM payment_schedules s
                  WHERE s.created_by_backfill_id = b.id AND s.org_id = b.org_id
              )
-       )::boolean AS touched
+       ) OR (b.created_contract_id IS NOT NULL AND (
+           -- Phase 30: money or edits by anyone else on the offline contract.
+           EXISTS (SELECT 1 FROM payments pm3
+                   WHERE pm3.org_id = b.org_id AND pm3.contract_id = b.created_contract_id
+                     AND pm3.deleted_at IS NULL
+                     AND pm3.backfill_batch_id IS DISTINCT FROM b.id)
+           OR EXISTS (SELECT 1 FROM payment_schedules s3
+                      WHERE s3.org_id = b.org_id AND s3.contract_id = b.created_contract_id
+                        AND s3.deleted_at IS NULL
+                        AND (s3.updated_at > b.created_at OR s3.status = 'written_off'))
+       )), false)::boolean AS touched
 FROM backfill_batches b
 LEFT JOIN users cu ON cu.id = b.created_by_user_id
 LEFT JOIN users uu ON uu.id = b.undone_by_user_id
-WHERE b.org_id = sqlc.arg(org_id) AND b.contract_id = sqlc.arg(contract_id)
+LEFT JOIN contracts oc ON oc.id = b.created_contract_id AND oc.org_id = b.org_id
+WHERE b.org_id = sqlc.arg(org_id)
+  AND (b.contract_id = sqlc.arg(contract_id) OR b.created_contract_id = sqlc.arg(contract_id))
 ORDER BY b.created_at DESC, b.id DESC;
 
 -- name: GetBackfillBatch :one
 SELECT b.*,
        cu.full_name AS created_by_name,
-       uu.full_name AS undone_by_name
+       uu.full_name AS undone_by_name,
+       oc.start_date AS offline_start, oc.end_date AS offline_end
 FROM backfill_batches b
 LEFT JOIN users cu ON cu.id = b.created_by_user_id
 LEFT JOIN users uu ON uu.id = b.undone_by_user_id
+LEFT JOIN contracts oc ON oc.id = b.created_contract_id AND oc.org_id = b.org_id
 WHERE b.org_id = sqlc.arg(org_id) AND b.id = sqlc.arg(id);
 
 -- LockBackfillBatch is the undo's guard: two clicks on Undo find the stamp the
@@ -95,7 +112,7 @@ FOR UPDATE;
 -- settled or waived. Undoing then would pull the floor from under money the
 -- landlord has since recorded against the same months.
 -- name: BackfillBatchTouched :one
-SELECT EXISTS (
+SELECT COALESCE(EXISTS (
     SELECT 1
     FROM payment_allocations a2
     JOIN payments pm2 ON pm2.id = a2.payment_id
@@ -114,7 +131,23 @@ SELECT EXISTS (
           SELECT s.id FROM payment_schedules s
           WHERE s.created_by_backfill_id = sqlc.arg(id)::uuid AND s.org_id = sqlc.arg(org_id)
       )
-)::boolean AS touched;
+) OR EXISTS (
+    -- Phase 30: an offline contract the batch created is touched by any money
+    -- that is not the batch's own, or any edit to its periods, since.
+    SELECT 1 FROM backfill_batches b
+    WHERE b.org_id = sqlc.arg(org_id) AND b.id = sqlc.arg(id)::uuid
+      AND b.created_contract_id IS NOT NULL
+      AND (
+          EXISTS (SELECT 1 FROM payments pm3
+                  WHERE pm3.org_id = b.org_id AND pm3.contract_id = b.created_contract_id
+                    AND pm3.deleted_at IS NULL
+                    AND pm3.backfill_batch_id IS DISTINCT FROM b.id)
+          OR EXISTS (SELECT 1 FROM payment_schedules s3
+                     WHERE s3.org_id = b.org_id AND s3.contract_id = b.created_contract_id
+                       AND s3.deleted_at IS NULL
+                       AND (s3.updated_at > b.created_at OR s3.status = 'written_off'))
+      )
+), false)::boolean AS touched;
 
 -- ListBackfillBatchPayments is the undo's worklist of money: every live
 -- payment the batch wrote, oldest first.

@@ -644,7 +644,7 @@ func (s *Server) handleContractWitnessOTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 	p := auth.MustFromContext(r.Context())
-	row, ok := s.loadContract(w, r)
+	row, ok := s.loadActionableContract(w, r)
 	if !ok {
 		return
 	}

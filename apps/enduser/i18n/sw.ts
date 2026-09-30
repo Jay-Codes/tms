@@ -202,6 +202,8 @@ const messages: Messages = {
   'contract.status.active': 'Unatumika',
   'contract.status.expiring': 'Unakaribia kuisha',
   'contract.status.ended': 'Umeisha',
+  'contract.offline.chip': 'Mkataba wa nje ya mfumo',
+  'contract.offline.banner': 'Mkataba wa nje ya mfumo - umerekodiwa na mwenye nyumba kutoka kumbukumbu za karatasi, haukusainiwa kwenye TMS; hauna hati.',
   'contract.status.terminated': 'Umesitishwa',
   'contract.status.draft': 'Rasimu',
 

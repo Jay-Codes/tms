@@ -308,7 +308,7 @@ func (s *Server) handleReissueContract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := auth.MustFromContext(r.Context())
-	row, ok := s.loadContract(w, r)
+	row, ok := s.loadActionableContract(w, r)
 	if !ok {
 		return
 	}
@@ -438,7 +438,7 @@ func (s *Server) handleAmendContract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := auth.MustFromContext(r.Context())
-	old, ok := s.loadContract(w, r)
+	old, ok := s.loadActionableContract(w, r)
 	if !ok {
 		return
 	}

@@ -891,6 +891,11 @@ export interface Contract {
   renter: { user_id: string; full_name: string; phone: string | null };
   template_id: string | null;
   status: ContractStatus;
+  /**
+   * Phase 30 — recorded by a backfill from the landlord's paper records: ended,
+   * never signed or issued in TMS, and nothing on it can be acted on.
+   */
+  is_offline?: boolean;
   rent_amount: number;
   rent_period_days: number;
   payment_period: { id: string; label: string; days: number } | null;
@@ -1454,8 +1459,9 @@ export interface BackfillResult {
   settled: number;
   skipped: number;
   total: number;
-  /** Phase 29 — periods created before the contract's start. */
+  /** Phase 30 — periods of the offline contract the call recorded. */
   created?: number;
+  offline_contract_id?: string | null;
   dry_run?: boolean;
   schedules?: ScheduleRow[];
 }
@@ -3163,9 +3169,15 @@ export interface BackfillBatch {
   periods: number;
   /** Money moved (`paid`) or forgiven (`waived`). */
   amount: number;
-  /** Phase 29 — the real move-in it reached back to, and the periods it created. */
+  /**
+   * Phase 30 — the move-in of the offline contract the batch recorded
+   * (`created_contract_id`, last covered day `offline_end`) and its period count.
+   * Phase 29 batches carry `from`/`created_periods` without a contract.
+   */
   from?: string | null;
   created_periods?: number;
+  created_contract_id?: string | null;
+  offline_end?: string | null;
   /** The CSV import the line arrived on; null for the contract page's button. */
   import_batch_id: string | null;
   created_by: { user_id: string; name: string } | null;
@@ -3184,6 +3196,8 @@ export interface BackfillUndoResult {
   periods_reopened: number;
   /** Phase 29 — periods before the contract's start that went with it. */
   periods_removed?: number;
+  /** Phase 30 — the offline contract it had recorded went too. */
+  contract_removed?: boolean;
 }
 
 export const backfillsApi = {
