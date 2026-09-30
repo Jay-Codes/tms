@@ -16,7 +16,7 @@ import (
 
 const periodLabelMax = 40
 
-// periodMonthsMax bounds a calendar period: a year at most (migration 000036).
+// periodMonthsMax bounds a calendar period: a year at most (migration 000037).
 const periodMonthsMax = 12
 
 // calendarDays is a calendar period's nominal length, the basis rent is scaled
