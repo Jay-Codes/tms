@@ -102,8 +102,9 @@ func TestPhase22HoldoverConfirmOrRenew(t *testing.T) {
 	h.endContract(t, stay.contractID)
 	end := stay.owner.do(http.MethodGet, "/contracts/"+stay.contractID, nil).str(t, "contract", "end_date")
 	renewal := stay.owner.do(http.MethodPost, "/contracts/"+stay.contractID+"/amend", map[string]any{
-		"effective_date": end, "reason": "still living there",
+		"effective_date": end, "reason": "still living there", "note_sw": "Upya", "note_en": "Renewal",
 	}).mustStatus(t, http.StatusCreated, "renew ended").str(t, "contract", "id")
+	stay.owner.do(http.MethodPost, "/contracts/"+renewal+"/amendment/approve", nil).mustStatus(t, http.StatusOK, "approve renewal")
 	h.signAsRenter(t, stay.renter, renewal, stay.renterPhone)
 	stay.owner.do(http.MethodPost, "/contracts/"+renewal+"/activate", nil).mustStatus(t, http.StatusOK, "activate renewal")
 	if got := stay.owner.do(http.MethodGet, "/contracts/"+stay.contractID, nil).str(t, "contract", "superseded_by_contract_id"); got != renewal {

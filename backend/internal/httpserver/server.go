@@ -267,6 +267,14 @@ func (s *Server) routes() chi.Router {
 			r.Post("/contracts/{id}/reissue", s.handleReissueContract)
 			// §22.4: amend or renew a running contract (renter signs again).
 			r.Post("/contracts/{id}/amend", s.handleAmendContract)
+			// Phase 31: an amendment is reviewed by an owner before the renter
+			// sees it (maker-checker); the owner-only calls check the role.
+			r.Patch("/contracts/{id}/amendment", s.handlePatchAmendment)
+			r.Post("/contracts/{id}/amendment/submit", s.handleSubmitAmendment)
+			r.Post("/contracts/{id}/amendment/approve", s.handleApproveAmendment)
+			r.Post("/contracts/{id}/amendment/return", s.handleReturnAmendment)
+			r.Post("/contracts/{id}/amendment/reject", s.handleRejectAmendment)
+			r.Post("/contracts/{id}/amendment/withdraw", s.handleWithdrawAmendment)
 			// §22.5: settle-up preview and the deposit ledger.
 			r.Get("/contracts/{id}/settlement", s.handleSettlementPreview)
 			r.Get("/contracts/{id}/deposit", s.handleGetDeposit)
@@ -469,6 +477,8 @@ func (s *Server) routes() chi.Router {
 			r.Post("/contracts/{id}/sign", s.handleSignContract)
 			// §22.5: the renter's own notice to leave.
 			r.Post("/me/contracts/{id}/notice", s.handleGiveNotice)
+			// Phase 31: the renter declines an approved contract change.
+			r.Post("/me/contracts/{id}/decline", s.handleDeclineAmendment)
 			r.Delete("/me/contracts/{id}/notice", s.handleWithdrawNotice)
 
 			// --- Phase 5: the renter's own payment history ---

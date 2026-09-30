@@ -22,6 +22,7 @@ Continues [PLAN.md](PLAN.md) (Phases 0–8, done 5 Sep 2026). Same rules: backen
 | 15 | **Next payment due** far more visible — landlord side (dashboard, renters, units) and renter side (home hero, countdown) | 16 |
 | 16 | **Payment instructions** easy to find for renters (pinned, reachable from home, contract and proof sheet) | 16 |
 | 17 | Contracts: **revoke, amend/update, re-sign, renew** | 17 (draft) |
+| 18 | Contract changes: reword/redate as the landlord, **maker-checker** (manager drafts, owner approves), mandatory SW+EN note, SMS to the renter in their language, renter may **decline** | 31 |
 
 Found during the same test pass (fixed in Phase 9): the contract terms say "TZS 100,000 per Quarterly (90 days)" while the unit price is 100,000 **per 30 days** — `{{rent}}` is not scaled to the payment period, so the signed document states the wrong figure.
 
@@ -400,6 +401,54 @@ Why: field feedback (30 Sep): "When backfilling periods, just create an anonymou
 - [x] Tenant UI: "Record an offline contract" in the Backfill sheet; Offline chip in the contract list and detail with the banner, actions hidden; Backfills list shows "created offline contract {from} – {to}, N periods". Renter app: Offline chip in the contract list and a banner on the document. Import page copy and CSV template help updated. SW/EN.
 - [x] Tests (`phase30_test.go`, and the Phase 29 tests rewritten for the new rule).
 - Not built: a "backfill" entry point from a unit or renter with no running contract in the UI — the CSV covers it.
+
+## Phase 31 — Contract changes with owner approval (maker-checker), bilingual note, renter decline (2 days) — 🚧 built 30 Sep 2026, browser pass pending
+
+Why: client request (30 Sep): "modify a contract — reword some words, validity dates and other things — as the landlord, with a maker-checker flow on any amendment; a mandatory comment in English and Swahili that the renter sees with the new contract and in an SMS, in their own language; the renter can decline." Builds on Phase 22.4 (amend/renew by supersession); the snapshot rule is unchanged — a change is still a **new document the renter signs**.
+
+Decisions with the client (30 Sep):
+- **Maker:** a manager or an owner drafts. **Checker:** an owner approves. An owner may approve their own draft (one step; the audit shows drafted and approved by the same person). A manager never approves.
+- **Note:** every amendment carries a mandatory note in **both** Swahili and English (≤200 characters each). The renter sees the note in their own language (`users.locale`) on the contract page and in the SMS.
+- **Renter decline:** the renter may decline an approved amendment with a reason; the running contract carries on, the org is told in the bell, and the owner may draft again.
+- Scope: amend and renew. Terminate, reissue and renter name corrections keep their own flows.
+
+Model (migration 000038):
+```
+contracts + amendment_stage TEXT NULL  (draft|submitted|approved|rejected|declined|withdrawn)
+          + amendment_note_sw, amendment_note_en  TEXT ≤200
+          + amendment_body_html TEXT NULL   -- this contract's own wording (template form, {{variables}} kept)
+          + amendment_drafted_by, amendment_submitted_by, amendment_reviewed_by  UUID NULL
+          + amendment_submitted_at, amendment_reviewed_at, amendment_declined_at  TIMESTAMPTZ NULL
+          + amendment_review_note TEXT ≤200   -- the owner's reason on return / reject
+          + amendment_decline_reason TEXT ≤200
+existing amendments backfilled to amendment_stage = 'approved'
+contracts_one_open_amendment covers status IN ('draft','pending_signature')
+notification_log kind + 'contract_amendment'
+```
+Stage ↔ status: `draft`/`submitted` → status `draft` (never visible to the renter, no SMS); `approved` → `pending_signature` → `active` as before; `rejected`/`declined`/`withdrawn` → `terminated`. "Returned" is `draft` again with `amendment_review_note` set.
+
+### 31.1 Backend
+- [x] `POST /contracts/{id}/amend` now writes a **draft** (status `draft`, stage `draft`, no SMS). New body fields `note_sw`, `note_en` (both required), `body_html` (optional per-contract wording, sanitized, template variables allowed); `reason` becomes optional (defaults to the note in the document's language).
+- [x] `PATCH /contracts/{id}/amendment` — edit a draft (same fields as amend). Any org member while `draft`; owners only while `submitted`. Re-renders terms and hash.
+- [x] `POST /contracts/{id}/amendment/submit` (maker) → `submitted`; bell item "Contract change awaiting approval".
+- [x] `POST /contracts/{id}/amendment/approve` (owner) — from `submitted`, or from `draft` when the owner drafted it. Does **not** re-render (the renter gets exactly what the owner reviewed); rechecks the effective date and that the old contract still runs, → `pending_signature`, SMS `contract_amendment` to the renter.
+- [x] `POST /contracts/{id}/amendment/return {reason}` (owner) → `draft` with the reason; bell item.
+- [x] `POST /contracts/{id}/amendment/reject {reason}` (owner) → `terminated`, stage `rejected`; bell item.
+- [x] `POST /contracts/{id}/amendment/withdraw` (any org member, `draft`/`submitted`) → `terminated`, stage `withdrawn`. An approved, unsigned amendment is still withdrawn with `terminate` as before.
+- [x] `POST /me/contracts/{id}/decline {reason}` (renter, approved amendment not yet signed by them) → `terminated`, stage `declined`; bell item "Renter declined the contract change".
+- [x] Renter reads (`GET /contracts/{id}`, `GET /me/contracts`) never show `draft`/`submitted`/`rejected`/`withdrawn` amendments.
+- [x] `GET /contracts?amendment_stage=submitted` for the approval queue.
+- [x] SMS kind `contract_amendment` (EN + SW platform defaults, admin-editable, org-overridable): `{{org}}`, `{{unit}}`, `{{date}}` (effective date), `{{reason}}` (the note in the renter's language), `{{link}}`.
+- [x] Audit: `contract.amend` (draft written), `contract.amend_update`, `contract.amend_submit`, `contract.amend_approve`, `contract.amend_return`, `contract.amend_reject`, `contract.amend_withdraw`, `contract.amend_decline`.
+- [x] Tests: manager drafts → owner approves → renter signs → activation supersedes; manager cannot approve (403); owner self-approve from draft; return → edit → resubmit; reject; withdraw; renter decline (old contract untouched, bell item); renter cannot see a draft (404); both notes required; SMS in the renter's locale carries that note; body_html wording rendered with variables.
+
+### 31.2 Frontend
+- [x] Tenant: Amend/Renew sheet becomes the draft editor — changes, effective date, SW + EN note (both required, counters), optional "Edit wording" (rich-text editor pre-filled from the template). Buttons: manager "Save draft" / "Submit for approval"; owner "Save draft" / "Approve & send".
+- [x] Tenant: amendment review panel on the draft — old vs new fields, wording diff, both notes, drafter; owner actions Approve / Return (reason) / Reject (reason); anyone Withdraw while draft. Stage chips (Draft, Awaiting approval, Returned, Sent to renter, Declined, Rejected). Contracts list filter "Awaiting approval".
+- [x] Enduser: amendment banner shows the note in the renter's language (fallback other language); **Decline** button with a reason sheet next to Sign.
+- [x] SW/EN strings; `make lint` (i18n check) and `tsc` clean.
+- [x] Docs: API.md Phase 31, PROGRESS entry, DECISIONS.
+- [ ] Browser walk-through (manager draft → owner approve → renter decline/sign) on the preview stack.
 
 ## Browser walk-through and fixes (27 Sep 2026) — ✅
 

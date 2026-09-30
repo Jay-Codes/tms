@@ -43,6 +43,10 @@ const (
 	// renter believed was recorded; they are always told.
 	KindPaymentReversed  = "payment_reversed"
 	KindPaymentCorrected = "payment_corrected"
+	// Phase 31: an owner approved a change to the renter's contract. The
+	// owner's note travels as `{{reason}}`, in the renter's own language, and
+	// `{{date}}` is the day the change applies from.
+	KindContractAmendment = "contract_amendment"
 	KindCustom            = "custom"
 	KindOTP          = "otp"
 )
@@ -282,6 +286,10 @@ var platformTemplates = map[string]Template{
 	KindPaymentCorrected: {
 		EN: "{{name}}, the payment of {{amount}} recorded on {{date}} for {{unit}} at {{org}} was corrected to {{next_amount}}: {{reason}}",
 		SW: "{{name}}, malipo ya {{amount}} yaliyorekodiwa tarehe {{date}} kwa {{unit}} katika {{org}} yamerekebishwa kuwa {{next_amount}}: {{reason}}",
+	},
+	KindContractAmendment: {
+		EN: "{{org}} proposes changes to your contract for {{unit}} from {{date}}: {{reason}} Review and sign or decline: {{link}}",
+		SW: "{{org}} inapendekeza mabadiliko kwenye mkataba wako wa {{unit}} kuanzia {{date}}: {{reason}} Pitia na usaini au ukatae: {{link}}",
 	},
 	KindEvictionWithdrawn: {
 		EN: "{{name}}, the notice about {{unit}} at {{org}} has been withdrawn. Thank you.",

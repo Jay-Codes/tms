@@ -37,6 +37,7 @@ import { Protected } from '../../../components/Protected';
 import { ContractStamp } from '../../../components/ContractStatus';
 import { CountdownChip } from '../../../components/PaymentStatus';
 import { NoticeSheet } from '../../../components/NoticeSheet';
+import { DeclineSheet } from '../../../components/DeclineSheet';
 import { RentValue } from '../../../components/RentValue';
 import { Notice, Screen } from '../../../components/Screen';
 import './document.css';
@@ -104,6 +105,7 @@ function DocumentContent() {
   // Phase 22.5: this contract's own rows carry the landlord's relief.
   const [ledgerRows, setLedgerRows] = useState<PaymentSchedule[]>([]);
   const [noticeOpen, setNoticeOpen] = useState(false);
+  const [declineOpen, setDeclineOpen] = useState(false);
   const [noticeBusy, setNoticeBusy] = useState(false);
   const [noticeError, setNoticeError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -253,7 +255,24 @@ function DocumentContent() {
 
       {/* Phase 22.4: an amendment names what it changes and from when, so the
           renter knows what the sign button at the bottom agrees to. */}
-      {needsSignature && contract?.amendment_effective_date && (
+      {/* Phase 31: the owner's note, in the renter's own language. */}
+      {needsSignature && contract?.amendment_effective_date && contract.amendment && (
+        <Notice>
+          {t('doc.amendment', {
+            date: formatDate(locale, contract.amendment_effective_date),
+            reason:
+              (locale === 'en' ? contract.amendment.note_en : contract.amendment.note_sw) ||
+              contract.amendment.note_en ||
+              contract.amendment.note_sw,
+          })}
+        </Notice>
+      )}
+      {contract?.amendment?.stage === 'declined' && (
+        <Notice>
+          {t('decline.done', { reason: contract.amendment.decline_reason ?? '' })}
+        </Notice>
+      )}
+      {needsSignature && contract?.amendment_effective_date && !contract.amendment && (
         <Notice>
           {contract.amendment_reason
             ? t('doc.amendment', {
@@ -549,11 +568,29 @@ function DocumentContent() {
         />
       )}
 
+      {declineOpen && contract && (
+        <DeclineSheet
+          contract={contract}
+          onClose={() => setDeclineOpen(false)}
+          onDone={(c) => {
+            setContract(c);
+            setDoc((d) => (d ? { ...d, status: c.status } : d));
+            setDeclineOpen(false);
+          }}
+        />
+      )}
+
       {needsSignature && (
         <div className="doc-cta">
           <Link className="btn btn-primary" href={`/contract/${encodeURIComponent(id)}/sign`}>
             {t('doc.acceptSign')}
           </Link>
+          {/* Phase 31: a change can be turned down; a first contract cannot. */}
+          {contract?.amendment?.stage === 'approved' && (
+            <button type="button" className="btn btn-secondary" onClick={() => setDeclineOpen(true)}>
+              {t('decline.open')}
+            </button>
+          )}
         </div>
       )}
     </Screen>

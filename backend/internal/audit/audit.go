@@ -232,6 +232,15 @@ const (
 	// activates, the old contract handing over to it.
 	ActionContractAmend     = "contract.amend"
 	ActionContractSupersede = "contract.supersede"
+	// Phase 31: the review of an amendment draft (maker-checker) and the
+	// renter's decline.
+	ActionContractAmendUpdate   = "contract.amend_update"
+	ActionContractAmendSubmit   = "contract.amend_submit"
+	ActionContractAmendApprove  = "contract.amend_approve"
+	ActionContractAmendReturn   = "contract.amend_return"
+	ActionContractAmendReject   = "contract.amend_reject"
+	ActionContractAmendWithdraw = "contract.amend_withdraw"
+	ActionContractAmendDecline  = "contract.amend_decline"
 	// §22.5: the settlement a termination applied, and each deposit movement.
 	ActionContractSettle = "contract.settle"
 	ActionDepositRecord  = "deposit.record"

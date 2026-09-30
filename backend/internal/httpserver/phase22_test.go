@@ -286,6 +286,7 @@ func TestPhase22AmendRentMidTermCarriesPrepaidMoney(t *testing.T) {
 	path := "/contracts/" + fix.contractID + "/amend"
 	mid := c.do(http.MethodPost, path, map[string]any{
 		"effective_date": day.AddDate(0, 0, 1).Format("2006-01-02"), "reason": "rent review", "rent_amount": 300_000,
+		"note_sw": "x", "note_en": "x",
 	})
 	if mid.Code != http.StatusUnprocessableEntity || mid.str(t, "type") != "effective_not_period_start" {
 		t.Fatalf("mid-period amendment = %d %s, want 422", mid.Code, mid.Raw)
@@ -293,15 +294,18 @@ func TestPhase22AmendRentMidTermCarriesPrepaidMoney(t *testing.T) {
 
 	am := c.do(http.MethodPost, path, map[string]any{
 		"effective_date": second, "reason": "rent review", "rent_amount": 300_000,
+		"note_sw": "Kodi mpya", "note_en": "New rent",
 	}).mustStatus(t, http.StatusCreated, "amend")
 	amID := am.str(t, "contract", "id")
-	if got := am.str(t, "contract", "status"); got != "pending_signature" {
-		t.Errorf("amendment status = %s", got)
+	if got := am.str(t, "contract", "status"); got != "draft" {
+		t.Errorf("amendment status = %s, want draft", got)
 	}
 	if got := am.str(t, "contract", "amendment_effective_date"); got != second {
 		t.Errorf("effective = %s, want %s", got, second)
 	}
-	again := c.do(http.MethodPost, path, map[string]any{"effective_date": second, "reason": "twice"})
+	again := c.do(http.MethodPost, path, map[string]any{
+		"effective_date": second, "reason": "twice", "note_sw": "x", "note_en": "x",
+	})
 	if again.Code != http.StatusConflict || again.str(t, "type") != "amendment_pending" {
 		t.Errorf("second amendment = %d %s, want 409 amendment_pending", again.Code, again.Raw)
 	}
@@ -310,6 +314,7 @@ func TestPhase22AmendRentMidTermCarriesPrepaidMoney(t *testing.T) {
 		t.Errorf("old status while amendment pending = %s", got)
 	}
 
+	c.do(http.MethodPost, "/contracts/"+amID+"/amendment/approve", nil).mustStatus(t, http.StatusOK, "approve")
 	h.signAsRenter(t, fix.renter, amID, fix.renterPhone)
 	c.do(http.MethodPost, "/contracts/"+amID+"/activate", nil).mustStatus(t, http.StatusOK, "activate amendment")
 
@@ -359,9 +364,10 @@ func TestPhase22RenewOnTheEndDate(t *testing.T) {
 	c := fix.owner
 	end := c.do(http.MethodGet, "/contracts/"+fix.contractID, nil).str(t, "contract", "end_date")
 	re := c.do(http.MethodPost, "/contracts/"+fix.contractID+"/amend", map[string]any{
-		"effective_date": end, "reason": "renewal",
+		"effective_date": end, "reason": "renewal", "note_sw": "Upya", "note_en": "Renewal",
 	}).mustStatus(t, http.StatusCreated, "renew")
 	renewal := re.str(t, "contract", "id")
+	c.do(http.MethodPost, "/contracts/"+renewal+"/amendment/approve", nil).mustStatus(t, http.StatusOK, "approve renewal")
 	if got := re.str(t, "contract", "start_date"); got != end {
 		t.Errorf("renewal starts %s, want %s", got, end)
 	}
@@ -381,7 +387,7 @@ func TestPhase22AmendRefusedOnAnUnsignedContract(t *testing.T) {
 	h := newHarness(t)
 	fix := h.newContractFixture(t, "AmendPending", "0722000700", "+255722000701")
 	r := fix.owner.do(http.MethodPost, "/contracts/"+fix.contractID+"/amend", map[string]any{
-		"effective_date": time.Now().UTC().Format("2006-01-02"), "reason": "x",
+		"effective_date": time.Now().UTC().Format("2006-01-02"), "reason": "x", "note_sw": "x", "note_en": "x",
 	})
 	if r.Code != http.StatusConflict {
 		t.Errorf("amend unsigned = %d, want 409", r.Code)

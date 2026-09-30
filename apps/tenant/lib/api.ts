@@ -937,6 +937,8 @@ export interface Contract {
    */
   amendment_effective_date?: string | null;
   amendment_reason?: string | null;
+  /** Phase 31 — the owner's review of a contract change; null on anything else. */
+  amendment?: AmendmentInfo | null;
   /** Phase 22.4 — set on the old contract once an amendment activates. */
   superseded_by_contract_id?: string | null;
   /** Phase 22.4 — the last day the old contract governs. */
@@ -1113,10 +1115,43 @@ export function exceedsDepositHeld(err: unknown): number | null {
   return typeof err.body.held === 'number' ? err.body.held : 0;
 }
 
-/** `POST /contracts/{id}/amend` body (API.md 22.4). Omitted fields carry over. */
+/**
+ * Phase 31 — where a contract change is in its review. `draft` and
+ * `submitted` are the org's alone; the renter first sees it `approved`.
+ */
+export type AmendmentStage = 'draft' | 'submitted' | 'approved' | 'rejected' | 'declined' | 'withdrawn';
+
+export interface AmendmentInfo {
+  stage: AmendmentStage;
+  /** The note to the renter, both languages (mandatory). */
+  note_sw: string;
+  note_en: string;
+  /** This contract's own wording in template form; absent = the template's. */
+  body_html?: string | null;
+  drafted_by?: string | null;
+  drafted_by_name?: string | null;
+  submitted_at?: string | null;
+  reviewed_by?: string | null;
+  reviewed_by_name?: string | null;
+  reviewed_at?: string | null;
+  /** The owner's reason when returning or rejecting. */
+  review_note?: string | null;
+  declined_at?: string | null;
+  decline_reason?: string | null;
+}
+
+/**
+ * `POST /contracts/{id}/amend` body (API.md 22.4, Phase 31). Omitted fields
+ * carry over; the two notes are required. On `PATCH …/amendment` every field
+ * is optional and omitted ones keep the draft's value.
+ */
 export interface AmendInput {
   effective_date: string;
-  reason: string;
+  reason?: string;
+  note_sw: string;
+  note_en: string;
+  /** This contract's own wording (template form); "" = back to the template. */
+  body_html?: string;
   rent_amount?: number;
   rent_period_days?: number;
   payment_period_id?: string;
@@ -1325,6 +1360,8 @@ export const contractsApi = {
   list: (
     query: {
       status?: ContractStatus | '';
+      /** Phase 31 — `submitted` is the owner's approval queue. */
+      amendment_stage?: AmendmentStage;
       unit_id?: string;
       renter_user_id?: string;
       cursor?: string;
@@ -1402,6 +1439,24 @@ export const contractsApi = {
    */
   amend: (id: string, body: AmendInput) =>
     api.post<{ contract: Contract } | Contract>(`/contracts/${id}/amend`, body),
+  /**
+   * Phase 31 — the review of a draft change (maker-checker). Edit: any org
+   * member while `draft`, an owner while `submitted` (409 `amendment_submitted`
+   * otherwise). Approve / return / reject are the owner's (403
+   * `owner_required`); an owner may approve their own draft directly.
+   */
+  updateAmendment: (id: string, body: Partial<AmendInput>) =>
+    api.patch<{ contract: Contract } | Contract>(`/contracts/${id}/amendment`, body),
+  submitAmendment: (id: string) =>
+    api.post<{ contract: Contract } | Contract>(`/contracts/${id}/amendment/submit`, {}),
+  approveAmendment: (id: string) =>
+    api.post<{ contract: Contract } | Contract>(`/contracts/${id}/amendment/approve`, {}),
+  returnAmendment: (id: string, reason: string) =>
+    api.post<{ contract: Contract } | Contract>(`/contracts/${id}/amendment/return`, { reason }),
+  rejectAmendment: (id: string, reason: string) =>
+    api.post<{ contract: Contract } | Contract>(`/contracts/${id}/amendment/reject`, { reason }),
+  withdrawAmendment: (id: string) =>
+    api.post<{ contract: Contract } | Contract>(`/contracts/${id}/amendment/withdraw`, {}),
 };
 
 /** `200 {periods, amount, schedules}` from write-off and its undo. */

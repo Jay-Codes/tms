@@ -16,7 +16,7 @@ UPDATE contracts
 SET status = 'active', activated_at = now()
 WHERE org_id = $1 AND id = $2
   AND status = 'pending_signature' AND deleted_at IS NULL
-RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language, policy, supersedes_contract_id, amendment_effective_date, amendment_reason, superseded_by_contract_id, settlement, notice_given_at, notice_leave_on, notice_reason, moved_out_confirmed_at, is_offline, payment_period_months
+RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language, policy, supersedes_contract_id, amendment_effective_date, amendment_reason, superseded_by_contract_id, settlement, notice_given_at, notice_leave_on, notice_reason, moved_out_confirmed_at, is_offline, payment_period_months, amendment_stage, amendment_note_sw, amendment_note_en, amendment_body_html, amendment_drafted_by, amendment_submitted_by, amendment_submitted_at, amendment_reviewed_by, amendment_reviewed_at, amendment_review_note, amendment_declined_at, amendment_decline_reason
 `
 
 type ActivateContractParams struct {
@@ -65,6 +65,18 @@ func (q *Queries) ActivateContract(ctx context.Context, arg ActivateContractPara
 		&i.MovedOutConfirmedAt,
 		&i.IsOffline,
 		&i.PaymentPeriodMonths,
+		&i.AmendmentStage,
+		&i.AmendmentNoteSw,
+		&i.AmendmentNoteEn,
+		&i.AmendmentBodyHtml,
+		&i.AmendmentDraftedBy,
+		&i.AmendmentSubmittedBy,
+		&i.AmendmentSubmittedAt,
+		&i.AmendmentReviewedBy,
+		&i.AmendmentReviewedAt,
+		&i.AmendmentReviewNote,
+		&i.AmendmentDeclinedAt,
+		&i.AmendmentDeclineReason,
 	)
 	return i, err
 }
@@ -117,7 +129,8 @@ INSERT INTO contracts (
     org_id, unit_id, renter_user_id, template_id, terms_snapshot_html,
     rent_amount, rent_period_days, payment_period_id, payment_period_days, payment_period_months,
     term_days, start_date, end_date, due_day, status, snapshot_hash, link_request_id,
-    language, supersedes_contract_id, amendment_effective_date, amendment_reason, is_offline
+    language, supersedes_contract_id, amendment_effective_date, amendment_reason, is_offline,
+    amendment_stage, amendment_note_sw, amendment_note_en, amendment_body_html, amendment_drafted_by
 )
 VALUES (
     $1, $2, $3, $4,
@@ -130,9 +143,12 @@ VALUES (
     -- §22.4: an amendment is marked at insert, so the per-unit index sees it.
     $19, $20,
     $21,
-    COALESCE($22::boolean, false)
+    COALESCE($22::boolean, false),
+    -- Phase 31: an amendment is written as a draft for an owner to approve.
+    $23, $24, $25,
+    $26, $27
 )
-RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language, policy, supersedes_contract_id, amendment_effective_date, amendment_reason, superseded_by_contract_id, settlement, notice_given_at, notice_leave_on, notice_reason, moved_out_confirmed_at, is_offline, payment_period_months
+RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language, policy, supersedes_contract_id, amendment_effective_date, amendment_reason, superseded_by_contract_id, settlement, notice_given_at, notice_leave_on, notice_reason, moved_out_confirmed_at, is_offline, payment_period_months, amendment_stage, amendment_note_sw, amendment_note_en, amendment_body_html, amendment_drafted_by, amendment_submitted_by, amendment_submitted_at, amendment_reviewed_by, amendment_reviewed_at, amendment_review_note, amendment_declined_at, amendment_decline_reason
 `
 
 type CreateContractParams struct {
@@ -158,6 +174,11 @@ type CreateContractParams struct {
 	AmendmentEffectiveDate pgtype.Date `json:"amendment_effective_date"`
 	AmendmentReason        *string     `json:"amendment_reason"`
 	IsOffline              *bool       `json:"is_offline"`
+	AmendmentStage         *string     `json:"amendment_stage"`
+	AmendmentNoteSw        *string     `json:"amendment_note_sw"`
+	AmendmentNoteEn        *string     `json:"amendment_note_en"`
+	AmendmentBodyHtml      *string     `json:"amendment_body_html"`
+	AmendmentDraftedBy     pgtype.UUID `json:"amendment_drafted_by"`
 }
 
 // A contract is the agreement between an org and a renter over one unit. Like
@@ -191,6 +212,11 @@ func (q *Queries) CreateContract(ctx context.Context, arg CreateContractParams) 
 		arg.AmendmentEffectiveDate,
 		arg.AmendmentReason,
 		arg.IsOffline,
+		arg.AmendmentStage,
+		arg.AmendmentNoteSw,
+		arg.AmendmentNoteEn,
+		arg.AmendmentBodyHtml,
+		arg.AmendmentDraftedBy,
 	)
 	var i Contract
 	err := row.Scan(
@@ -231,12 +257,24 @@ func (q *Queries) CreateContract(ctx context.Context, arg CreateContractParams) 
 		&i.MovedOutConfirmedAt,
 		&i.IsOffline,
 		&i.PaymentPeriodMonths,
+		&i.AmendmentStage,
+		&i.AmendmentNoteSw,
+		&i.AmendmentNoteEn,
+		&i.AmendmentBodyHtml,
+		&i.AmendmentDraftedBy,
+		&i.AmendmentSubmittedBy,
+		&i.AmendmentSubmittedAt,
+		&i.AmendmentReviewedBy,
+		&i.AmendmentReviewedAt,
+		&i.AmendmentReviewNote,
+		&i.AmendmentDeclinedAt,
+		&i.AmendmentDeclineReason,
 	)
 	return i, err
 }
 
 const getContract = `-- name: GetContract :one
-SELECT c.id, c.org_id, c.unit_id, c.renter_user_id, c.template_id, c.terms_snapshot_html, c.rent_amount, c.rent_period_days, c.payment_period_id, c.payment_period_days, c.term_days, c.start_date, c.end_date, c.due_day, c.status, c.snapshot_hash, c.created_at, c.updated_at, c.deleted_at, c.activated_at, c.terminated_at, c.termination_reason, c.termination_effective_date, c.link_request_id, c.language, c.policy, c.supersedes_contract_id, c.amendment_effective_date, c.amendment_reason, c.superseded_by_contract_id, c.settlement, c.notice_given_at, c.notice_leave_on, c.notice_reason, c.moved_out_confirmed_at, c.is_offline, c.payment_period_months,
+SELECT c.id, c.org_id, c.unit_id, c.renter_user_id, c.template_id, c.terms_snapshot_html, c.rent_amount, c.rent_period_days, c.payment_period_id, c.payment_period_days, c.term_days, c.start_date, c.end_date, c.due_day, c.status, c.snapshot_hash, c.created_at, c.updated_at, c.deleted_at, c.activated_at, c.terminated_at, c.termination_reason, c.termination_effective_date, c.link_request_id, c.language, c.policy, c.supersedes_contract_id, c.amendment_effective_date, c.amendment_reason, c.superseded_by_contract_id, c.settlement, c.notice_given_at, c.notice_leave_on, c.notice_reason, c.moved_out_confirmed_at, c.is_offline, c.payment_period_months, c.amendment_stage, c.amendment_note_sw, c.amendment_note_en, c.amendment_body_html, c.amendment_drafted_by, c.amendment_submitted_by, c.amendment_submitted_at, c.amendment_reviewed_by, c.amendment_reviewed_at, c.amendment_review_note, c.amendment_declined_at, c.amendment_decline_reason,
        u.name AS unit_name, u.unit_code, u.status AS unit_status,
        p.name AS property_name, p.location_text AS property_location_text,
        o.name AS org_name, o.slug AS org_slug,
@@ -247,12 +285,16 @@ SELECT c.id, c.org_id, c.unit_id, c.renter_user_id, c.template_id, c.terms_snaps
        COALESCE(sm.paid_count, 0)::bigint    AS schedule_paid_count,
        COALESCE(sm.overdue_count, 0)::bigint AS schedule_overdue_count,
        nd.due_date AS next_due_date,
-       COALESCE(nd.amount, 0)::bigint AS next_due_amount
+       COALESCE(nd.amount, 0)::bigint AS next_due_amount,
+       ad.full_name AS amendment_drafted_by_name,
+       ar.full_name AS amendment_reviewed_by_name
 FROM contracts c
 JOIN units u      ON u.id = c.unit_id AND u.org_id = c.org_id
 JOIN properties p ON p.id = u.property_id AND p.org_id = c.org_id
 JOIN orgs o       ON o.id = c.org_id
 JOIN users ru     ON ru.id = c.renter_user_id
+LEFT JOIN users ad ON ad.id = c.amendment_drafted_by
+LEFT JOIN users ar ON ar.id = c.amendment_reviewed_by
 LEFT JOIN payment_periods pp ON pp.id = c.payment_period_id AND pp.org_id = c.org_id
 LEFT JOIN LATERAL (
     SELECT count(*) AS cnt, sum(s.amount) AS total,
@@ -270,6 +312,9 @@ LEFT JOIN LATERAL (
 WHERE c.id = $1 AND c.deleted_at IS NULL
   AND c.org_id = COALESCE($2::uuid, c.org_id)
   AND c.renter_user_id = COALESCE($3::uuid, c.renter_user_id)
+  -- Phase 31: the renter never sees an amendment an owner has not approved.
+  AND ($2::uuid IS NOT NULL OR c.amendment_stage IS NULL
+       OR c.amendment_stage IN ('approved', 'declined'))
 `
 
 type GetContractParams struct {
@@ -316,6 +361,18 @@ type GetContractRow struct {
 	MovedOutConfirmedAt      pgtype.Timestamptz `json:"moved_out_confirmed_at"`
 	IsOffline                bool               `json:"is_offline"`
 	PaymentPeriodMonths      *int32             `json:"payment_period_months"`
+	AmendmentStage           *string            `json:"amendment_stage"`
+	AmendmentNoteSw          *string            `json:"amendment_note_sw"`
+	AmendmentNoteEn          *string            `json:"amendment_note_en"`
+	AmendmentBodyHtml        *string            `json:"amendment_body_html"`
+	AmendmentDraftedBy       pgtype.UUID        `json:"amendment_drafted_by"`
+	AmendmentSubmittedBy     pgtype.UUID        `json:"amendment_submitted_by"`
+	AmendmentSubmittedAt     pgtype.Timestamptz `json:"amendment_submitted_at"`
+	AmendmentReviewedBy      pgtype.UUID        `json:"amendment_reviewed_by"`
+	AmendmentReviewedAt      pgtype.Timestamptz `json:"amendment_reviewed_at"`
+	AmendmentReviewNote      *string            `json:"amendment_review_note"`
+	AmendmentDeclinedAt      pgtype.Timestamptz `json:"amendment_declined_at"`
+	AmendmentDeclineReason   *string            `json:"amendment_decline_reason"`
 	UnitName                 string             `json:"unit_name"`
 	UnitCode                 string             `json:"unit_code"`
 	UnitStatus               string             `json:"unit_status"`
@@ -333,6 +390,8 @@ type GetContractRow struct {
 	ScheduleOverdueCount     int64              `json:"schedule_overdue_count"`
 	NextDueDate              pgtype.Date        `json:"next_due_date"`
 	NextDueAmount            int64              `json:"next_due_amount"`
+	AmendmentDraftedByName   *string            `json:"amendment_drafted_by_name"`
+	AmendmentReviewedByName  *string            `json:"amendment_reviewed_by_name"`
 }
 
 // guard-exempt: dual-scoped — org_id for the landlord, renter_user_id for the renter's own contract; the handler always supplies one.
@@ -377,6 +436,18 @@ func (q *Queries) GetContract(ctx context.Context, arg GetContractParams) (GetCo
 		&i.MovedOutConfirmedAt,
 		&i.IsOffline,
 		&i.PaymentPeriodMonths,
+		&i.AmendmentStage,
+		&i.AmendmentNoteSw,
+		&i.AmendmentNoteEn,
+		&i.AmendmentBodyHtml,
+		&i.AmendmentDraftedBy,
+		&i.AmendmentSubmittedBy,
+		&i.AmendmentSubmittedAt,
+		&i.AmendmentReviewedBy,
+		&i.AmendmentReviewedAt,
+		&i.AmendmentReviewNote,
+		&i.AmendmentDeclinedAt,
+		&i.AmendmentDeclineReason,
 		&i.UnitName,
 		&i.UnitCode,
 		&i.UnitStatus,
@@ -394,6 +465,8 @@ func (q *Queries) GetContract(ctx context.Context, arg GetContractParams) (GetCo
 		&i.ScheduleOverdueCount,
 		&i.NextDueDate,
 		&i.NextDueAmount,
+		&i.AmendmentDraftedByName,
+		&i.AmendmentReviewedByName,
 	)
 	return i, err
 }
@@ -420,7 +493,7 @@ func (q *Queries) GetContractForLinkRequest(ctx context.Context, arg GetContract
 }
 
 const listContracts = `-- name: ListContracts :many
-SELECT c.id, c.org_id, c.unit_id, c.renter_user_id, c.template_id, c.terms_snapshot_html, c.rent_amount, c.rent_period_days, c.payment_period_id, c.payment_period_days, c.term_days, c.start_date, c.end_date, c.due_day, c.status, c.snapshot_hash, c.created_at, c.updated_at, c.deleted_at, c.activated_at, c.terminated_at, c.termination_reason, c.termination_effective_date, c.link_request_id, c.language, c.policy, c.supersedes_contract_id, c.amendment_effective_date, c.amendment_reason, c.superseded_by_contract_id, c.settlement, c.notice_given_at, c.notice_leave_on, c.notice_reason, c.moved_out_confirmed_at, c.is_offline, c.payment_period_months,
+SELECT c.id, c.org_id, c.unit_id, c.renter_user_id, c.template_id, c.terms_snapshot_html, c.rent_amount, c.rent_period_days, c.payment_period_id, c.payment_period_days, c.term_days, c.start_date, c.end_date, c.due_day, c.status, c.snapshot_hash, c.created_at, c.updated_at, c.deleted_at, c.activated_at, c.terminated_at, c.termination_reason, c.termination_effective_date, c.link_request_id, c.language, c.policy, c.supersedes_contract_id, c.amendment_effective_date, c.amendment_reason, c.superseded_by_contract_id, c.settlement, c.notice_given_at, c.notice_leave_on, c.notice_reason, c.moved_out_confirmed_at, c.is_offline, c.payment_period_months, c.amendment_stage, c.amendment_note_sw, c.amendment_note_en, c.amendment_body_html, c.amendment_drafted_by, c.amendment_submitted_by, c.amendment_submitted_at, c.amendment_reviewed_by, c.amendment_reviewed_at, c.amendment_review_note, c.amendment_declined_at, c.amendment_decline_reason,
        u.name AS unit_name, u.unit_code, u.status AS unit_status,
        p.name AS property_name, p.location_text AS property_location_text,
        o.name AS org_name, o.slug AS org_slug,
@@ -431,12 +504,16 @@ SELECT c.id, c.org_id, c.unit_id, c.renter_user_id, c.template_id, c.terms_snaps
        COALESCE(sm.paid_count, 0)::bigint    AS schedule_paid_count,
        COALESCE(sm.overdue_count, 0)::bigint AS schedule_overdue_count,
        nd.due_date AS next_due_date,
-       COALESCE(nd.amount, 0)::bigint AS next_due_amount
+       COALESCE(nd.amount, 0)::bigint AS next_due_amount,
+       ad.full_name AS amendment_drafted_by_name,
+       ar.full_name AS amendment_reviewed_by_name
 FROM contracts c
 JOIN units u      ON u.id = c.unit_id AND u.org_id = c.org_id
 JOIN properties p ON p.id = u.property_id AND p.org_id = c.org_id
 JOIN orgs o       ON o.id = c.org_id
 JOIN users ru     ON ru.id = c.renter_user_id
+LEFT JOIN users ad ON ad.id = c.amendment_drafted_by
+LEFT JOIN users ar ON ar.id = c.amendment_reviewed_by
 LEFT JOIN payment_periods pp ON pp.id = c.payment_period_id AND pp.org_id = c.org_id
 LEFT JOIN LATERAL (
     SELECT count(*) AS cnt, sum(s.amount) AS total,
@@ -456,20 +533,25 @@ WHERE c.deleted_at IS NULL
   AND ($2::uuid IS NULL OR c.renter_user_id = $2::uuid)
   AND ($3::uuid IS NULL OR c.unit_id = $3::uuid)
   AND ($4::text IS NULL OR c.status = $4::text)
-  AND ($5::timestamptz IS NULL
-       OR (c.created_at, c.id) < ($5::timestamptz, $6::uuid))
+  AND ($5::text IS NULL OR c.amendment_stage = $5::text)
+  -- Phase 31: the renter's own list never shows an unapproved amendment.
+  AND ($1::uuid IS NOT NULL OR c.amendment_stage IS NULL
+       OR c.amendment_stage IN ('approved', 'declined'))
+  AND ($6::timestamptz IS NULL
+       OR (c.created_at, c.id) < ($6::timestamptz, $7::uuid))
 ORDER BY c.created_at DESC, c.id DESC
-LIMIT $7
+LIMIT $8
 `
 
 type ListContractsParams struct {
-	OrgID        pgtype.UUID        `json:"org_id"`
-	RenterUserID pgtype.UUID        `json:"renter_user_id"`
-	UnitID       pgtype.UUID        `json:"unit_id"`
-	Status       *string            `json:"status"`
-	CursorAt     pgtype.Timestamptz `json:"cursor_at"`
-	CursorID     pgtype.UUID        `json:"cursor_id"`
-	RowLimit     int32              `json:"row_limit"`
+	OrgID          pgtype.UUID        `json:"org_id"`
+	RenterUserID   pgtype.UUID        `json:"renter_user_id"`
+	UnitID         pgtype.UUID        `json:"unit_id"`
+	Status         *string            `json:"status"`
+	AmendmentStage *string            `json:"amendment_stage"`
+	CursorAt       pgtype.Timestamptz `json:"cursor_at"`
+	CursorID       pgtype.UUID        `json:"cursor_id"`
+	RowLimit       int32              `json:"row_limit"`
 }
 
 type ListContractsRow struct {
@@ -510,6 +592,18 @@ type ListContractsRow struct {
 	MovedOutConfirmedAt      pgtype.Timestamptz `json:"moved_out_confirmed_at"`
 	IsOffline                bool               `json:"is_offline"`
 	PaymentPeriodMonths      *int32             `json:"payment_period_months"`
+	AmendmentStage           *string            `json:"amendment_stage"`
+	AmendmentNoteSw          *string            `json:"amendment_note_sw"`
+	AmendmentNoteEn          *string            `json:"amendment_note_en"`
+	AmendmentBodyHtml        *string            `json:"amendment_body_html"`
+	AmendmentDraftedBy       pgtype.UUID        `json:"amendment_drafted_by"`
+	AmendmentSubmittedBy     pgtype.UUID        `json:"amendment_submitted_by"`
+	AmendmentSubmittedAt     pgtype.Timestamptz `json:"amendment_submitted_at"`
+	AmendmentReviewedBy      pgtype.UUID        `json:"amendment_reviewed_by"`
+	AmendmentReviewedAt      pgtype.Timestamptz `json:"amendment_reviewed_at"`
+	AmendmentReviewNote      *string            `json:"amendment_review_note"`
+	AmendmentDeclinedAt      pgtype.Timestamptz `json:"amendment_declined_at"`
+	AmendmentDeclineReason   *string            `json:"amendment_decline_reason"`
 	UnitName                 string             `json:"unit_name"`
 	UnitCode                 string             `json:"unit_code"`
 	UnitStatus               string             `json:"unit_status"`
@@ -527,6 +621,8 @@ type ListContractsRow struct {
 	ScheduleOverdueCount     int64              `json:"schedule_overdue_count"`
 	NextDueDate              pgtype.Date        `json:"next_due_date"`
 	NextDueAmount            int64              `json:"next_due_amount"`
+	AmendmentDraftedByName   *string            `json:"amendment_drafted_by_name"`
+	AmendmentReviewedByName  *string            `json:"amendment_reviewed_by_name"`
 }
 
 // guard-exempt: dual-scoped — org_id for the landlord's list, renter_user_id for GET /me/contracts; the handler always supplies one.
@@ -536,6 +632,7 @@ func (q *Queries) ListContracts(ctx context.Context, arg ListContractsParams) ([
 		arg.RenterUserID,
 		arg.UnitID,
 		arg.Status,
+		arg.AmendmentStage,
 		arg.CursorAt,
 		arg.CursorID,
 		arg.RowLimit,
@@ -585,6 +682,18 @@ func (q *Queries) ListContracts(ctx context.Context, arg ListContractsParams) ([
 			&i.MovedOutConfirmedAt,
 			&i.IsOffline,
 			&i.PaymentPeriodMonths,
+			&i.AmendmentStage,
+			&i.AmendmentNoteSw,
+			&i.AmendmentNoteEn,
+			&i.AmendmentBodyHtml,
+			&i.AmendmentDraftedBy,
+			&i.AmendmentSubmittedBy,
+			&i.AmendmentSubmittedAt,
+			&i.AmendmentReviewedBy,
+			&i.AmendmentReviewedAt,
+			&i.AmendmentReviewNote,
+			&i.AmendmentDeclinedAt,
+			&i.AmendmentDeclineReason,
 			&i.UnitName,
 			&i.UnitCode,
 			&i.UnitStatus,
@@ -602,6 +711,8 @@ func (q *Queries) ListContracts(ctx context.Context, arg ListContractsParams) ([
 			&i.ScheduleOverdueCount,
 			&i.NextDueDate,
 			&i.NextDueAmount,
+			&i.AmendmentDraftedByName,
+			&i.AmendmentReviewedByName,
 		); err != nil {
 			return nil, err
 		}
@@ -647,7 +758,7 @@ SET status = 'terminated', terminated_at = now(),
     termination_effective_date = $2
 WHERE org_id = $3 AND id = $4
   AND status IN ('pending_signature', 'active', 'expiring') AND deleted_at IS NULL
-RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language, policy, supersedes_contract_id, amendment_effective_date, amendment_reason, superseded_by_contract_id, settlement, notice_given_at, notice_leave_on, notice_reason, moved_out_confirmed_at, is_offline, payment_period_months
+RETURNING id, org_id, unit_id, renter_user_id, template_id, terms_snapshot_html, rent_amount, rent_period_days, payment_period_id, payment_period_days, term_days, start_date, end_date, due_day, status, snapshot_hash, created_at, updated_at, deleted_at, activated_at, terminated_at, termination_reason, termination_effective_date, link_request_id, language, policy, supersedes_contract_id, amendment_effective_date, amendment_reason, superseded_by_contract_id, settlement, notice_given_at, notice_leave_on, notice_reason, moved_out_confirmed_at, is_offline, payment_period_months, amendment_stage, amendment_note_sw, amendment_note_en, amendment_body_html, amendment_drafted_by, amendment_submitted_by, amendment_submitted_at, amendment_reviewed_by, amendment_reviewed_at, amendment_review_note, amendment_declined_at, amendment_decline_reason
 `
 
 type TerminateContractParams struct {
@@ -703,6 +814,18 @@ func (q *Queries) TerminateContract(ctx context.Context, arg TerminateContractPa
 		&i.MovedOutConfirmedAt,
 		&i.IsOffline,
 		&i.PaymentPeriodMonths,
+		&i.AmendmentStage,
+		&i.AmendmentNoteSw,
+		&i.AmendmentNoteEn,
+		&i.AmendmentBodyHtml,
+		&i.AmendmentDraftedBy,
+		&i.AmendmentSubmittedBy,
+		&i.AmendmentSubmittedAt,
+		&i.AmendmentReviewedBy,
+		&i.AmendmentReviewedAt,
+		&i.AmendmentReviewNote,
+		&i.AmendmentDeclinedAt,
+		&i.AmendmentDeclineReason,
 	)
 	return i, err
 }

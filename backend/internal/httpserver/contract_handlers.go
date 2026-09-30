@@ -119,6 +119,25 @@ type contractInput struct {
 	AmendsClosed   bool
 	RentAmount     int64
 	RentPeriodDays int32
+	// Phase 31: an amendment is written as a draft for an owner to approve.
+	// BodyHTML is this contract's own wording (template form, variables
+	// kept), empty to render the template; the notes are the two-language
+	// message the renter reads with it.
+	BodyHTML       string
+	NoteSW, NoteEN string
+}
+
+// builtContract is one contract rendered from its input and not yet written:
+// the insert parameters plus what the audit row and the SMS need.
+type builtContract struct {
+	Params          sqlc.CreateContractParams
+	Policy          *contract.Policy
+	PolicyCanonical string
+	Renter          sqlc.User
+	Unit            sqlc.GetUnitRow
+	DisplayName     string
+	Settings        OrgSettings
+	TemplateSource  string
 }
 
 // createContractTx writes one contract and its audit row through the supplied
@@ -132,68 +151,82 @@ func (s *Server) createContractTx(
 	ctx context.Context, q *sqlc.Queries, in contractInput,
 ) (sqlc.Contract, string, error) {
 	var zero sqlc.Contract
+	b, err := s.buildContract(ctx, q, in)
+	if err != nil {
+		return zero, "", err
+	}
+	return s.insertContractTx(ctx, q, in, b)
+}
+
+// buildContract resolves and renders everything a contract's document says
+// (SPEC §5.5) without writing it. Creation inserts the result; a Phase 31
+// amendment draft is re-rendered through it on every edit and at approval.
+func (s *Server) buildContract(
+	ctx context.Context, q *sqlc.Queries, in contractInput,
+) (builtContract, error) {
+	var zero builtContract
 
 	unit, err := q.GetUnit(ctx, sqlc.GetUnitParams{OrgID: in.OrgID, ID: in.UnitID})
 	if isNoRows(err) {
-		return zero, "", errUnitNotFound
+		return zero, errUnitNotFound
 	}
 	if err != nil {
-		return zero, "", err
+		return zero, err
 	}
 	amendment := in.Amends.Valid
 	switch {
 	case amendment:
 	case unit.Status == statusOccupied:
-		return zero, "", errUnitOccupied
+		return zero, errUnitOccupied
 	case unit.Status == statusUnlisted, unit.Status == statusMaintenance:
-		return zero, "", errUnitUnavailable
+		return zero, errUnitUnavailable
 	}
 	if in.RentAmount > 0 {
 		unit.PriceAmount, unit.PricePeriodDays = in.RentAmount, in.RentPeriodDays
 		unit.PriceID = pgtype.UUID{Valid: true}
 	}
 	if !unit.PriceID.Valid || unit.PricePeriodDays <= 0 {
-		return zero, "", errUnitNotPriced
+		return zero, errUnitNotPriced
 	}
 
 	live, err := q.CountLiveContractsForUnit(ctx, sqlc.CountLiveContractsForUnitParams{
 		OrgID: in.OrgID, UnitID: in.UnitID,
 	})
 	if err != nil {
-		return zero, "", err
+		return zero, err
 	}
 	if live > 0 && (!amendment || in.AmendsClosed) {
-		return zero, "", errContractExists
+		return zero, errContractExists
 	}
 
 	known, err := q.RenterKnownToOrg(ctx, sqlc.RenterKnownToOrgParams{
 		OrgID: in.OrgID, RenterUserID: in.RenterUserID,
 	})
 	if err != nil && !isNoRows(err) {
-		return zero, "", err
+		return zero, err
 	}
 	if isNoRows(err) || !known {
-		return zero, "", errRenterUnknown
+		return zero, errRenterUnknown
 	}
 	renter, err := q.GetUserByID(ctx, in.RenterUserID)
 	if isNoRows(err) {
-		return zero, "", errRenterUnknown
+		return zero, errRenterUnknown
 	}
 	if err != nil {
-		return zero, "", err
+		return zero, err
 	}
 
 	period, err := q.GetPaymentPeriod(ctx, sqlc.GetPaymentPeriodParams{
 		OrgID: in.OrgID, ID: in.PaymentPeriodID,
 	})
 	if isNoRows(err) || (err == nil && !period.Active) {
-		return zero, "", errPeriodNotOffered
+		return zero, errPeriodNotOffered
 	}
 	if err != nil {
-		return zero, "", err
+		return zero, err
 	}
 	if allowed := allowedSet(unit.AllowedPeriodIds); allowed != nil && !allowed[db.UUIDString(period.ID)] {
-		return zero, "", errPeriodNotOffered
+		return zero, errPeriodNotOffered
 	}
 
 	// Phase 22: a template named by the caller wins; otherwise the unit's,
@@ -211,15 +244,15 @@ func (s *Server) createContractTx(
 		}
 	}
 	if isNoRows(err) {
-		return zero, "", errTemplateNotFound
+		return zero, errTemplateNotFound
 	}
 	if err != nil {
-		return zero, "", err
+		return zero, err
 	}
 
 	org, err := q.GetOrg(ctx, in.OrgID)
 	if err != nil {
-		return zero, "", err
+		return zero, err
 	}
 	settings := parseSettings(org.Settings)
 	dueDay := in.DueDay
@@ -253,12 +286,20 @@ func (s *Server) createContractTx(
 		wanted = renter.Locale
 	}
 	body, lang := contract.BodyFor(wanted, tpl.BodyHtml, tpl.BodyHtmlSw)
+	// Phase 31: an amendment may carry its own wording, written in the
+	// document's language.
+	if in.BodyHTML != "" {
+		body = in.BodyHTML
+		if wanted == notify.LangSwahili || wanted == notify.LangEnglish {
+			lang = wanted
+		}
+	}
 	// Phase 22 §22.2: the template's policy, resolved onto this tenancy (a
 	// deposit in months becomes an amount), is copied onto the contract and
 	// covered by its hash.
 	tplPolicy, err := contract.ParsePolicy(tpl.Policy)
 	if err != nil {
-		return zero, "", err
+		return zero, err
 	}
 	var policy *contract.Policy
 	policyCanonical := ""
@@ -322,7 +363,37 @@ func (s *Server) createContractTx(
 		createParams.SupersedesContractID = in.Amends
 		createParams.AmendmentEffectiveDate = pgtype.Date{Time: in.AmendsEffective, Valid: true}
 		createParams.AmendmentReason = &in.AmendReason
+		// Phase 31: every amendment starts as a draft only the org can see.
+		stage := amendStageDraft
+		createParams.Status = contractDraft
+		createParams.AmendmentStage = &stage
+		createParams.AmendmentNoteSw = db.Str(in.NoteSW)
+		createParams.AmendmentNoteEn = db.Str(in.NoteEN)
+		createParams.AmendmentBodyHtml = db.Str(in.BodyHTML)
+		if actor, err := db.ParseUUID(in.ActorUserID); err == nil {
+			createParams.AmendmentDraftedBy = actor
+		}
 	}
+	return builtContract{
+		Params: createParams, Policy: policy, PolicyCanonical: policyCanonical,
+		Renter: renter, Unit: unit, DisplayName: displayName, Settings: settings,
+		TemplateSource: templateSource,
+	}, nil
+}
+
+// insertContractTx writes a built contract with its policy and audit row, and
+// queues `contract_ready` — except for an amendment draft, which reaches the
+// renter only when an owner approves it (Phase 31).
+func (s *Server) insertContractTx(
+	ctx context.Context, q *sqlc.Queries, in contractInput, b builtContract,
+) (sqlc.Contract, string, error) {
+	var zero sqlc.Contract
+	amendment := in.Amends.Valid
+	createParams, policy, policyCanonical := b.Params, b.Policy, b.PolicyCanonical
+	renter, unit, settings, displayName := b.Renter, b.Unit, b.Settings, b.DisplayName
+	templateSource, hash, lang := b.TemplateSource, db.StrVal(b.Params.SnapshotHash), db.StrVal(b.Params.Language)
+	tplID, period := createParams.TemplateID, createParams.PaymentPeriodDays
+	start, end, dueDay := createParams.StartDate.Time, createParams.EndDate.Time, createParams.DueDay
 	created, err := q.CreateContract(ctx, createParams)
 	if err != nil {
 		// The partial unique index on (unit_id) over the live statuses is the
@@ -352,16 +423,19 @@ func (s *Server) createContractTx(
 		EntityID:    db.UUIDString(created.ID),
 		After: map[string]any{
 			"unit_id": db.UUIDString(unit.ID), "renter_user_id": db.UUIDString(renter.ID),
-			"template_id": db.UUIDString(tpl.ID), "template_source": templateSource,
+			"template_id": db.UUIDString(tplID), "template_source": templateSource,
 			"rent_amount":      unit.PriceAmount,
-			"rent_period_days": unit.PricePeriodDays, "payment_period_days": period.Days,
+			"rent_period_days": unit.PricePeriodDays, "payment_period_days": period,
 			"term_days": in.TermDays, "start_date": start.Format(dateLayout),
 			"end_date": end.Format(dateLayout), "due_day": dueDayString(dueDay),
-			"status": contractPendingSignature, "snapshot_hash": hash, "policy": policy,
+			"status": created.Status, "snapshot_hash": hash, "policy": policy,
 			"language": lang,
 		},
 	}); err != nil {
 		return zero, "", err
+	}
+	if amendment {
+		return created, "", nil
 	}
 
 	notifyID, err := s.queueContractSMS(ctx, q, contractMessage{
@@ -486,6 +560,9 @@ func (s *Server) reloadContract(
 	out := toContract(row, toSignatures(sigs))
 	if !s.markTemplateChanged(w, r, row, &out) {
 		return contractResponse{}, false
+	}
+	if renterID.Valid {
+		out.forRenter()
 	}
 	return out, true
 }
@@ -616,6 +693,12 @@ func (s *Server) listContracts(w http.ResponseWriter, r *http.Request, renterSco
 	if v := strings.TrimSpace(qs.Get("unit_id")); v != "" {
 		params.UnitID = uuidField(f, "unit_id", v, true)
 	}
+	// Phase 31: the approval queue (`amendment_stage=submitted`).
+	if v := strings.TrimSpace(qs.Get("amendment_stage")); v != "" && !renterScope {
+		stage := f.OneOf("amendment_stage", v, amendStageDraft, amendStageSubmitted,
+			amendStageApproved, amendStageRejected, amendStageDeclined, amendStageWithdrawn)
+		params.AmendmentStage = &stage
+	}
 	if !f.Empty() {
 		badRequest(w, f)
 		return
@@ -642,7 +725,11 @@ func (s *Server) listContracts(w http.ResponseWriter, r *http.Request, renterSco
 	items := make([]contractResponse, 0, len(rows))
 	for _, row := range rows {
 		c := contractRowOfList(row)
-		items = append(items, toContract(c, byContract[db.UUIDString(c.ID)]))
+		item := toContract(c, byContract[db.UUIDString(c.ID)])
+		if renterScope {
+			item.forRenter()
+		}
+		items = append(items, item)
 	}
 	var cursor *string
 	if len(rows) > 0 {
@@ -670,6 +757,9 @@ func (s *Server) handleGetContract(w http.ResponseWriter, r *http.Request) {
 	out := toContract(row, toSignatures(sigs))
 	if !s.markTemplateChanged(w, r, row, &out) {
 		return
+	}
+	if auth.MustFromContext(r.Context()).Kind == auth.KindRenter {
+		out.forRenter()
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"contract": out})
 }
@@ -1643,6 +1733,10 @@ type contractMessage struct {
 	Phone     string
 	Vars      notify.Vars
 	Overrides notify.Overrides
+	// ReasonByLang, when set, fills `{{reason}}` with the text in the
+	// language the message goes out in (Phase 31: the owner's two-language
+	// note).
+	ReasonByLang map[string]string
 }
 
 // queueContractSMS writes the notification row inside the caller's transaction
@@ -1654,6 +1748,9 @@ func (s *Server) queueContractSMS(ctx context.Context, q *sqlc.Queries, m contra
 		return "", nil
 	}
 	lang := s.recipientLang(ctx, q, m.UserID, m.Lang)
+	if v, ok := m.ReasonByLang[lang]; ok {
+		m.Vars.Reason = v
+	}
 	id, err := notify.Queue(ctx, q, notify.Msg{
 		OrgID: m.OrgID, UserID: m.UserID, Kind: m.Kind,
 		DedupeKey: m.Kind + ":" + m.ContractID, Phone: m.Phone,
