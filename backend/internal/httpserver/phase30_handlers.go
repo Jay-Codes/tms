@@ -113,6 +113,14 @@ type offlinePlanInput struct {
 	// PeriodAmount is the rent per payment period, 0 to take the renter's own
 	// running contract's.
 	PeriodAmount int64
+	// Amount, when set, is the total paid for the whole stretch (Phase 32):
+	// the offline contract is one period for exactly this sum.
+	Amount int64
+	// LaterStarts are the `from` dates of other lines of the same sheet for
+	// this unit, which the preview has to floor against before any of them
+	// is written (Phase 32). The commit writes later lines first, so the
+	// database answers instead.
+	LaterStarts []time.Time
 }
 
 // offlinePlan is a validated offline contract, not yet written.
@@ -134,9 +142,6 @@ type offlinePlan struct {
 func (s *Server) planOffline(ctx context.Context, q *sqlc.Queries, in offlinePlanInput) (*offlinePlan, error) {
 	f := validate.Fields{}
 	today := todayEAT()
-	if in.Until.After(today) {
-		f.Add("until", "must not be in the future")
-	}
 	if in.Until.Before(in.From) {
 		f.Add("until", "must not be before from ("+in.From.Format(dateLayout)+")")
 	}
@@ -153,8 +158,40 @@ func (s *Server) planOffline(ctx context.Context, q *sqlc.Queries, in offlinePla
 			end = last
 		}
 	}
+	// Phase 32 — the floor: any contract of the unit that starts inside the
+	// stretch (a finished TMS contract, another offline one, or another line
+	// of this sheet) keeps its start date, and the stretch ends the day before.
+	if f.Empty() {
+		next, err := q.FindNextContractStart(ctx, sqlc.FindNextContractStartParams{
+			OrgID: in.OrgID, UnitID: in.UnitID,
+			FromDate: pgtype.Date{Time: in.From, Valid: true},
+			LastDay:  pgtype.Date{Time: end, Valid: true},
+		})
+		if err != nil && !isNoRows(err) {
+			return nil, err
+		}
+		if next.Valid {
+			end = next.Time.AddDate(0, 0, -1)
+		}
+		for _, later := range in.LaterStarts {
+			if later.After(in.From) && !later.After(end) {
+				end = later.AddDate(0, 0, -1)
+			}
+		}
+	}
+	// Only after the floor: a stretch that would run past today is fine when
+	// a contract already in TMS cuts it off first.
+	if end.After(today) {
+		f.Add("until", "must not be in the future (nothing in TMS starts before it to end the stretch)")
+	}
+	if in.Amount > 0 && in.PeriodAmount > 0 {
+		f.Add("amount", "give amount or period_amount, not both")
+	}
 	// The renter's own running contract gives the default rent.
 	amount := in.PeriodAmount
+	if in.Amount > 0 {
+		amount = in.Amount
+	}
 	if amount <= 0 {
 		if run := in.UnitRunning; run != nil && run.RenterUserID == in.RenterUserID {
 			amount = backfillDefaultPeriodAmount(*run)
@@ -198,9 +235,21 @@ func (s *Server) planOffline(ctx context.Context, q *sqlc.Queries, in offlinePla
 		}
 	}
 	plan.TermDays = int(end.Sub(in.From).Hours()/24) + 1
-	// amount is one period's rent, so the cadence is its own basis.
-	plan.Rows = contract.GenerateCadence(int(amount), plan.CadenceDays, plan.TermDays,
-		cadenceOf(int32(plan.CadenceDays), plan.CadenceMonths), in.From, intPtr(plan.DueDay))
+	if in.Amount > 0 {
+		// Phase 32: one line is one paper payment — one period spanning the
+		// whole stretch, for the whole sum, due on its first day. The cadence
+		// is the stretch itself, so nothing about it repeats.
+		plan.CadenceDays, plan.CadenceMonths, plan.DueDay = plan.TermDays, nil, nil
+		plan.PaymentPeriodID = pgtype.UUID{}
+		plan.Rows = []contract.Row{{
+			PeriodStart: in.From, PeriodEnd: end, DueDate: in.From,
+			Days: plan.TermDays, Amount: in.Amount,
+		}}
+	} else {
+		// amount is one period's rent, so the cadence is its own basis.
+		plan.Rows = contract.GenerateCadence(int(amount), plan.CadenceDays, plan.TermDays,
+			cadenceOf(int32(plan.CadenceDays), plan.CadenceMonths), in.From, intPtr(plan.DueDay))
+	}
 
 	// A clash with anything else on the unit: 409, naming it.
 	clash, err := q.FindOverlappingContract(ctx, sqlc.FindOverlappingContractParams{

@@ -48,3 +48,16 @@ VALUES (
     sqlc.arg(due_date), sqlc.arg(amount), 'pending', sqlc.arg(created_by_backfill_id)
 )
 RETURNING *;
+
+-- FindNextContractStart is Phase 32's floor: the first contract of the unit,
+-- offline or not, that starts after `from` and on or before the stretch's
+-- last day. The offline stretch then ends the day before it — the contract
+-- already in TMS wins its own start date.
+-- name: FindNextContractStart :one
+SELECT min(c.start_date)::date AS start_date
+FROM contracts c
+WHERE c.org_id = sqlc.arg(org_id) AND c.unit_id = sqlc.arg(unit_id)
+  AND c.deleted_at IS NULL
+  AND c.status IN ('active', 'expiring', 'ended', 'terminated')
+  AND c.start_date > sqlc.arg(from_date)::date
+  AND c.start_date <= sqlc.arg(last_day)::date;

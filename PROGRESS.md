@@ -293,3 +293,8 @@ Backfill takes `from` (real move-in) + `period_amount` (rent then) + `dry_run`; 
 ## Phase 31 — Contract changes with owner approval (30 Sep 2026) — branch `phase-31-amendment-approval`
 
 Client request: landlords reword/redate contracts with a maker-checker flow, a mandatory SW+EN note, SMS to the renter in their language, and a renter decline. `POST /contracts/{id}/amend` now writes a draft (migration 000038); a manager submits, an owner approves (own drafts directly), returns or rejects; approval sends SMS `contract_amendment`; the renter signs or declines (`POST /me/contracts/{id}/decline`). Per-contract wording (`body_html`, template form). Tenant: draft editor with notes and wording editor, review panel (field table, paragraph diff, actions), "Awaiting approval" tab. Enduser: note in the renter's language, Decline sheet. Tests: `phase31_test.go`, 22.4 tests updated, isolation census. Full backend suite green except `TestRevenueTrendSlopeRises`, which is date-dependent and already fixed on main (`c257d1c`). Browser pass pending.
+
+## Phase 32 — One backfill line per paper payment, floored at TMS contracts (1 Oct 2026) — branch `phase-32-offline-lines`
+
+`amount` column/field: one offline contract = one period = one payment for the receipt total; several lines per renter (key unit+renter+from); floor at any contract of the unit or later sheet line, so `until` past a TMS contract's start (even in the future) is cut instead of refused; amount lines never settle the running contract. No migration (new query `FindNextContractStart`). `phase32_test.go` (3 tests); Phase 20/26/29/30 tests unchanged and green.
+

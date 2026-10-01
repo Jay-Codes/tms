@@ -450,6 +450,15 @@ Stage ↔ status: `draft`/`submitted` → status `draft` (never visible to the r
 - [x] Docs: API.md Phase 31, PROGRESS entry, DECISIONS.
 - [ ] Browser walk-through (manager draft → owner approve → renter decline/sign) on the preview stack.
 
+## Phase 32 — One backfill line per paper payment, floored at TMS contracts (½ day) — ✅ done 1 Oct 2026
+
+Why: field feedback (1 Oct): the landlord's paper records are receipts ("460,000 on 2 June for three months"), two or more per renter, and each should be its own offline contract for that renter. "Floor": when a paper stretch runs up to (or past) a contract already in TMS, the TMS contract keeps its start date and the paper one ends the day before.
+- [x] Backfill CSV column **`amount`** (and `amount` on `POST /contracts/{id}/backfill`): the total paid for the whole `from`–`until` stretch. Only with `from`, not with `period_amount`. The offline contract is then **one period** spanning the stretch for exactly that sum (cadence = the stretch, no due day, no payment period), and `paid` writes **one payment** of it on `paid_at` (default `from`). An `amount` line never settles the renter's running contract.
+- [x] Several offline lines per renter and unit in one sheet: the duplicate key for a line with `from` is unit + renter + `from`.
+- [x] **Floor:** any contract of the unit (running, ended, terminated or offline) that starts after `from` and on or before the stretch's last day cuts the stretch to end the day before it; so does a later line of the same sheet (the preview floors against the sheet's other `from` dates; the commit writes latest `from` first). `until` past today is accepted when a floor cuts the stretch back to today or earlier. Real overlaps (a contract that starts on or before `from` and is still covering it) stay 409 `offline_overlap` / a row error.
+- [x] Import page copy (SW/EN) explains `amount`.
+- [x] Tests (`phase32_test.go`): two receipts back to back → two contracts, each one paid period and one payment on its date; floor at a TMS contract with `until` in the future, running contract untouched; floor against an earlier-written offline contract; refusals (amount without from, with period_amount, future with nothing to floor, same from twice; endpoint 400).
+
 ## Browser walk-through and fixes (27 Sep 2026) — ✅
 
 - [x] Phases 25–28 walked through on the local stack (dev DB migrated to 32): assisted onboarding end to end; backfill → Backfills list → Undo restores the months; Backfill CSV template served; Projections with and without a purchase price (ROI/yield/payback checked by hand, break-even month marked on the chart); Buy credits shows the switched-off state; admin SMS sales page renders.

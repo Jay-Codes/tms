@@ -1558,6 +1558,14 @@ Migration 000036: `contracts.is_offline` (default false), `backfill_batches.crea
 
 Excluded from the live book (`is_offline`): vacancy (`vacant_since`, `days_vacant`), holdovers, the historical occupancy series, projection history and last-rent baselines, the payments-import contract match. Included: revenue, collections, payments lists, exports, the renter directory (`RenterKnownToOrg`).
 
+## Part 2 — Phase 32: one backfill line per paper payment
+
+| Route | Contract |
+|---|---|
+| `POST /contracts/{id}/backfill` | Body gains **`amount?: int`** (whole TZS, `0 < x < 10^12`; only with `from` else 400; not with `period_amount` else 400). With it the offline contract is one period `from`..last day for exactly `amount` (`rent_amount = amount`, `rent_period_days = payment_period_days = term_days`, no `payment_period_id`, no due day) and `paid` writes one payment on `paid_at` (default `from`). The running contract is never settled by an `amount` call. |
+| Offline stretch (endpoint and CSV) | **Floor:** the last covered day is `until`, cut to the day before the earliest contract of the unit (status `active/expiring/ended/terminated`, offline or not) that starts after `from` and on or before it; in a CSV also before any other line's `from` for the unit. `until` in the future is refused only if the floored end is still after today. A contract starting on or before `from` that still covers it is 409 `offline_overlap` as before. |
+| CSV `backfill` kind | Optional column **`amount`** (same rules; row errors). Lines with `from` are keyed unit + renter + `from`, so one renter may have several. Commit writes offline lines latest `from` first. Preview `resolved.offline_end` is the floored last day. |
+
 ## Part 2 — Phase 31: contract changes with owner approval (maker-checker)
 
 Migration 000038: `contracts.amendment_stage` (`draft|submitted|approved|rejected|declined|withdrawn`, NULL on a contract that amends nothing; existing amendments backfilled `approved`), `amendment_note_sw` / `amendment_note_en` (≤200), `amendment_body_html`, `amendment_drafted_by`, `amendment_submitted_by` / `_at`, `amendment_reviewed_by` / `_at`, `amendment_review_note` (≤200), `amendment_declined_at`, `amendment_decline_reason` (≤200); `contracts_one_open_amendment` now covers `draft` too; notification kind `contract_amendment`.
