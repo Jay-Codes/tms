@@ -86,6 +86,8 @@ func (s *Server) handleContractBackfill(w http.ResponseWriter, r *http.Request) 
 		// Phase 29: reach back before the contract's start date.
 		From         string `json:"from"`
 		PeriodAmount *int64 `json:"period_amount"`
+		// Phase 32: the total paid for the whole offline stretch.
+		Amount *int64 `json:"amount"`
 		// DryRun answers what the call would do and writes nothing — the
 		// sheet's preview once `from` makes the rows the server's to invent.
 		DryRun bool `json:"dry_run"`
@@ -134,6 +136,18 @@ func (s *Server) handleContractBackfill(w http.ResponseWriter, r *http.Request) 
 			f.Add("period_amount", "must be a positive whole-shilling amount")
 		}
 	}
+	var amount int64
+	if body.Amount != nil {
+		amount = *body.Amount
+		switch {
+		case from.IsZero() && strings.TrimSpace(body.From) == "":
+			f.Add("amount", "only with from: it is the total paid for the offline contract")
+		case amount <= 0 || amount >= backfillHistoryPeriodAmountMax:
+			f.Add("amount", "must be a positive whole-shilling amount")
+		case body.PeriodAmount != nil:
+			f.Add("amount", "give amount or period_amount, not both")
+		}
+	}
 	if !f.Empty() {
 		badRequest(w, f)
 		return
@@ -174,7 +188,7 @@ func (s *Server) handleContractBackfill(w http.ResponseWriter, r *http.Request) 
 		Until: until, Mode: mode, Method: method, Reference: reference, Note: note,
 		PerRowPaidAt: perRowPaidAt, PaidAt: flatPaidAt,
 		OrgName: brand.DisplayName, Settings: settings,
-		From: from, PeriodAmount: periodAmount,
+		From: from, PeriodAmount: periodAmount, Amount: amount,
 	}
 	var out backfillOutcome
 	err = s.inTx(r.Context(), func(q *sqlc.Queries) error {
@@ -269,6 +283,12 @@ type backfillRequest struct {
 	// per payment period, zero for the renter's running contract's own.
 	From         time.Time
 	PeriodAmount int64
+	// Amount, with From, makes the offline contract one period for this
+	// total (Phase 32); the running contract is then left alone — the line is
+	// one paper payment, not "everything up to until".
+	Amount int64
+	// LaterStarts: see offlinePlanInput (preview only).
+	LaterStarts []time.Time
 }
 
 // backfillOutcome is what the caller needs after the transaction commits.
@@ -321,6 +341,7 @@ func (s *Server) runBackfill(
 			OrgID: req.OrgID, UnitID: req.Party.UnitID, RenterUserID: req.Party.RenterUserID,
 			Settings: req.Settings, UnitRunning: req.UnitRunning,
 			From: req.From, Until: req.Until, PeriodAmount: req.PeriodAmount,
+			Amount: req.Amount, LaterStarts: req.LaterStarts,
 		})
 		if err != nil {
 			return out, err
@@ -328,7 +349,7 @@ func (s *Server) runBackfill(
 	}
 	// The running contract is settled unless the offline stretch stops before
 	// it even starts.
-	settleRunning := req.Contract != nil &&
+	settleRunning := req.Contract != nil && req.Amount == 0 &&
 		(plan == nil || !req.Until.Before(req.Contract.StartDate.Time))
 
 	var offline sqlc.Contract

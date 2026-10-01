@@ -16,7 +16,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -385,6 +387,16 @@ func (s *Server) resolveBackfillRows(
 		return err
 	}
 	settings := parseSettings(org.Settings)
+	// Phase 32: the `from` dates each unit's lines ask for, so the preview can
+	// floor a line against a later line of the same sheet before either is
+	// written. Keyed by unit code as written; resolution below confirms it.
+	startsByUnit := map[string][]time.Time{}
+	for _, row := range rows {
+		parsed, errs := importer.ParseBackfillRow(row.raw)
+		if len(errs) == 0 && !parsed.From.IsZero() {
+			startsByUnit[strings.ToUpper(parsed.UnitCode)] = append(startsByUnit[strings.ToUpper(parsed.UnitCode)], parsed.From)
+		}
+	}
 	for _, row := range rows {
 		parsed, errs := importer.ParseBackfillRow(row.raw)
 		mergeErrors(row, errs)
@@ -397,7 +409,9 @@ func (s *Server) resolveBackfillRows(
 		if !parsed.From.IsZero() {
 			row.resolved["from"] = parsed.From.Format(dateLayout)
 		}
-		if parsed.Until.After(today) {
+		// With `from` the offline plan judges `until`, after the floor: a
+		// TMS contract starting first may cut a stretch that runs past today.
+		if parsed.From.IsZero() && parsed.Until.After(today) {
 			row.errs.Add("until", "must not be in the future")
 			continue
 		}
@@ -443,8 +457,12 @@ func (s *Server) resolveBackfillRows(
 		}
 		// One line per tenancy: keyed on unit and renter, so a sheet cannot
 		// record the same person on the same unit twice (with or without a
-		// running contract).
+		// running contract). Phase 32: offline lines are keyed on their
+		// `from` as well — one line per paper payment, several per renter.
 		key := db.UUIDString(unit.ID) + "|" + db.UUIDString(user.ID)
+		if !parsed.From.IsZero() {
+			key += "|" + parsed.From.Format(dateLayout)
+		}
 		if line, dup := seen[key]; dup {
 			row.errs.Add("unit_code", "this tenancy already has a line in this file (line "+strconv.Itoa(line)+")")
 			continue
@@ -487,7 +505,8 @@ func (s *Server) resolveBackfillRows(
 			plan, err := s.planOffline(ctx, q, offlinePlanInput{
 				OrgID: p.OrgID, UnitID: unit.ID, RenterUserID: user.ID, Settings: settings,
 				UnitRunning: unitRunning, From: parsed.From, Until: parsed.Until,
-				PeriodAmount: parsed.PeriodAmount,
+				PeriodAmount: parsed.PeriodAmount, Amount: parsed.Amount,
+				LaterStarts: startsByUnit[strings.ToUpper(parsed.UnitCode)],
 			})
 			var pe *planError
 			if errors.As(err, &pe) {
@@ -509,8 +528,14 @@ func (s *Server) resolveBackfillRows(
 			row.resolved["created"] = len(plan.Rows)
 			row.resolved["offline_end"] = plan.End.Format(dateLayout)
 			row.resolved["offline_amount"] = plan.PeriodAmount
-			// The running contract is settled too once `until` reaches it.
-			settleRunning = running != nil && !parsed.Until.Before(running.StartDate.Time)
+			// The running contract is settled too once `until` reaches it —
+			// unless the line is one paper payment (`amount`).
+			settleRunning = running != nil && parsed.Amount == 0 &&
+				!parsed.Until.Before(running.StartDate.Time)
+			if settleRunning && parsed.Until.After(today) {
+				row.errs.Add("until", "must not be in the future")
+				continue
+			}
 		}
 		if settleRunning {
 			var err error
@@ -599,7 +624,19 @@ func (s *Server) applyBackfillRows(
 
 	var made int
 	var notifyIDs []string
-	for _, row := range rows {
+	// Phase 32: offline lines are written latest `from` first, so each one
+	// finds the later stretches of its unit already in the book and floors
+	// against them, exactly as the preview did.
+	ordered := make([]*importRow, len(rows))
+	copy(ordered, rows)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		a, b := ordered[i].backfill, ordered[j].backfill
+		if a == nil || b == nil {
+			return false
+		}
+		return a.From.After(b.From)
+	})
+	for _, row := range ordered {
 		if !row.ok() || row.backfill == nil {
 			continue
 		}
@@ -627,7 +664,7 @@ func (s *Server) applyBackfillRows(
 			Reference: db.Str(b.Reference), Note: db.Str(b.Note),
 			PerRowPaidAt: b.PaidAt.IsZero(), PaidAt: b.PaidAt,
 			OrgName: brand.DisplayName, Settings: settings, ImportBatchID: batch.ID,
-			From: b.From, PeriodAmount: b.PeriodAmount,
+			From: b.From, PeriodAmount: b.PeriodAmount, Amount: b.Amount,
 		})
 		var pe *planError
 		if errors.As(err, &pe) {

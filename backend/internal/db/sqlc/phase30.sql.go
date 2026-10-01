@@ -72,6 +72,39 @@ func (q *Queries) CreateOfflineSchedule(ctx context.Context, arg CreateOfflineSc
 	return i, err
 }
 
+const findNextContractStart = `-- name: FindNextContractStart :one
+SELECT min(c.start_date)::date AS start_date
+FROM contracts c
+WHERE c.org_id = $1 AND c.unit_id = $2
+  AND c.deleted_at IS NULL
+  AND c.status IN ('active', 'expiring', 'ended', 'terminated')
+  AND c.start_date > $3::date
+  AND c.start_date <= $4::date
+`
+
+type FindNextContractStartParams struct {
+	OrgID    pgtype.UUID `json:"org_id"`
+	UnitID   pgtype.UUID `json:"unit_id"`
+	FromDate pgtype.Date `json:"from_date"`
+	LastDay  pgtype.Date `json:"last_day"`
+}
+
+// FindNextContractStart is Phase 32's floor: the first contract of the unit,
+// offline or not, that starts after `from` and on or before the stretch's
+// last day. The offline stretch then ends the day before it — the contract
+// already in TMS wins its own start date.
+func (q *Queries) FindNextContractStart(ctx context.Context, arg FindNextContractStartParams) (pgtype.Date, error) {
+	row := q.db.QueryRow(ctx, findNextContractStart,
+		arg.OrgID,
+		arg.UnitID,
+		arg.FromDate,
+		arg.LastDay,
+	)
+	var start_date pgtype.Date
+	err := row.Scan(&start_date)
+	return start_date, err
+}
+
 const findOverlappingContract = `-- name: FindOverlappingContract :one
 
 SELECT c.id, c.status, c.is_offline, c.start_date,

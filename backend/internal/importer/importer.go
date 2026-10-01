@@ -134,6 +134,11 @@ var columns = map[string][]Column{
 		{Name: "period_amount", Required: false, Example: "",
 			Help: "rent per payment period on the paper contract, whole shillings; only with from " +
 				"(default: the renter's running contract's; required without one)"},
+		// Phase 32: one line, one paper payment.
+		{Name: "amount", Required: false, Example: "",
+			Help: "total paid for the whole from-until stretch, whole shillings; only with from, not with " +
+				"period_amount. The offline contract gets one period and, when paid, one payment for it. " +
+				"Several lines may then cover the same renter and unit, one per payment"},
 	},
 }
 
@@ -628,6 +633,9 @@ type BackfillRow struct {
 	// PeriodAmount is zero for "the running contract's own rent".
 	From         time.Time
 	PeriodAmount int64
+	// Amount is the total paid for the whole stretch (Phase 32): the offline
+	// contract is one period for this sum. Zero when not given.
+	Amount int64
 }
 
 // ParseBackfillRow applies the `backfill` rules to one line's cells: the same
@@ -693,6 +701,13 @@ func ParseBackfillRow(raw map[string]string) (BackfillRow, RowErrors) {
 	out.PeriodAmount = money(errs, "period_amount", raw["period_amount"], false)
 	if out.PeriodAmount > 0 && strings.TrimSpace(raw["from"]) == "" {
 		errs.Add("period_amount", "only with from: it is the rent per period of the offline contract")
+	}
+	out.Amount = money(errs, "amount", raw["amount"], false)
+	switch {
+	case out.Amount > 0 && strings.TrimSpace(raw["from"]) == "":
+		errs.Add("amount", "only with from: it is the total paid for the offline contract")
+	case out.Amount > 0 && out.PeriodAmount > 0:
+		errs.Add("amount", "give amount (the total for the stretch) or period_amount (rent per period), not both")
 	}
 	return out, errs
 }
